@@ -530,6 +530,23 @@
                   the report says so. Your microphone stays with CodeTrial.
                 </p>
               </div>
+              <!-- Off unless asked for: only a candidate recording the screen
+                   needs their own face on it, and everyone else would spend the
+                   interview watching themselves beside the code. -->
+              <div class="audio-check-step" id="audio-step-recorder">
+                <p>
+                  <label for="screen-recording">
+                    <input type="checkbox" id="screen-recording" />
+                    I am recording this interview with a screen recorder
+                  </label>
+                </p>
+                <p class="muted small">
+                  Your camera then shows below Jim, so the recording includes
+                  you, unless you present in Meet or continue without a camera.
+                  Leave the recorder's own camera off: the browser already holds
+                  it.
+                </p>
+              </div>
             </div>
             <div
               class="preflight-column"
@@ -738,6 +755,19 @@
         >
           Hide avatar
         </button>
+        <!-- The candidate's own camera, so a screen recorder captures their
+             face without opening the camera a second time. Shown only when
+             the candidate says they are recording, below Jim and under his
+             own Hide control, and hidden whenever there is no live camera. -->
+        <video
+          id="self-view"
+          class="self-view"
+          muted
+          playsinline
+          autoplay
+          hidden
+          aria-label="Your camera"
+        ></video>
         <!-- On the stage, not in the sidebar: the wait for the report makes
              the sidebar inert while Jim may still be speaking, and the stage
              is what stays reachable over that overlay. -->

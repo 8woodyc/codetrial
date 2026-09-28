@@ -294,6 +294,8 @@ test("the interview page keeps the structure the script drives", () => {
     "transcript-panel",
     "problem-panel",
     "camera-integrity-video",
+    "self-view",
+    "screen-recording",
   ]) {
     assert.match(
       page,

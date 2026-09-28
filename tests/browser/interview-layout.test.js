@@ -318,6 +318,39 @@ test("on a phone Jim's closing lines leave the wait's buttons reachable", async 
   }
 });
 
+// The camera stays live through the wait, so a recording candidate's self view
+// would add its height to the compact card, which lets taps through but is
+// drawn over the wait's buttons.
+test("on a phone the self view does not grow the card over the wait", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await openInterview(390, 480);
+  try {
+    await closeSetupCheck(page);
+    const selfView = page.locator("#self-view");
+    await selfView.evaluate((video) => (video.hidden = false));
+    assert.equal(await selfView.isVisible(), true);
+    await page.evaluate(() => {
+      document.querySelector("#ending-overlay").hidden = false;
+      document.querySelector("#ending-withdraw-consent").hidden = false;
+      document.querySelector("#captions-text").textContent =
+        "Thanks for walking me through that. ".repeat(30);
+    });
+    const under = await page.evaluate(() => {
+      const card = document.querySelector("#jim-stage").getBoundingClientRect();
+      return [...document.querySelectorAll("#ending-overlay button")]
+        .filter((button) => button.offsetParent)
+        .filter((button) => {
+          const box = button.getBoundingClientRect();
+          return box.bottom > card.top && box.top < card.bottom;
+        })
+        .map((button) => button.id);
+    });
+    assert.deepEqual(under, []);
+  } finally {
+    await page.close();
+  }
+});
+
 test("a narrow window and a narrow panel both make the stage compact", async (t) => {
   if (!browser) return t.skip("playwright chromium unavailable");
   const page = await openInterview(1440, 900);
