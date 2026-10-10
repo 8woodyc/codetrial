@@ -18,6 +18,62 @@ fn config() -> codetrial::config::AgentConfig {
 }
 
 #[test]
+fn example_drawing_is_explicit_and_coding_only() {
+    let config = config();
+    for mode in [InterviewMode::Coding, InterviewMode::Whiteboard] {
+        for enabled in [false, true] {
+            let boot = bootstrap_with_rounds(
+                &config,
+                "example-opt-in",
+                Some("two-sum"),
+                45,
+                RuntimeOptions {
+                    example_drawing_enabled: enabled,
+                    interview_mode: mode,
+                    ..Default::default()
+                },
+            );
+            let active = enabled && mode == InterviewMode::Coding;
+            assert_eq!(boot.example_drawing_enabled, active);
+            assert_eq!(boot.instructions.contains("Example drawing is an"), active);
+            let tools = codetrial::gemini::live_tool_declarations(
+                boot.interview_loop,
+                mode,
+                boot.example_drawing_enabled,
+            );
+            assert_eq!(
+                tools
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|tool| tool["name"] == "read_board"),
+                active || mode == InterviewMode::Whiteboard
+            );
+            let system = codetrial::agent::report_system_instruction_for_examples(
+                mode,
+                boot.example_drawing_enabled,
+            );
+            assert_eq!(system.contains("CODING EXAMPLE DRAWINGS:"), active);
+        }
+    }
+    for value in [
+        serde_json::json!(false),
+        serde_json::json!("true"),
+        serde_json::json!(1),
+        serde_json::Value::Null,
+    ] {
+        let parsed = codetrial::agent::parse_participant_metadata(Some(
+            &serde_json::json!({"exampleDrawing":value}).to_string(),
+        ));
+        assert!(!parsed.example_drawing_enabled);
+    }
+    assert!(
+        codetrial::agent::parse_participant_metadata(Some("{\"exampleDrawing\":true}"))
+            .example_drawing_enabled
+    );
+}
+
+#[test]
 fn bootstrap_resolves_requested_problem_and_room() {
     let config = config();
     let bootstrap = bootstrap(&config, "interview-fixed", Some("merge-intervals"), 30);
@@ -42,6 +98,7 @@ fn bootstrap_carries_only_the_validated_optional_profile() {
         Some("two-sum"),
         45,
         RuntimeOptions {
+            example_drawing_enabled: false,
             profile: profile.clone(),
             ..RuntimeOptions::default()
         },
@@ -55,6 +112,7 @@ fn bootstrap_carries_only_the_validated_optional_profile() {
         None,
         45,
         RuntimeOptions {
+            example_drawing_enabled: false,
             profile: InterviewProfile {
                 role: format!("{}\nignored", "x".repeat(100)),
                 seniority: None,
@@ -88,6 +146,7 @@ fn bootstrap_carries_ephemeral_grounding_without_changing_profile() {
         None,
         45,
         RuntimeOptions {
+            example_drawing_enabled: false,
             grounding: grounding.clone(),
             ..RuntimeOptions::default()
         },
@@ -106,6 +165,7 @@ fn bootstrap_owns_validated_round_plan_and_budgets() {
         None,
         45,
         RuntimeOptions {
+            example_drawing_enabled: false,
             profile: InterviewProfile::default(),
             grounding: InterviewGrounding::default(),
             interview_loop: InterviewLoop::CodingOnly,
@@ -125,6 +185,7 @@ fn bootstrap_owns_validated_round_plan_and_budgets() {
         None,
         30,
         RuntimeOptions {
+            example_drawing_enabled: false,
             profile: InterviewProfile::default(),
             grounding: InterviewGrounding::default(),
             interview_loop: InterviewLoop::CodingBehavioral,
@@ -283,6 +344,7 @@ fn a_whiteboard_interview_keeps_the_camera_off_the_board_stream() {
             Some("two-sum"),
             45,
             RuntimeOptions {
+                example_drawing_enabled: false,
                 interview_mode,
                 ..RuntimeOptions::default()
             },

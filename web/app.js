@@ -99,6 +99,7 @@ let avoidedProblem;
 
 const nodes = {
   editorOptions: document.querySelector(".editor-options-row"),
+  exampleDrawing: document.querySelector("#enable-example-drawing"),
   accountStatus: document.querySelector("#account-status"),
   githubLogin: document.querySelector("#github-login"),
   loginLink: document.querySelector("#login-link"),
@@ -361,6 +362,8 @@ for (const button of document.querySelectorAll("[data-mode]")) {
   });
 }
 
+nodes.exampleDrawing.addEventListener("change", rememberSettings);
+
 const start = document.querySelector("#start");
 
 let signInFirst = false;
@@ -393,6 +396,8 @@ start.addEventListener("click", async () => {
   destination.searchParams.set("duration", String(duration));
   destination.searchParams.set("loop", interviewLoop);
   destination.searchParams.set("mode", mode);
+  if (mode === "coding" && nodes.exampleDrawing.checked)
+    destination.searchParams.set("exampleDrawing", "1");
   setEditorOptions(destination.searchParams, selectedEditorOptions());
   const profile = {
     role: nodes.profileRole.value.trim(),
@@ -1157,6 +1162,7 @@ function setInterviewMode(value) {
   mode = interviewMode(value);
   select("[data-mode]", document.querySelector(`[data-mode="${mode}"]`));
   nodes.editorOptions.disabled = mode === "whiteboard";
+  nodes.exampleDrawing.disabled = mode === "whiteboard";
   const note = document.querySelector("#mode-note");
   note.textContent =
     mode === "whiteboard"
@@ -1172,6 +1178,7 @@ function rememberSettings() {
       durationMin: chosenDuration,
       interviewLoop,
       interviewMode: mode,
+      exampleDrawing: nodes.exampleDrawing.checked,
     }),
   );
 }
@@ -1186,6 +1193,7 @@ function restoreSettings() {
     return;
   }
   if (!settings || typeof settings !== "object") return;
+  nodes.exampleDrawing.checked = settings.exampleDrawing === true;
   if (
     durations.some(
       (button) => Number(button.dataset.duration) === settings.durationMin,

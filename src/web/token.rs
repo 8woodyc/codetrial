@@ -303,6 +303,13 @@ pub fn token_response(
             .expect("metadata is an object")
             .insert("hideExamples".to_string(), Value::Bool(true));
     }
+    if !interview_mode.is_whiteboard() && request.get("exampleDrawing") == Some(&Value::Bool(true))
+    {
+        metadata
+            .as_object_mut()
+            .expect("metadata is an object")
+            .insert("exampleDrawing".to_string(), Value::Bool(true));
+    }
     if request.get("codeExecution") == Some(&Value::Bool(false)) {
         metadata
             .as_object_mut()

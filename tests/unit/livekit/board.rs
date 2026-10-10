@@ -3,65 +3,98 @@
 //! unit test and not an integration test: private items are in scope.
 
 use super::*;
+use crate::agent::InterviewMode;
 
 const CANDIDATE: &str = "candidate-4f2c";
 
-fn refusal(
-    mode: InterviewMode,
-    topic: &str,
-    sender: &str,
-    declared_length: Option<u64>,
-) -> Option<&'static str> {
-    board_stream_refusal(mode, topic, sender, CANDIDATE, declared_length)
+#[test]
+fn example_stream_requires_the_signed_coding_opt_in() {
+    assert_eq!(
+        board_stream_refusal(
+            InterviewMode::Coding,
+            false,
+            TOPIC_BOARD_IMAGE,
+            CANDIDATE,
+            CANDIDATE,
+            Some(10)
+        ),
+        Some("example drawing is disabled")
+    );
+    assert_eq!(
+        board_stream_refusal(
+            InterviewMode::Coding,
+            true,
+            TOPIC_BOARD_IMAGE,
+            CANDIDATE,
+            CANDIDATE,
+            Some(10)
+        ),
+        None
+    );
+    assert_eq!(
+        board_stream_refusal(
+            InterviewMode::Whiteboard,
+            false,
+            TOPIC_BOARD_IMAGE,
+            CANDIDATE,
+            CANDIDATE,
+            Some(10)
+        ),
+        None
+    );
+}
+
+fn refusal(topic: &str, sender: &str, declared_length: Option<u64>) -> Option<&'static str> {
+    board_stream_refusal(
+        InterviewMode::Whiteboard,
+        false,
+        topic,
+        sender,
+        CANDIDATE,
+        declared_length,
+    )
 }
 
 #[test]
 fn accepts_a_board_from_the_candidate() {
-    assert_eq!(
-        refusal(
-            InterviewMode::Whiteboard,
-            TOPIC_BOARD_IMAGE,
-            CANDIDATE,
-            Some(96_318)
-        ),
-        None
-    );
+    assert_eq!(refusal(TOPIC_BOARD_IMAGE, CANDIDATE, Some(96_318)), None);
 
     // A browser that did not declare a length still gets a board through: the
     // ceiling is then enforced while reading, which is what `drain` does.
+    assert_eq!(refusal(TOPIC_BOARD_IMAGE, CANDIDATE, None), None);
+}
+
+#[test]
+fn accepts_an_example_drawing_in_a_coding_interview() {
     assert_eq!(
-        refusal(
-            InterviewMode::Whiteboard,
+        board_stream_refusal(
+            InterviewMode::Coding,
+            true,
             TOPIC_BOARD_IMAGE,
             CANDIDATE,
-            None
+            CANDIDATE,
+            Some(4_096)
         ),
         None
+    );
+    assert_eq!(
+        refusal("lk.agent.pre-connect-audio-buffer", CANDIDATE, Some(4_096)),
+        Some("not the board topic")
     );
 }
 
 #[test]
-fn refuses_a_board_no_interview_asked_for() {
-    // The editor's own interview has no board, so a stream on this topic is a
-    // client sending one anyway.
-    assert_eq!(
-        refusal(
-            InterviewMode::Coding,
-            TOPIC_BOARD_IMAGE,
-            CANDIDATE,
-            Some(4_096)
-        ),
-        Some("this interview has no whiteboard")
-    );
-    assert_eq!(
-        refusal(
-            InterviewMode::Whiteboard,
-            "lk.agent.pre-connect-audio-buffer",
-            CANDIDATE,
-            Some(4_096)
-        ),
-        Some("not the board topic")
-    );
+fn a_coding_drawing_is_auxiliary_and_has_no_whiteboard_checkpoints() {
+    let mut board = Board::new();
+    let mut state = RuntimeState::default();
+    let mut drawing = snapshot(1);
+    drawing.checkpoint = Some("Example");
+    record(&mut board, &mut state, drawing);
+    assert_eq!(state.interview_mode, InterviewMode::Coding);
+    assert_eq!(state.board_snapshots, 1);
+    assert!(board.checkpoints.is_empty());
+    let images = board.report_boards();
+    assert!(images.is_empty());
 }
 
 #[test]
@@ -69,12 +102,7 @@ fn refuses_a_board_from_anyone_but_the_candidate() {
     // Every participant holds `canPublishData`, so the identity is the only
     // thing between the interviewer's eyes and a board an observer drew.
     assert_eq!(
-        refusal(
-            InterviewMode::Whiteboard,
-            TOPIC_BOARD_IMAGE,
-            "observer-9a11",
-            Some(4_096)
-        ),
+        refusal(TOPIC_BOARD_IMAGE, "observer-9a11", Some(4_096)),
         Some("not the candidate")
     );
 }
@@ -83,7 +111,6 @@ fn refuses_a_board_from_anyone_but_the_candidate() {
 fn refuses_a_header_larger_than_a_board() {
     assert_eq!(
         refusal(
-            InterviewMode::Whiteboard,
             TOPIC_BOARD_IMAGE,
             CANDIDATE,
             Some(MAX_BOARD_BYTES as u64 + 1)
@@ -94,12 +121,7 @@ fn refuses_a_header_larger_than_a_board() {
     // The ceiling itself is allowed: a bound refused at its own value is a
     // different bound from the one the browser is written against.
     assert_eq!(
-        refusal(
-            InterviewMode::Whiteboard,
-            TOPIC_BOARD_IMAGE,
-            CANDIDATE,
-            Some(MAX_BOARD_BYTES as u64)
-        ),
+        refusal(TOPIC_BOARD_IMAGE, CANDIDATE, Some(MAX_BOARD_BYTES as u64)),
         None
     );
 }
@@ -551,4 +573,68 @@ fn completed_coding_idle_board_progress_uses_encoded_bytes_not_repeated_receipt(
     );
     assert!(!record(&mut board, &mut state, snapshot(vec![0], 0)));
     assert_eq!(state.board_snapshots, 5);
+}
+
+#[tokio::test]
+async fn coding_edits_stay_out_of_gemini_until_an_explicit_read() {
+    let (mut gemini, mut frames) = live_session().await;
+    let mut board = Board::new();
+    let mut state = RuntimeState::default();
+    record(&mut board, &mut state, snapshot(1));
+    send_if_due(&mut board, &mut gemini, Instant::now())
+        .await
+        .unwrap();
+    record(&mut board, &mut state, snapshot(7));
+    send_if_due(
+        &mut board,
+        &mut gemini,
+        Instant::now() + Duration::from_secs(2),
+    )
+    .await
+    .unwrap();
+    gemini
+        .send_context("unreferenced drawing", false)
+        .await
+        .unwrap();
+    let unseen = next_frame(&mut frames).await;
+    assert!(unseen.contains("unreferenced drawing"), "{unseen}");
+    assert!(board.unsent);
+    resend(&mut board, &mut gemini).await.unwrap();
+    let seen = next_frame(&mut frames).await;
+    assert!(seen.contains("/9gH"), "{seen}");
+    assert!(!board.unsent);
+    assert!(board.report_boards().is_empty());
+}
+
+#[tokio::test]
+async fn explicit_reads_settle_queued_ink_without_sending_it() {
+    let (mut gemini, mut frames) = live_session().await;
+    let mut board = Board::new();
+    let mut state = RuntimeState::default();
+    board.sender().try_send(snapshot(7)).unwrap();
+    board.settle_for_read(&mut state).await;
+    assert_eq!(state.board_snapshots, 1);
+    assert_eq!(board.latest.as_deref(), Some(&[0xff, 0xd8, 7][..]));
+    gemini
+        .send_context("waiting for read_board", false)
+        .await
+        .unwrap();
+    assert!(
+        next_frame(&mut frames)
+            .await
+            .contains("waiting for read_board")
+    );
+    resend(&mut board, &mut gemini).await.unwrap();
+    assert!(next_frame(&mut frames).await.contains("/9gH"));
+}
+
+#[tokio::test]
+async fn an_explicit_read_bounds_an_unfinished_upload() {
+    let mut board = Board::new();
+    let mut state = RuntimeState::default();
+    tokio::time::pause();
+    let _reader = Arc::clone(&board.readers).try_acquire_owned().unwrap();
+    let start = tokio::time::Instant::now();
+    board.settle_for_read(&mut state).await;
+    assert!((Duration::from_millis(100)..=Duration::from_millis(101)).contains(&start.elapsed()));
 }

@@ -1484,6 +1484,7 @@ fn take_interim_review_window(state: &mut RuntimeState, boot: &RuntimeBootstrap<
     let prompt = interim_review_prompt(&InterimReviewInput {
         problem: boot.problem,
         interview_mode: state.interview_mode,
+        example_drawing_enabled: state.example_drawing_enabled,
         transcript_window: &window,
         code: &code,
         language: &state.language,
@@ -2694,6 +2695,7 @@ pub(crate) async fn run_room_with_slot(
                     // is a whole one.
                     if handle_board_event(
                         turn.state.interview_mode,
+                        turn.state.example_drawing_enabled,
                         &candidate_identity,
                         &board,
                         &event,
@@ -2794,6 +2796,7 @@ pub(crate) async fn run_room_with_slot(
                     if board::record(&mut board, &mut turn.state, snapshot) {
                         turn.activity.reset_completed_coding_idle();
                     }
+
                     if !turn.state.paused {
                         // The candidate is working, even while silent. Without
                         // this the silence nudge counts a candidate who is
@@ -3164,6 +3167,7 @@ fn candidate_bootstrap<'a>(
             grounding: candidate.grounding,
             interview_loop: candidate.interview_loop,
             examples_hidden: candidate.examples_hidden,
+            example_drawing_enabled: candidate.example_drawing_enabled,
             interview_mode: candidate.interview_mode,
             code_execution_disabled: candidate.code_execution_disabled
                 && !candidate.interview_mode.is_whiteboard(),
@@ -3209,6 +3213,7 @@ fn initial_runtime_state(boot: &RuntimeBootstrap<'_>, started_at: Instant) -> Ru
         interview_loop: boot.interview_loop,
         interview_mode: boot.interview_mode,
         code_execution_disabled: boot.code_execution_disabled,
+        example_drawing_enabled: boot.example_drawing_enabled,
         coding_minutes: boot.coding_minutes,
         behavioral_minutes: boot.behavioral_minutes,
         context_compression: boot.context_compression,
@@ -3763,7 +3768,7 @@ async fn apply_data_packet(
             interview.boot,
             &assessment.prompt,
             &report_boards,
-            assessment.rounds(),
+            (assessment.rounds(), assessment.drawing_received()),
             api_key,
             crate::gemini::GENERATION_SEED,
             &assessment.refused,

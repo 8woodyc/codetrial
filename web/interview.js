@@ -1,4 +1,10 @@
 import { createReportRecovery } from "./report-recovery.js";
+import {
+  createDrawingTurn,
+  mountExampleBoard,
+  reconnectCodingInterview,
+} from "./example-board.js";
+import { mountInterviewDrawer } from "./interview-drawer.js";
 import { loadJudge, loadProblem } from "./problem-data.js";
 import { downloadMarkdown, reportFilename } from "./download.js";
 import { consumeSharedFocus } from "./problem-picker.js";
@@ -64,6 +70,7 @@ import {
   FRAMEWORKS,
   frameworkChecklist,
   endInterviewPayload,
+  drawingActivityPayload,
   retryReportPayload,
   escapeHtml,
   formatTime,
@@ -81,6 +88,8 @@ import {
   timeWarningPayload,
   topics,
   thinkingPayload,
+  drawingTurnPayload,
+  TURN_SPEECH_PEAK,
   yieldTurnPayload,
   isYieldShortcut,
   turnCountdown,
@@ -167,6 +176,8 @@ import { consumeGroundingPacket } from "./document-grounding.js";
 /// module body does, so a declaration beside its other readers would be in the
 /// temporal dead zone for the first paint.
 let frameworkRound = "coding";
+let exampleBoard = null;
+let drawingTurn = null;
 let editorInitialized = false;
 let codePublishTimer = null;
 /// The switch waiting out its debounce, held as the buffer and language it was
@@ -304,6 +315,8 @@ const whiteboard = modeIsWhiteboard(params.get("mode"));
 /// checklist both need. Derived from the boolean rather than from the URL a
 /// second time, so an unrecognized value cannot reach the server as itself.
 const mode = whiteboard ? "whiteboard" : "coding";
+const exampleDrawingEnabled =
+  !whiteboard && params.get("exampleDrawing") === "1";
 /// The board, and what is in flight for it.
 ///
 /// Declared with the other module state rather than beside the functions that
@@ -405,6 +418,7 @@ const state = {
   // Whether an interviewer is in the room to hear the turn controls.
   interviewerPresent: false,
   agentSpeaking: false,
+  agentThinking: false,
   codeByLanguage: { ...problem.starterCode },
   language: "python",
   // Thresholds already announced. A latch is released when the room pauses only
@@ -628,6 +642,60 @@ async function init() {
   setLanguage("python");
   bindEvents();
   if (whiteboard) initWhiteboard();
+  else {
+    document.querySelector("#example-board").hidden = !exampleDrawingEnabled;
+    if (exampleDrawingEnabled) {
+      drawingTurn = createDrawingTurn({
+        windowMs: () => state.turnWindowMs,
+        blocked: () =>
+          !canTakeTurnAction() ||
+          frameworkRound !== "coding" ||
+          state.candidateThinking ||
+          state.agentSpeaking ||
+          state.agentThinking,
+        paint: paintDrawingTurnProgress,
+        flush: () => exampleBoard.flush(),
+        yieldTurn: () => publish(topics.control, drawingTurnPayload()),
+      });
+      exampleBoard = mountExampleBoard(
+        document.querySelector("#example-board"),
+        {
+          locked: () =>
+            !board.ready ||
+            state.phase !== "live" ||
+            state.paused ||
+            frameworkRound !== "coding",
+          publish: (blob, strokes) => publishBoard(blob, strokes, ""),
+          connected: () => Boolean(state.room && state.connected),
+          turnActivity: () => drawingTurn.activity(),
+          cancelTurn: () => drawingTurn.reset(),
+          activity: () => {
+            if (state.room && state.connected)
+              void sendData(topics.control, drawingActivityPayload()).catch(
+                () => {},
+              );
+          },
+          record: (ops) => {
+            for (const batch of boardOpBatches(ops))
+              recordReplay("board", { ops: batch, surface: "example" });
+          },
+        },
+      );
+      nodes.resultsBody.hidden = true;
+      nodes.resultsChevron.textContent = ">";
+      nodes.editorPanel.dataset.exampleDrawing = "true";
+      nodes.testDrawerResizer.classList.remove(
+        "splitter",
+        "test-drawer-resizer",
+      );
+      nodes.testDrawerResizer.classList.add("drawer-resizer");
+      nodes.testDrawerResizer.setAttribute(
+        "aria-label",
+        "Resize drawing and test panel",
+      );
+      mountInterviewDrawer(nodes.editorPanel);
+    }
+  }
   placeJimStageBelowToolbar(
     whiteboard ? nodes.boardToolbar : nodes.editorToolbar,
   );
@@ -641,17 +709,19 @@ async function init() {
     storageKey: SIDEBAR_WIDTH_KEY,
     bounds: sidebarBounds,
   });
-  attachSplitter({
-    handle: nodes.testDrawerResizer,
-    pane: nodes.testDrawer,
-    axis: "y",
-    side: "after",
-    target: nodes.editorPanel,
-    property: "--test-drawer-height",
-    storageKey: TEST_DRAWER_HEIGHT_KEY,
-    bounds: testDrawerBounds,
-    resizeTargets: [nodes.editorStack, nodes.editorToolbar],
-  });
+  if (!exampleDrawingEnabled) {
+    attachSplitter({
+      handle: nodes.testDrawerResizer,
+      pane: nodes.testDrawer,
+      axis: "y",
+      side: "after",
+      target: nodes.editorPanel,
+      property: "--test-drawer-height",
+      storageKey: TEST_DRAWER_HEIGHT_KEY,
+      bounds: testDrawerBounds,
+      resizeTargets: [nodes.editorStack, nodes.editorToolbar],
+    });
+  }
   compactJimStageBesideNarrowPanel(
     whiteboard ? nodes.boardPanel : nodes.editorPanel,
   );
@@ -1017,6 +1087,7 @@ function bindEvents() {
     if (nodes.editor.value !== state.codeByLanguage[state.language]) {
       dismissCaptions();
     }
+    drawingTurn?.reset();
     // Before the buffer below is taken, because this sends the tab as it
     // arrived. Typing inside the switch's own debounce window cancels it
     // otherwise, and the single packet that survives carries the switch and the
@@ -1394,6 +1465,7 @@ async function connect(preflight, presenting = false) {
           ? { interviewerVoice: nodes.interviewerVoice.value }
           : {}),
         ...(nodes.hideExamples.checked ? { hideExamples: true } : {}),
+        ...(exampleDrawingEnabled ? { exampleDrawing: true } : {}),
         ...(!editorOptions.execution ? { codeExecution: false } : {}),
       }),
     });
@@ -1473,8 +1545,9 @@ async function connect(preflight, presenting = false) {
   }
   // Joined and recording, or offline with nothing to send: either way the
   // board's first stroke now reaches everything that should see it.
+  board.ready = true;
+  exampleBoard?.refresh();
   if (whiteboard) {
-    board.ready = true;
     paintBoard();
   }
 }
@@ -1569,8 +1642,14 @@ async function connectLiveKit(connection, preflight, presenting = false) {
       republishBoard();
       void boardUploadsSettled().then(flushPendingPublishes);
     } else {
-      flushPendingPublishes();
-      publishCode();
+      void reconnectCodingInterview({
+        ending: state.phase === "ending",
+        board: exampleBoard,
+        flush: flushPendingPublishes,
+        publishCode,
+      }).catch((error) =>
+        console.warn("codetrial example_resync_failed", error),
+      );
     }
     updateAgentState();
   });
@@ -2402,6 +2481,7 @@ function receiveControl(bytes) {
         // The round changed, so the checklist and the offer change with it.
         frameworkRound = "behavioral";
         if (whiteboard) paintBoard();
+        else exampleBoard?.refresh();
         renderFrameworkProgress();
         showFrameworkHint();
       }
@@ -2440,6 +2520,10 @@ function toggleThinking() {
 
 function yieldTurn() {
   if (!canTakeTurnAction()) return;
+  if (!state.candidateThinking && drawingTurn?.pending()) {
+    void drawingTurn.yield();
+    return;
+  }
   void publish(topics.control, yieldTurnPayload()).catch(() => {});
 }
 
@@ -2456,6 +2540,8 @@ function onTurnKey(event) {
 let turnSpokeAt = null;
 let turnRingProgress = null;
 function paintTurnRing(peak) {
+  if (state.micEnabled && peak >= TURN_SPEECH_PEAK) drawingTurn?.speech();
+  if (drawingTurn?.pending()) return;
   const next = turnCountdown(turnSpokeAt, {
     peak,
     at: performance.now(),
@@ -2464,12 +2550,24 @@ function paintTurnRing(peak) {
       !canTakeTurnAction() ||
       state.candidateThinking ||
       state.agentSpeaking ||
+      state.agentThinking ||
       !state.micEnabled,
   });
   turnSpokeAt = next.spokeAt;
-  const hidden = next.progress === null;
+  paintTurnProgress(next.progress);
+}
+
+function paintDrawingTurnProgress(value) {
+  // The drawing owns the ring until its handover completes. Speech must not
+  // resume an older countdown when the drawing gives the ring back.
+  turnSpokeAt = null;
+  paintTurnProgress(value);
+}
+
+function paintTurnProgress(value) {
+  const hidden = value === null;
   if (nodes.turnRing.hidden !== hidden) nodes.turnRing.hidden = hidden;
-  const progress = hidden ? null : next.progress.toFixed(3);
+  const progress = hidden ? null : value.toFixed(3);
   if (progress !== null && progress !== turnRingProgress)
     nodes.turnRing.style.setProperty("--turn-progress", progress);
   turnRingProgress = progress;
@@ -2562,6 +2660,7 @@ function applyPause(paused) {
   // pause taken during it used to give both back on the way out.
   nodes.editor.disabled = paused || codingClosed();
   if (whiteboard) paintBoard();
+  else exampleBoard?.refresh();
   updateRunAvailability();
   recordReplay("lifecycle", { state: paused ? "paused" : "resumed" });
   recordStage();
@@ -2913,6 +3012,7 @@ function stopEndingEscape() {
 
 function endInterview(reason) {
   if (state.phase !== "live" || state.reportReceiving) return;
+  const exampleFinished = exampleBoard?.finish();
   state.phase = "ending";
   // The hint outranks the ending overlay in the stacking order, so a candidate
   // who ends while it is still up would read the report status through it.
@@ -3006,6 +3106,8 @@ function endInterview(reason) {
     );
   if (whiteboard) {
     void boardUploadsSettled().then(publishEnd);
+  } else if (exampleFinished) {
+    void exampleFinished.then(publishEnd);
   } else {
     publishEnd();
   }
@@ -3160,6 +3262,7 @@ function renderReport() {
     language: state.language,
     code: currentCode(),
     board: finalBoardImage(),
+    exampleDrawing: exampleBoard?.image(),
     boardPhases: [...board.snapshots],
     saveResult: null,
   });
@@ -3402,6 +3505,11 @@ function updateAgentState() {
   const published = agent?.attributes?.["lk.agent.state"];
   const value = published || "listening";
   state.agentSpeaking = value === "speaking";
+  state.agentThinking = value === "thinking";
+  if (state.agentSpeaking || state.agentThinking) {
+    drawingTurn?.reset();
+    hideTurnRing();
+  }
   state.turnWindowMs = turnWindowMs(agent?.attributes);
   const labels = {
     listening: "Listening",

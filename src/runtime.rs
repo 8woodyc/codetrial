@@ -37,6 +37,7 @@ pub struct RuntimeBootstrap<'a> {
     pub interview_loop: InterviewLoop,
     pub interview_mode: InterviewMode,
     pub code_execution_disabled: bool,
+    pub example_drawing_enabled: bool,
     pub coding_minutes: u32,
     pub behavioral_minutes: u32,
     pub profile: InterviewProfile,
@@ -73,6 +74,7 @@ pub struct RuntimeOptions {
     pub examples_hidden: bool,
     pub interview_mode: InterviewMode,
     pub code_execution_disabled: bool,
+    pub example_drawing_enabled: bool,
 }
 
 pub fn bootstrap<'a>(
@@ -106,7 +108,9 @@ pub fn bootstrap_with_rounds<'a>(
         examples_hidden,
         interview_mode,
         code_execution_disabled,
+        example_drawing_enabled,
     } = options;
+    let example_drawing_enabled = example_drawing_enabled && !interview_mode.is_whiteboard();
     let problem = get_problem(problem_id);
     let duration_min = duration_min.clamp(MIN_DURATION_MIN, MAX_DURATION_MIN);
     let profile = sanitize_interview_profile(Some(&interview_profile_json(&profile)));
@@ -126,6 +130,7 @@ pub fn bootstrap_with_rounds<'a>(
             examples_hidden,
             interview_mode,
             code_execution_disabled,
+            example_drawing_enabled,
         },
     );
 
@@ -136,6 +141,7 @@ pub fn bootstrap_with_rounds<'a>(
         interview_loop,
         interview_mode,
         code_execution_disabled,
+        example_drawing_enabled,
         coding_minutes,
         behavioral_minutes,
         instructions,

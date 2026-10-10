@@ -516,6 +516,143 @@ fn browser_control_packets_all_reach_the_agent() {
         "the report prompt would be written against the wrong language"
     );
 }
+
+#[test]
+fn drawing_activity_resets_idle_without_adding_evidence_or_requesting_a_reply() {
+    let (topic, cases) = wire_fixture(include_str!("../fixtures/control.json"));
+    let payload = wire_case(&cases, "drawing activity");
+    let mut state = RuntimeState {
+        example_drawing_enabled: true,
+        ..Default::default()
+    };
+    let result = apply_data_event(&mut state, &topic, payload, TEST_REACTION_COOLDOWN_S);
+    assert_eq!(
+        result,
+        DataEventResult {
+            update_last_code_change: true,
+            ..DataEventResult::default()
+        }
+    );
+    assert!(state.code.is_empty());
+    assert!(state.framework_evidence.is_empty());
+    assert!(!state.thinking_hold.is_active());
+    for mut state in [
+        RuntimeState {
+            paused: true,
+            ..RuntimeState::default()
+        },
+        RuntimeState {
+            ended: true,
+            ..RuntimeState::default()
+        },
+        RuntimeState {
+            behavioral_round_started: true,
+            ..RuntimeState::default()
+        },
+    ] {
+        assert_eq!(
+            apply_data_event(&mut state, &topic, payload, TEST_REACTION_COOLDOWN_S),
+            DataEventResult::default()
+        );
+    }
+}
+
+#[test]
+fn drawing_yields_request_a_reply_without_speech_or_assessment_credit() {
+    let (topic, cases) = wire_fixture(include_str!("../fixtures/control.json"));
+    let payload = wire_case(&cases, "drawing turn");
+    let mut state = RuntimeState {
+        example_drawing_enabled: true,
+        ..Default::default()
+    };
+    let result = apply_data_event(&mut state, &topic, payload, 0.0);
+    assert!(result.yield_turn);
+    let prompt = result.generate_reply.unwrap();
+    assert!(prompt.contains("Example drawing"));
+    assert!(prompt.contains("not assessment evidence"));
+    assert!(prompt.contains("untrusted candidate content"));
+    assert!(prompt.contains("If a requested image is unavailable"));
+    assert!(prompt.contains("Only if the candidate referred to the drawing"));
+    assert!(prompt.contains("An unreferenced drawing must not trigger an image read"));
+    assert!(state.framework_evidence.is_empty());
+    assert!(state.transcript.is_empty());
+    assert!(state.code.is_empty());
+    assert!(!result.carries_thinking_debt);
+    assert!(!state.thinking_hold.is_active());
+    for mut blocked in [
+        RuntimeState {
+            paused: true,
+            ..RuntimeState::default()
+        },
+        RuntimeState {
+            ended: true,
+            ..RuntimeState::default()
+        },
+        RuntimeState {
+            behavioral_round_started: true,
+            ..RuntimeState::default()
+        },
+        RuntimeState {
+            interview_mode: InterviewMode::Whiteboard,
+            ..RuntimeState::default()
+        },
+    ] {
+        assert_eq!(
+            apply_data_event(&mut blocked, &topic, payload, 0.0),
+            DataEventResult::default()
+        );
+    }
+}
+
+#[test]
+fn example_mutation_controls_respect_opt_in_and_interview_boundaries() {
+    for enabled in [false, true] {
+        for paused in [false, true] {
+            for ended in [false, true] {
+                for behavioral in [false, true] {
+                    for mode in [InterviewMode::Coding, InterviewMode::Whiteboard] {
+                        for kind in ["drawing_activity", "yield_turn"] {
+                            let mut state = RuntimeState {
+                                example_drawing_enabled: enabled,
+                                paused,
+                                ended,
+                                behavioral_round_started: behavioral,
+                                interview_mode: mode,
+                                ..Default::default()
+                            };
+                            let result = apply_data_event(
+                                &mut state,
+                                codetrial::runtime::TOPIC_CONTROL,
+                                &serde_json::json!({"type": kind, "surface":"example"}),
+                                0.0,
+                            );
+                            let eligible = enabled && !paused && !ended && !behavioral;
+                            let label = format!(
+                                "{kind}: enabled={enabled}, paused={paused}, ended={ended}, behavioral={behavioral}, mode={mode:?}"
+                            );
+                            if kind == "drawing_activity" {
+                                assert_eq!(result.update_last_code_change, eligible, "{label}");
+                                assert!(result.generate_reply.is_none(), "{label}");
+                            } else {
+                                assert_eq!(
+                                    result.yield_turn,
+                                    eligible && mode == InterviewMode::Coding,
+                                    "{label}"
+                                );
+                                assert_eq!(
+                                    result.generate_reply.is_some(),
+                                    eligible && mode == InterviewMode::Coding,
+                                    "{label}"
+                                );
+                            }
+                            assert!(state.framework_evidence.is_empty(), "{label}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 /// it congratulates a candidate whose tests failed.
 #[test]
 fn browser_test_result_packets_are_classified_correctly_by_the_agent() {

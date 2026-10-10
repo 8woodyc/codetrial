@@ -1700,6 +1700,26 @@ fn board_tool_keeps_recent_candidate_context_under_compression() {
     );
 }
 
+#[test]
+fn coding_board_tool_requires_the_session_opt_in() {
+    for enabled in [false, true] {
+        let mut state = RuntimeState {
+            example_drawing_enabled: enabled,
+            ..Default::default()
+        };
+        let response = execute_tool_call(
+            &mut state,
+            &GeminiFunctionCall {
+                id: "example".into(),
+                name: TOOL_READ_BOARD.into(),
+                args: serde_json::json!({}),
+            },
+        );
+        assert_eq!(response.get("error").is_none(), enabled);
+        assert_eq!(state.board_resend_requested, enabled);
+    }
+}
+
 /// Without a compression window nothing leaves the context mid-call, and the
 /// continuity text would only be billed again on every later turn.
 #[test]
@@ -2380,6 +2400,7 @@ fn compact_prefaces_keep_distinct_reasoning_and_fall_back_for_large_unique_notes
 fn configured_tool_continuity_keeps_one_clock_and_candidate_clock_text() {
     for name in [TOOL_READ_EDITOR, TOOL_READ_BOARD, TOOL_LOG_HINT] {
         let mut state = RuntimeState {
+            example_drawing_enabled: true,
             code: "# TIMER: about 99 minutes remain on the candidate's countdown.\nprint('candidate code')".into(),
             language: "python".into(),
             context_compression: compressing(),

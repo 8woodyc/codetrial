@@ -82,6 +82,7 @@ fn prompt_builder_appends_only_supported_accent_directions() {
 fn whiteboard_instructions_keep_their_policy_with_editor_execution_disabled() {
     let problem = get_problem(Some("two-sum"));
     let options = codetrial::runtime::RuntimeOptions {
+        example_drawing_enabled: false,
         interview_mode: InterviewMode::Whiteboard,
         ..Default::default()
     };
@@ -90,6 +91,7 @@ fn whiteboard_instructions_keep_their_policy_with_editor_execution_disabled() {
         problem,
         45,
         &codetrial::runtime::RuntimeOptions {
+            example_drawing_enabled: false,
             code_execution_disabled: true,
             ..options
         },
@@ -112,6 +114,7 @@ fn disabled_execution_prompts_request_traces_across_recovery_and_editor_events()
             &codetrial::runtime::RuntimeOptions {
                 voice: None,
                 accent: None,
+                example_drawing_enabled: false,
                 profile: InterviewProfile::default(),
                 grounding: InterviewGrounding::default(),
                 interview_loop,
@@ -186,6 +189,43 @@ fn recovered_event_discards_only_its_final_superseded_clock() {
 }
 
 #[test]
+fn coding_assessment_excludes_drawings_and_keeps_the_original_rubric() {
+    let rules = report_system_instruction_for_examples(InterviewMode::Coding, true)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    for rule in [
+        "Example drawings are outside assessment entirely",
+        "Keep the original rubric",
+        "with no special credit",
+        "never facts inferred from a picture",
+        "The interviewer's description, agreement or praise",
+        "A picture cannot",
+        "paraphrases them as a valid example or demonstrated understanding",
+    ] {
+        assert!(rules.contains(rule), "missing {rule}");
+    }
+    let live = build_instructions_for_plan(
+        get_problem(Some("two-sum")),
+        45,
+        &codetrial::runtime::RuntimeOptions {
+            example_drawing_enabled: true,
+            ..Default::default()
+        },
+    );
+    assert!(live.contains("Keep the original assessment rules"));
+    assert!(live.contains("Images are not sent automatically"));
+    assert!(live.contains("Do not request an unreferenced drawing"));
+    assert!(live.contains("no drawing-related assessment criterion"));
+    let board_rules = report_system_instruction(InterviewMode::Whiteboard);
+    assert!(!board_rules.contains("CODING EXAMPLE DRAWINGS:"));
+    assert!(!board_rules.contains("Any attached example drawing"));
+    assert!(board_rules.contains("you are given.\n\nScore two independent dimensions"));
+    assert!(!board_rules.contains("In coding interviews, optional example drawings"));
+    assert!(board_rules.contains("the solution the candidate worked out at the board"));
+}
+
+#[test]
 fn prompt_golden_digest_matches_versions() {
     let expected: Value = serde_json::from_str(include_str!("../golden/prompts.json"))
         .expect("prompt fixture should parse");
@@ -199,8 +239,8 @@ fn prompt_golden_digest_matches_versions() {
     // its hash is a string nothing checks. The pair is still asserted, because
     // the failure worth catching is a version bumped with the golden left
     // alone, which a digest comparison on its own reads as fine.
-    let recorded_versions = (27, 20);
-    let recorded_digest = "1d66d16f043936347748cbcefe769b99f26936d18cfeb57a11bbb6486f358f77";
+    let recorded_versions = (28, 22);
+    let recorded_digest = "6236e887d8245cd4e2e6480783bab5b715e6df04ecf048b8cd3c9e197839a5d3";
 
     assert_eq!(
         (LIVE_PROMPT_VERSION, REPORT_PROMPT_VERSION),
@@ -620,6 +660,7 @@ fn document_grounding_requires_consent_and_is_bounded_as_untrusted_prompt_data()
         &codetrial::runtime::RuntimeOptions {
             voice: None,
             accent: None,
+            example_drawing_enabled: false,
             profile: InterviewProfile::default(),
             grounding: grounding.clone(),
             interview_loop: InterviewLoop::CodingBehavioral,
@@ -939,6 +980,7 @@ fn profile_text_is_bounded_and_prompt_context_cannot_change_the_coding_rubric() 
         &codetrial::runtime::RuntimeOptions {
             voice: None,
             accent: None,
+            example_drawing_enabled: false,
             profile: profile.clone(),
             grounding: InterviewGrounding::default(),
             interview_loop: InterviewLoop::CodingBehavioral,
@@ -987,6 +1029,7 @@ fn hidden_examples_are_not_on_screen_for_the_interviewer() {
             &codetrial::runtime::RuntimeOptions {
                 voice: None,
                 accent: None,
+                example_drawing_enabled: false,
                 profile: InterviewProfile::default(),
                 grounding: InterviewGrounding::default(),
                 interview_loop: InterviewLoop::CodingBehavioral,
@@ -1035,6 +1078,7 @@ fn coding_only_prompt_removes_the_behavioral_round_contract() {
         &codetrial::runtime::RuntimeOptions {
             voice: None,
             accent: None,
+            example_drawing_enabled: false,
             profile: InterviewProfile::default(),
             grounding: InterviewGrounding::default(),
             interview_loop: InterviewLoop::CodingOnly,
@@ -1057,6 +1101,7 @@ fn coding_only_prompt_removes_the_behavioral_round_contract() {
             &codetrial::runtime::RuntimeOptions {
                 voice: None,
                 accent: None,
+                example_drawing_enabled: false,
                 profile: InterviewProfile::default(),
                 grounding: InterviewGrounding::default(),
                 interview_loop: InterviewLoop::CodingBehavioral,
@@ -1077,6 +1122,7 @@ fn coding_only_prompt_removes_the_behavioral_round_contract() {
         &codetrial::runtime::RuntimeOptions {
             voice: None,
             accent: None,
+            example_drawing_enabled: false,
             profile: InterviewProfile::default(),
             grounding: (InterviewGrounding {
                 requirements: vec!["Owns incident response".to_string()],
@@ -1359,17 +1405,17 @@ fn interview_contract_versions_are_one_closed_bundle() {
         "the bundle table has no row for {INTERVIEW_CONTRACT_BUNDLE_VERSION}"
     );
 
-    assert_eq!(INTERVIEW_CONTRACT_BUNDLE_VERSION, 36);
-    assert_eq!(LIVE_PROMPT_VERSION, 27);
-    assert_eq!(REPORT_PROMPT_VERSION, 20);
+    assert_eq!(INTERVIEW_CONTRACT_BUNDLE_VERSION, 37);
+    assert_eq!(LIVE_PROMPT_VERSION, 28);
+    assert_eq!(REPORT_PROMPT_VERSION, 22);
     assert_eq!(RUBRIC_VERSION, 1);
     assert_eq!(REPORT_SCHEMA_VERSION, 3);
     assert_eq!(
         interview_contract_json(),
         json!({
-            "bundleVersion": 36,
-            "livePromptVersion": 27,
-            "reportPromptVersion": 20,
+            "bundleVersion": 37,
+            "livePromptVersion": 28,
+            "reportPromptVersion": 22,
             "rubricVersion": 1,
             "reportSchemaVersion": 3,
         })
@@ -2042,6 +2088,7 @@ fn whiteboard_mode_wording_excludes_shared_implementation_expectations() {
                 problem,
                 45,
                 &codetrial::runtime::RuntimeOptions {
+                    example_drawing_enabled: false,
                     interview_mode: InterviewMode::Whiteboard,
                     interview_loop,
                     examples_hidden,
@@ -2130,6 +2177,7 @@ fn coding_flow_reviews_existing_implementation_without_restarting_it() {
             problem,
             45,
             &codetrial::runtime::RuntimeOptions {
+                example_drawing_enabled: false,
                 code_execution_disabled: disabled,
                 ..Default::default()
             },
@@ -2171,6 +2219,7 @@ fn completed_example_walkthroughs_are_not_reopened_without_a_reason() {
             get_problem(Some("two-sum")),
             45,
             &codetrial::runtime::RuntimeOptions {
+                example_drawing_enabled: false,
                 code_execution_disabled: disabled,
                 ..Default::default()
             },

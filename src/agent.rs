@@ -66,11 +66,11 @@ pub use prompts::{
     log_hint_text, numbered, numbered_from, owed_reply, phase_judge_prompt,
     phase_judge_system_instruction, phase_judgment_note, proactive_review, read_board_text,
     read_editor_text, received_test_note, released_follow_ups, report_prompt,
-    report_system_instruction, resume, resumed_context, rolling_assessment, round_skipped,
-    round_started, silence_nudge, spoken_language, test_results_reaction,
-    test_runner_unavailable_reaction, test_setup_error_reaction, time_warning,
-    uncredited_test_results_reaction, unrecorded_earlier_phases, unvoiced_record_note,
-    with_owed_reply, wrap_up,
+    report_system_instruction, report_system_instruction_for_examples, resume, resumed_context,
+    rolling_assessment, round_skipped, round_started, silence_nudge, spoken_language,
+    test_results_reaction, test_runner_unavailable_reaction, test_setup_error_reaction,
+    time_warning, uncredited_test_results_reaction, unrecorded_earlier_phases,
+    unvoiced_record_note, with_owed_reply, wrap_up,
 };
 pub(crate) use prompts::{
     behavioral_round_start, editor_tool_continuity, end_interview_refusal, evidenced_among,
@@ -78,7 +78,9 @@ pub(crate) use prompts::{
     pending_candidate_line, read_editor_text_from_numbered, report_transcript_lines,
     tool_editor_review,
 };
-pub(crate) use report::{MAX_ERROR_CHARS, Sanitized, sanitize_report_candidate};
+pub(crate) use report::{
+    MAX_ERROR_CHARS, Sanitized, sanitize_example_drawing_candidate, sanitize_report_candidate,
+};
 pub use report::{
     MAX_SUMMARY_TEXT, ReportRounds, fallback_report, final_report, names_published_problem,
     report_response_schema, spelled_words, validate_report, validate_report_candidate,
@@ -177,9 +179,9 @@ pub const THINKING_CHECK_IN_S: u64 = 120;
 pub(crate) const THINKING_RELEASE_COOLDOWN: std::time::Duration =
     std::time::Duration::from_secs(10);
 
-pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 36;
-pub const LIVE_PROMPT_VERSION: u32 = 27;
-pub const REPORT_PROMPT_VERSION: u32 = 20;
+pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 37;
+pub const LIVE_PROMPT_VERSION: u32 = 28;
+pub const REPORT_PROMPT_VERSION: u32 = 22;
 pub const RUBRIC_VERSION: u32 = 1;
 pub const REPORT_SCHEMA_VERSION: u32 = 3;
 
@@ -784,6 +786,7 @@ pub struct RuntimeState {
     /// whole life, and every gate that reads them has to ask this first.
     pub interview_mode: InterviewMode,
     pub code_execution_disabled: bool,
+    pub example_drawing_enabled: bool,
     pub coding_minutes: u32,
     pub behavioral_minutes: u32,
     pub round_transition_seen: bool,
@@ -1068,6 +1071,7 @@ impl Default for RuntimeState {
             interview_loop: InterviewLoop::CodingBehavioral,
             interview_mode: InterviewMode::Coding,
             code_execution_disabled: false,
+            example_drawing_enabled: false,
             coding_minutes: 37,
             behavioral_minutes: 8,
             round_transition_seen: false,
@@ -2382,14 +2386,12 @@ fn record_evidence(
         );
     }
 
-    // A source this interview has no surface for. The declaration offers only
-    // the one it runs on, so reaching here is the model recording what it read
-    // in an editor nobody opened, or on a board nobody drew on, and a report
-    // that carries such a row tells a reviewer the observation was made
-    // somewhere it cannot have been.
+    // The evidence declaration offers only assessable work: code and tests in
+    // coding, drawn work in whiteboard. Coding example drawings remain optional
+    // explanation aids even after an image arrives.
     match state.interview_mode {
         InterviewMode::Coding if source == EvidenceSource::BoardSnapshot => {
-            return Err("this interview has no whiteboard; board_snapshot is not a source here");
+            return Err("example drawings are explanation aids, not coding assessment evidence");
         }
         InterviewMode::Whiteboard
             if matches!(
@@ -2840,6 +2842,7 @@ pub struct MetadataConfig {
     /// The candidate hid the worked examples in the preflight.
     pub examples_hidden: bool,
     pub code_execution_disabled: bool,
+    pub example_drawing_enabled: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -3212,6 +3215,8 @@ pub fn parse_participant_metadata(metadata: Option<&str>) -> MetadataConfig {
     let code_execution_disabled =
         value.get("codeExecution") == Some(&serde_json::Value::Bool(false));
 
+    let example_drawing_enabled = !interview_mode.is_whiteboard()
+        && value.get("exampleDrawing") == Some(&serde_json::Value::Bool(true));
     MetadataConfig {
         voice: sanitize_interviewer_choice(value.get("interviewerVoice"), INTERVIEWER_VOICES),
         accent: sanitize_interviewer_choice(value.get("interviewerAccent"), INTERVIEWER_ACCENTS),
@@ -3223,6 +3228,7 @@ pub fn parse_participant_metadata(metadata: Option<&str>) -> MetadataConfig {
         grounding,
         examples_hidden,
         code_execution_disabled,
+        example_drawing_enabled,
     }
 }
 

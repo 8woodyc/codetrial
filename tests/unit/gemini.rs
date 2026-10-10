@@ -9,6 +9,8 @@ use crate::runtime::bootstrap;
 
 /// An editor interview's report material: the editor's rules, nothing attached.
 const EDITOR: ReportMaterial<'static> = ReportMaterial {
+    example_drawing_enabled: false,
+    drawing_received: false,
     mode: InterviewMode::Coding,
     boards: &[],
 };
@@ -1029,8 +1031,10 @@ fn report_with_self_review(item: usize, checks: Value) -> String {
 /// One attempt of a fresh loop, as the `attempt`-th after the first.
 fn attempt_for(output: &str, attempt: usize, problem: &crate::agent::Problem) -> ReportStep {
     ReportAttempts {
+        drawing_received: true,
         held: None,
         rounds: rounds(true),
+        mode: InterviewMode::Coding,
     }
     .step("original", output, attempt, problem)
 }
@@ -1079,12 +1083,239 @@ fn run_for_round(
             "original",
             problem,
             rounds(behavioral_round_opened),
+            InterviewMode::Coding,
             &mut Scripted(outputs.iter()),
+            true,
         ))
 }
 
 fn run_attempts(outputs: &[&str]) -> ReportResult {
     run_for(outputs, report_problem()).map(|(report, _)| report)
+}
+
+#[test]
+fn drawing_credit_requests_repair_and_keeps_a_salvage() {
+    let mut image_credit = valid_report();
+    image_credit["codingFeedback"]["strengths"][0] =
+        json!("You provided a clear example drawing to illustrate the tree structure.");
+    let mut explained = valid_report();
+    explained["communicationFeedback"]["strengths"][0] =
+        json!("You explained to Jim how the values at each tree level produce the mean.");
+    let initial = image_credit.to_string();
+    let repaired = explained.to_string();
+    let result = run_attempts(&[&initial, &repaired]).unwrap();
+    assert_eq!(
+        result["codingFeedback"]["strengths"],
+        explained["codingFeedback"]["strengths"]
+    );
+    assert_eq!(
+        result["communicationFeedback"]["strengths"],
+        explained["communicationFeedback"]["strengths"]
+    );
+    let rescued = run_attempts(&[&initial, &initial, &initial]).unwrap();
+    assert_eq!(rescued["codingScore"], image_credit["codingScore"]);
+    assert!(!rescued.to_string().contains("example drawing"));
+    assert!(matches!(
+        attempt_for(&initial, 0, report_problem()),
+        ReportStep::Repair(_)
+    ));
+    image_credit["improvementPlan"][0]["selfReview"] = json!(["Sound confident", "Uses evidence"]);
+    assert!(
+        salvage_report(
+            image_credit,
+            0,
+            report_problem(),
+            rounds(true),
+            InterviewMode::Coding,
+            true
+        )
+        .is_some()
+    );
+}
+
+#[test]
+fn repeated_drawing_advice_keeps_the_report_without_visual_feedback() {
+    for text in [
+        "Draw a diagram of the pointer moves before coding.",
+        "Your sketch explains the pointer moves.",
+    ] {
+        let mut raw = valid_report();
+        raw["codingFeedback"]["improvements"][0] = json!(text);
+        raw["improvementPlan"][0]["weakness"] = json!(text);
+        raw["summary"] = json!(format!("You explained a map-based approach. {text}"));
+        let (clean, _) = crate::agent::sanitize_example_drawing_candidate(
+            raw.clone(),
+            report_problem(),
+            InterviewMode::Coding,
+            true,
+        );
+        crate::agent::validate_report_for_round(
+            &clean,
+            report_problem(),
+            rounds(true),
+            InterviewMode::Coding,
+            true,
+        )
+        .expect("sanitized drawing advice must remain valid");
+        let output = raw.to_string();
+        let (rescued, log) = run_for(&[&output, &output, &output], report_problem()).unwrap();
+        assert!(log.unwrap().contains("drawings="));
+        assert_eq!(rescued["codingScore"], raw["codingScore"]);
+        assert_eq!(rescued["communicationScore"], raw["communicationScore"]);
+        assert_eq!(rescued["decision"], raw["decision"]);
+        assert_eq!(rescued["summary"], "You explained a map-based approach.");
+        assert!(!rescued.to_string().contains(text));
+        assert_eq!(
+            rescued["improvementPlan"].as_array().unwrap().len(),
+            raw["improvementPlan"].as_array().unwrap().len()
+        );
+        let stopped = run_for(&[&output], report_problem()).unwrap().0;
+        assert_eq!(stopped["codingScore"], raw["codingScore"]);
+        raw["codingScore"] = json!("invalid");
+        let invalid = raw.to_string();
+        assert!(
+            run_attempts(&[&invalid, &invalid, &invalid]).is_err(),
+            "visual sanitizing must not repair malformed scores"
+        );
+    }
+}
+
+#[test]
+fn example_mutation_sanitizing_requires_received_coding_ink() {
+    let raw = json!({"summary": "Your drawing explained the approach."});
+    for (mode, received) in [
+        (InterviewMode::Coding, false),
+        (InterviewMode::Whiteboard, false),
+        (InterviewMode::Whiteboard, true),
+    ] {
+        assert_eq!(
+            crate::agent::sanitize_example_drawing_candidate(
+                raw.clone(),
+                report_problem(),
+                mode,
+                received
+            ),
+            (raw.clone(), 0)
+        );
+    }
+}
+
+#[test]
+fn example_mutation_summary_counts_one_edit_and_keeps_spoken_evidence() {
+    let raw = json!({"summary": "You explained a map. Your drawing was clear.", "codingScore": 75});
+    let (clean, count) = crate::agent::sanitize_example_drawing_candidate(
+        raw,
+        report_problem(),
+        InterviewMode::Coding,
+        true,
+    );
+    assert_eq!(count, 1);
+    assert_eq!(clean["summary"], "You explained a map.");
+    assert_eq!(clean["codingScore"], 75);
+}
+
+#[test]
+fn example_mutation_feedback_labels_and_linked_weakness_counts() {
+    let text = "Your sketch explains the approach.";
+    let raw = json!({
+        "codingFeedback": {"strengths": [text], "improvements": [text]},
+        "communicationFeedback": {"strengths": [text]},
+        "improvementPlan": [{"weakness": text}],
+    });
+    let (clean, count) = crate::agent::sanitize_example_drawing_candidate(
+        raw,
+        report_problem(),
+        InterviewMode::Coding,
+        true,
+    );
+    assert_eq!(count, 4, "three feedback entries and one linked weakness");
+    assert_eq!(
+        clean["codingFeedback"]["strengths"][0],
+        "Additional implementation feedback item 1 was omitted from this report."
+    );
+    assert_eq!(
+        clean["communicationFeedback"]["strengths"][0],
+        "Additional conversation feedback item 1 was omitted from this report."
+    );
+    assert_eq!(
+        clean["improvementPlan"][0]["weakness"],
+        clean["codingFeedback"]["improvements"][0]
+    );
+}
+
+#[test]
+fn example_mutation_practice_fields_count_each_removed_reference() {
+    let text = "Your drawing showed understanding.";
+    let raw = json!({"improvementPlan": [{"weakness": text, "drill": text,
+        "successCriterion": text, "phase": "algorithm", "durationMin": 5}]});
+    let (clean, count) = crate::agent::sanitize_example_drawing_candidate(
+        raw,
+        report_problem(),
+        InterviewMode::Coding,
+        true,
+    );
+    assert_eq!(count, 3);
+    assert_eq!(
+        clean["improvementPlan"][0]["weakness"],
+        "This feedback item was omitted from the assessment."
+    );
+    assert_eq!(
+        clean["improvementPlan"][0]["drill"],
+        "Review the retained code and explain one evidence-supported improvement."
+    );
+    assert_eq!(
+        clean["improvementPlan"][0]["successCriterion"],
+        "Support the improvement with code, tests or actual conversation."
+    );
+    assert_eq!(clean["improvementPlan"][0]["phase"], "algorithm");
+    assert_eq!(clean["improvementPlan"][0]["durationMin"], 5);
+}
+
+#[test]
+fn example_mutation_self_review_counts_removals_and_preserves_empty_lists() {
+    let raw = json!({"improvementPlan": [
+        {"selfReview": ["Your drawing was clear.", "Explain the invariant."]},
+        {"selfReview": ["Your sketch was clear."]},
+        {"selfReview": []},
+    ]});
+    let (clean, count) = crate::agent::sanitize_example_drawing_candidate(
+        raw,
+        report_problem(),
+        InterviewMode::Coding,
+        true,
+    );
+    assert_eq!(count, 2);
+    assert_eq!(
+        clean["improvementPlan"][0]["selfReview"],
+        json!(["Explain the invariant."])
+    );
+    assert_eq!(
+        clean["improvementPlan"][1]["selfReview"],
+        json!(["Uses retained assessment evidence."])
+    );
+    assert_eq!(clean["improvementPlan"][2]["selfReview"], json!([]));
+}
+
+#[test]
+fn example_mutation_follow_up_counts_edits_and_keeps_conversation() {
+    let raw = json!({"followUps": [
+        {"assessment": "You explained the map. Your drawing was clear."},
+        {"assessment": "Your sketch was clear."},
+        {"assessment": null},
+    ]});
+    let (clean, count) = crate::agent::sanitize_example_drawing_candidate(
+        raw,
+        report_problem(),
+        InterviewMode::Coding,
+        true,
+    );
+    assert_eq!(count, 2);
+    assert_eq!(
+        clean["followUps"][0]["assessment"],
+        "You explained the map."
+    );
+    assert!(clean["followUps"][1]["assessment"].is_null());
+    assert!(clean["followUps"][2]["assessment"].is_null());
 }
 
 /// What a report refused after every repair fails with, for the recovery tests.
@@ -1140,7 +1371,9 @@ fn a_repair_call_that_fails_after_a_refusal_keeps_its_retry_policy() {
                 "original",
                 report_problem(),
                 rounds(true),
+                InterviewMode::Coding,
                 &mut transport,
+                true,
             ))
             .expect_err("nothing was held");
         assert_eq!(transport.calls, 2);
@@ -1215,8 +1448,10 @@ fn star_content_in_a_round_that_never_opened_is_repaired() {
     assert!(star_cleared(&report));
 
     let repair = match (ReportAttempts {
+        drawing_received: true,
         held: None,
         rounds: rounds(false),
+        mode: InterviewMode::Coding,
     })
     .step("original", &star, 0, report_problem())
     {
@@ -1290,8 +1525,15 @@ fn a_self_review_the_last_attempt_emptied_gets_a_replacement_safe_for_every_prob
     let mut raw = valid_report();
     raw["improvementPlan"][0]["selfReview"] = json!(["Your personality seemed introverted."]);
     for problem in crate::agent::PROBLEMS {
-        let salvage = salvage_report(raw.clone(), 0, problem, rounds(true))
-            .unwrap_or_else(|| panic!("rejected for {}", problem.id));
+        let salvage = salvage_report(
+            raw.clone(),
+            0,
+            problem,
+            rounds(true),
+            InterviewMode::Coding,
+            true,
+        )
+        .unwrap_or_else(|| panic!("rejected for {}", problem.id));
         assert_eq!(
             salvage.report["improvementPlan"][0]["selfReview"],
             json!([crate::agent::SELF_REVIEW_REPLACEMENT])
@@ -1427,8 +1669,15 @@ fn unsafe_checks_across_plan_items_are_all_dropped_and_counted() {
         json!(["Uses evidence", "Your body language was closed."]);
     report["improvementPlan"][3]["selfReview"] = json!(["Mind your accent."]);
 
-    let salvage = salvage_report(report, 0, report_problem(), rounds(true))
-        .expect("every item is safe once its unsafe checks are gone");
+    let salvage = salvage_report(
+        report,
+        0,
+        report_problem(),
+        rounds(true),
+        InterviewMode::Coding,
+        true,
+    )
+    .expect("every item is safe once its unsafe checks are gone");
     assert_eq!(salvage.removed.checks, 3);
     let lists = salvage.report["improvementPlan"]
         .as_array()
@@ -1452,11 +1701,19 @@ fn an_unsafe_follow_up_assessment_is_dropped_and_counted() {
         {"index": 2, "raised": true, "assessment": "You bounded the memory."},
     ]);
 
-    let salvage = salvage_report(report, 0, report_problem(), rounds(true))
-        .expect("the report is valid once the unsafe assessment is gone");
+    let salvage = salvage_report(
+        report,
+        0,
+        report_problem(),
+        rounds(true),
+        InterviewMode::Coding,
+        false,
+    )
+    .expect("the report is valid once the unsafe assessment is gone");
     assert_eq!(
         salvage.removed,
         crate::agent::Sanitized {
+            drawings: 0,
             checks: 0,
             criteria: 0,
             assessments: 1
@@ -1856,6 +2113,13 @@ fn live_setup_uses_native_audio_voice_tools_and_transcription() {
     // clock says so. No parameters: the reason is always the same one, and a
     // free-text field here would be a second place for the closing to be
     // written.
+    assert!(
+        !setup["tools"][0]["functionDeclarations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["name"] == TOOL_READ_BOARD)
+    );
     let ending_tool = &setup["tools"][0]["functionDeclarations"][3];
     assert_eq!(ending_tool["name"], TOOL_END_INTERVIEW);
     assert!(ending_tool.get("parameters").is_none());
@@ -1954,6 +2218,7 @@ fn a_whiteboard_session_is_offered_the_board_and_not_the_editor() {
         Some("two-sum"),
         45,
         crate::runtime::RuntimeOptions {
+            example_drawing_enabled: false,
             interview_mode: InterviewMode::Whiteboard,
             ..Default::default()
         },
@@ -2390,11 +2655,28 @@ fn report_generation_request_matches_python_report_model_config() {
         "an editor interview attaches nothing"
     );
 
+    let with_example = generate_report_request(
+        "score this",
+        ReportMaterial {
+            example_drawing_enabled: false,
+            drawing_received: false,
+            mode: InterviewMode::Coding,
+            boards: &[("Example drawing", &[0xff, 0xd8, 0xff])],
+        },
+        GENERATION_SEED,
+    );
+    assert_eq!(
+        with_example, request,
+        "drawings do not reach coding assessment"
+    );
+
     // Every phase image rides the same request, preceded by its server-owned
     // label. The prompt comes last, after all of the evidence it describes.
     let with_board = generate_report_request(
         "score this",
         ReportMaterial {
+            example_drawing_enabled: false,
+            drawing_received: false,
             mode: InterviewMode::Whiteboard,
             boards: &[
                 ("Example checkpoint", &[0xff, 0xd8, 0xff]),
@@ -3940,7 +4222,17 @@ fn a_success_criterion_still_unsafe_after_both_repairs_is_replaced_and_scored() 
 /// one that would pass validation as it stands.
 #[test]
 fn a_response_with_nothing_to_remove_is_never_a_salvage() {
-    assert!(salvage_report(valid_report(), 0, report_problem(), rounds(true)).is_none());
+    assert!(
+        salvage_report(
+            valid_report(),
+            0,
+            report_problem(),
+            rounds(true),
+            InterviewMode::Coding,
+            true
+        )
+        .is_none()
+    );
 }
 
 /// Fixed text, so checked once against every title it could be shown under.
@@ -3949,11 +4241,19 @@ fn the_success_criterion_replacement_is_safe_for_every_problem() {
     let mut raw = valid_report();
     raw["improvementPlan"][0]["successCriterion"] = json!("Never appear nervous.");
     for problem in crate::agent::PROBLEMS {
-        let salvage = salvage_report(raw.clone(), 0, problem, rounds(true))
-            .unwrap_or_else(|| panic!("rejected for {}", problem.id));
+        let salvage = salvage_report(
+            raw.clone(),
+            0,
+            problem,
+            rounds(true),
+            InterviewMode::Coding,
+            true,
+        )
+        .unwrap_or_else(|| panic!("rejected for {}", problem.id));
         assert_eq!(
             salvage.removed,
             crate::agent::Sanitized {
+                drawings: 0,
                 checks: 0,
                 criteria: 1,
                 assessments: 0
@@ -3971,8 +4271,14 @@ fn every_rule_one_field_breaks_reaches_the_repair() {
     let ReportStep::Repair(repair) = attempt_for(&output, 0, report_problem()) else {
         panic!("both policy rules must trigger a repair");
     };
-    let errors = crate::agent::validate_report_for_round(&report, report_problem(), rounds(true))
-        .unwrap_err();
+    let errors = crate::agent::validate_report_for_round(
+        &report,
+        report_problem(),
+        rounds(true),
+        InterviewMode::Coding,
+        true,
+    )
+    .unwrap_err();
     assert_eq!(errors.len(), 2);
     for error in errors {
         assert!(repair.contains(&serde_json::to_string(&error).unwrap()));
@@ -3986,8 +4292,14 @@ fn a_long_phrase_list_is_counted_rather_than_cut_midway() {
         "Mind accent, dialect, typing speed, speech rate, filler words, disfluency, eye contact, \
          posture, body language, facial expression, voice tone and physical appearance."
     );
-    let errors = crate::agent::validate_report_for_round(&report, report_problem(), rounds(true))
-        .unwrap_err();
+    let errors = crate::agent::validate_report_for_round(
+        &report,
+        report_problem(),
+        rounds(true),
+        InterviewMode::Coding,
+        true,
+    )
+    .unwrap_err();
     let [error] = errors.as_slice() else {
         panic!("one rule, one error: {errors:?}");
     };
@@ -4049,7 +4361,15 @@ fn a_self_review_check_with_multiple_policy_violations_is_dropped_once() {
         "Speak clearly in English without nervous filler words.",
         "Verify the loop invariant"
     ]);
-    let salvage = salvage_report(report, 0, report_problem(), rounds(true)).unwrap();
+    let salvage = salvage_report(
+        report,
+        0,
+        report_problem(),
+        rounds(true),
+        InterviewMode::Coding,
+        true,
+    )
+    .unwrap();
     assert_eq!(salvage.removed.checks, 1);
     assert_eq!(
         salvage.report["improvementPlan"][0]["selfReview"],
@@ -4158,7 +4478,8 @@ fn coding_only_tool_schema_excludes_behavioral_phases_on_both_surfaces() {
     // Only a whiteboard is offered the tool at all.
     for mode in [InterviewMode::Coding, InterviewMode::Whiteboard] {
         if !crate::agent::evidence_tool_declared(mode) {
-            let tools = live_tool_declarations(crate::agent::InterviewLoop::CodingBehavioral, mode);
+            let tools =
+                live_tool_declarations(crate::agent::InterviewLoop::CodingBehavioral, mode, false);
             assert!(
                 tools
                     .as_array()
@@ -4168,8 +4489,9 @@ fn coding_only_tool_schema_excludes_behavioral_phases_on_both_surfaces() {
             );
             continue;
         }
-        let coding = live_tool_declarations(crate::agent::InterviewLoop::CodingOnly, mode);
-        let full = live_tool_declarations(crate::agent::InterviewLoop::CodingBehavioral, mode);
+        let coding = live_tool_declarations(crate::agent::InterviewLoop::CodingOnly, mode, false);
+        let full =
+            live_tool_declarations(crate::agent::InterviewLoop::CodingBehavioral, mode, false);
         let find = |tools: Value| {
             tools
                 .as_array()
@@ -4213,11 +4535,14 @@ fn coding_only_tool_schema_excludes_behavioral_phases_on_both_surfaces() {
 
 #[tokio::test]
 async fn bounded_http_diagnostic_preserves_real_connect_error_and_hides_url() {
-    // Bound but never listening: the kernel refuses the connection, and the
-    // port stays reserved, where a listener bound and dropped frees it for any
-    // test running alongside to take before the connect.
-    let reserved = tokio::net::TcpSocket::new_v4().unwrap();
-    reserved.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    // A connected socket reserves its source port without accepting new
+    // connections. A merely bound socket times out on macOS; dropping a
+    // listener instead lets another test take its port before the request.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let reserved = tokio::net::TcpStream::connect(listener.local_addr().unwrap())
+        .await
+        .unwrap();
+    let (_peer, _) = listener.accept().await.unwrap();
     let address = reserved.local_addr().unwrap();
     let error = generate_content_once(
         "SECRET_KEY_SENTINEL",
