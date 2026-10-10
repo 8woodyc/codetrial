@@ -657,6 +657,122 @@ test("disabled auto indentation retains parsed bracket highlighting", async (t) 
   }
 });
 
+test("Jim captions survive editor navigation and language switches", async (t) => {
+  const ctx = await editorPage(t, {
+    beforeLoad: (page) => page.clock.install(),
+  });
+  if (!ctx) return;
+  const { page, errors } = ctx;
+  const editor = page.locator("#editor");
+  const bar = page.locator("#captions-bar");
+  const code = "const answer = 42;";
+  const text = "Use a hash map and count each value.";
+
+  const assertJim = async (message) => {
+    await page.evaluate(
+      () => new Promise((resolve) => requestAnimationFrame(resolve)),
+    );
+    assert.equal(await bar.isVisible(), true, message);
+    assert.equal(
+      await page.locator("#captions-text").textContent(),
+      `[Jim]: ${text}`,
+      message,
+    );
+  };
+
+  try {
+    await page.evaluate(async () => {
+      await import("/interview.js");
+      document.querySelector("#audio-check").hidden = true;
+      (await import("/avatar/stage.js")).setStageCovered(false);
+    });
+
+    await page.locator('[data-language="javascript"]').click();
+    await editor.fill(code);
+    await page.locator("#problem-tab").click();
+    assert.equal(
+      await editor.evaluate((node) => document.activeElement === node),
+      false,
+      "setup must move focus away from the editor",
+    );
+
+    await page.evaluate(async (captionText) => {
+      const captions = await import("/captions.js");
+      captions.updateCaptions(
+        "interviewer",
+        captionText,
+        "jim-editor-navigation",
+        { final: true },
+      );
+    }, text);
+    await page.clock.runFor(300 * Math.ceil(text.length / 8));
+    await page.clock.runFor(13000);
+    await assertJim("a completed Jim caption must outlive the idle timeout");
+
+    await page.evaluate(() => {
+      document
+        .querySelector("#editor")
+        .dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    assert.equal(await editor.inputValue(), code);
+    await assertJim("an input event without changed text must preserve Jim");
+
+    await editor.focus();
+    assert.equal(
+      await editor.evaluate((node) => document.activeElement === node),
+      true,
+    );
+    await assertJim("focusing the editor must preserve Jim");
+
+    await editor.click({ position: { x: 8, y: 8 } });
+    await assertJim("clicking the editor must preserve Jim");
+
+    await page.evaluate(() => {
+      document.querySelector("#editor").setSelectionRange(0, 0);
+    });
+    await page.keyboard.press("ArrowRight");
+    assert.deepEqual(await caretState(page), {
+      value: code,
+      start: 1,
+      end: 1,
+    });
+    await assertJim("moving the caret must preserve Jim");
+
+    const python = page.locator('[data-language="python"]');
+    await python.click();
+    assert.equal(
+      await python.evaluate((button) => button.classList.contains("selected")),
+      true,
+      "the language switch must run",
+    );
+    assert.notEqual(
+      await editor.inputValue(),
+      code,
+      "the language switch must restore a different buffer",
+    );
+    await assertJim("switching languages must preserve Jim");
+
+    await page.locator('[data-language="javascript"]').click();
+    assert.equal(await editor.inputValue(), code);
+    await assertJim("returning to the saved buffer must preserve Jim");
+
+    await editor.focus();
+    await assertJim("refocusing after a switch must preserve Jim");
+
+    await editor.fill(`${code} `);
+    assert.equal(await editor.inputValue(), `${code} `);
+    assert.equal(
+      await bar.isVisible(),
+      false,
+      "changing the code text must dismiss Jim",
+    );
+
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
 test("disabled bracket auto-close leaves insertion and deletion to the browser", async (t) => {
   const ctx = await editorPage(t, { params: { editorAutoClose: "0" } });
   if (!ctx) return;
@@ -803,6 +919,82 @@ test("plain editor text follows the highlight layer's color setting", async (t) 
       );
     });
     assert.deepEqual(colors, ["rgb(31, 31, 31)", "rgb(31, 31, 31)"]);
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("a new Jim turn starts at the top of the caption bar", async (t) => {
+  const ctx = await editorPage(t, {
+    beforeLoad: (page) => page.clock.install(),
+  });
+  if (!ctx) return;
+  const { page, errors } = ctx;
+  const bar = page.locator("#captions-bar");
+  const captionText = page.locator("#captions-text");
+  const firstText =
+    "Start by checking how often each value appears in the input. ".repeat(40);
+  const secondText =
+    "Then scan the array and check the boundary cases. ".repeat(40);
+
+  const showJim = async (text, id) => {
+    await page.evaluate(
+      async ({ text, id }) => {
+        const captions = await import("/captions.js");
+        captions.updateCaptions("interviewer", text, id, { final: true });
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      },
+      { text, id },
+    );
+    await page.clock.runFor(300 * Math.ceil(text.length / 8));
+  };
+
+  const scrollDown = async () => {
+    const position = await bar.evaluate((node) => {
+      node.scrollTop = node.scrollHeight;
+      return node.scrollTop;
+    });
+    assert.ok(position > 0, "the test must actually scroll the caption bar");
+    return position;
+  };
+
+  try {
+    await page.evaluate(async () => {
+      await import("/interview.js");
+      document.querySelector("#audio-check").hidden = true;
+      (await import("/avatar/stage.js")).setStageCovered(false);
+    });
+
+    await showJim(firstText, "jim-scroll-1");
+    assert.equal(await bar.isVisible(), true);
+    assert.equal(await captionText.textContent(), `[Jim]: ${firstText}`);
+
+    const firstPosition = await scrollDown();
+    await showJim(firstText, "jim-scroll-1");
+    assert.equal(
+      await bar.evaluate((node) => node.scrollTop),
+      firstPosition,
+      "an update to the same turn must preserve the reading position",
+    );
+
+    await showJim(secondText, "jim-scroll-2");
+    assert.equal(await captionText.textContent(), `[Jim]: ${secondText}`);
+    assert.equal(
+      await bar.evaluate((node) => node.scrollTop),
+      0,
+      "a new Jim turn must start at the top",
+    );
+
+    const secondPosition = await scrollDown();
+    await showJim(firstText, "jim-scroll-1");
+    assert.equal(await captionText.textContent(), `[Jim]: ${secondText}`);
+    assert.equal(
+      await bar.evaluate((node) => node.scrollTop),
+      secondPosition,
+      "a retired turn must not move the current reading position",
+    );
+
     assert.deepEqual(errors, []);
   } finally {
     await page.close();

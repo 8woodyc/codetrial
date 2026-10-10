@@ -126,7 +126,12 @@ import {
   startIntegrityWorker,
   stopIntegrityWorker,
 } from "./integrity.js";
-import { initCaptions, showCaptions, updateCaptions } from "./captions.js";
+import {
+  dismissCaptions,
+  initCaptions,
+  showCaptions,
+  updateCaptions,
+} from "./captions.js";
 import {
   consentGiven,
   initRecording,
@@ -973,6 +978,10 @@ function bindEvents() {
     }
   });
   nodes.editor.addEventListener("input", () => {
+    // Only a changed code buffer counts as the candidate's response.
+    if (nodes.editor.value !== state.codeByLanguage[state.language]) {
+      dismissCaptions();
+    }
     // Before the buffer below is taken, because this sends the tab as it
     // arrived. Typing inside the switch's own debounce window cancels it
     // otherwise, and the single packet that survives carries the switch and the
@@ -1980,6 +1989,7 @@ async function consumeTranscript(room, reader, participant) {
   const responseWindow = responseWindowIndex();
   const final = attrs["lk.transcription_final"] === "true";
   let text = "";
+  let completed = false;
   try {
     for await (const chunk of reader) {
       text += chunk;
@@ -1987,14 +1997,19 @@ async function consumeTranscript(room, reader, participant) {
       // Not `text.trim()`: this runs per chunk and would copy the whole turn so
       // far just to ask whether it is empty. Non-empty is enough here, and the
       // post-loop write below does the trim once.
-      if (text) updateCaptions(speaker, text, id);
+      if (text) updateCaptions(speaker, text, id, { finalStream: final });
     }
+    // A final stream that breaks must not pin its partial text.
+    completed = true;
   } catch {
     // Keep whatever arrived before the stream broke.
   }
   if (text.trim()) {
     updateTranscriptSegment(id, speaker, text, final);
-    updateCaptions(speaker, text, id);
+    updateCaptions(speaker, text, id, {
+      final: final && completed,
+      finalStream: final,
+    });
     // Once per turn, at the end of the stream, not once per chunk: a chunk is a
     // few words and a turn is a sentence, and the replay is read as sentences.
     recordReplay("transcript", { speaker, text: text.trim(), responseWindow });

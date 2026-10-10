@@ -1,10 +1,8 @@
-/// The live subtitle over the editor.
+/// Captions over the editor.
 ///
-/// A subtitle, not a log: the transcript tab already keeps every turn, so this
-/// shows what is being said now and retires when nobody is speaking. Split out
-/// of `interview.js` because the pacing state is three variables and one timer
-/// that nothing else may touch, and the reveal is the only thing in the page
-/// that repaints on a 300ms tick.
+/// Keep completed interviewer turns readable while the candidate thinks.
+/// Interviewer captions reveal gradually, including final copies. Candidate
+/// captions retain their bounded window and idle timeout.
 
 import { captionWindow } from "./lib.js";
 
@@ -17,22 +15,46 @@ export function initCaptions(deps) {
 const CAPTION_TICK_MS = 300;
 const CAPTION_CHARS_PER_TICK = 8;
 
-// One uninterrupted spoken turn is unbounded, and the caption line sits in the
-// header: rendered whole, a long answer pushes the timer and the controls off
-// the screen. The tail is the part being spoken.
+// Bound live captions until Jim's final text is fully revealed.
 const CAPTION_MAX_CHARS = 160;
-// Long enough to finish reading a sentence that just landed, short enough that
-// a silent pause clears the editor's corner.
+// Candidate captions and the listening placeholder should clear when idle.
 const CAPTION_IDLE_HIDE_MS = 12000;
 let captionIdleTimer = null;
-let interviewerCaption = { id: null, text: "", shown: 0, timer: null };
+let interviewerCaption = {
+  id: null,
+  text: "",
+  shown: 0,
+  timer: null,
+  final: false,
+  pendingDismissal: false,
+};
 
-export function updateCaptions(speaker, text, id = null) {
+// Each publish opens a separate stream, so replaced turns can arrive late.
+const retiredInterviewerIds = new Set();
+const retiredCandidateIds = new Set();
+let candidateCaption = { id: null, text: "", replaced: false };
+
+export function updateCaptions(
+  speaker,
+  text,
+  id = null,
+  { final = false, finalStream = final } = {},
+) {
   if (!nodes.captionsText) return;
   if (speaker === "interviewer") {
+    if (retiredInterviewerIds.has(id)) return;
+    if (candidateCaption.id != null) candidateCaption.replaced = true;
     if (interviewerCaption.id !== id) {
-      clearTimeout(interviewerCaption.timer);
-      interviewerCaption = { id, text: "", shown: 0, timer: null };
+      retireInterviewerCaption();
+      if (nodes.captionsBar) nodes.captionsBar.scrollTop = 0;
+      interviewerCaption = {
+        id,
+        text: "",
+        shown: 0,
+        timer: null,
+        final: false,
+        pendingDismissal: false,
+      };
     }
     // The longest, not the latest. Every interim publish carries the whole turn
     // so far on a stream of its own, so one that lands out of order is a
@@ -40,14 +62,40 @@ export function updateCaptions(speaker, text, id = null) {
     // reveal to a few characters and replay the line.
     if (text.length > interviewerCaption.text.length)
       interviewerCaption.text = text;
+    if (final) interviewerCaption.final = true;
+
+    // Final text can arrive while audio is still queued.
+    if (interviewerCaption.final) retireCandidateCaption();
     if (!interviewerCaption.timer) paceInterviewerCaption();
     return;
   }
-  // Stop pacing Jim: the next tick would otherwise repaint his line over the
-  // candidate's. A later chunk of the same segment restarts it through the
-  // `!interviewerCaption.timer` check below.
-  clearTimeout(interviewerCaption.timer);
-  interviewerCaption.timer = null;
+
+  if (retiredCandidateIds.has(id)) return;
+  const newCandidateSegment = candidateCaption.id !== id;
+  if (newCandidateSegment) {
+    retireCandidateCaption();
+    candidateCaption = { id, text: "", replaced: false };
+  }
+
+  // A closing copy is not a new response to the interviewer.
+  if (
+    candidateCaption.replaced &&
+    (finalStream || text.length <= candidateCaption.text.length)
+  ) {
+    return;
+  }
+
+  if (text.length > candidateCaption.text.length) candidateCaption.text = text;
+  candidateCaption.replaced = false;
+
+  // A new candidate segment supersedes Jim. Otherwise, only a final Jim
+  // turn is retired; a live turn can resume after late candidate speech.
+  if (newCandidateSegment || interviewerCaption.final) {
+    retireInterviewerCaption();
+  } else {
+    clearTimeout(interviewerCaption.timer);
+    interviewerCaption.timer = null;
+  }
   const clipped = captionWindow(text, CAPTION_MAX_CHARS);
   nodes.captionsText.textContent = `[${speaker === "you" ? "You" : "Jim"}]: ${clipped}`;
   showCaptions();
@@ -59,8 +107,16 @@ export function paceInterviewerCaption() {
     caption.text.length,
     caption.shown + CAPTION_CHARS_PER_TICK,
   );
-  nodes.captionsText.textContent = `[Jim]: ${captionWindow(caption.text.slice(0, caption.shown), CAPTION_MAX_CHARS)}`;
-  showCaptions();
+  const retained = caption.final && caption.shown === caption.text.length;
+  const text = retained
+    ? caption.text
+    : captionWindow(caption.text.slice(0, caption.shown), CAPTION_MAX_CHARS);
+  nodes.captionsText.textContent = `[Jim]: ${text}`;
+  if (retained && caption.pendingDismissal) {
+    dismissCaptions();
+    return;
+  }
+  showCaptions({ persistent: retained });
   if (caption.shown < caption.text.length) {
     caption.timer = setTimeout(paceInterviewerCaption, CAPTION_TICK_MS);
   } else {
@@ -68,15 +124,56 @@ export function paceInterviewerCaption() {
   }
 }
 
-/// Captions are a live subtitle, not a log: the transcript tab already keeps
-/// every turn. Leaving the last thing anyone said pinned over the editor for
-/// the rest of the interview is just an obstruction, so the bar retires once
-/// nobody has spoken for a while and comes back on the next word.
-export function showCaptions() {
+/// Completed interviewer turns remain available while the candidate thinks.
+/// Other captions expire so an idle subtitle does not cover the editor.
+export function showCaptions({ persistent = false } = {}) {
   if (!nodes.captionsBar) return;
   nodes.captionsBar.hidden = false;
   clearTimeout(captionIdleTimer);
+  captionIdleTimer = null;
+
+  if (persistent) return;
+
   captionIdleTimer = setTimeout(() => {
     nodes.captionsBar.hidden = true;
   }, CAPTION_IDLE_HIDE_MS);
+}
+
+/// Remember a code response until Jim's final text finishes revealing.
+export function dismissCaptions() {
+  if (
+    !interviewerCaption.text ||
+    retiredInterviewerIds.has(interviewerCaption.id)
+  ) {
+    return;
+  }
+
+  interviewerCaption.pendingDismissal = true;
+  if (
+    !interviewerCaption.final ||
+    interviewerCaption.shown < interviewerCaption.text.length
+  ) {
+    return;
+  }
+
+  retireInterviewerCaption();
+  clearTimeout(captionIdleTimer);
+  captionIdleTimer = null;
+  if (nodes.captionsBar) nodes.captionsBar.hidden = true;
+}
+
+function retireInterviewerCaption() {
+  clearTimeout(interviewerCaption.timer);
+  interviewerCaption.timer = null;
+  interviewerCaption.final = false;
+  interviewerCaption.pendingDismissal = false;
+  if (interviewerCaption.id != null) {
+    retiredInterviewerIds.add(interviewerCaption.id);
+  }
+}
+
+function retireCandidateCaption() {
+  if (candidateCaption.id != null) {
+    retiredCandidateIds.add(candidateCaption.id);
+  }
 }
