@@ -22,7 +22,7 @@ export function mountProblemGrid() {
 
   // Measure the live layout, including changes to any setup panel's height.
   function drawOutline() {
-    const connected = columns.matches && picker.open;
+    const connected = columns.matches && picker.open && !picker.hidden;
     lobby.classList.toggle("problem-picker-connected", connected);
     outline.toggleAttribute("hidden", !connected);
     if (!connected) return;
@@ -83,14 +83,16 @@ export function mountProblemGrid() {
     const hadFocus = grid.contains(focused);
     if (columns.matches) {
       if (grid.previousElementSibling !== panel) panel.after(grid);
-      if (picker.open) grid.removeAttribute("hidden");
+      // Detached desktop cards must inherit the picker's hidden state.
+      if (picker.hidden) grid.hidden = true;
+      else if (picker.open) grid.removeAttribute("hidden");
       else grid.setAttribute("hidden", "until-found");
     } else {
       if (grid.parentElement !== picker) home.after(grid);
-      grid.hidden = false;
+      grid.hidden = picker.hidden;
     }
     drawOutline();
-    if (hadFocus) {
+    if (hadFocus && !picker.hidden) {
       if (!picker.open) summary.focus({ preventScroll: true });
       else focused.focus({ preventScroll: true });
     }
@@ -101,7 +103,7 @@ export function mountProblemGrid() {
   const stateObserver = new MutationObserver(update);
   stateObserver.observe(picker, {
     attributes: true,
-    attributeFilter: ["open"],
+    attributeFilter: ["open", "hidden"],
   });
   columns.addEventListener("change", update);
   update();

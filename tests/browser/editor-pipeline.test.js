@@ -1087,6 +1087,9 @@ test("a new Jim turn starts at the top of the caption bar", async (t) => {
   try {
     await page.evaluate(() => import("/interview.js"));
     await closeSetupCheck(page);
+    // Advancing caption timers must not render minutes of the unrelated 3D
+    // avatar on a software GPU. Its rendering is covered by the avatar tests.
+    await page.evaluate(() => document.querySelector("#hide-avatar").click());
 
     await showJim(firstText, "jim-scroll-1");
     assert.equal(await bar.isVisible(), true);

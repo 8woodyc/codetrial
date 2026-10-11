@@ -1,3 +1,8 @@
+import {
+  previousAssignment,
+  rememberAssignment,
+  resetAssignments,
+} from "./selection.js";
 import { createReportRecovery } from "./report-recovery.js";
 import { createAudioPlayback } from "./audio-playback.js";
 import {
@@ -272,6 +277,7 @@ const replayVersion = globalThis.CODETRIAL_REPLAY_VERSION || 1;
 
 const params = new URLSearchParams(window.location.search);
 const editorOptions = editorOptionsFromParams(params);
+const strict = params.get("selection") === "strict";
 // Start this independent request while the problem data is loading. It has to
 // settle rather than reject: nothing awaits it until init() reaches the sign-in
 // gate, and a problem that fails to load throws out of the top-level await
@@ -280,32 +286,21 @@ const editorOptions = editorOptionsFromParams(params);
 const sessionPromise = fetch("/api/session")
   .then((response) => (response.ok ? response.json() : null))
   .catch(() => null);
-// Top-level await: the whole module is written against a known problem, and
-// interview.html loads it as a module, so waiting here beats threading a
-// promise through every consumer below.
-//
-// The failure has to be said out loud. Every consumer below reads `problem`
-// unconditionally, so an unreachable bank would otherwise leave the page on its
-// "Loading interview..." heading forever with a console error nobody sees.
-const problem = await loadProblem(params.get("problem")).catch((error) => {
-  const title = document.querySelector("#problem-title");
-  if (title)
-    title.textContent =
-      "This interview could not load its problem. Reload the page.";
-  throw error;
-});
-// Started here and awaited nowhere: which tabs are real is a property of the
-// judge, but it is not worth holding a page the candidate can already work in.
-// Every tab is offered until the answer arrives, which is what the row did
-// before this and what it keeps doing if the judge never loads; the run path
-// reports that failure itself.
-const judgePromise = loadJudge(problem.page).catch(() => null);
-// Up here rather than beside the functions that read them: `init()` runs
-// during module evaluation and reaches `initializeCandidateCases` before its
-// first await, so declarations further down are still uninitialized then. The
-// read threw, the catch took it for an empty list, and every reload lost the
-// candidate's saved cases.
-const candidateCaseStorageKey = `codetrial.candidateCases.${problem.page}`;
+// Practice keeps its URL lookup, including legacy aliases and fallback.
+// Strict does not load a problem until preflight and server assignment finish.
+let problem = strict
+  ? null
+  : await loadProblem(params.get("problem")).catch((error) => {
+      const title = document.querySelector("#problem-title");
+      if (title)
+        title.textContent =
+          "This interview could not load its problem. Reload the page.";
+      throw error;
+    });
+let judgePromise = problem ? loadJudge(problem.page).catch(() => null) : null;
+const candidateCaseStorageKey = problem
+  ? `codetrial.candidateCases.${problem.page}`
+  : "";
 /// Filled by `applyLanguages`, which `init` calls before anything reads it.
 let languages = [];
 // A delayed judge may make the requested C tab available after the first
@@ -445,7 +440,7 @@ const state = {
   interviewerPresent: false,
   agentSpeaking: false,
   agentThinking: false,
-  codeByLanguage: { ...problem.starterCode },
+  codeByLanguage: { ...problem?.starterCode },
   language: "python",
   // Thresholds already announced. A latch is released when the room pauses only
   // if it was set inside the pause round trip, because the agent drops either
@@ -513,6 +508,23 @@ const state = {
 };
 
 const beforeUnloadGuard = createBeforeUnloadGuard(window);
+
+// A history restore may revive a whole old page instead of evaluating this
+// module again. Recheck Strict preflight only when the existing unload policy
+// allows leaving: an active attempt or unsaved report must remain available.
+window.addEventListener("pageshow", (event) => {
+  if (
+    !strict ||
+    !event.persisted ||
+    shouldWarnBeforeUnload({
+      endsAt: state.endsAt,
+      reportPersisted: state.reportPersisted,
+    })
+  )
+    return;
+  beforeUnloadGuard.setEnabled(false);
+  window.location.reload();
+});
 
 function updateBeforeUnloadGuard() {
   beforeUnloadGuard.setEnabled(
@@ -754,6 +766,7 @@ function holdWorkspaceBehindDialogs() {
 async function init() {
   state.transcript = createTranscriptView(document, nodes.transcriptPanel);
   renderRuntimeConfig();
+  document.querySelector("#strict-note").hidden = !strict;
   nodes.hideExamples.checked = readStored(HIDE_EXAMPLES_KEY) === "1";
   nodes.editorHighlight.hidden = !editorOptions.highlight;
   nodes.editorStack.classList.toggle("plain-text", !editorOptions.highlight);
@@ -761,13 +774,17 @@ async function init() {
     nodes.editorStack.style.setProperty("--editor-font-family", "inherit");
   applyEditorFontSize(readStored(EDITOR_FONT_SIZE_KEY));
   applyEditorTheme(readStored(EDITOR_THEME_KEY));
-  renderProblem();
-  applyLanguages(null);
-  setLanguage(
-    requestedLanguage && languages.includes(requestedLanguage)
-      ? requestedLanguage
-      : "python",
-  );
+  if (problem) {
+    renderProblem();
+    initializeLanguages();
+  } else {
+    nodes.title.textContent = "Strict Interview";
+    nodes.meta.textContent = "Assigned after media preflight";
+    nodes.editor.disabled = true;
+    nodes.run.disabled = true;
+    nodes.end.disabled = true;
+    nodes.pause.disabled = true;
+  }
   bindEvents();
   if (whiteboard) initWhiteboard();
   else {
@@ -856,20 +873,6 @@ async function init() {
   compactJimStageBesideNarrowPanel(
     whiteboard ? nodes.boardPanel : nodes.editorPanel,
   );
-  // After bindEvents, so the callback cannot beat the row it edits: everything
-  // above here is synchronous, and a `then` runs no earlier than the next
-  // microtask.
-  void judgePromise.then((spec) => {
-    applyLanguages(spec);
-    if (
-      state.phase === "live" &&
-      !languageChoiceCommitted &&
-      requestedLanguage &&
-      state.language !== requestedLanguage &&
-      languages.includes(requestedLanguage)
-    )
-      setLanguage(requestedLanguage);
-  });
   // No enumeration here. Before the preflight grant the browser reports only a
   // blank placeholder, so the list is discarded and repainted a few lines down;
   // the `toggle` handler covers a panel opened while the preflight is still up.
@@ -902,7 +905,12 @@ async function init() {
   // is clear by the time the candidate is actually working rather than holding
   // a caption nobody said.
   showCaptions();
-  await connect(preflight, presenting);
+  const started = await connect(preflight, presenting);
+  if (started === false) return;
+  if (strict) {
+    nodes.end.disabled = false;
+    nodes.pause.disabled = false;
+  }
   publishCode();
   state.endsAt = Date.now() + durationMin * 60 * 1000;
   updateBeforeUnloadGuard();
@@ -1086,7 +1094,7 @@ function announceRestore(message, stillTrue) {
 /// not with `window.confirm`, which blocks the page's event loop while it is
 /// open and stalls the captions, the timer and the data channel with it.
 function restoreStarter() {
-  const starter = problem.starterCode[state.language];
+  const starter = problem?.starterCode[state.language];
   if (codingClosed() || nodes.editor.disabled || starter === undefined) {
     disarmRestore();
     return;
@@ -1206,7 +1214,7 @@ function bindEvents() {
     });
     removeCandidateCase(Number(button.dataset.removeCase));
   });
-  void initializeCandidateCases();
+  if (problem) void initializeCandidateCases();
   for (const select of [nodes.meetOutputSelect, nodes.preflightOutput]) {
     select.addEventListener("change", () => {
       void applyAudioOutput(select.value);
@@ -1471,8 +1479,7 @@ async function signInRequired() {
   if (
     !session ||
     session.signedIn ||
-    !session.loginRequired ||
-    session.guestModeAvailable
+    (!strict && (!session.loginRequired || session.guestModeAvailable))
   )
     return false;
   nodes.audioCheck.hidden = true;
@@ -1725,7 +1732,7 @@ function runAudioCheck() {
     };
 
     const finish = () => {
-      if (!sampleReadiness().ready) return;
+      if (finished || !sampleReadiness().ready) return;
       stopChecks();
       nodes.audioCheck.hidden = true;
       resolve({ userStream: pool.stream, cameraSkipped, cameraSkipReason });
@@ -1931,6 +1938,7 @@ async function connect(preflight, presenting = false) {
     // write consent down, and it must not be reachable without one.
     if (!consentGiven())
       throw new Error("Agree to the recording notice before starting.");
+    const previous = strict ? previousAssignment(tabStorage) : null;
     const interviewId = await recordConsent();
     state.interviewId = interviewId;
     // `hideExamples` goes only when ticked, so Jim is not told the examples are
@@ -1941,7 +1949,15 @@ async function connect(preflight, presenting = false) {
       headers: { "Content-Type": "application/json" },
       signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
       body: JSON.stringify({
-        problemId: problem.page,
+        ...(strict
+          ? {
+              selectionMode: "strict",
+              ...(params.has("difficulty")
+                ? { difficulties: params.getAll("difficulty") }
+                : {}),
+              ...(previous ? { previousAssignment: previous } : {}),
+            }
+          : { problemId: problem.page }),
         durationMin,
         interviewId,
         interviewLoop,
@@ -1959,18 +1975,43 @@ async function connect(preflight, presenting = false) {
         ...(!editorOptions.execution ? { codeExecution: false } : {}),
       }),
     });
-    if (!response.ok)
-      throw new Error(
-        (await response.json()).error || "Failed to create a session.",
+    if (!response.ok) {
+      const failure = await response.json().catch((error) => {
+        throw Object.assign(error, { status: response.status });
+      });
+      throw Object.assign(
+        new Error(failure?.error || "Failed to create a session."),
+        { code: failure?.code, status: response.status },
       );
+    }
     const connection = await response.json();
     state.isGuest = connection.guest === true;
+    if (strict) {
+      // Save before revealing the problem or joining. A later load or join
+      // failure must still exclude this assignment on the next attempt.
+      rememberAssignment(tabStorage, connection.previousAssignment);
+      if (typeof connection.problemPage !== "string" || !connection.problemPage)
+        throw new Error("The server returned no Strict problem.");
+      const assigned = await loadProblem(connection.problemPage);
+      if (assigned.page !== connection.problemPage || assigned.requestedPage)
+        throw new Error(
+          "The assigned problem could not be loaded. Reload to try again.",
+        );
+      problem = assigned;
+      judgePromise = loadJudge(problem.page).catch(() => null);
+      state.codeByLanguage = { ...problem.starterCode };
+      renderProblem();
+      initializeLanguages();
+      void initializeCandidateCases();
+    }
     // Before the room, and before anything that reads the length: the replay's
     // opening lifecycle event carries the round split, and a split computed
     // from the requested length would be the first thing written down.
     applyGrantedDuration(connection.durationMin);
     await connectLiveKit(connection, preflight, presenting);
     state.connected = true;
+    if (strict) updateRunAvailability();
+    if (strict && !whiteboard) nodes.editor.disabled = false;
     // After the room, not before it. The server refuses to record an interview
     // that has not claimed a room, so starting here rather than alongside the
     // consent request is the difference between a recording and a failure
@@ -2008,7 +2049,7 @@ async function connect(preflight, presenting = false) {
     }
   } catch (error) {
     const failure =
-      error?.name === "TimeoutError"
+      !strict && error?.name === "TimeoutError"
         ? new Error(
             "The interview connection timed out. Offline practice is ready.",
           )
@@ -2028,7 +2069,55 @@ async function connect(preflight, presenting = false) {
     state.room = null;
     if (joined) void joined.disconnect?.()?.catch?.(() => {});
     stopPreflight(preflight);
-    const degraded = providerUiState("degraded", failure?.message);
+    const reason =
+      strict &&
+      (error?.name === "TimeoutError" || [408, 504].includes(error?.status))
+        ? "Strict Interview connection timed out. Return to the lobby or retry media preflight."
+        : failure?.message;
+    if (strict) {
+      const message = reason || "Could not start Strict Interview.";
+      setAgentStateLabel("Not connected");
+      setBanner("connection", message);
+      // Selection refusals need a new choice, not another consent and token
+      // request with the same inputs. Keep the receipt unless the candidate
+      // explicitly starts a new sequence after the server rejects it.
+      nodes.editor.disabled = true;
+      nodes.run.disabled = true;
+      nodes.audioStatus.textContent = message;
+      nodes.audioCheck.hidden = false;
+      for (const control of nodes.audioCheck.querySelectorAll(
+        "button, input, select",
+      ))
+        control.disabled = control !== nodes.audioLeave;
+      const restart = error?.code === "strict_assignment_invalid";
+      nodes.audioJoin.hidden = [
+        "strict_no_alternative",
+        "strict_difficulty_invalid",
+      ].includes(error?.code);
+      nodes.audioJoin.disabled = nodes.audioJoin.hidden;
+      nodes.audioJoin.textContent = restart
+        ? "Start a new selection sequence"
+        : "Retry media preflight";
+      if (!nodes.audioJoin.hidden)
+        nodes.audioJoin.addEventListener("click", () => {
+          if (nodes.audioJoin.disabled) return;
+          nodes.audioJoin.disabled = true;
+          if (restart) {
+            try {
+              resetAssignments(tabStorage);
+              if (previousAssignment(tabStorage) !== null) throw new Error();
+            } catch {
+              nodes.audioStatus.textContent =
+                "Could not clear the previous assignment. Allow site storage or return to the lobby.";
+              nodes.audioJoin.disabled = false;
+              return;
+            }
+          }
+          window.location.reload();
+        });
+      return false;
+    }
+    const degraded = providerUiState("degraded", reason);
     setAgentStateLabel(degraded.label);
     // A degraded start without a reason reads as the product working. The server
     // says why it refused, in words written for a candidate, and a busy server
@@ -2125,10 +2214,12 @@ async function connectLiveKit(connection, preflight, presenting = false) {
   // on its own, so the candidate is told to wait rather than to restart.
   room.on(livekit.RoomEvent.Reconnecting, () => {
     state.connected = false;
+    if (strict) updateRunAvailability();
     setBanner("connection", providerUiState("reconnecting").message);
   });
   room.on(livekit.RoomEvent.Reconnected, () => {
     state.connected = true;
+    if (strict) updateRunAvailability();
     setBanner("connection", "");
     // Everything held during the gap, in order, then the current buffer on top
     // so Jim is reading what the candidate is actually looking at rather than
@@ -2155,6 +2246,7 @@ async function connectLiveKit(connection, preflight, presenting = false) {
   room.on(livekit.RoomEvent.Disconnected, () => {
     audioPlayback.release(room);
     state.connected = false;
+    if (strict) updateRunAvailability();
     // Terminal, not transient: LiveKit fires Reconnecting for a recoverable
     // blip and only reaches here when it has given up. Dropping the reference
     // is what makes the banner's own advice possible: `endInterview` hides the
@@ -2164,9 +2256,13 @@ async function connectLiveKit(connection, preflight, presenting = false) {
     // waiting on an overlay for a report that could not arrive.
     if (state.phase === "report_recovery") reportRecovery.finish();
     state.room = null;
+    if (strict) setAgentStateLabel("Not connected");
     setBanner(
       "connection",
-      providerUiState("degraded", "The interview connection dropped.").message,
+      strict
+        ? "The Strict Interview connection dropped."
+        : providerUiState("degraded", "The interview connection dropped.")
+            .message,
     );
     console.warn("codetrial room_disconnected");
   });
@@ -2341,6 +2437,7 @@ const reportRecovery = createReportRecovery({
   },
   offer: (ready, cooldown, cause) => {
     state.phase = "report_recovery";
+    if (strict) updateRunAvailability();
     if (!ready) stopEndingEscape();
     globalThis.clearTimeout(frameworkHintTimer);
     nodes.frameworkHint.hidden = true;
@@ -2700,6 +2797,7 @@ async function toggleMicrophone() {
 }
 
 function renderProblem() {
+  if (!problem) return;
   // Difficulty only. The topic tags name the technique, and the heading is the
   // scenario's own title rather than the published problem it was written from.
   nodes.title.textContent = problem.title;
@@ -2721,6 +2819,29 @@ function selectTab(tab) {
   nodes.transcriptPanel.hidden = !transcript;
   nodes.problemTab.classList.toggle("selected", !transcript);
   nodes.transcriptTab.classList.toggle("selected", transcript);
+}
+
+function initializeLanguages() {
+  applyLanguages(null);
+  setLanguage(
+    requestedLanguage && languages.includes(requestedLanguage)
+      ? requestedLanguage
+      : "python",
+  );
+  // Setup and event binding finish synchronously before this callback runs.
+  // A late judge may enable the requested language, but cannot replace a
+  // language or buffer the candidate has already committed to.
+  void judgePromise.then((spec) => {
+    applyLanguages(spec);
+    if (
+      state.phase === "live" &&
+      !languageChoiceCommitted &&
+      requestedLanguage &&
+      state.language !== requestedLanguage &&
+      languages.includes(requestedLanguage)
+    )
+      setLanguage(requestedLanguage);
+  });
 }
 
 /// Unavailable labels and the active selector's title come from `harnessGap`,
@@ -3233,6 +3354,10 @@ function setResultsOpen(open) {
 }
 
 async function runTests() {
+  if (strict) {
+    updateRunAvailability();
+    if (nodes.run.disabled) return;
+  }
   if (!editorOptions.execution) return;
   languageChoiceCommitted = true;
   flushPendingCodePublish();
@@ -3325,12 +3450,12 @@ async function initializeCandidateCases() {
   const wasActive = Boolean(readStored(activeSessionKey, tabStorage));
   writeStored(activeSessionKey, "1", tabStorage);
 
-  if (!isReload && wasActive) {
+  if (!strict && !isReload && wasActive) {
     writeStored(candidateCaseStorageKey, "", tabStorage);
   }
   try {
     const saved =
-      !isReload && wasActive
+      strict || (!isReload && wasActive)
         ? []
         : JSON.parse(readStored(candidateCaseStorageKey, tabStorage) || "[]");
     state.candidateCases = Array.isArray(saved)
@@ -3398,7 +3523,7 @@ async function addCandidateCaseNow() {
     writeStored(
       candidateCaseStorageKey,
       JSON.stringify(state.candidateCases),
-      tabStorage,
+      strict ? null : tabStorage,
     );
     nodes.candidateCaseInput.value = "";
     nodes.candidateCaseExpected.value = "";
@@ -3457,7 +3582,7 @@ function removeCandidateCase(index) {
   writeStored(
     candidateCaseStorageKey,
     JSON.stringify(state.candidateCases),
-    tabStorage,
+    strict ? null : tabStorage,
   );
   renderCandidateCases();
   // renderCandidateCases leaves the status alone on an empty list, so the
@@ -3489,6 +3614,7 @@ function updateRunAvailability() {
   if (restoreOff) disarmRestore();
   nodes.run.disabled =
     !editorOptions.execution ||
+    (strict && !state.connected) ||
     state.runningTests ||
     state.paused ||
     codingClosed() ||
@@ -3609,6 +3735,7 @@ function endInterview(reason) {
   if (state.phase !== "live" || state.reportReceiving) return;
   const exampleFinished = exampleBoard?.finish();
   state.phase = "ending";
+  if (strict) updateRunAvailability();
   // The hint outranks the ending overlay in the stacking order, so a candidate
   // who ends while it is still up would read the report status through it.
   globalThis.clearTimeout(frameworkHintTimer);
@@ -3848,6 +3975,7 @@ function reportRenderFailed(error, { offlineSummary }) {
 }
 
 function renderReport() {
+  if (strict) updateRunAvailability();
   // The interview is over. Both report paths, agent-sent and offline, land
   // here, so this is the one place that has to stop the render loop and the
   // one place that has to release the devices. Only the agent-sent path used

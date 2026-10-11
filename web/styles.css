@@ -3329,6 +3329,7 @@ body:not([data-recording]) .replay-detail > :not(header) {
 }
 
 .lobby .account-input,
+.lobby #selection-mode,
 .lobby .practice-filters select,
 .lobby .progress-filters select,
 .lobby .interview-context input:not([type="checkbox"]),

@@ -556,7 +556,23 @@ test("the module state the first paint reads exists before init paints", () => {
 
   const init = functionBody(script, "init");
   const prefix = init.slice(0, init.indexOf("await"));
-  assert.match(prefix, /setLanguage\(/, "init paints before its first await");
+  assert.match(
+    prefix,
+    /initializeLanguages\(/,
+    "init initializes languages before its first await",
+  );
+  const initialize = functionBody(script, "initializeLanguages");
+  assert.match(initialize, /^function initializeLanguages\(/);
+  const initialLanguages = initialize.slice(
+    0,
+    initialize.indexOf("void judgePromise.then"),
+  );
+  assert.doesNotMatch(initialLanguages, /\bawait\b|\.then\(/);
+  assert.match(
+    initialLanguages,
+    /setLanguage\(/,
+    "initialization paints synchronously",
+  );
 
   const topLevel = new Map();
   lines.forEach((line, index) => {
@@ -861,7 +877,12 @@ test("a refused interview says why instead of silently degrading", () => {
   const script = interviewSource();
   const connect = functionBody(script, "connect");
 
-  assert.match(connect, /providerUiState\("degraded", failure\?\.message\)/);
+  assert.match(
+    connect,
+    /const reason =\s*strict &&[\s\S]*?:\s*failure\?\.message;/,
+    "other refusals retain the server's reason",
+  );
+  assert.match(connect, /providerUiState\("degraded", reason\)/);
   // The reason has to reach the candidate, not only the console.
   const bannerAt = connect.indexOf('setBanner("connection", degraded.message)');
   const offlineAt = connect.indexOf("Offline mode is ready");
