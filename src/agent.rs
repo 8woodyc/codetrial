@@ -175,8 +175,8 @@ pub const THINKING_CHECK_IN_S: u64 = 120;
 pub(crate) const THINKING_RELEASE_COOLDOWN: std::time::Duration =
     std::time::Duration::from_secs(10);
 
-pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 34;
-pub const LIVE_PROMPT_VERSION: u32 = 25;
+pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 35;
+pub const LIVE_PROMPT_VERSION: u32 = 26;
 pub const REPORT_PROMPT_VERSION: u32 = 20;
 pub const RUBRIC_VERSION: u32 = 1;
 pub const REPORT_SCHEMA_VERSION: u32 = 3;
@@ -215,6 +215,9 @@ pub struct ProblemVariant {
     /// on the server.
     pub page: &'static str,
     pub brief: &'static [&'static str],
+    /// The worked examples from the same problem-bank entry as the candidate
+    /// page.
+    pub examples: &'static [(&'static str, &'static str, Option<&'static str>)],
     /// The exact input and output contract in the scenario's words, which the
     /// interviewer judges against in place of the published statement.
     pub contract: &'static str,
