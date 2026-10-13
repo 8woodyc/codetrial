@@ -2241,3 +2241,63 @@ test("report and replay cards and Markdown retain the resolved interviewer style
   assert.doesNotMatch(card, /<img src=x/);
   assert.match(card, /&lt;img src=x/);
 });
+
+test("markdown export includes test run history", () => {
+  const markdown = reportMarkdown({
+    report: {
+      codingScore: 70,
+      communicationScore: 70,
+      decision: "NO HIRE",
+      summary: "Needs more practice.",
+      codingFeedback: {
+        strengths: [],
+        improvements: [],
+      },
+      communicationFeedback: {
+        strengths: [],
+        improvements: [],
+      },
+    },
+    problemTitle: "Two Sum",
+    language: "python",
+    code: "def solve(nums):\n    return sum(nums)",
+    transcript: [],
+    at: "2026-10-13",
+    testHistory: [
+      {
+        runNumber: 1,
+        timestamp: "2026-10-13T10:00:00.000Z",
+        language: "python",
+        code: "def solve(nums):\n    return sum(nums)",
+        passed: 0,
+        total: 3,
+        setupError: null,
+        cases: [
+          {
+            label: "Case 1",
+            input: "[1, 2, 3]",
+            expected: "6",
+            got: "6",
+            pass: true,
+            error: null,
+          },
+          {
+            label: "Case 2",
+            input: "[2, 4]",
+            expected: "6",
+            got: "8",
+            pass: false,
+            error: null,
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.match(markdown, /## Test Run History/);
+  assert.match(markdown, /### Run 1/);
+  assert.match(markdown, /Code snapshot/);
+  assert.match(markdown, /Case 2/);
+  assert.match(markdown, /Expected: 6/);
+  assert.match(markdown, /Actual: 8/);
+});

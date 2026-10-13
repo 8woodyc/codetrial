@@ -484,6 +484,7 @@ export function reportMarkdown({
   board,
   transcript,
   at,
+  testHistory = [],
 }) {
   const atBoard = heldAtBoard(report, board);
   const workTitle = atBoard ? "Board work" : "Coding";
@@ -658,21 +659,24 @@ export function reportMarkdown({
     code == null
       ? "(final code was not saved)"
       : code.trimEnd() || "(editor was empty)";
-  const longestRun = (body.match(/`+/g) || []).reduce(
-    (longest, run) => Math.max(longest, run.length),
-    0,
-  );
-  const fence = "`".repeat(Math.max(2, longestRun) + 1);
-  // The info string is the one place this document emits a value unescaped, so
-  // it takes the only characters a language tag can be. Today `language` comes
-  // from the tabs and is allowlisted on both sides, but a newline here would
-  // end the fence line and start emitting the candidate's code as prose.
-  const info = String(language ?? "").replace(/[^a-zA-Z0-9_+-]/g, "");
-  // The exported copy is the one that outlives the tab and can be forwarded, so
-  // it must not carry a verdict the session never earned either. Only the head
-  // differs: the tail used to be duplicated per branch and had already drifted
-  // four ways, including an untagged code fence and two different names for the
-  // same section.
+  const fencedCodeLines = (body, language) => {
+    const longestRun = (body.match(/`+/g) || []).reduce(
+      (longest, run) => Math.max(longest, run.length),
+      0,
+    );
+    const fence = "`".repeat(Math.max(2, longestRun) + 1);
+    // The info string is the one place this document emits a value unescaped, so
+    // it takes the only characters a language tag can be. Today `language` comes
+    // from the tabs and is allowlisted on both sides, but a newline here would
+    // end the fence line and start emitting the candidate's code as prose.
+    const info = String(language ?? "").replace(/[^a-zA-Z0-9_+-]/g, "");
+    // The exported copy is the one that outlives the tab and can be forwarded, so
+    // it must not carry a verdict the session never earned either. Only the head
+    // differs: the tail used to be duplicated per branch and had already drifted
+    // four ways, including an untagged code fence and two different names for the
+    // same section.
+    return [fence + info, body, fence];
+  };
   const head = report.incomplete
     ? ["## No evaluation", "", mdText(report.summary) || "(none)"]
     : [
@@ -697,6 +701,52 @@ export function reportMarkdown({
           report.communicationFeedback,
         ).trimEnd(),
       ];
+
+  // Test history is omitted entirely when no tests were run.
+  const testHistoryMarkdown = testHistory.length
+    ? [
+        "## Test Run History",
+        "",
+        ...testHistory.flatMap((run) => {
+          const code = String(run.code ?? "(empty code)");
+
+          return [
+            `### Run ${mdText(run.runNumber)} — ${mdText(run.timestamp)}`,
+            "",
+            `- Language: ${mdText(run.language)}`,
+            `- Result: ${mdText(run.passed)}/${mdText(run.total)} tests passed`,
+            "",
+            "#### Code snapshot",
+            "",
+            ...fencedCodeLines(code, run.language),
+            "",
+            "#### Errors and test cases",
+            "",
+            ...(run.setupError
+              ? [`**Setup error:** ${mdText(run.setupError)}`, ""]
+              : []),
+            ...(run.cases?.length
+              ? run.cases.flatMap((item) => [
+                  `**${mdText(item.label || "Test case")}** — ${
+                    item.pass === true
+                      ? "PASS"
+                      : item.pass === false
+                        ? "FAIL"
+                        : "UNKNOWN"
+                  }`,
+                  `- Input: ${mdText(item.input ?? "(not available)")}`,
+                  `- Expected: ${mdText(item.expected ?? "(not available)")}`,
+                  `- Actual: ${mdText(item.got ?? "(not available)")}`,
+                  ...(item.error ? [`- Error: ${mdText(item.error)}`] : []),
+                  "",
+                ])
+              : ["No individual test results available.", ""]),
+            "---",
+            "",
+          ];
+        }),
+      ]
+    : [];
 
   return [
     `# Interview Report - ${mdText(problemTitle)}`,
@@ -745,9 +795,10 @@ export function reportMarkdown({
       ? boardStepsMarkdown(report, mdText)
       : [
           `## Final code (${mdText(languageLabel(language) || "not recorded")})`,
-          ...(code == null ? [body] : [fence + info, body, fence]),
+          ...(code == null ? [body] : fencedCodeLines(body, language)),
           "",
         ]),
+    ...testHistoryMarkdown,
     "## Conversation transcript",
     conversation || "(no speech captured)",
     "",
