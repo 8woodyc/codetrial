@@ -408,10 +408,14 @@ jobs:
           path: ~/.cargo/bin/cargo-mutants
           key: cargo-mutants-${{ env.CARGO_MUTANTS_VERSION }}-${{ runner.os }}
 
+      # Cargo forwards `mutants` as the plugin's first argument. Calling the
+      # binary with only --version rejects the flag and reinstalls every hit.
       - name: Install cargo-mutants
         run: |
-          cargo-mutants --version 2>/dev/null | grep -qF " $CARGO_MUTANTS_VERSION" \
-            || cargo install cargo-mutants --locked --version "$CARGO_MUTANTS_VERSION" --force
+          if ! version=$(cargo mutants --version 2>/dev/null) \
+            || [ "$version" != "cargo-mutants $CARGO_MUTANTS_VERSION" ]; then
+            cargo install cargo-mutants --locked --version "$CARGO_MUTANTS_VERSION" --force
+          fi
 
       - name: Count the mutants this diff is worth
         id: plan
@@ -546,8 +550,10 @@ jobs:
 
       - name: Install cargo-mutants
         run: |
-          cargo-mutants --version 2>/dev/null | grep -qF " $CARGO_MUTANTS_VERSION" \
-            || cargo install cargo-mutants --locked --version "$CARGO_MUTANTS_VERSION" --force
+          if ! version=$(cargo mutants --version 2>/dev/null) \
+            || [ "$version" != "cargo-mutants $CARGO_MUTANTS_VERSION" ]; then
+            cargo install cargo-mutants --locked --version "$CARGO_MUTANTS_VERSION" --force
+          fi
 
       # `--in-place` because cargo-mutants otherwise copies the tree and builds
       # it from cold, discarding the target/ the cache above just restored. The
