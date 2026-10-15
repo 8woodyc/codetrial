@@ -429,6 +429,7 @@ const state = {
   runningTests: false,
   candidateCases: [],
   candidateCaseAddition: null,
+  testHistory: [],
   /// The judge's first input, shown as the Add a case placeholder unless the
   /// worked examples are hidden: it is a worked case in its own right.
   candidateCaseHint: "",
@@ -2548,16 +2549,45 @@ async function runTests() {
       return;
     }
   }
+
+  const codeSnapshot = currentCode();
+  const languageSnapshot = state.language;
+  const startedAt = new Date();
+  const maxRunCount = 10;
+
   const summary = await runBrowserTests(
     problem.page,
-    currentCode(),
-    state.language,
+    codeSnapshot,
+    languageSnapshot,
     setTestStatus,
     state.candidateCases,
   );
+
   state.latestSummary = summary;
+
+  state.testHistory.push({
+    runNumber: (state.testHistory.at(-1)?.runNumber ?? 0) + 1,
+    timestamp: startedAt.toISOString(),
+    language: languageSnapshot,
+    code: codeSnapshot,
+    passed: summary.passed ?? 0,
+    total: summary.total ?? 0,
+    setupError: summary.setupError ?? null,
+    cases: (summary.cases ?? []).map((item) => ({
+      label: item.label,
+      input: item.input ?? null,
+      expected: item.expected ?? null,
+      got: item.got ?? null,
+      pass: item.pass ?? null,
+      error: item.error ?? null,
+    })),
+  });
+  if (state.testHistory.length > maxRunCount) {
+    state.testHistory = state.testHistory.slice(-maxRunCount);
+  }
   state.testStatus = finalRunnerStatus(summary, state.testStatus);
   renderResults(summary);
+
   // Test is credited from this message alone, so one that fails to send (a
   // buffer past the data channel's limit, a dropped link) has to say so: the
   // candidate sees results the interviewer never received.
@@ -3155,6 +3185,7 @@ function buildMarkdown(at) {
     board: finalBoardImage(),
     transcript: state.transcript.values(),
     at: at.toLocaleString(),
+    testHistory: state.testHistory,
   });
 }
 
