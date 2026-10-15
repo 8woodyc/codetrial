@@ -277,9 +277,11 @@ test("disabled execution hides the test drawer divider", async (t) => {
     await page.goto(`${base}/interview.html?editorExecution=0`, {
       waitUntil: "domcontentloaded",
     });
-    const divider = page.locator("#test-drawer-resizer");
-    assert.equal(await divider.isHidden(), true);
-    assert.equal(await page.locator("#test-drawer").isHidden(), true);
+    // Waited for, not read once: init() hides both only after the module's
+    // top-level await on the problem fetch, which DOMContentLoaded does not
+    // wait for, so a single read races it on a loaded runner.
+    await page.locator("#test-drawer-resizer").waitFor({ state: "hidden" });
+    await page.locator("#test-drawer").waitFor({ state: "hidden" });
   } finally {
     await page.close();
   }
