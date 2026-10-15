@@ -1345,12 +1345,15 @@ function renderAttemptHistory(attempts) {
   nodes.attemptHistory.replaceChildren();
   for (const attempt of [...attempts].reverse()) {
     const item = document.createElement("li");
-    const date = new Date(attempt.at).toLocaleDateString();
+    const when = new Date(attempt.at).toLocaleString(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
     const verdict = attempt.report.incomplete
       ? "INCOMPLETE"
       : (attempt.report.decision ?? "UNSCORED");
     const label = document.createElement("p");
-    label.textContent = `${date} · ${attempt.problemTitle} · ${languageLabel(attempt.language ?? "not recorded")} · ${verdict}`;
+    label.textContent = `${when} · ${attempt.problemTitle} · ${languageLabel(attempt.language ?? "not recorded")} · ${verdict}`;
     const open = document.createElement("button");
     open.type = "button";
     open.textContent = "Open report";
@@ -1359,7 +1362,7 @@ function renderAttemptHistory(attempts) {
     download.textContent = "Download report (.md)";
     download.setAttribute(
       "aria-label",
-      `Download report (.md) for ${attempt.problemTitle}, ${new Date(attempt.at).toLocaleString()}`,
+      `Download report (.md) for ${attempt.problemTitle}, ${when}`,
     );
     download.addEventListener("click", () => downloadSavedReport(attempt));
     const retry = document.createElement("button");
@@ -1416,13 +1419,6 @@ function renderAttemptHistory(attempts) {
     // A row with no id has nothing both stores and the account agree on, and
     // deleting by anything weaker could take a different report than this one.
     if (attempt.id) {
-      // The time as well as the day: `Try again` makes two attempts at one
-      // problem on one day, and the confirmation and the accessible name are
-      // all that tells their two Delete buttons apart.
-      const when = new Date(attempt.at).toLocaleString(undefined, {
-        dateStyle: "medium",
-        timeStyle: "short",
-      });
       const remove = document.createElement("button");
       remove.type = "button";
       remove.dataset.deleteReport = "";
