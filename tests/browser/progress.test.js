@@ -869,3 +869,18 @@ test("problem summaries preserve distinct id-less attempts and epoch timestamps"
     lastAttemptAt: 0,
   });
 });
+
+test("an attempt carries its final code only as a string", () => {
+  const code = "return 42;\n";
+  assert.equal(normalizeProgressEntry({ code, report: {} }).code, code);
+  assert.equal(normalizeProgressEntry({ code: "", report: {} }).code, "");
+  assert.equal(
+    normalizeProgressEntry({ payload: { code, report: {} } }).code,
+    code,
+  );
+  for (const stored of [undefined, null, 42, { text: code }, [code]])
+    assert.equal(
+      normalizeProgressEntry({ code: stored, report: {} }).code,
+      null,
+    );
+});
