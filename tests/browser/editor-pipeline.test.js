@@ -689,9 +689,13 @@ test("disabled bracket auto-close leaves insertion and deletion to the browser",
   }
 });
 
-test("disabled highlighting and indentation invoke neither classifier nor parser", async (t) => {
+test("disabled syntax-aware editor features invoke neither classifier nor parser", async (t) => {
   const ctx = await editorPage(t, {
-    params: { editorHighlight: "0", editorAutoIndent: "0" },
+    params: {
+      editorHighlight: "0",
+      editorAutoIndent: "0",
+      editorAutoClose: "0",
+    },
     beforeLoad: async (page) => {
       // Every name editor.js imports, or the page fails to link before any
       // of them could be called and the test reports that instead.
@@ -722,7 +726,7 @@ test("disabled highlighting and indentation invoke neither classifier nor parser
     assert.notEqual(color, "rgba(0, 0, 0, 0)");
     assert.equal(await page.locator("#editor-highlight code").innerHTML(), "");
     await page.keyboard.type("(");
-    assert.equal((await caretState(page)).value, "()");
+    assert.equal((await caretState(page)).value, "(");
     await setCode(page, "    if ready:");
     await page.keyboard.press("Enter");
     const python = (await caretState(page)).value;
@@ -896,5 +900,220 @@ test("editor setup waits for delayed problem initialization before clearing the 
     releaseProblem();
     await setup.catch(() => {});
     await loadingPage?.close();
+  }
+});
+
+const cppLiteralBracketCases = [
+  { name: "line comment", before: "// note " },
+  { name: "block comment", before: "/*\n * note \n */", start: 11 },
+  {
+    name: "string literal",
+    before: 'const char* s = "left ";',
+    start: 21,
+  },
+];
+
+for (const { name, before, start = before.length } of cppLiteralBracketCases) {
+  for (const opener of ["(", "[", "{"]) {
+    test(`typing ${opener} inside a C++ ${name} inserts only the opener`, async (t) => {
+      // Disabling execution keeps C++ available without Compiler Explorer.
+      const ctx = await editorPage(t, { params: { editorExecution: "0" } });
+      if (!ctx) return;
+      const { page, errors } = ctx;
+      try {
+        await page.evaluate(() =>
+          document.querySelector('[data-language="cpp"]').click(),
+        );
+        await page.waitForSelector('[data-language="cpp"].selected');
+        await setCode(page, before, start);
+        await page.keyboard.type(opener);
+        assert.deepEqual(await caretState(page), {
+          value: before.slice(0, start) + opener + before.slice(start),
+          start: start + 1,
+          end: start + 1,
+        });
+        assert.deepEqual(errors, []);
+      } finally {
+        await page.close();
+      }
+    });
+  }
+}
+
+async function waitForParser(page, language) {
+  const syntax = await page.evaluateHandle(() => import("/syntax-parser.js"));
+  try {
+    await page.waitForFunction(
+      ({ syntax, language }) => {
+        const tree = syntax.parseSyntax("", language);
+        if (!tree) return false;
+        tree.delete();
+        return true;
+      },
+      { syntax, language },
+    );
+  } finally {
+    await syntax.dispose();
+  }
+}
+
+for (const parserReady of [false, true]) {
+  test(`context-aware pairing works with highlighting off and parser ${parserReady ? "ready" : "unavailable"}`, async (t) => {
+    const ctx = await editorPage(t, {
+      params: {
+        editorHighlight: "0",
+        editorAutoIndent: "0",
+        editorExecution: "0",
+      },
+      beforeLoad: async (page) => {
+        if (!parserReady)
+          await page.route(/\/vendor\/tree-sitter[^/]*\//, (route) =>
+            route.abort(),
+          );
+      },
+    });
+    if (!ctx) return;
+    const { page, errors } = ctx;
+    try {
+      // The same text is a comment in C++ and JS, but division in Python.
+      // Replacing the buffer after switching also catches stale token ranges.
+      for (const language of ["cpp", "python", "javascript"]) {
+        await page.evaluate(
+          (language) =>
+            document.querySelector(`[data-language="${language}"]`).click(),
+          language,
+        );
+        await page.waitForSelector(`[data-language="${language}"].selected`);
+        if (parserReady) await waitForParser(page, language);
+        const before = "// note ";
+        await setCode(page, before);
+        await page.keyboard.type("(");
+        const typed = before + (language === "python" ? "()" : "(");
+        assert.deepEqual(await caretState(page), {
+          value: typed,
+          start: before.length + 1,
+          end: before.length + 1,
+        });
+        await page.keyboard.press("ControlOrMeta+Z");
+        assert.equal((await caretState(page)).value, before);
+        await page.keyboard.press("ControlOrMeta+Shift+Z");
+        assert.equal((await caretState(page)).value, typed);
+      }
+      const before = 'const text = "left ";';
+      const start = before.indexOf("left") + 4;
+      await setCode(page, before, start);
+      await page.keyboard.type("[");
+      assert.deepEqual(await caretState(page), {
+        value: 'const text = "left[ ";',
+        start: start + 1,
+        end: start + 1,
+      });
+      await setCode(page, "// text", 3, 7);
+      await page.keyboard.type("(");
+      assert.deepEqual(await caretState(page), {
+        value: "// (text)",
+        start: 4,
+        end: 8,
+      });
+      assert.equal(await page.locator("#editor-highlight").isVisible(), false);
+      assert.deepEqual(errors, []);
+    } finally {
+      await page.close();
+    }
+  });
+}
+
+for (const parserReady of [false, true]) {
+  test(`literal bracket edits preserve existing closers with parser ${parserReady ? "ready" : "unavailable"}`, async (t) => {
+    const ctx = await editorPage(t, {
+      beforeLoad: async (page) => {
+        if (!parserReady)
+          await page.route(/\/vendor\/tree-sitter[^/]*\//, (route) =>
+            route.abort(),
+          );
+      },
+    });
+    if (!ctx) return;
+    const { page, errors } = ctx;
+    try {
+      if (parserReady) await waitForParser(page, "python");
+      for (const [before, start] of [
+        ['"a)"', 2],
+        ["# a)", 3],
+      ]) {
+        await setCode(page, before, start);
+        await page.keyboard.type("(");
+        assert.deepEqual(await caretState(page), {
+          value: before.slice(0, start) + "(" + before.slice(start),
+          start: start + 1,
+          end: start + 1,
+        });
+        await page.keyboard.press("Backspace");
+        assert.deepEqual(await caretState(page), {
+          value: before,
+          start,
+          end: start,
+        });
+        await page.keyboard.press("ControlOrMeta+Z");
+        assert.equal(
+          (await caretState(page)).value,
+          before.slice(0, start) + "(" + before.slice(start),
+        );
+        await setCode(page, before, start);
+        await page.keyboard.type("(");
+        await page.keyboard.type(")");
+        assert.deepEqual(await caretState(page), {
+          value: before.slice(0, start) + "()" + before.slice(start),
+          start: start + 2,
+          end: start + 2,
+        });
+      }
+      const value = 'f"{value }"';
+      const start = value.indexOf(" ");
+      await setCode(page, value, start);
+      await page.keyboard.type("(");
+      assert.deepEqual(await caretState(page), {
+        value: 'f"{value() }"',
+        start: start + 1,
+        end: start + 1,
+      });
+      await page.keyboard.press("Backspace");
+      assert.equal((await caretState(page)).value, value);
+      await page.keyboard.type("(");
+      await page.keyboard.type(")");
+      assert.equal((await caretState(page)).value, 'f"{value() }"');
+      assert.deepEqual(errors, []);
+    } finally {
+      await page.close();
+    }
+  });
+}
+
+test("unfinished f-string expressions retain bracket editing with a loaded parser", async (t) => {
+  const ctx = await editorPage(t);
+  if (!ctx) return;
+  const { page, errors } = ctx;
+  try {
+    await waitForParser(page, "python");
+    const value = 'f"{value';
+    await setCode(page, value);
+    await page.keyboard.type("(");
+    assert.deepEqual(await caretState(page), {
+      value: value + "()",
+      start: value.length + 1,
+      end: value.length + 1,
+    });
+    await page.keyboard.press("Backspace");
+    assert.equal((await caretState(page)).value, value);
+    await page.keyboard.type("(");
+    await page.keyboard.type(")");
+    assert.deepEqual(await caretState(page), {
+      value: value + "()",
+      start: value.length + 2,
+      end: value.length + 2,
+    });
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
   }
 });

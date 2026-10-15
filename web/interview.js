@@ -958,6 +958,7 @@ function bindEvents() {
         nodes.editor.selectionStart,
         nodes.editor.selectionEnd,
         event.data,
+        state.language,
       );
       if (!pair) return;
       event.preventDefault();
@@ -970,6 +971,7 @@ function bindEvents() {
         nodes.editor.selectionStart,
         nodes.editor.selectionEnd,
         event.data,
+        state.language,
       );
       if (!skip) return;
       event.preventDefault();
@@ -981,6 +983,7 @@ function bindEvents() {
         nodes.editor.value,
         nodes.editor.selectionStart,
         nodes.editor.selectionEnd,
+        state.language,
       );
       if (!removal) return;
       event.preventDefault();
@@ -2085,8 +2088,12 @@ function applyLanguages(spec) {
 function setLanguage(language) {
   if (state.phase === "report_recovery" || state.phase === "report") return;
   if (!languages.includes(language)) return;
-  // Indentation and syntax highlighting share parsed regions.
-  if (editorOptions.autoIndent || editorOptions.highlight) {
+  // Indentation, highlighting and bracket pairing share parsed regions.
+  if (
+    editorOptions.autoIndent ||
+    editorOptions.highlight ||
+    editorOptions.autoClose
+  ) {
     void prepareLanguage(language)
       .then(() => {
         loadedGrammars.add(language);

@@ -1085,3 +1085,343 @@ test("the comment toggle answers to Ctrl or Cmd with a typed slash", () => {
   // Ctrl with it is the browser's zoom.
   assert.equal(press({ ctrlKey: true, key: "-", code: "Slash" }), false);
 });
+
+const literalPairingCases = [
+  ["python", "# note |"],
+  ["python", "# note |\npass"],
+  ["python", 'text = "left| "'],
+  ["python", 'text = "unfinished|'],
+  ["python", 'text = """first\nsecond| """'],
+  ["python", String.raw`text = "escaped \" quote| "`],
+  ["javascript", "// note |"],
+  ["javascript", "/* first\nsecond| */"],
+  ["javascript", 'const text = "left| ";'],
+  ["javascript", 'const text = "unfinished|'],
+  ["javascript", "const text = `first\nsecond| `;"],
+  ["javascript", "const text = `${value} text| `;"],
+  ["c", "// note |"],
+  ["c", "/* unfinished|"],
+  ["c", 'char *text = "left| ";'],
+  ["c", "char c = '| ';"],
+  ["cpp", "// note |"],
+  ["cpp", "/* first\nsecond| */"],
+  ["cpp", 'auto text = "left| ";'],
+  ["cpp", 'auto text = R"tag(first\nsecond| )tag";'],
+  ["cpp", 'auto text = R"tag(first\nunfinished|'],
+  ["java", "// note |"],
+  ["java", "/* first\nsecond| */"],
+  ["java", 'String text = "left| ";'],
+  ["java", 'String text = """\nsecond| \n""";'],
+];
+
+const codePairingCases = [
+  ["python", "|"],
+  ["python", "# note\n|"],
+  ["python", '"closed"|'],
+  ["python", '"""closed"""|'],
+  ["javascript", "/* closed */|"],
+  ["javascript", "`closed`|"],
+  ["javascript", "`${value| }`"],
+  ["javascript", '"closed"| '],
+  ["javascript", "/[| ]/"],
+  ["c", "'x'|"],
+  ["cpp", 'R"tag(closed)tag"|'],
+  ["cpp", "#define VALUE |"],
+  ["java", '"""\nclosed\n"""|'],
+];
+
+function checkContextPairing(parse) {
+  for (const [cases, suppressed] of [
+    [literalPairingCases, true],
+    [codePairingCases, false],
+  ]) {
+    for (const [language, marked] of cases) {
+      const at = marked.indexOf("|");
+      const value = marked.replace("|", "");
+      for (const [opener, closer] of [
+        ["(", ")"],
+        ["[", "]"],
+        ["{", "}"],
+      ]) {
+        assert.deepEqual(
+          insertBracketPair(value, at, at, opener, language, parse),
+          suppressed
+            ? null
+            : {
+                value: value.slice(0, at) + opener + closer + value.slice(at),
+                start: at + 1,
+                end: at + 1,
+              },
+          `${language}: ${marked}, typing ${opener}`,
+        );
+      }
+    }
+  }
+}
+
+test("bracket pairing distinguishes comments, strings and boundaries without a parser", () => {
+  checkContextPairing(() => null);
+  const value = 'f"{value }"';
+  const at = value.indexOf(" ");
+  assert.deepEqual(
+    insertBracketPair(value, at, at, "(", "python", () => null),
+    {
+      value: 'f"{value() }"',
+      start: at + 1,
+      end: at + 1,
+    },
+  );
+});
+
+test("bracket pairing uses ready grammars and keeps interpolation expressions editable", async () => {
+  const syntax = createSyntaxParser({
+    loadBytes: async (url) => new Uint8Array(await readFile(url)),
+  });
+  await Promise.all(
+    ["c", "cpp", "java", "javascript", "python"].map((language) =>
+      syntax.prepareLanguage(language),
+    ),
+  );
+  checkContextPairing(syntax.parseSyntax);
+  const value = 'f"{value }"';
+  const at = value.indexOf(" ");
+  assert.deepEqual(
+    insertBracketPair(value, at, at, "(", "python", syntax.parseSyntax),
+    {
+      value: 'f"{value() }"',
+      start: at + 1,
+      end: at + 1,
+    },
+  );
+});
+
+test("bracket pairing still wraps selected text inside comments and strings", () => {
+  for (const value of ['"text"', "// text"]) {
+    const start = value.indexOf("text");
+    assert.deepEqual(
+      insertBracketPair(value, start, start + 4, "(", "cpp", () => {
+        throw new Error("Selection wrapping should not need lexical context");
+      }),
+      {
+        value: value.slice(0, start) + "(text)" + value.slice(start + 4),
+        start: start + 1,
+        end: start + 5,
+      },
+    );
+  }
+});
+
+test("bracket pairing preserves existing behavior for unknown languages", () => {
+  for (const language of [undefined, "unknown", "constructor", "toString"]) {
+    const value = "// note ";
+    assert.deepEqual(
+      insertBracketPair(value, value.length, value.length, "(", language),
+      {
+        value: value + "()",
+        start: value.length + 1,
+        end: value.length + 1,
+      },
+    );
+  }
+});
+
+test("closer and Backspace handlers leave literal text to native editing", async () => {
+  const syntax = createSyntaxParser({
+    loadBytes: async (url) => new Uint8Array(await readFile(url)),
+  });
+  await Promise.all(
+    ["python", "javascript", "c", "cpp", "java"].map((language) =>
+      syntax.prepareLanguage(language),
+    ),
+  );
+  for (const parse of [() => null, syntax.parseSyntax]) {
+    for (const language of ["python", "javascript", "c", "cpp", "java"]) {
+      for (const value of [
+        '"a()"',
+        `${language === "python" ? "#" : "//"} a()`,
+      ]) {
+        const at = value.indexOf(")");
+        assert.equal(
+          typeOverCloser(value, at, at, ")", language, parse),
+          null,
+          value,
+        );
+        assert.equal(
+          deleteEmptyPair(value, at, at, language, parse),
+          null,
+          value,
+        );
+      }
+      for (const [value, at] of [
+        ['"a"()', 4],
+        ["call()", 5],
+      ]) {
+        assert.deepEqual(typeOverCloser(value, at, at, ")", language, parse), {
+          value,
+          start: at + 1,
+          end: at + 1,
+        });
+        assert.deepEqual(deleteEmptyPair(value, at, at, language, parse), {
+          value: value.slice(0, at - 1) + value.slice(at + 1),
+          start: at - 1,
+          end: at - 1,
+        });
+      }
+    }
+  }
+});
+
+test("unparsed Python f-strings retain pairing while ordinary strings stay literal", () => {
+  for (const prefix of ["f", "F", "fr", "Fr", "rf", "RF"]) {
+    for (const quote of ['"', "'", '"""', "\'\'\'"]) {
+      for (const content of ["{value }", "text "]) {
+        const value = prefix + quote + content + quote;
+        const at = value.indexOf(" ");
+        const paired = insertBracketPair(
+          value,
+          at,
+          at,
+          "(",
+          "python",
+          () => null,
+        );
+        assert.deepEqual(
+          paired,
+          {
+            value: value.slice(0, at) + "()" + value.slice(at),
+            start: at + 1,
+            end: at + 1,
+          },
+          value,
+        );
+        assert.deepEqual(
+          deleteEmptyPair(paired.value, at + 1, at + 1, "python", () => null),
+          {
+            value,
+            start: at,
+            end: at,
+          },
+          value,
+        );
+        assert.deepEqual(
+          typeOverCloser(
+            paired.value,
+            at + 1,
+            at + 1,
+            ")",
+            "python",
+            () => null,
+          ),
+          {
+            value: paired.value,
+            start: at + 2,
+            end: at + 2,
+          },
+          value,
+        );
+      }
+    }
+  }
+  for (const value of ['r"text "', 'b"text "', '"f text "']) {
+    const at = value.lastIndexOf(" ");
+    assert.equal(
+      insertBracketPair(value, at, at, "(", "python", () => null),
+      null,
+      value,
+    );
+  }
+});
+
+test("error trees preserve pairing in unfinished Python f-string expressions", async () => {
+  const syntax = createSyntaxParser({
+    loadBytes: async (url) => new Uint8Array(await readFile(url)),
+  });
+  await syntax.prepareLanguage("python");
+  for (const value of [
+    'f"{value',
+    'f"{value ',
+    'f"{value }',
+    'RF"{value ',
+    'f"""text\n{value ',
+  ]) {
+    const at = value.indexOf("value") + 5;
+    for (const [opener, closer] of [
+      ["(", ")"],
+      ["[", "]"],
+      ["{", "}"],
+    ]) {
+      const typed = value.slice(0, at) + opener + value.slice(at);
+      const tree = syntax.parseSyntax(typed, "python");
+      assert.ok(
+        tree,
+        "The regression needs a returned tree, not an unloaded parser",
+      );
+      try {
+        assert.equal(tree.rootNode.hasError, true, typed);
+      } finally {
+        tree.delete();
+      }
+      const paired = insertBracketPair(
+        value,
+        at,
+        at,
+        opener,
+        "python",
+        syntax.parseSyntax,
+      );
+      assert.deepEqual(
+        paired,
+        {
+          value: value.slice(0, at) + opener + closer + value.slice(at),
+          start: at + 1,
+          end: at + 1,
+        },
+        typed,
+      );
+      assert.deepEqual(
+        deleteEmptyPair(
+          paired.value,
+          at + 1,
+          at + 1,
+          "python",
+          syntax.parseSyntax,
+        ),
+        {
+          value,
+          start: at,
+          end: at,
+        },
+        typed,
+      );
+      assert.deepEqual(
+        typeOverCloser(
+          paired.value,
+          at + 1,
+          at + 1,
+          closer,
+          "python",
+          syntax.parseSyntax,
+        ),
+        {
+          value: paired.value,
+          start: at + 2,
+          end: at + 2,
+        },
+        typed,
+      );
+    }
+  }
+  for (const marked of [
+    '"unfinished| ',
+    'f"literal| "\nif (',
+    'f"""literal| \n"""\nif (',
+  ]) {
+    const at = marked.indexOf("|");
+    const value = marked.replace("|", "");
+    assert.equal(
+      insertBracketPair(value, at, at, "(", "python", syntax.parseSyntax),
+      null,
+      marked,
+    );
+  }
+});
