@@ -2,14 +2,36 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { downloadMarkdown, reportFilename } from "../../web/download.js";
 
-test("report filenames use local calendar dates and safe scenario names", () => {
+test("report filenames use local timestamps and safe scenario names", () => {
   assert.equal(
     reportFilename("scenario/../name?", new Date(2026, 0, 2, 1, 30)),
-    "interview-report-scenario----name--2026-01-02.md",
+    "interview-report-scenario----name--2026-01-02-013000.md",
   );
   assert.equal(
     reportFilename("", new Date(2026, 10, 12, 23, 30)),
-    "interview-report-past-interview-2026-11-12.md",
+    "interview-report-past-interview-2026-11-12-233000.md",
+  );
+});
+
+test("report filenames distinguish times on the same local calendar day", () => {
+  assert.equal(
+    reportFilename("two-sum", new Date(2026, 9, 14, 1, 2, 3)),
+    "interview-report-two-sum-2026-10-14-010203.md",
+  );
+  assert.equal(
+    reportFilename("two-sum", new Date(2026, 9, 14, 15, 30, 0)),
+    "interview-report-two-sum-2026-10-14-153000.md",
+  );
+});
+
+test("report filenames follow the local midnight boundary", () => {
+  assert.equal(
+    reportFilename("two-sum", new Date(2026, 9, 14, 23, 59, 59)),
+    "interview-report-two-sum-2026-10-14-235959.md",
+  );
+  assert.equal(
+    reportFilename("two-sum", new Date(2026, 9, 15, 0, 0, 0)),
+    "interview-report-two-sum-2026-10-15-000000.md",
   );
 });
 

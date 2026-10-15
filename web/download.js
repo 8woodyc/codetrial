@@ -4,7 +4,10 @@ export function reportFilename(problemId, at) {
   const date = [at.getFullYear(), at.getMonth() + 1, at.getDate()]
     .map((part) => String(part).padStart(2, "0"))
     .join("-");
-  return `interview-report-${name}-${date}.md`;
+  const time = [at.getHours(), at.getMinutes(), at.getSeconds()]
+    .map((part) => String(part).padStart(2, "0"))
+    .join("");
+  return `interview-report-${name}-${date}-${time}.md`;
 }
 
 export function downloadMarkdown(markdown, filename) {

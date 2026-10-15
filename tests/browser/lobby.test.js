@@ -1932,7 +1932,7 @@ lobbyTest(
 
 for (const storage of ["account", "device"]) {
   lobbyTest(
-    `saved ${storage} reports download their own markdown with local dates`,
+    `saved ${storage} reports download their own markdown with local timestamps`,
     async (page) => {
       const cases = [
         {
@@ -1992,7 +1992,7 @@ for (const storage of ["account", "device"]) {
         assert.equal(await download.failure(), null);
         assert.equal(
           download.suggestedFilename(),
-          `interview-report-${EASY[0]}-2026-01-02.md`,
+          `interview-report-${EASY[0]}-2026-01-02-0${index + 1}3000.md`,
         );
         const chunks = [];
         for await (const chunk of await download.createReadStream())
