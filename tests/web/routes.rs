@@ -50,7 +50,7 @@ async fn a_refused_code_exchange_names_the_token_leg_not_the_profile_leg() {
             "cookie",
             format!(
                 "codetrial_oauth_state={}",
-                signed_cookie("state-token", "session-secret")
+                state_cookie("state-token", "session-secret")
             ),
         )
         .send()
@@ -58,6 +58,10 @@ async fn a_refused_code_exchange_names_the_token_leg_not_the_profile_leg() {
         .unwrap();
 
     assert_eq!(response.status(), 502);
+    assert!(
+        clears_state_cookie(response.headers()),
+        "a failed exchange still spends the state"
+    );
     let body = response.json::<Value>().await.unwrap();
     assert_eq!(
         body["error"], "GitHub token exchange failed.",
@@ -114,7 +118,7 @@ async fn the_oauth_callback_requires_the_state_it_minted() {
         "state",
     )
     .expect("the authorize URL carries a state token");
-    let state_cookie = started
+    let minted_cookie = started
         .headers()
         .get_all("set-cookie")
         .iter()
@@ -155,20 +159,46 @@ async fn the_oauth_callback_requires_the_state_it_minted() {
             "a state cookie signed with another secret",
             Some(format!(
                 "codetrial_oauth_state={}",
-                signed_cookie(&minted, "another-session-secret")
+                state_cookie(&minted, "another-session-secret")
+            )),
+            minted.clone(),
+            "Login state is missing or expired.",
+        ),
+        (
+            "a state signed longer ago than it lives",
+            Some(format!(
+                "codetrial_oauth_state={}",
+                state_cookie_aged(&minted, "session-secret", 10 * 60 + 1)
+            )),
+            minted.clone(),
+            "Login state is missing or expired.",
+        ),
+        (
+            "the minted state signed as a session cookie instead",
+            Some(format!(
+                "codetrial_oauth_state={}",
+                signed_cookie(
+                    "codetrial_session",
+                    &format!("{}:{minted}", codetrial::current_epoch_seconds_i64()),
+                    "session-secret",
+                )
             )),
             minted.clone(),
             "Login state is missing or expired.",
         ),
         (
             "a state parameter this browser was never given",
-            Some(state_cookie.clone()),
+            Some(minted_cookie.clone()),
             "state-from-somewhere-else".to_string(),
             "Login state did not match.",
         ),
     ] {
         let refused = callback(cookie, &state).await;
         assert_eq!(refused.status(), 401, "{why}");
+        assert!(
+            clears_state_cookie(refused.headers()),
+            "{why}: a refused callback tells the browser to drop the state"
+        );
         assert_eq!(
             refused.json::<Value>().await.unwrap()["error"],
             message,
@@ -181,16 +211,17 @@ async fn the_oauth_callback_requires_the_state_it_minted() {
     for query in ["code=ok", "state=whatever", ""] {
         let incomplete = client
             .get(format!("{base}/api/callback?{query}"))
-            .header("cookie", &state_cookie)
+            .header("cookie", &minted_cookie)
             .send()
             .await
             .unwrap();
         assert_eq!(incomplete.status(), 400, "{query:?}");
+        assert!(clears_state_cookie(incomplete.headers()), "{query:?}");
     }
 
     // And the pair this server minted completes the sign-in, so the refusals
     // above are a comparison rather than a callback that refuses everyone.
-    let accepted = callback(Some(state_cookie.clone()), &minted).await;
+    let accepted = callback(Some(minted_cookie.clone()), &minted).await;
     assert_eq!(accepted.status(), 302);
     assert!(
         accepted
@@ -213,7 +244,7 @@ async fn the_oauth_callback_requires_the_state_it_minted() {
             percent_first(MOCK_GITHUB_CODE),
             percent_first(&minted)
         ))
-        .header("cookie", &state_cookie)
+        .header("cookie", &minted_cookie)
         .send()
         .await
         .unwrap();

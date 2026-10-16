@@ -172,7 +172,7 @@ fn signed_in_web_config(label: &str) -> (WebServerConfig, String, std::path::Pat
         config,
         format!(
             "codetrial_session={}",
-            signed_cookie("session-one", "session-secret")
+            signed_cookie("codetrial_session", "session-one", "session-secret")
         ),
         db_path,
     )
@@ -255,19 +255,46 @@ async fn record_login(client: &reqwest::Client, base: &str, handle: &str) -> Str
 /// Checking only `iss` would miss a token minted with one provider's key and
 /// another's secret, which the SFU rejects and the response body does not show.
 fn verify_signature(token: &str, secret: &str) -> bool {
-    // A JWS is `<signed>.<signature>`, the same shape `signed_cookie` builds,
-    // so re-signing and comparing beats a second HMAC spelled out here.
+    // A JWS is `<signed>.<signature>` over exactly the signed part, so
+    // re-signing it and comparing is the whole check.
     let (signed, _) = token.rsplit_once('.').unwrap();
-    signed_cookie(signed, secret) == token
+    format!("{signed}.{}", hs256(signed, secret)) == token
 }
 
-fn signed_cookie(value: &str, secret: &str) -> String {
+fn hs256(value: &str, secret: &str) -> String {
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
     mac.update(value.as_bytes());
-    format!(
-        "{value}.{}",
-        URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
+    URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
+}
+
+/// A cookie value as the server signs it: over `name=value`, so one cookie's
+/// signature does not verify as another's.
+fn signed_cookie(name: &str, value: &str, secret: &str) -> String {
+    format!("{value}.{}", hs256(&format!("{name}={value}"), secret))
+}
+
+/// The OAuth state cookie as `/api/login` mints it, issued `age` seconds ago.
+fn state_cookie_aged(token: &str, secret: &str, age: i64) -> String {
+    let issued = codetrial::current_epoch_seconds_i64() - age;
+    signed_cookie(
+        "codetrial_oauth_state",
+        &format!("{issued}:{token}"),
+        secret,
     )
+}
+
+fn state_cookie(token: &str, secret: &str) -> String {
+    state_cookie_aged(token, secret, 0)
+}
+
+/// Whether a response spends the OAuth state, as the callback must on every
+/// answer it gives.
+fn clears_state_cookie(headers: &reqwest::header::HeaderMap) -> bool {
+    headers.get_all("set-cookie").iter().any(|cookie| {
+        cookie
+            .to_str()
+            .is_ok_and(|cookie| cookie.starts_with("codetrial_oauth_state=; Max-Age=0"))
+    })
 }
 
 /// Stop accepting requests and drain connections before removing a database.
