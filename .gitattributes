@@ -1,3 +1,9 @@
+# Every text file is LF in the working tree, whatever core.autocrlf says. Git
+# for Windows defaults that to true, and a CRLF checkout fails prettier, which
+# asks for LF, in the pre-commit hook and the gate, and breaks the tests that
+# read source text. Later lines override this one for the paths they name.
+* text=auto eol=lf
+
 # The Windows release runner runs `scripts/fetch-vendor.sh` under Git Bash. A
 # CRLF checkout turns the shebang into `/bin/sh\r` and, past that, leaves a
 # carriage return on every name the FETCH manifest loop reads, so the SHA256SUMS
