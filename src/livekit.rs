@@ -95,6 +95,7 @@ use crate::token::{LivekitTokenInput, livekit_token};
 mod board;
 mod media;
 mod report;
+mod room_service;
 mod rooms;
 mod session;
 mod timing;
@@ -118,6 +119,11 @@ use rooms::{evict_duplicate_agent, isolate_local_agent};
 // Re-exported rather than merely used: `web::setup` calls this to check the
 // credentials a Setup form was given, and it names it through this module.
 pub(crate) use rooms::validate_livekit_credentials;
+
+// Room cleanup runs on the web server, not in the agent. The allow goes when
+// the peer sweeper calls it.
+#[allow(dead_code, unused_imports)]
+pub(crate) use room_service::delete_room;
 
 use media::*;
 use turn::*;
