@@ -146,6 +146,7 @@ pub(super) struct ReplyDebt {
     prompted_at: Option<Instant>,
     unvoiced_prompt_at: Option<Instant>,
     recovery_prompt: bool,
+    tool_ack_owed: bool,
 }
 
 pub(super) struct RuntimeActivity {
@@ -269,6 +270,10 @@ pub(super) struct RuntimeActivity {
     /// A round transition held for the phase judge; see
     /// `defers_round_transition`.
     pub(super) pending_round_transition: Option<ParkedPacket>,
+    /// Armed by the candidate's words and spent by an acknowledgement, so a
+    /// reply held back by several tool rounds, or a wait rebased across an
+    /// interruption, plays it once per thing the candidate said.
+    pub(super) tool_ack_owed: bool,
     /// Fixed when the interview starts, like the review quota.
     pub(super) reply_timeout: Duration,
     /// Fixed with `reply_timeout`, and held to it: see `expired_reply_wait`.
@@ -783,6 +788,7 @@ impl RuntimeActivity {
             editor_phase_judges: 0,
             phase_judge: super::SideCall::default(),
             pending_round_transition: None,
+            tool_ack_owed: false,
             reply_timeout: REPLY_TIMEOUT,
             first_output_deadline: FIRST_OUTPUT_DEADLINE,
         }
@@ -1110,6 +1116,7 @@ impl RuntimeActivity {
             }),
             unvoiced_prompt_at: self.unvoiced_prompt_at,
             recovery_prompt: self.recovery_prompt,
+            tool_ack_owed: self.tool_ack_owed,
         }
     }
 
@@ -1120,6 +1127,7 @@ impl RuntimeActivity {
         self.prompted_at = debt.prompted_at;
         self.unvoiced_prompt_at = debt.unvoiced_prompt_at;
         self.recovery_prompt = debt.recovery_prompt;
+        self.tool_ack_owed |= debt.tool_ack_owed;
     }
 
     /// The candidate has waited `REPLY_WAIT_SHOWN` in silence: for a reply
@@ -1187,8 +1195,23 @@ impl RuntimeActivity {
         self.unvoiced_prompt_at = None;
     }
 
+    /// A tool round is about to hold back the reply a candidate is waiting
+    /// for and has heard nothing of: the moment an acknowledgement fills. Not
+    /// while they are speaking again, which it would talk over.
+    pub(super) fn take_tool_ack(&mut self, now: Instant) -> bool {
+        let due = self.tool_ack_owed
+            && !self.discarding_output
+            && !self.candidate_interrupting(now)
+            && !self.incoming_speech_active(now);
+        if due {
+            self.tool_ack_owed = false;
+        }
+        due
+    }
+
     pub(super) fn clear_candidate_reply_wait(&mut self) {
         self.awaiting_reply_since = None;
+        self.tool_ack_owed = false;
     }
 
     /// The first audible chunk of a reply went out: the wait it answered is
@@ -1273,6 +1296,7 @@ impl RuntimeActivity {
             && !(self.floor == Floor::AwaitingPlayout && audio_playing)
         {
             self.awaiting_reply_since = Some(now);
+            self.tool_ack_owed = true;
             self.turn_timing.note_transcript(now);
 
             // The candidate has moved on past a prompt that went unanswered, so
