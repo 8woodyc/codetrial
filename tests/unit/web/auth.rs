@@ -197,6 +197,33 @@ async fn github_bodies_are_bounded() {
     task.abort();
 }
 
+/// Exactly the limit, delivered in pieces, is still a body: the cap counts
+/// bytes across chunks rather than refusing at the boundary or judging one
+/// chunk against another.
+#[tokio::test]
+async fn a_body_at_the_limit_arrives_whole_across_chunks() {
+    let prefix = r#"{"id":303,"login":"octocat","bio":""#;
+    let suffix = r#""}"#;
+    let body = format!(
+        "{prefix}{}{suffix}",
+        "a".repeat(GITHUB_BODY_LIMIT - prefix.len() - suffix.len())
+    );
+    assert_eq!(body.len(), GITHUB_BODY_LIMIT);
+    let chunks = body
+        .as_bytes()
+        .chunks(64 * 1024)
+        .map(<[u8]>::to_vec)
+        .collect::<Vec<_>>();
+    let (config, task) = serve(axum::Router::new().fallback(move || {
+        let chunks = chunks.clone().into_iter().map(Ok::<_, std::io::Error>);
+        async move { Body::from_stream(futures_util::stream::iter(chunks)) }
+    }))
+    .await;
+    let profile = github_profile(&config, "token", false).await.unwrap();
+    assert_eq!(profile.github_id, 303);
+    task.abort();
+}
+
 #[tokio::test]
 async fn a_recording_profile_carries_the_verified_email() {
     let router = axum::Router::new()
