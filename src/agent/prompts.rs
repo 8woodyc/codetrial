@@ -373,6 +373,28 @@ pub fn build_instructions_for_plan(
     let brief = variant.brief_text();
     let constraints = variant.constraints.join("; ");
     let contract = variant.contract;
+    let worked_examples = if examples_hidden {
+        String::new()
+    } else {
+        let examples = variant
+            .examples
+            .iter()
+            .enumerate()
+            .map(|(index, (input, output, explanation))| {
+                let explanation = explanation
+                    .map(|text| format!("\n    Explanation: {text}"))
+                    .unwrap_or_default();
+
+                format!(
+                    "  Example {}:\n    Input: {input}\n    Output: {output}{explanation}",
+                    index + 1
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        format!("\n\nWORKED EXAMPLES — exactly as shown on the candidate's screen:\n{examples}")
+    };
 
     // One interview, run the way a real one is run. The frameworks above are
     // said out loud because a candidate who knows which step they are in can
@@ -553,7 +575,7 @@ SESSION LANGUAGE AND SPEECH RECOGNITION
 
 THE EXERCISE — {on_screen}
 - Exercise: {exercise_title} ({})
-- On screen: {brief}
+- On screen: {brief}{worked_examples}
 
 PRIVATE SPECIFICATION — {spec_note} judge by it, never read it out:
 - Contract: {contract}

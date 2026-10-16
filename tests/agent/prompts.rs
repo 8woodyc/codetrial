@@ -199,8 +199,8 @@ fn prompt_golden_digest_matches_versions() {
     // its hash is a string nothing checks. The pair is still asserted, because
     // the failure worth catching is a version bumped with the golden left
     // alone, which a digest comparison on its own reads as fine.
-    let recorded_versions = (25, 20);
-    let recorded_digest = "caaf4d7f81c8144938c574882724c9a50fbdd027129e8fd54c625099e5e7cae9";
+    let recorded_versions = (26, 20);
+    let recorded_digest = "a049e67c73f112b9511924f562165238db1eda558f4c2a3329e60e1f4e694ab6";
 
     assert_eq!(
         (LIVE_PROMPT_VERSION, REPORT_PROMPT_VERSION),
@@ -976,7 +976,7 @@ fn profile_text_is_bounded_and_prompt_context_cannot_change_the_coding_rubric() 
 fn hidden_examples_are_not_on_screen_for_the_interviewer() {
     let prompt = |examples_hidden| {
         build_instructions_for_plan(
-            get_problem(Some("surrounded-regions")),
+            get_problem(Some("clone-graph")),
             45,
             &codetrial::runtime::RuntimeOptions {
                 voice: None,
@@ -992,11 +992,22 @@ fn hidden_examples_are_not_on_screen_for_the_interviewer() {
     };
     let shown = prompt(false);
     let hidden = prompt(true);
+    let example_input = "Input: node = [[2,3],[1,3],[1,2]]";
+    let example_output = "Output: [[2,3],[1,3],[1,2]]";
+
+    assert!(shown.contains(example_input));
+    assert!(shown.contains(example_output));
+    assert!(!hidden.contains(example_input));
+    assert!(!hidden.contains(example_output));
 
     assert!(shown.contains("one or two worked examples"));
     assert!(!hidden.contains("one or two worked examples"));
     assert!(hidden.contains("The candidate chose to hide the worked"));
     assert!(hidden.contains("never point them at an example"));
+
+    let start = shown.find("\n\nWORKED EXAMPLES").unwrap();
+    let end = shown.find("\n\nPRIVATE SPECIFICATION").unwrap();
+    let shown = format!("{}{}", &shown[..start], &shown[end..]);
 
     let exercise = |prompt: &str| {
         let start = prompt.find("THE EXERCISE").unwrap();
@@ -1342,16 +1353,16 @@ fn interview_contract_versions_are_one_closed_bundle() {
         "the bundle table has no row for {INTERVIEW_CONTRACT_BUNDLE_VERSION}"
     );
 
-    assert_eq!(INTERVIEW_CONTRACT_BUNDLE_VERSION, 34);
-    assert_eq!(LIVE_PROMPT_VERSION, 25);
+    assert_eq!(INTERVIEW_CONTRACT_BUNDLE_VERSION, 35);
+    assert_eq!(LIVE_PROMPT_VERSION, 26);
     assert_eq!(REPORT_PROMPT_VERSION, 20);
     assert_eq!(RUBRIC_VERSION, 1);
     assert_eq!(REPORT_SCHEMA_VERSION, 3);
     assert_eq!(
         interview_contract_json(),
         json!({
-            "bundleVersion": 34,
-            "livePromptVersion": 25,
+            "bundleVersion": 35,
+            "livePromptVersion": 26,
             "reportPromptVersion": 20,
             "rubricVersion": 1,
             "reportSchemaVersion": 3,

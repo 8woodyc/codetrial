@@ -83,6 +83,11 @@ def rust_variants(problems: list[dict], variants: dict) -> str:
             f"({rust_str(language)}, {rust_str(code)})"
             for language, code in entry["problem"]["starterCode"].items()
         )
+        examples = ", ".join(
+            f"({rust_str(example['input'])}, {rust_str(example['output'])}, "
+            f"{'Some(' + rust_str(example['explanation']) + ')' if 'explanation' in example else 'None'})"
+            for example in entry["examples"]
+        )
         rows.append(
             "\n".join(
                 [
@@ -90,6 +95,7 @@ def rust_variants(problems: list[dict], variants: dict) -> str:
                     f"        title: {rust_str(variant['title'])},",
                     f"        page: {rust_str(page_slug(variant['title']))},",
                     f"        brief: {rust_strs(variant['brief'])},",
+                    f"        examples: &[{examples}],",
                     f"        contract: {rust_str(variant['contract'])},",
                     f"        constraints: {rust_strs(entry['problem']['constraints'])},",
                     f"        clarifications: &[{clarifications}],",

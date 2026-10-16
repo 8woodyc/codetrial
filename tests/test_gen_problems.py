@@ -747,6 +747,7 @@ class RuleStepTests(unittest.TestCase):
         for field in (
             'title: "Kiosk Token Payout"',
             'page: "kiosk-token-payout"',
+            'examples: &[("tokens = [5,7], amount = 1", "-1", None)]',
             "clarifications: &[(",
             "follow_ups: &[",
             "hints: &[",
