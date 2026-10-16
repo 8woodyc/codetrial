@@ -3476,6 +3476,20 @@ function paintEditor(showMatch = document.activeElement === nodes.editor) {
     editorPaintFrame = null;
   }
   const code = currentCode();
+
+  const currentActiveLine =
+    showMatch && nodes.editor.selectionStart === nodes.editor.selectionEnd
+      ? code.slice(0, nodes.editor.selectionStart).split("\n").length - 1
+      : -1;
+  if (currentActiveLine >= 0) {
+    nodes.editorStack?.style.setProperty(
+      "--active-line",
+      String(currentActiveLine),
+    );
+  } else {
+    nodes.editorStack?.style.removeProperty("--active-line");
+  }
+
   const brackets =
     editorOptions.highlight && showMatch
       ? matchingBrackets(
