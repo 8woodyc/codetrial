@@ -240,6 +240,108 @@ test("results markup reports counts and marks each case", () => {
   );
 });
 
+test("hiding passed tests preserves failures, observations and original totals", () => {
+  const summary = {
+    passed: 2,
+    total: 4,
+    cases: [
+      { label: "judge pass", pass: true, timeMs: 1 },
+      { label: "custom pass", pass: true, candidate: true, timeMs: 1 },
+      { label: "judge failure", pass: false, error: "wrong result", timeMs: 1 },
+      {
+        label: "custom failure",
+        pass: false,
+        candidate: true,
+        error: "boom",
+        timeMs: 1,
+      },
+      {
+        label: "observation",
+        pass: null,
+        candidate: true,
+        got: "42",
+        timeMs: 1,
+      },
+      { label: "not a strict pass", pass: 1, got: "0", timeMs: 1 },
+    ],
+  };
+  const original = structuredClone(summary);
+  const { label, body } = resultsMarkup(summary, "done", true);
+  assert.equal(label, "Test results · 2/4");
+  assert.match(body, /2\/4 test cases passed/);
+  assert.match(body, /2 passed tests hidden/);
+  assert.doesNotMatch(body, /judge pass|custom pass|>OK</);
+  for (const text of [
+    "judge failure",
+    "custom failure",
+    "observation",
+    "not a strict pass",
+    "wrong result",
+    "boom",
+    "42",
+  ])
+    assert.ok(body.includes(text), text);
+  assert.deepEqual(summary, original);
+  assert.match(resultsMarkup(summary).body, /judge pass/);
+  assert.match(resultsMarkup(summary).body, /custom pass/);
+  assert.doesNotMatch(resultsMarkup(summary).body, /passed tests? hidden/);
+});
+
+test("hiding every passing row retains the summary and setup failures", () => {
+  const { body } = resultsMarkup(
+    {
+      passed: 2,
+      total: 2,
+      cases: [
+        { label: "judge", pass: true, timeMs: 1 },
+        { label: "custom", pass: true, candidate: true, timeMs: 1 },
+      ],
+    },
+    "done",
+    true,
+  );
+  assert.match(body, /2\/2 test cases passed/);
+  assert.match(body, /Run finished/);
+  assert.doesNotMatch(body, /<ul|<li>|Your cases/);
+  assert.match(body, /2 passed tests hidden/);
+  const failure = { setupError: "SyntaxError: bad code" };
+  assert.deepEqual(
+    resultsMarkup(failure, "running", true),
+    resultsMarkup(failure, "running"),
+  );
+});
+
+test("the filter counts hidden rows and omits its notice when none are hidden", () => {
+  const summary = {
+    passed: 1,
+    total: 1,
+    cases: [
+      { label: "judge", pass: true, timeMs: 1 },
+      {
+        label: "observation",
+        pass: null,
+        candidate: true,
+        got: "42",
+        timeMs: 1,
+      },
+    ],
+  };
+  const { body } = resultsMarkup(summary, "done", true);
+  assert.match(body, /1 passed test hidden/);
+  assert.equal((body.match(/<ul/g) ?? []).length, 1);
+  assert.match(body, /Your cases/);
+  assert.match(body, /observation/);
+  assert.doesNotMatch(body, /<ul[^>]*>\s*<\/ul>/);
+  assert.doesNotMatch(
+    resultsMarkup(
+      { passed: 0, total: 1, cases: [{ label: "failure", pass: false }] },
+      "done",
+      true,
+    ).body,
+    /passed tests? hidden/,
+  );
+});
+
 test("only a strict pass hides details and observed cases remain output", () => {
   const { body } = resultsMarkup({
     passed: 1,

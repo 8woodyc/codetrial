@@ -80,7 +80,7 @@ export function finalRunnerStatus(summary, currentStatus) {
   return summary.setupError ? currentStatus : "done";
 }
 
-export function resultsMarkup(summary, status = null) {
+export function resultsMarkup(summary, status = null, hidePassed = false) {
   const statusMarkup = runnerStatusMarkup(status);
   if (summary.setupError) {
     return {
@@ -111,11 +111,15 @@ export function resultsMarkup(summary, status = null) {
       </li>
     `;
   };
-  const judgeCases = summary.cases
+  const visibleCases = summary.cases.filter(
+    (item) => !hidePassed || item.pass !== true,
+  );
+  const hiddenCount = summary.cases.length - visibleCases.length;
+  const judgeCases = visibleCases
     .filter((item) => !item.candidate)
     .map(caseMarkup)
     .join("");
-  const candidateCases = summary.cases
+  const candidateCases = visibleCases
     .filter((item) => item.candidate)
     .map(caseMarkup)
     .join("");
@@ -124,7 +128,8 @@ export function resultsMarkup(summary, status = null) {
     body: `
     ${statusMarkup}
     <p class="${summary.passed === summary.total ? "good" : "critical"} small"><strong>${summary.passed}/${summary.total} test cases passed</strong></p>
-    <ul class="result-list">${judgeCases}</ul>
+    ${hiddenCount ? `<p class="muted small">${hiddenCount} passed test${hiddenCount === 1 ? "" : "s"} hidden</p>` : ""}
+    ${judgeCases ? `<ul class="result-list">${judgeCases}</ul>` : ""}
     ${candidateCases ? `<h3>Your cases</h3><ul class="result-list">${candidateCases}</ul>` : ""}
   `,
   };

@@ -311,7 +311,7 @@ test("a malformed candidate case stops the run it was typed into", async (t) => 
       document.querySelector("#run-tests").click();
     });
     await page.waitForFunction(() => {
-      const results = document.querySelector("#results-body").textContent;
+      const results = document.querySelector("#results-content").textContent;
       return (
         results.length > 0 &&
         results === document.querySelector("#candidate-case-status").textContent
