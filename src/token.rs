@@ -150,6 +150,32 @@ pub fn livekit_room_list_token(
     )
 }
 
+/// A credential for deleting a room, which LiveKit gates on `roomCreate`
+/// rather than on `roomAdmin`.
+///
+/// No room, because LiveKit checks `roomCreate` project-wide and ignores any
+/// room in the grant: naming one here would read as a scope nothing enforces.
+/// Kept apart from [`livekit_room_admin_token`] so the cleanup path cannot
+/// remove participants and the agent's path cannot delete rooms.
+pub fn livekit_room_create_token(
+    api_key: &str,
+    api_secret: &str,
+    now_seconds: u64,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    sign_jwt(
+        api_secret,
+        &json!({
+            "iss": api_key,
+            "sub": "room-cleanup",
+            "nbf": now_seconds,
+            "exp": now_seconds + TOKEN_TTL_SECONDS,
+            "video": {
+                "roomCreate": true
+            }
+        }),
+    )
+}
+
 fn sign_jwt(
     api_secret: &str,
     claims: &Value,

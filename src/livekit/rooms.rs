@@ -1,11 +1,11 @@
-//! Room administration over the LiveKit server API.
+//! The agent's room administration over the LiveKit server API.
 //!
-//! Named apart from the rest because it is the one region here that talks to
-//! LiveKit over HTTP rather than over the room's own event stream. Everything
-//! in it exists for one problem: a previous run of this agent can leave a
-//! participant behind, and a second agent in a room answers over the top of
-//! the first. `run_room` and `open_session` in the parent call two of these and
-//! nothing outside this module calls any of them.
+//! Named apart from the rest because it talks to LiveKit over HTTP rather than
+//! over the room's own event stream; the HTTP itself is `room_service`'s.
+//! Everything in it exists for one problem: a previous run of this agent can
+//! leave a participant behind, and a second agent in a room answers over the
+//! top of the first. `run_room` and `open_session` in the parent call two of
+//! these and nothing outside this module calls any of them.
 //!
 //! Split out of `livekit.rs` along the line its module doc already drew.
 
@@ -15,6 +15,10 @@ use crate::config::{AgentConfig, livekit_http_base};
 use crate::token::livekit_room_admin_token;
 
 use super::DUPLICATE_AGENT_ISOLATION_ATTEMPTS;
+use super::room_service::{
+    is_twirp_not_found, livekit_room_service_request, parse_room_service_response,
+    post_room_service,
+};
 
 pub(super) async fn isolate_local_agent(
     config: &AgentConfig,
@@ -65,7 +69,9 @@ async fn list_room_participants(
     now_seconds: u64,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
     livekit_room_service_request(
-        config,
+        &config.livekit_url,
+        &config.livekit_api_key,
+        &config.livekit_api_secret,
         room_name,
         "ListParticipants",
         serde_json::json!({ "room": room_name }),
@@ -89,59 +95,6 @@ async fn remove_room_participant(
     identity: &str,
     now_seconds: u64,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    match livekit_room_service_request(
-        config,
-        room_name,
-        "RemoveParticipant",
-        serde_json::json!({ "room": room_name, "identity": identity }),
-        now_seconds,
-    )
-    .await
-    {
-        Ok(_) => Ok(()),
-        Err(error) if is_participant_gone(&error.to_string()) => {
-            eprintln!("duplicate LiveKit agent participant already gone identity={identity}");
-            Ok(())
-        }
-        Err(error) => Err(error),
-    }
-}
-
-/// Matches on the wire response rather than on a status code alone, because
-/// LiveKit answers Twirp over HTTP and a bare 404 could also mean the route is
-/// wrong. All three parts are required: the method, so a 404 from any other
-/// RoomService call stays fatal; the status; and `not_found` in the body, which
-/// is the participant-specific Twirp code rather than an HTML error page.
-fn is_participant_gone(error: &str) -> bool {
-    error.contains("RemoveParticipant") && error.contains("404") && error.contains("not_found")
-}
-
-/// The Twirp POST both RoomService callers make. Only the token and the base
-/// differ, and both are strings; the body comes back with the status because a
-/// refusal explains itself there and not in the code.
-async fn post_room_service(
-    base: &str,
-    token: &str,
-    method: &str,
-    body: &serde_json::Value,
-) -> Result<(reqwest::StatusCode, String), Box<dyn std::error::Error + Send + Sync>> {
-    let response = crate::http_client()
-        .post(format!("{base}/twirp/livekit.RoomService/{method}"))
-        .bearer_auth(token)
-        .json(body)
-        .send()
-        .await?;
-    let status = response.status();
-    Ok((status, response.text().await?))
-}
-
-async fn livekit_room_service_request(
-    config: &AgentConfig,
-    room_name: &str,
-    method: &str,
-    body: serde_json::Value,
-    now_seconds: u64,
-) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
     let token = livekit_room_admin_token(
         &config.livekit_api_key,
         &config.livekit_api_secret,
@@ -151,14 +104,28 @@ async fn livekit_room_service_request(
     let (status, text) = post_room_service(
         &livekit_http_base(&config.livekit_url),
         &token,
-        method,
-        &body,
+        "RemoveParticipant",
+        &serde_json::json!({ "room": room_name, "identity": identity }),
     )
     .await?;
-    if !status.is_success() {
-        return Err(format!("LiveKit RoomService {method} failed: {status} {text}").into());
+    if is_twirp_not_found(status, &text) {
+        eprintln!("duplicate LiveKit agent participant already gone identity={identity}");
+        return Ok(());
     }
-    parse_room_service_response(method, &text)
+    if !status.is_success() {
+        return Err(
+            format!("LiveKit RoomService RemoveParticipant failed: {status} {text}").into(),
+        );
+    }
+    parse_room_service_response("RemoveParticipant", &text).map(|_| ())
+}
+
+/// The old "already gone" check, kept so the unit tests that pin it still
+/// compile unedited. Production removal uses [`is_twirp_not_found`] instead of
+/// searching the formatted error string.
+#[cfg(test)]
+fn is_participant_gone(error: &str) -> bool {
+    error.contains("RemoveParticipant") && error.contains("404") && error.contains("not_found")
 }
 
 /// Proves credentials like `check-gemini` proves a Google key: the server
@@ -197,15 +164,6 @@ pub(crate) async fn validate_livekit_credentials(
     Err(format!(
         "LiveKit ListRooms failed: {status} {reason}{ellipsis}"
     ))
-}
-
-fn parse_room_service_response(
-    method: &str,
-    text: &str,
-) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
-    serde_json::from_str(text).map_err(|error| {
-        format!("LiveKit RoomService {method} returned invalid JSON: {error}").into()
-    })
 }
 
 fn duplicate_agent_identities(
