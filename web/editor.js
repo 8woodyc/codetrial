@@ -1,4 +1,5 @@
 import { lineCommentFor, tokenize } from "./tokenizer.js";
+import { parseSyntax } from "./syntax-parser.js";
 
 const INDENT = "    ";
 
@@ -108,11 +109,34 @@ export function isBracketOpenerKeystroke(event) {
 // here would sit in front of that text rather than after it (issue 150).
 const AUTO_CLOSE_BEFORE = new Set([..." \t\n;:.,=>", ...BRACKET_CLOSERS]);
 
+function isLiteralCharacter(value, at, language, parse = parseSyntax) {
+  let usesFallback = true;
+  const token = tokenize(value, language, (code, language) => {
+    const tree = parse(code, language);
+    usesFallback = !tree || tree.rootNode.hasError;
+    return tree;
+  }).tokens.find((token) => token.start <= at && at < token.end);
+  if (token?.kind === "comment") return true;
+  if (token?.kind !== "string") return false;
+  // The Python fallback scanner cannot separate f-string text from its
+  // expressions. Preserve pairing for scanner-classified f-string tokens
+  // when the tree is missing or contains errors, matching tokenize's fallback.
+  // Recognized syntax regions still distinguish literal text from code.
+  if (
+    usesFallback &&
+    language === "python" &&
+    /(?:^|[^\p{ID_Continue}])(?:f|fr|rf)$/iu.test(value.slice(0, token.start))
+  )
+    return false;
+  return true;
+}
+
 // Typing an opener around a selection wraps it, the way most editors do;
 // typing it at a bare caret inserts an empty pair and steps inside so the
 // candidate doesn't have to type the closer themselves. Null, so the caller
-// falls through to native insertion, when the caret sits before other text.
-export function insertBracketPair(value, start, end, opener) {
+// falls through to native insertion, before other text or inside a literal
+// or comment.
+export function insertBracketPair(value, start, end, opener, language, parse) {
   const closer = BRACKET_PAIRS[opener];
   if (
     start === end &&
@@ -120,6 +144,13 @@ export function insertBracketPair(value, start, end, opener) {
     !AUTO_CLOSE_BEFORE.has(value[start])
   )
     return null;
+  if (start === end) {
+    // Classify the inserted character, not its neighbor: at EOF a comment
+    // or unfinished string still owns the input, but a closed literal does
+    // not. The shared tokenizer also handles a grammar that is not ready.
+    const typed = value.slice(0, start) + opener + value.slice(end);
+    if (isLiteralCharacter(typed, start, language, parse)) return null;
+  }
   const inner = value.slice(start, end);
   const insertion = `${opener}${inner}${closer}`;
   const caret = start + opener.length + inner.length;
@@ -138,9 +169,10 @@ export function isBracketCloserKeystroke(event) {
 // should step past the closer already there rather than duplicate it. Not
 // applicable, so the caller falls through to native insertion, unless the
 // caret is collapsed right before that same character.
-export function typeOverCloser(value, start, end, closer) {
+export function typeOverCloser(value, start, end, closer, language, parse) {
   if (!BRACKET_CLOSERS.has(closer)) return null;
   if (start !== end || value[start] !== closer) return null;
+  if (isLiteralCharacter(value, start, language, parse)) return null;
   return { value, start: start + 1, end: start + 1 };
 }
 
@@ -155,10 +187,11 @@ export function isBackspaceKeystroke(event) {
 // The type-over's counterpart: Backspace right after an auto-inserted empty
 // pair should remove both characters in one stroke instead of stranding the
 // closer.
-export function deleteEmptyPair(value, start, end) {
+export function deleteEmptyPair(value, start, end, language, parse) {
   if (start !== end || start === 0) return null;
   const closer = BRACKET_PAIRS[value[start - 1]];
   if (!closer || value[start] !== closer) return null;
+  if (isLiteralCharacter(value, start - 1, language, parse)) return null;
   return {
     value: value.slice(0, start - 1) + value.slice(start + 1),
     start: start - 1,
