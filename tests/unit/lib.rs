@@ -33,3 +33,16 @@ fn sha256_hex_matches_known_vectors_and_concatenates_parts() {
         );
     }
 }
+
+/// The 30-second backstop is why these clients exist instead of
+/// `reqwest::Client::new()`, and no test can afford to wait it out. reqwest
+/// prints a client's total timeout in its `Debug` output and leaves the field
+/// out when none is set, so that is where the backstop is visible. A reqwest
+/// that stops printing it fails here loudly rather than passing quietly.
+#[test]
+fn shared_http_clients_carry_the_backstop_timeout() {
+    for client in [super::http_client(), super::no_redirect_http_client()] {
+        let debug = format!("{client:?}");
+        assert!(debug.contains("TotalTimeout: 30s"), "{debug}");
+    }
+}

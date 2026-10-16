@@ -452,7 +452,7 @@ async fn github_callback_sets_session_and_clears_oauth_state() {
             "cookie",
             format!(
                 "codetrial_oauth_state={}",
-                signed_cookie("state-token", "session-secret")
+                state_cookie("state-token", "session-secret")
             ),
         )
         .send()
@@ -476,9 +476,7 @@ async fn github_callback_sets_session_and_clears_oauth_state() {
         .unwrap()
         .to_string();
     assert!(
-        cookies
-            .iter()
-            .any(|cookie| cookie.starts_with("codetrial_oauth_state=; Max-Age=0")),
+        clears_state_cookie(response.headers()),
         "callback should clear oauth state cookie"
     );
 
@@ -534,8 +532,12 @@ async fn a_forged_session_cookie_is_not_a_session() {
         ("an empty signature", format!("{payload}.")),
         ("a signature that is not base64", format!("{payload}.zzz")),
         (
+            "a signature made for the OAuth state cookie",
+            signed_cookie("codetrial_oauth_state", &payload, "session-secret"),
+        ),
+        (
             "a signature from another secret",
-            signed_cookie(&payload, "another-session-secret"),
+            signed_cookie("codetrial_session", &payload, "another-session-secret"),
         ),
     ] {
         let forged = format!("codetrial_session={value}");
@@ -625,7 +627,7 @@ async fn anonymous_requests_cannot_spend_the_signed_in_budget() {
             "cookie",
             format!(
                 "codetrial_session={}",
-                signed_cookie("session-one", "session-secret")
+                signed_cookie("codetrial_session", "session-one", "session-secret")
             ),
         )
         .json(&json!({}))
@@ -704,11 +706,11 @@ async fn account_reports_are_scoped_to_the_signed_in_user() {
     let client = http_client();
     let user_one_cookie = format!(
         "codetrial_session={}",
-        signed_cookie("session-one", "session-secret")
+        signed_cookie("codetrial_session", "session-one", "session-secret")
     );
     let user_two_cookie = format!(
         "codetrial_session={}",
-        signed_cookie("session-two", "session-secret")
+        signed_cookie("codetrial_session", "session-two", "session-secret")
     );
 
     let session = client
@@ -1108,7 +1110,7 @@ async fn github_callback_stores_only_the_primary_verified_email() {
             "cookie",
             format!(
                 "codetrial_oauth_state={}",
-                signed_cookie("state-token", "session-secret")
+                state_cookie("state-token", "session-secret")
             ),
         )
         .send()
@@ -1276,7 +1278,7 @@ async fn a_failed_email_lookup_does_not_unverify_an_account() {
                     "cookie",
                     format!(
                         "codetrial_oauth_state={}",
-                        signed_cookie("state-token", "session-secret")
+                        state_cookie("state-token", "session-secret")
                     ),
                 )
                 .send()
@@ -1300,6 +1302,8 @@ async fn a_failed_email_lookup_does_not_unverify_an_account() {
         502,
         "a failed lookup fails the sign-in rather than downgrading the account"
     );
+
+    assert!(clears_state_cookie(failed.headers()));
 
     // Both 502 legs of the callback carry the same status, so the status alone
     // would still pass here if the token exchange had broken and the profile

@@ -1226,7 +1226,7 @@ async fn token_requires_a_session_once_accounts_exist() {
             "cookie",
             format!(
                 "codetrial_session={}",
-                signed_cookie("session-one", "session-secret")
+                signed_cookie("codetrial_session", "session-one", "session-secret")
             ),
         )
         .json(&body)

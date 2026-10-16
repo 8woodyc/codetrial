@@ -107,13 +107,31 @@ pub(crate) fn sha256_hex(parts: &[&[u8]]) -> String {
 pub fn http_client() -> &'static reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
     CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            // Not `unwrap_or_default()`: that hands back a client with no
-            // timeout at all, quietly dropping the backstop this exists for.
+        http_client_builder()
             .build()
             .expect("http client should build")
     })
+}
+
+/// [`http_client`] that hands a redirect back instead of following it, for
+/// requests that carry a credential. A 307/308 replays the request body at the
+/// redirect target, which for the GitHub OAuth exchange includes the client
+/// secret, and a followed redirect on an API call lets another host answer
+/// for the one asked.
+pub(crate) fn no_redirect_http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        http_client_builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("no-redirect http client should build")
+    })
+}
+
+// Built and `expect`ed rather than `unwrap_or_default()`: that hands back a
+// client with no timeout at all, quietly dropping the backstop this exists for.
+fn http_client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder().timeout(std::time::Duration::from_secs(30))
 }
 
 #[cfg(test)]
