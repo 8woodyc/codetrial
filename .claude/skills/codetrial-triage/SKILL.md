@@ -246,6 +246,15 @@ symptoms plus a plausible shared cause is "possibly duplicate" until a log, a
 measurement or a bisect names that cause, and containment of a fix is one input
 to that, not a substitute for it.
 
+A saved report's `Contract: bundle N` bounds a build the same way, and more
+tightly than a date: a bundle older than the one a fix introduced proves the
+build lacks that fix. #216's report said bundle 5 and PR #69 (999904c)
+introduced bundle 6, so the build predated #69: not a regression of #69, and
+possibly #68 again until its log matches. A bundle at or past the fix's own
+says nothing about a fix that did not change the bundle.
+[codetrial-contribute](../codetrial-contribute/SKILL.md) has the `git log -S`
+recipe that turns N into a commit range.
+
 Judge completeness against the bug, feature and documentation fields in
 [codetrial-contribute](../codetrial-contribute/SKILL.md), and ask only for facts
 needed to make the next decision; a typo needs none of the interview details a
@@ -311,11 +320,13 @@ The four sweep lists are the queue, and each one has a fixed next move:
 - `linked`, with `merged` set: a merged pull request referenced the issue after
   it was filed, and GitHub did not close it, so that PR only touched it, or its
   `Closes` line named another issue. Read the PR and the issue. When the PR does
-  what the issue asks, ask the reporter to retest on the `latest` release built
-  from that merge, and to post the output of `codetrial --version` with the
-  result. #82 got exactly that and was closed within a day. When the PR covers
-  only part of it, narrow the issue to the remainder, as #85 was. The same
-  waiting rule then applies to the retest.
+  what the issue asks, ask for a retest in the shape below, with the recipe
+  from [codetrial-contribute](../codetrial-contribute/SKILL.md); #82 got that
+  and was closed within a day. A merged PR that names the issue only as an
+  example is a mention, not a fix: the triage tooling PR #302 cited #156 and
+  changed nothing it asks for, so read the diff before asking anyone to
+  retest. When the PR covers only part of it, narrow the issue to the
+  remainder, as #85 was. The same waiting rule then applies to the retest.
 - `linked`, with `open` set: a cross-reference is only a mention, so read the
   PR. When it implements the request, the issue is superseded by that open pull
   request (see the verdicts above). Ask the reporter, and anyone in the thread about to
@@ -357,6 +368,27 @@ The four sweep lists are the queue, and each one has a fixed next move:
 The two windows are the sweep's `wait-days` argument, 7 by default. Report each
 list's counts next to the duplicate counts, so the maintainer sees what is
 waiting and on whom.
+
+The windows bound what a sweep proposes, not what the maintainer decides. A
+maintainer may close earlier, as with #62 and #270 a week early and #115 and
+#169 three days before their stated dates. The closing comment then names when
+the fact was asked and never implies that a deadline passed. When the
+maintainer asks to move the date itself, the edited reminder goes on the
+confirmed list with the close, with its new text, and is applied before the
+close, so the thread does not promise a date later than its close. The REST
+endpoint takes the comment's numeric id, which the sweep does not collect:
+
+```sh
+comment=$(gh api "repos/$repo/issues/$number/comments" --paginate --jq \
+  '.[] | select(.body | startswith("@'"$reporter"' ")) | .id' | tail -1)
+[ -n "$comment" ] && gh api -X PATCH "repos/$repo/issues/comments/$comment" \
+  -F body=@"$SCRATCH/reminder.md"
+```
+
+The reminder shape only fixes the leading @mention, so check that the id
+found is the reminder before patching it.
+
+Say in the report which reporters got less time than first promised.
 
 ## Draft the notice the other thread needs
 
@@ -406,10 +438,10 @@ What the shapes add:
 - Closing for no reply: say what was asked and when, that the report could not
   be acted on without it, and the exact thing to post to reopen it. Not a
   verdict on the report.
-- Asking for a retest after a merge: name the PR, its merge commit and the
-  release that contains it, and say what each result means: fixed means close,
-  and still failing means post the `codetrial --version` output and the new
-  log here.
+- Asking for a retest after a merge: name the PR and its merge commit, ask for
+  a build from source of `main` at or after it, and say what each result
+  means: fixed means close, and still failing means post the
+  `cargo run -- --version` line and the new log here.
 
 ## Apply only the confirmed list
 

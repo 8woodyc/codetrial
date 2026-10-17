@@ -26,9 +26,11 @@ matters most here, where some actions apply without asking.
 
 ## What a sweep may apply without asking
 
-Asking to sweep the PRs authorizes three actions, because none carries text
-drafted during the sweep, each is cheap to undo or harmless, and holding them
-for a confirmation only stalls a contributor:
+Asking to sweep the PRs ("sweep the PRs", "run the PR sweep") authorizes three
+actions, because none carries text drafted during the sweep, each is cheap to
+undo or harmless, and holding them for a confirmation only stalls a
+contributor. A bare "continue" after an issue report is not that request: it
+carries the work on, and the three actions go on the confirmed list instead.
 
 - Approving a run in `approve` whose `first_time` is true and whose
   `touches_workflows` and `files_truncated` are false. A run waits there because
@@ -187,6 +189,46 @@ first or is superseded by it; report which in the sweep output and leave the
 close to a maintainer. A PR opened from a fork's `main` fails CI on its own
 and needs a new PR from a topic branch, not a comparison. Any comment either
 case calls for goes through the confirmed list.
+
+A failed log runs to thousands of lines, every passing Rust suite prints
+`0 failed`, and the browser lane prints `Error:` for tests that expect one, so
+grepping for "fail" or "error" finds nothing useful. Save the log and grep for
+the markers a real failure leaves:
+
+```sh
+job=$(gh pr view "$pr" --repo "$repo" --json statusCheckRollup --jq \
+  '[.statusCheckRollup[] | select(.conclusion | IN("FAILURE", "CANCELLED",
+     "TIMED_OUT")) | .detailsUrl // empty | capture("/job/(?<id>[0-9]+)").id]
+   | first // empty')
+if [ -z "$job" ]; then
+  echo "no failing Actions job; read the failing check's detailsUrl instead"
+else
+  gh run view --repo "$repo" --job "$job" --log > "$SCRATCH/ci-$pr.log"
+  grep -nE '✖|test result: FAILED|panicked at|SyntaxError|vulnerabilities found|Crate: |##\[error\]' \
+    "$SCRATCH/ci-$pr.log"
+fi
+```
+
+It reads Actions jobs only. A third-party check run, cubic among them, links
+elsewhere, and a commit status reports `state` rather than `conclusion`, so
+neither is matched; read those from the PR's checks tab.
+
+The job log rather than `--log-failed`, because a job cancelled at its time
+limit has no failed step and `--log-failed` prints nothing for it; #300's was
+cancelled that way, and its log shows the `SyntaxError` that hung every lobby
+test.
+
+A `cargo-audit` advisory that `main` also has is the maintainer's, and the PR
+must not carry a lockfile bump to clear it: #304 was told it "needs nothing
+from you", and #305 to drop its unrelated `Cargo.lock` change. Once `main`
+lands the fix (#331 moved to zip 9), a PR still failing on that advisory has a
+stale base. When it conflicts it is in `rebase` unless its current head
+already carries a request. When it still merges, `rebase` skips it, so read
+the PR's reviews first: a request on the current head in any wording
+already counts, as [Conflicting branches](#conflicting-branches) says, and
+posting the fixed text beside #326's own request sent a second notification
+for nothing. Only without one does the fixed review go on the confirmed list,
+since the sweep requests a rebase without asking only on a conflicting branch.
 
 A clean merge does not establish readiness. For a dependent draft, check whether
 its prerequisite merged and whether the author still needs to rebase, remove
