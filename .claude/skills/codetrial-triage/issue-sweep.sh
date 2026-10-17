@@ -91,8 +91,19 @@ def age: ts | days;
 def staff: (.authorAssociation | IN("MEMBER", "OWNER", "COLLABORATOR"))
   or (.author.login | IN($pushers[]));
 def human: .author != null and .author.__typename != "Bot";
-def cjk: [scan("[\\p{Han}\\p{Hiragana}\\p{Katakana}\\p{Hangul}]")] | length;
-def latin: [scan("[A-Za-z]")] | length;
+# Counted by code point: scan, splits and gsub over a whole body cost time
+# quadratic in their matches, seconds for one long report, and the sweep reads
+# every open body; split on a plain string does not. A character above ASCII
+# is tested on its own, so a class keeps its meaning. ink stops at 40, the
+# only threshold it is compared against.
+def is(class): [.] | implode | test(class);
+def cjk: [explode[] | select(. > 255 and is("[\\p{Han}\\p{Hiragana}\\p{Katakana}\\p{Hangul}]"))]
+  | length;
+def latin: [explode[] | select((. >= 65 and . <= 90) or (. >= 97 and . <= 122))]
+  | length;
+def ink: [limit(40; split("\n")[] | select(startswith("#") | not)
+  | explode[] | select(if . < 128 then . != 32 and (. < 9 or . > 13)
+      else is("\\s") | not end))] | length;
 [.[].data.repository.issues.nodes[]] as $issues |
 def maint: [.comments.nodes[] | select(human and staff)];
 def cut: .comments.totalCount > 100 or .timelineItems.totalCount > 100
@@ -107,7 +118,7 @@ def mine: .author.login as $a | [.comments.nodes[]
 def gaps: (.body // "") as $b
   | ($b + " " + ([.author.login as $a | .comments.nodes[]
       | select($a != null and .author.login == $a) | .body] | join(" "))) as $said
-  | [ (select($b | gsub("(?m)^#+.*$|\\s"; "") | length < 40) | "empty_body"),
+  | [ (select($b | ink < 40) | "empty_body"),
       (select($b | test("\\[([Pp]lease )?[Ff]ill in|<[A-Z][a-z][^<>\\n]{15,}>"))
         | "placeholder"),
       (select($b | test("(?m)^(#{1,6}) [^\\n]+\\n\\s*(^\\1 |\\z)"))
