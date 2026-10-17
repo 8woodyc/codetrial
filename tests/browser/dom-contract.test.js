@@ -20,9 +20,13 @@ import {
 } from "./source.js";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const web = join(root, "web");
 const read = (name) => readFileSync(join(web, name), "utf8");
+// What import() takes. A bare absolute path only works where it starts with a
+// slash: on Windows the loader reads the drive letter as a URL scheme.
+const webUrl = (name) => pathToFileURL(join(web, name)).href;
 // The page names these tests use, read from the generated map rather than
 // written here, so renaming a scenario does not break a test about loading.
 const pageMap = JSON.parse(read("problem-pages.json"));
@@ -154,9 +158,7 @@ test("problem loader resolves legacy ids and falls back to the default", async (
   const served = [];
   const restore = serveWebFromDisk(served);
   try {
-    const { loadProblem, loadJudge } = await import(
-      join(web, "problem-data.js")
-    );
+    const { loadProblem, loadJudge } = await import(webUrl("problem-data.js"));
 
     const scenario = await loadProblem(twoSum.page);
     assert.equal(scenario.page, twoSum.page);
@@ -207,7 +209,7 @@ test("an unreachable bank is reported as unreachable, not as an empty one", asyn
   });
   try {
     const { loadProblem, loadJudge } = await import(
-      `${join(web, "problem-data.js")}?unreachable`
+      `${webUrl("problem-data.js")}?unreachable`
     );
 
     await assert.rejects(() => loadProblem("two-sum"), /could not be reached/);
@@ -225,7 +227,7 @@ test("an unreachable bank is reported as unreachable, not as an empty one", asyn
   }));
   try {
     const { loadJudge } = await import(
-      `${join(web, "problem-data.js")}?unavailable`
+      `${webUrl("problem-data.js")}?unavailable`
     );
     await assert.rejects(() => loadJudge("two-sum"), /returned 503/);
   } finally {
@@ -244,7 +246,7 @@ test("a page map that could not be fetched is asked for again", async () => {
   };
   try {
     const { loadPageMap } = await import(
-      `${join(web, "problem-data.js")}?map-retry`
+      `${webUrl("problem-data.js")}?map-retry`
     );
     await assert.rejects(() => loadPageMap(), /could not be reached/);
     down = false;
@@ -266,7 +268,7 @@ test("a judge that cannot be fetched is not a problem without tests", async () =
   });
   try {
     const { runBrowserTests } = await import(
-      `${join(web, "runners.js")}?judge-unreachable`
+      `${webUrl("runners.js")}?judge-unreachable`
     );
     const summary = await runBrowserTests("two-sum", "x = 1", "python");
 
