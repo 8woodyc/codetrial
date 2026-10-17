@@ -2334,6 +2334,14 @@ Use {{"steps": []}} when no open step is completed. No scores or advice."#
     )
 }
 
+/// What the interviewer is told when a turn answering the candidate called
+/// tools, usually to record evidence, and ended without a word. Silence stays
+/// its call, since quiet is right while they code; the note only stops a reply
+/// it meant to give from waiting for the candidate to speak again.
+pub fn unvoiced_record_note() -> &'static str {
+    "[SYSTEM EVENT] Your last turn answered the candidate with tool calls only and said nothing aloud. If their turn calls for a reply, give it now; otherwise stay silent."
+}
+
 /// What the interviewer is told when the phase judge records steps it did not:
 /// added to its context without asking for a reply, so it neither asks for
 /// them again nor records them twice, and, when the step completed the coding
