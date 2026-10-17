@@ -2,6 +2,7 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  closeSetupCheck,
   DEFAULT_RUNTIME_CONFIG,
   launchChromium,
   startStaticServer,
@@ -393,6 +394,9 @@ test("removing a saved candidate case frees its slot and persists", async (t) =>
       waitUntil: "domcontentloaded",
     });
     await candidateCasesReady(page);
+    // Where focus goes after a removal is part of this test, and nothing under
+    // the setup check can hold focus while it is open.
+    await closeSetupCheck(page);
     for (let index = 0; index < 5; index++) {
       await page.evaluate((index) => {
         document.querySelector("#candidate-case-input").value = JSON.stringify([
@@ -462,6 +466,8 @@ test("removing a saved candidate case frees its slot and persists", async (t) =>
       await page.locator("#candidate-case-list").textContent(),
       /\[\[10,7\],17\]/,
     );
+    // The reload opened the setup check again, and focus is asserted below.
+    await closeSetupCheck(page);
     // Removal ignores a second click that lands before the next animation
     // frame, so the tight in-page loop this used to be would take one case
     // and then spin. Five clicks from here instead, one frame apart - the

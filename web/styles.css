@@ -8,11 +8,21 @@
   --hairline: #2d2b26;
   --accent: #3987e5;
   /* Solid fill behind white button text. --accent itself measures 3.6:1 under
-     white, short of the 4.5 that button labels need. */
+     white, short of the 4.5 that button labels need. --accent-deep is its
+     hover, one step darker so the hover is visible. */
   --accent-fill: #2069bd;
-  --accent-deep: #2069bd;
+  --accent-deep: #1a5aa3;
   --good: #24b47e;
   --critical: #ff6b6b;
+  /* A destructive control: its border and fill, and its text on the surface
+     when it is outlined rather than filled (7.6:1). */
+  --danger: #c44545;
+  --danger-ink: #ff8a8a;
+  /* The edge of a form field: 4.6:1 against the surface, past the 3:1 a
+     control boundary needs. */
+  --control-border: #8a8473;
+  /* A card set into the surface, such as a step of the setup check. */
+  --step-surface: #151512;
   /* The floating avatar stage. Opaque on purpose: this sits over the editor,
      which repaints on every keystroke, and a backdrop-filter under it re-ran a
      blur pass per repaint for an effect 82% opaque paint already hid. */
@@ -1137,8 +1147,8 @@ p {
 }
 
 .pill-button.danger {
-  border-color: #c44545;
-  background: #c44545;
+  border-color: var(--danger);
+  background: var(--danger);
   color: white;
 }
 
@@ -1202,11 +1212,15 @@ p {
   text-align: center;
 }
 
+/* A query container: the toolbar's sync note is hidden by the panel's own
+   width, below, not the window's, because the sidebar's width is the
+   candidate's. */
 .editor-panel {
   display: flex;
   min-height: 34rem;
   flex-direction: column;
   background: #1e1e1e;
+  container-type: inline-size;
 }
 
 .editor-toolbar {
@@ -1222,9 +1236,17 @@ p {
   font-size: 0.75rem;
 }
 
+/* A footnote under the editor rather than a toolbar item, so the toolbar
+   stays one row. --sub, not --muted: this is a sentence to read, and --muted
+   is under 4.5 against the surface. */
 .compile-disclosure {
+  flex: none;
+  max-width: none;
   margin: 0;
-  color: var(--muted);
+  padding: 0.375rem 1rem;
+  border-top: 1px solid var(--hairline);
+  background: var(--surface);
+  color: var(--sub);
   font-size: 0.75rem;
 }
 
@@ -1931,12 +1953,19 @@ table.phase-scores {
 
 /* Pre-flight media gate. Sits above the shell until required local media
    passes, so the candidate never meets the interviewer through dead devices. */
+/* Devices on one side, preferences on the other, and the way out and the way
+   in pinned below both, so Start is never scrolled away. */
 .audio-check-card {
-  width: min(32rem, 90vw);
-  padding: 1.75rem;
+  display: flex;
+  width: min(60rem, 100%);
+  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
+  flex-direction: column;
+  overflow: hidden;
   border: 1px solid var(--hairline);
-  border-radius: 10px;
+  border-radius: 16px;
   background: var(--surface);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
   text-align: left;
 }
 
@@ -2385,11 +2414,322 @@ table.phase-scores {
 .interviewer-style-controls select {
   width: 100%;
   min-width: 0;
+  min-height: 2.25rem;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  background: var(--step-surface);
+  color: var(--ink);
+  font: inherit;
 }
 
 @media (max-width: 480px) {
   .interviewer-style-controls {
     grid-template-columns: 1fr;
+  }
+}
+
+/* The interview's layout: where each control lives. Dark like the rest of
+   the workspace; only placement and grouping are decided here. */
+
+/* The problem fills the sidebar and scrolls; the control dock stays at the
+   bottom of it, always in reach. */
+.interview-sidebar .side-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.session-dock {
+  display: grid;
+  flex: none;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem 1rem;
+  border-top: 1px solid var(--hairline);
+  background: var(--surface);
+}
+
+.session-dock .control-row {
+  margin-top: 0;
+}
+
+/* The action used most: handing the turn to Jim. */
+.session-dock .turn-button {
+  width: 100%;
+  min-height: 2.5rem;
+  border-color: var(--accent);
+  background: var(--accent-fill);
+  color: #ffffff;
+  font-size: 0.875rem;
+}
+
+.session-dock .turn-button:hover {
+  background: var(--accent-deep);
+}
+
+.session-dock .control-row .pill-button {
+  min-height: 2rem;
+}
+
+.pill-button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+/* Ending is final, so it sits apart at the far end and is outlined rather
+   than filled: present, but never the loudest thing in the dock. */
+.dock-end {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.session-dock .pill-button.danger {
+  border-color: var(--danger);
+  background: transparent;
+  color: var(--danger-ink);
+}
+
+.session-dock .pill-button.danger:hover {
+  background: var(--danger);
+  color: #ffffff;
+}
+
+.session-dock .meet-mode {
+  margin-top: 0;
+}
+
+/* Open, the Meet notes scroll inside themselves rather than pushing the
+   dock, and End interview with it, out of a short sidebar. */
+.session-dock .meet-mode-body {
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+.recording-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.recording-row:not(:has(> :not([hidden]))) {
+  display: none;
+}
+
+/* --sub, not --muted, for small text a candidate has to read here: --muted
+   is 3.88:1 on the surface and 4.11 on a step card, under the 4.5 needed. */
+.session-dock .muted,
+.audio-check-card .muted {
+  color: var(--sub);
+}
+
+/* Stacked, the sidebar would grow to the problem's full length and put the
+   dock a screen or more below it. Capped, the problem scrolls inside and the
+   controls stay in view under it. */
+@media (max-width: 1023px) {
+  .interview-sidebar {
+    max-height: 80vh;
+    max-height: 80dvh;
+  }
+}
+
+/* One toolbar row: languages on the left; sync state, display settings and
+   Run tests on the right. */
+.editor-toolbar {
+  row-gap: 0.5rem;
+}
+
+.toolbar-end {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-left: auto;
+}
+
+/* The sync note is reassurance, not a control: it gives way first, below
+   the width where the toolbar holds it on one row. */
+@container (max-width: 58rem) {
+  .toolbar-end .sync-state {
+    display: none;
+  }
+}
+
+.editor-view-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.toolbar-end .run-button {
+  min-height: 2rem;
+  padding-inline: 1rem;
+}
+
+#candidate-case > summary {
+  padding: 0.5rem 1rem;
+  color: var(--sub);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+#candidate-case[open] {
+  padding-bottom: 0.5rem;
+}
+
+#candidate-case > label,
+#candidate-case > button,
+#candidate-case > p,
+#candidate-case > ol {
+  margin-inline: 1rem;
+}
+
+.preflight-head {
+  padding: 1.5rem 1.75rem 1.25rem;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.preflight-kicker {
+  margin: 0 0 0.25rem;
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Focused by script when the dialog opens, so a screen reader starts at its
+   name; a heading is not a control, so it draws no focus ring. */
+.preflight-head h2:focus {
+  outline: none;
+}
+
+.preflight-head h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  letter-spacing: -0.02em;
+}
+
+.preflight-head p {
+  margin-top: 0.5rem;
+  line-height: 1.5;
+}
+
+.preflight-head #round-plan-summary:empty {
+  display: none;
+}
+
+.preflight-body {
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  overflow-y: auto;
+}
+
+.preflight-column {
+  padding: 1.25rem 1.75rem;
+}
+
+.preflight-column + .preflight-column {
+  border-left: 1px solid var(--hairline);
+}
+
+.preflight-section-title {
+  margin: 0 0 0.75rem;
+  color: var(--sub);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.preflight-column .audio-check-step:not([hidden]) + .preflight-section-title {
+  margin-top: 1.5rem;
+}
+
+/* Each check is its own card, ticked off in place when it passes. */
+.preflight-column .audio-check-step {
+  margin: 0 0 0.75rem;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--step-surface);
+  transition: border-color 140ms ease;
+}
+
+.preflight-column .audio-check-step.done {
+  border-color: rgba(36, 180, 126, 0.55);
+}
+
+.preflight-column .audio-check-step > p:first-child,
+.audio-check-step > .preflight-section-title + p {
+  margin-top: 0;
+}
+
+.audio-check-step > .preflight-section-title {
+  margin-bottom: 0.5rem;
+}
+
+.preflight-column .audio-check-step:not([hidden]) + h3 {
+  margin-top: 1.5rem;
+}
+
+.preflight-column .audio-check-step .muted.small {
+  line-height: 1.5;
+}
+
+.preflight-column .interviewer-style-controls + p {
+  margin: 0.5rem 0 0.75rem;
+}
+
+.interviewer-style-controls label {
+  color: var(--sub);
+  font-weight: 700;
+}
+
+.preflight-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  padding: 1rem 1.75rem;
+  border-top: 1px solid var(--hairline);
+  background: var(--surface);
+}
+
+.preflight-footer #audio-check-status {
+  flex: 1 1 16rem;
+  margin: 0;
+}
+
+.preflight-footer .audio-check-actions {
+  margin-top: 0;
+}
+
+.preflight-footer .start-button {
+  min-height: 2.5rem;
+  padding: 0.625rem 1.5rem;
+  color: #ffffff;
+}
+
+@media (max-width: 860px) {
+  .preflight-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .preflight-column + .preflight-column {
+    border-top: 1px solid var(--hairline);
+    border-left: 0;
+  }
+
+  .preflight-head,
+  .preflight-column,
+  .preflight-footer {
+    padding-inline: 1.25rem;
   }
 }
 

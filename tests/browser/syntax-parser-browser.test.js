@@ -2,6 +2,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  closeSetupCheck,
   DEFAULT_RUNTIME_CONFIG,
   launchChromium,
   startStaticServer,
@@ -79,6 +80,7 @@ test("an interview loads only selected grammars and Enter works during a switch"
     await page.goto(base + "/interview.html?problem=chargeback-pair-match", {
       waitUntil: "domcontentloaded",
     });
+    await closeSetupCheck(page);
     // C becomes selectable only after the judge callback has run.
     await page.waitForSelector('[data-language="c"]:not([disabled])');
     await page.waitForSelector("#editor:not([disabled])");
@@ -219,6 +221,7 @@ test("a grammar completing after a switch does not repaint the active language",
     await page.goto(base + "/interview.html?problem=chargeback-pair-match", {
       waitUntil: "domcontentloaded",
     });
+    await closeSetupCheck(page);
     await page.waitForSelector("#editor:not([disabled])");
     const code = 'text = """\n/*\n"""\nif True:';
     await page.evaluate(async (code) => {
@@ -283,6 +286,7 @@ test("a failed grammar download leaves highlighting, Enter and undo usable", asy
     await page.goto(base + "/interview.html?problem=chargeback-pair-match", {
       waitUntil: "domcontentloaded",
     });
+    await closeSetupCheck(page);
     await page.waitForSelector("#editor:not([disabled])");
     const code = "const text = `\n/*\n`;\n    if (ready) {";
     await page.evaluate(async (code) => {
@@ -338,6 +342,7 @@ test("highlighting and Enter share comment and string regions in every language"
     await page.goto(base + "/interview.html?problem=chargeback-pair-match", {
       waitUntil: "domcontentloaded",
     });
+    await closeSetupCheck(page);
     await page.waitForSelector('[data-language="c"]:not([disabled])');
     for (const [language, declaration, literal, comment] of [
       ["python", "text = ", '"""\n/*\n"""', "# if ready:"],

@@ -556,6 +556,7 @@ const nodes = {
   endingElapsed: document.querySelector("#ending-elapsed"),
   report: document.querySelector("#report-modal"),
   audioCheck: document.querySelector("#audio-check"),
+  audioCheckTitle: document.querySelector("#audio-check-title"),
   audioTestTone: document.querySelector("#audio-test-tone"),
   audioTestSpeech: document.querySelector("#audio-test-speech"),
   audioTestVoice: document.querySelector("#audio-test-voice"),
@@ -615,6 +616,7 @@ initAvatarStage({ nodes });
 // The preflight overlay is up from the first paint; the stage stays inert and
 // undrawn under it until the preflight closes, below.
 setStageCovered(true);
+holdWorkspaceBehindPreflight();
 initAudioOutput({ nodes, jimAudioElement: () => jimAudio });
 initRecording({ state, nodes, recordingEnabled, addTranscript, setBanner });
 initIntegrity({
@@ -626,6 +628,33 @@ initIntegrity({
 });
 
 init();
+
+/// The setup check is a modal dialog, so the workspace under it is inert while
+/// it is up: Tab cannot reach Run tests or End interview unseen, and a screen
+/// reader is not offered the problem behind it. Follows the overlay's own
+/// `hidden` rather than each place that closes it, because there are several
+/// (the checks passing, the sign-in redirect) and a missed one would leave the
+/// whole interview unusable. The Jim stage has its own cover, setStageCovered.
+function holdWorkspaceBehindPreflight() {
+  const workspace = [
+    nodes.sidebar,
+    nodes.sidebarResizer,
+    nodes.editorPanel,
+    nodes.boardPanel,
+  ];
+  const sync = () => {
+    const open = !nodes.audioCheck.hidden;
+    for (const node of workspace) node.inert = open;
+    return open;
+  };
+  // Focus starts on the dialog's title, so the first thing read is what the
+  // dialog is, and the first Tab lands on its first control.
+  if (sync()) nodes.audioCheckTitle.focus({ preventScroll: true });
+  new MutationObserver(sync).observe(nodes.audioCheck, {
+    attributes: true,
+    attributeFilter: ["hidden"],
+  });
+}
 
 async function init() {
   state.transcript = createTranscriptView(document, nodes.transcriptPanel);
@@ -719,7 +748,11 @@ async function init() {
       property: "--test-drawer-height",
       storageKey: TEST_DRAWER_HEIGHT_KEY,
       bounds: testDrawerBounds,
-      resizeTargets: [nodes.editorStack, nodes.editorToolbar],
+      resizeTargets: [
+        nodes.editorStack,
+        nodes.editorToolbar,
+        nodes.compileDisclosure,
+      ],
     });
   }
   compactJimStageBesideNarrowPanel(
@@ -3782,7 +3815,8 @@ function testDrawerBounds() {
   const room =
     nodes.editorPanel.clientHeight -
     nodes.editorToolbar.offsetHeight -
-    nodes.testDrawerResizer.offsetHeight;
+    nodes.testDrawerResizer.offsetHeight -
+    nodes.compileDisclosure.offsetHeight;
   const rootFontSize = Number.parseFloat(
     getComputedStyle(document.documentElement).fontSize,
   );

@@ -11,6 +11,7 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  closeSetupCheck,
   DEFAULT_RUNTIME_CONFIG,
   launchChromium,
   startStaticServer,
@@ -34,14 +35,12 @@ after(async () => {
 });
 
 /// Out from behind the media preflight, which covers the toolbar until a
-/// device check clears it. Mirrors the same helper in editor-font-size.test.js.
+/// device check clears it.
 async function openEditor(page) {
   await page.waitForFunction(
     () => document.querySelector("#candidate-case-input").placeholder !== "",
   );
-  await page.evaluate(() => {
-    document.querySelector("#audio-check").hidden = true;
-  });
+  await closeSetupCheck(page);
 }
 
 /// def and return are Python keywords (see highlight.test.js), so this gives
