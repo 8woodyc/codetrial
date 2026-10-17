@@ -18,9 +18,12 @@
 #             off at 100
 #   rebase    non-draft PRs against the default branch that conflict with it
 #             and whose head moved since the last rebase request, or that never
-#             got one
+#             got one; a changes-requested review on the current head that
+#             mentions rebase in any other wording also counts as the request
 #   hide      earlier rebase requests that a newer one supersedes, including
-#             every one on a PR in rebase, which gets a new request
+#             every one on a PR in rebase, which gets a new request, and on a
+#             conflicting PR every one left on an older head once any rebase
+#             request sits on the current head
 #   hide_ask  other changes-requested reviews mentioning rebase on a PR that
 #             has or is about to get the fixed one: hand-written ones, and
 #             fixed-text ones with inline comments; they may carry more
@@ -105,9 +108,11 @@ runs=$(printf '%s\n' "$runs" | jq -s .)
 # the author whose body is exactly rebase.md or the short request and which
 # carries no inline comments, since hiding a review collapses what it carries.
 # Any other review that mentions rebase may ask for more, so it only ever lands
-# in hide_ask. GitHub refuses a review of one's own PR, so the viewer's PRs are
-# never in rebase, and rebase.md names the default branch, so a PR stacked on
-# another branch is left to its reviewer.
+# in hide_ask, but one left on the current head still keeps the PR out of
+# rebase: it already asked, and a second request only adds a notification.
+# GitHub refuses a review of one's own PR, so the viewer's PRs are never in
+# rebase, and rebase.md names the default branch, so a PR stacked on another
+# branch is left to its reviewer.
 printf '%s\n%s\n' "$prs" "$runs" | jq -s --argjson days "$days" --arg me "$me" \
     --arg base "$base" --rawfile text "$text" --arg short "$short" '
 def human: .author != null and .author.__typename != "Bot";
@@ -125,10 +130,18 @@ def fixed_only: .comments.totalCount == 0
   and (.body | trim | . == $fixed or ($base == "main" and . == $short));
 def asks_rebase: [requests[] | select(fixed_only)]
   | sort_by(.submittedAt | ts);
+def mentions_rebase: .body | test("\\brebase"; "i");
+def asked_here: .headRefOid as $head | any(requests[];
+  .commit.oid == $head and mentions_rebase);
+# A conflicting PR whose only request on its current head is hand-written:
+# that review is the standing request, so no fixed one is kept beside it and
+# it is never offered for hiding.
+def hand_asked: .headRefOid as $head | .mergeable == "CONFLICTING"
+  and asked_here and all(asks_rebase[]; .commit.oid != $head);
 def needs_rebase: .mergeable == "CONFLICTING" and (.isDraft | not)
   and .baseRefName == $base
   and nudgeable and whole
-  and (asks_rebase | last | .commit.oid) != .headRefOid;
+  and (asked_here | not);
 {
   approve: [$prs[] as $p | $runs[] | select(.head_sha == $p.headRefOid
       and .head_branch == $p.headRefName
@@ -164,19 +177,20 @@ def needs_rebase: .mergeable == "CONFLICTING" and (.isDraft | not)
        else pushed > $at end) as $pushed_since
     | select($review != null and $verdict != "APPROVED"
         and ((.mergeable == "CONFLICTING"
-          and any(asks_rebase[]; .id == $review.id)) | not)
+          and any(requests[]; .id == $review.id and mentions_rebase)) | not)
         and $at > $mine and ($pushed_since | not)
         and now - $at > $days * 86400)
     | {pr: .number, author: $author, review_by: $review.by,
        review_at: $review.at, idle_days: ((now - $at) / 86400 | floor)}],
   rebase: [$prs[] | select(needs_rebase) | {pr: .number, author: .author.login}],
   hide: [$prs[] | .number as $n | select(whole)
-    | asks_rebase as $r | (if needs_rebase then $r else $r[:-1] end)[]
+    | asks_rebase as $r
+    | (if needs_rebase or hand_asked then $r else $r[:-1] end)[]
     | {pr: $n, review: .id, at: .submittedAt}],
   hide_ask: [$prs[] | .number as $n
-    | select(whole and (needs_rebase or (asks_rebase | length > 0)))
-    | requests[] | select((fixed_only | not)
-        and (.body | test("\\brebase"; "i")))
+    | select(whole and (needs_rebase
+        or (asks_rebase | length > 0) and (hand_asked | not)))
+    | requests[] | select((fixed_only | not) and mentions_rebase)
     | {pr: $n, review: .id, at: .submittedAt, by: .author.login,
        body: (.body | .[0:300])}],
   unknown: [$prs[] | select(.mergeable == "UNKNOWN") | .number],

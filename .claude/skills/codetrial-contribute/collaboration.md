@@ -119,11 +119,16 @@ boundary and name the remaining work without claiming it fixed.
 
 Keep routine push, squash and rebase narration out of the thread: "You don't
 have to make statements like this, as GitHub always tracks commits" (#285;
-#271 said the same). Do not announce that all feedback is addressed while a request or a
-check is still open: "Don't make statements too early. Continue resolving."
-(#266). A PR author resolves their own addressed threads, as CONTRIBUTING.md
-says, under the approval rule in conventions; a sweep resolving threads on
-someone else's PR is limited to triage's outdated ones.
+#271 said the same; #312 put it as "Don't act as a machine."). Do not announce
+that all feedback is addressed while a request or a check is still open:
+"Don't make statements too early. Continue resolving." (#266). After folding
+changes into a PR, update its description to match, in refined English
+(#299). Answer on GitHub, not by replying to the notification email: the reply
+lands with the quoted notification attached, and #152 got "Don't use email to
+reply. Always comment via GitHub web." A PR author resolves their own
+addressed threads, as CONTRIBUTING.md says, under the approval rule in
+conventions; a sweep resolving threads on someone else's PR is limited to
+triage's outdated ones.
 
 ## Make CI green before asking for review
 

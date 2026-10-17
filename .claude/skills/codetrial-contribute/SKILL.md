@@ -57,9 +57,10 @@ Choose the smallest useful structure:
   regression range when known.
   Unknown details can stay explicitly unknown, but include the initial
   analysis below when the code path can be found, since a maintainer asks for
-  it otherwise ([collaboration.md](collaboration.md#start-with-an-actionable-contribution)). Retest on the current `latest` release or `main` before
-  filing: the lobby and the interviewer change daily, and #146 and #171 both
-  reported behavior that had already been fixed after the reporter's download.
+  it otherwise ([collaboration.md](collaboration.md#start-with-an-actionable-contribution)).
+  Retest on a build from source of current `main` before filing: the lobby
+  and the interviewer change daily, and #146 and #171 both reported behavior
+  that had already been fixed after the reporter's download.
 - **Feature**: who is affected (candidate, operator or contributor) and in which
   workflow, desired outcome, present workaround, scope and observable acceptance
   criteria. Keep a suggested implementation separate from the need it serves,
@@ -84,7 +85,7 @@ be run in the checkout, and check the result before it is posted.
 | The agent terminal output | The terminal window where `codetrial` is running prints the agent log. Copy the lines around the failure, starting at `starting interview: room=...`. Remove API keys and tokens, and every line that quotes what the candidate said: personal interview content stays out of a public thread even when the contributor would not mind. |
 | The browser console | F12 or Ctrl+Shift+J (Cmd+Option+J on macOS) in Chrome and Edge, Ctrl+Shift+K in Firefox; Safari needs Settings, Advanced, "Show features for web developers" first. Copy the text rather than a screenshot. |
 | A retest of an open PR | From a checkout: `gh pr checkout <N> --repo sysprog21/codetrial`, or `git fetch https://github.com/sysprog21/codetrial.git pull/<N>/head:pr-<N> && git switch pr-<N>`, then `cargo run -- web`. Report the result on the PR, not on the issue. |
-| A retest after a merge | Download the `latest` release again, or `git pull` on `main`, and confirm `--version` names the merge commit or later. |
+| A retest after a merge | `git pull` on `main`, rebuild, and confirm `cargo run -- --version` names the merge commit or later. A downloaded binary gets "Always build from source." (#216) or "Build from source instead." (#221). |
 | An edit to the issue | On the issue page, the `...` menu on the first post, then Edit; or `gh issue edit <N> --repo sysprog21/codetrial --body-file <file>`. Edit in place rather than filing again. |
 
 ## Write the initial analysis a maintainer asked for

@@ -8,7 +8,10 @@
 # Prints one JSON object:
 #   maintainers_known  false when the collaborators listing failed, leaving
 #               only comment badges to tell a maintainer
-#   unanswered  issues no maintainer has commented on, oldest first
+#   unanswered  issues no maintainer other than the author has commented on,
+#               oldest first, so a collaborator's own follow-up is not an answer;
+#               the viewer's own issues and a deleted account's are left out,
+#               since nobody else answers the first and nobody can the second
 #   waiting     issues whose newest maintainer comment is newer than anything
 #               the reporter did since, comment or body edit; overdue once it
 #               is older than wait-days. Issues a maintainer opened are left
@@ -66,6 +69,12 @@ query='query($owner: String!, $name: String!, $endCursor: String) {
   }
 }'
 
+# The viewer, whose own issues are not unanswered. A token that may read the
+# repository but not /user, such as an Actions GITHUB_TOKEN, leaves it empty,
+# which excludes nobody rather than ending the sweep; gh prints a refusal's body
+# to stdout, so a failed call is not read.
+me=$(gh api user --jq .login 2> /dev/null) || me=
+
 # Who may push, so a maintainer who assigned themselves without commenting is
 # not taken for a contributor. Listing it needs push access; on a refusal gh
 # prints the error body to stdout, so only a successful call is read.
@@ -84,15 +93,26 @@ pages=$(gh api graphql --paginate -F owner="${repo%/*}" -F name="${repo#*/}" \
 # reporter answering by editing the body counts, since the bug form and
 # maintainers both ask for that.
 printf '%s\n' "$pages" | jq -s --argjson days "$days" --arg repo "$repo" \
-    --argjson pushers "$pushers" '
+    --argjson pushers "$pushers" --arg me "$me" '
 def ts: if . == null then 0 else fromdateiso8601 end;
 def days: (now - .) / 86400 | floor;
 def age: ts | days;
 def staff: (.authorAssociation | IN("MEMBER", "OWNER", "COLLABORATOR"))
   or (.author.login | IN($pushers[]));
 def human: .author != null and .author.__typename != "Bot";
-def cjk: [scan("[\\p{Han}\\p{Hiragana}\\p{Katakana}\\p{Hangul}]")] | length;
-def latin: [scan("[A-Za-z]")] | length;
+# Counted by code point: scan, splits and gsub over a whole body cost time
+# quadratic in their matches, seconds for one long report, and the sweep reads
+# every open body; split on a plain string does not. A character above ASCII
+# is tested on its own, so a class keeps its meaning. ink stops at 40, the
+# only threshold it is compared against.
+def is(class): [.] | implode | test(class);
+def cjk: [explode[] | select(. > 255 and is("[\\p{Han}\\p{Hiragana}\\p{Katakana}\\p{Hangul}]"))]
+  | length;
+def latin: [explode[] | select((. >= 65 and . <= 90) or (. >= 97 and . <= 122))]
+  | length;
+def ink: [limit(40; split("\n")[] | select(startswith("#") | not)
+  | explode[] | select(if . < 128 then . != 32 and (. < 9 or . > 13)
+      else is("\\s") | not end))] | length;
 [.[].data.repository.issues.nodes[]] as $issues |
 def maint: [.comments.nodes[] | select(human and staff)];
 def cut: .comments.totalCount > 100 or .timelineItems.totalCount > 100
@@ -107,7 +127,7 @@ def mine: .author.login as $a | [.comments.nodes[]
 def gaps: (.body // "") as $b
   | ($b + " " + ([.author.login as $a | .comments.nodes[]
       | select($a != null and .author.login == $a) | .body] | join(" "))) as $said
-  | [ (select($b | gsub("(?m)^#+.*$|\\s"; "") | length < 40) | "empty_body"),
+  | [ (select($b | ink < 40) | "empty_body"),
       (select($b | test("\\[([Pp]lease )?[Ff]ill in|<[A-Z][a-z][^<>\\n]{15,}>"))
         | "placeholder"),
       (select($b | test("(?m)^(#{1,6}) [^\\n]+\\n\\s*(^\\1 |\\z)"))
@@ -143,8 +163,9 @@ def claim: . as $i | maint as $m
 [$issues[] | claim] as $claims |
 {
   maintainers_known: ($pushers | length > 0),
-  unanswered: [$issues[] | select(maint | length == 0)
-    | {issue: .number, author: .author.login, age_days: (.createdAt | age)}]
+  unanswered: [$issues[] | select(.author != null) | .author.login as $a
+    | select($a != $me and all(maint[]; .author.login == $a))
+    | {issue: .number, author: $a, age_days: (.createdAt | age)}]
     | sort_by(-.age_days),
   waiting: [$issues[] | select(.author != null and (staff | not))
     | .number as $n | .author.login as $a

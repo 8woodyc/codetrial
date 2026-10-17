@@ -169,9 +169,9 @@ Three lines, and the body lives in `tests/unit/`, mirroring the path under
 The indirection is what keeps both halves of the promise. A test under
 `tests/*.rs` is an integration test: it links the plain rlib and can reach only
 the public API, so moving these outright would have meant publishing internals
-for the tests' benefit. Declared this way they are still unit tests -- same
+for the tests' benefit. Declared this way they are still unit tests (same
 module path, `super::` still the containing module, private and `pub(crate)`
-items still in reach -- and none of it is visible to a dependent. The two halves
+items still in reach), and none of it is visible to a dependent. The two halves
 cannot share a module, which is why `tests/common/` exists and why the credential
 predicate is deliberately written twice.
 

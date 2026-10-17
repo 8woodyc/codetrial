@@ -26,9 +26,11 @@ matters most here, where some actions apply without asking.
 
 ## What a sweep may apply without asking
 
-Asking to sweep the PRs authorizes three actions, because none carries text
-drafted during the sweep, each is cheap to undo or harmless, and holding them
-for a confirmation only stalls a contributor:
+Asking to sweep the PRs ("sweep the PRs", "run the PR sweep") authorizes three
+actions, because none carries text drafted during the sweep, each is cheap to
+undo or harmless, and holding them for a confirmation only stalls a
+contributor. A bare "continue" after an issue report is not that request: it
+carries the work on, and the three actions go on the confirmed list instead.
 
 - Approving a run in `approve` whose `first_time` is true and whose
   `touches_workflows` and `files_truncated` are false. A run waits there because
@@ -104,9 +106,9 @@ review records the head it was left on, so a moved head is a push; after a plain
 comment, the latest commit or force-push date stands in. Hidden reviews do not
 count. Two cases are left alone: a PR whose latest approving or
 changes-requested review is an approval, since the next move is not the author's
-even when a comment followed it, and a PR whose latest activity is the fixed
-rebase request while it still conflicts, since `rebase` owns that one and a
-nudge on top only adds a notification. A maintainer nudge is itself a comment,
+even when a comment followed it, and a PR whose latest activity is a rebase
+request, in any wording, while it still conflicts, since `rebase` owns that
+one and a nudge on top only adds a notification. A maintainer nudge is itself a comment,
 so a nudged PR drops out for another seven days without any bookkeeping here. A
 PR can be in `stale` and `rebase` at once; the rebase request goes out first, so
 the nudge says the branch also needs that rebase rather than leaving the author
@@ -128,9 +130,11 @@ as conflicting (the "This branch has conflicts that must be resolved" banner),
 not opened by the account running the sweep, since GitHub refuses a review of
 one's own PR. A draft is still being written and is left alone, and a PR stacked
 on another branch is left to its reviewer, since the fixed text names the
-default branch. A PR whose latest rebase request is left on its current head is
-not listed: that request is still the current one, and asking again only adds a
-notification.
+default branch. A PR whose current head already carries a visible
+changes-requested review that mentions rebase is not listed, whether it is the
+fixed text, the short request or a maintainer's own wording such as #326's
+"Rebase latest `main` branch to eliminate known vulnerabilities.": that request
+is still the current one, and asking again only adds a notification.
 
 The review body is [rebase.md](rebase.md), posted as the file itself; the
 script compares against the same file, so rewording it there keeps the two in
@@ -152,9 +156,11 @@ gh pr view "$pr" --repo "$repo" --json mergeable,headRefOid \
 ```
 
 Post it before hiding anything, so a failed post never leaves a conflicting PR
-with no visible request. `hide` lists every earlier review with that exact text
-and no inline comments on a PR in `rebase`, plus, on any other PR, all but the
-newest one. The entries for a PR in `rebase` assume its new request landed, so
+with no visible request. `hide` lists the earlier reviews with that exact text
+and no inline comments: all of them on a PR in `rebase`, or on a conflicting
+PR whose current head carries only a hand-written request (that request stays
+current and is kept out of `hide_ask`); on any other PR, all but the newest.
+The entries for a PR in `rebase` assume its new request landed, so
 hide them only after that PR's post succeeded; when the check above skipped the
 post, or the post failed, hide all of them but the newest, which is still the
 current request. Hiding does not dismiss the review; the PR stays at changes
@@ -183,6 +189,46 @@ first or is superseded by it; report which in the sweep output and leave the
 close to a maintainer. A PR opened from a fork's `main` fails CI on its own
 and needs a new PR from a topic branch, not a comparison. Any comment either
 case calls for goes through the confirmed list.
+
+A failed log runs to thousands of lines, every passing Rust suite prints
+`0 failed`, and the browser lane prints `Error:` for tests that expect one, so
+grepping for "fail" or "error" finds nothing useful. Save the log and grep for
+the markers a real failure leaves:
+
+```sh
+job=$(gh pr view "$pr" --repo "$repo" --json statusCheckRollup --jq \
+  '[.statusCheckRollup[] | select(.conclusion | IN("FAILURE", "CANCELLED",
+     "TIMED_OUT")) | .detailsUrl // empty | capture("/job/(?<id>[0-9]+)").id]
+   | first // empty')
+if [ -z "$job" ]; then
+  echo "no failing Actions job; read the failing check's detailsUrl instead"
+else
+  gh run view --repo "$repo" --job "$job" --log > "$SCRATCH/ci-$pr.log"
+  grep -nE '✖|test result: FAILED|panicked at|SyntaxError|vulnerabilities found|Crate: |##\[error\]' \
+    "$SCRATCH/ci-$pr.log"
+fi
+```
+
+It reads Actions jobs only. A third-party check run, cubic among them, links
+elsewhere, and a commit status reports `state` rather than `conclusion`, so
+neither is matched; read those from the PR's checks tab.
+
+The job log rather than `--log-failed`, because a job cancelled at its time
+limit has no failed step and `--log-failed` prints nothing for it; #300's was
+cancelled that way, and its log shows the `SyntaxError` that hung every lobby
+test.
+
+A `cargo-audit` advisory that `main` also has is the maintainer's, and the PR
+must not carry a lockfile bump to clear it: #304 was told it "needs nothing
+from you", and #305 to drop its unrelated `Cargo.lock` change. Once `main`
+lands the fix (#331 moved to zip 9), a PR still failing on that advisory has a
+stale base. When it conflicts it is in `rebase` unless its current head
+already carries a request. When it still merges, `rebase` skips it, so read
+the PR's reviews first: a request on the current head in any wording
+already counts, as [Conflicting branches](#conflicting-branches) says, and
+posting the fixed text beside #326's own request sent a second notification
+for nothing. Only without one does the fixed review go on the confirmed list,
+since the sweep requests a rebase without asking only on a conflicting branch.
 
 A clean merge does not establish readiness. For a dependent draft, check whether
 its prerequisite merged and whether the author still needs to rebase, remove
