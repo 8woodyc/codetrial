@@ -288,9 +288,24 @@
             <span id="results-chevron">v</span>
           </button>
           <div id="results-body" class="results-body">
-            <p class="muted small">
-              Run the test cases any time - Jim sees your results too.
-            </p>
+            <div id="results-filter" hidden>
+              <label>
+                <input
+                  id="hide-passed-tests"
+                  type="checkbox"
+                  aria-describedby="results-filter-note"
+                />
+                Hide passed tests
+              </label>
+              <p id="results-filter-note" class="muted small">
+                Failed tests and cases without an expected answer stay visible.
+              </p>
+            </div>
+            <div id="results-content">
+              <p class="muted small">
+                Run the test cases any time - Jim sees your results too.
+              </p>
+            </div>
           </div>
         </section>
       </section>

@@ -523,6 +523,9 @@ const nodes = {
   candidateCaseList: document.querySelector("#candidate-case-list"),
   resultsLabel: document.querySelector("#results-label"),
   resultsBody: document.querySelector("#results-body"),
+  resultsContent: document.querySelector("#results-content"),
+  resultsFilter: document.querySelector("#results-filter"),
+  hidePassedTests: document.querySelector("#hide-passed-tests"),
   resultsToggle: document.querySelector("#results-toggle"),
   resultsChevron: document.querySelector("#results-chevron"),
   ending: document.querySelector("#ending-overlay"),
@@ -790,7 +793,7 @@ function bindEvents() {
       return;
     if (
       event.target !== nodes.editor &&
-      event.target.matches?.("textarea, input")
+      event.target.matches?.("textarea, input:not([type=checkbox])")
     )
       return;
     event.preventDefault();
@@ -849,6 +852,19 @@ function bindEvents() {
   nodes.resultsToggle.addEventListener("click", () => {
     nodes.resultsBody.hidden = !nodes.resultsBody.hidden;
     nodes.resultsChevron.textContent = nodes.resultsBody.hidden ? "^" : "v";
+  });
+  nodes.hidePassedTests.addEventListener("change", () => {
+    if (
+      state.runningTests ||
+      !state.latestSummary ||
+      nodes.resultsFilter.hidden
+    )
+      return;
+    nodes.resultsContent.innerHTML = resultsMarkup(
+      state.latestSummary,
+      state.testStatus,
+      nodes.hidePassedTests.checked,
+    ).body;
   });
   for (const button of document.querySelectorAll("[data-language]")) {
     button.addEventListener("click", () =>
@@ -2552,7 +2568,7 @@ async function runTests() {
       state.runningTests = false;
       updateRunAvailability();
       nodes.run.textContent = "Run tests";
-      nodes.resultsBody.textContent = nodes.candidateCaseStatus.textContent;
+      nodes.resultsContent.textContent = nodes.candidateCaseStatus.textContent;
       return;
     }
   }
@@ -2750,9 +2766,10 @@ function removeCandidateCase(index) {
   state.latestSummary = null;
   state.testStatus = "done"; // the value the page loads with, so no run state outlives the panel it painted
   nodes.resultsLabel.textContent = "Test results";
-  // The placeholder web/interview.html ships in #results-body; keep the
+  // The placeholder web/interview.html ships in #results-content; keep the
   // sentence identical.
-  nodes.resultsBody.innerHTML = `<p class="muted small">Run the test cases any time - Jim sees your results too.</p>`;
+  nodes.resultsFilter.hidden = true;
+  nodes.resultsContent.innerHTML = `<p class="muted small">Run the test cases any time - Jim sees your results too.</p>`;
   const remaining =
     nodes.candidateCaseList.querySelectorAll("[data-remove-case]");
   (
@@ -2778,13 +2795,20 @@ function firstRunnerStatus(language) {
 function setTestStatus(status) {
   state.testStatus = status;
   nodes.resultsLabel.textContent = "Test results";
-  nodes.resultsBody.innerHTML = runnerStatusMarkup(status);
+  nodes.resultsFilter.hidden = true;
+  nodes.resultsContent.innerHTML = runnerStatusMarkup(status);
 }
 
 function renderResults(summary) {
-  const { label, body } = resultsMarkup(summary, state.testStatus);
+  const { label, body } = resultsMarkup(
+    summary,
+    state.testStatus,
+    nodes.hidePassedTests.checked,
+  );
   nodes.resultsLabel.textContent = label;
-  nodes.resultsBody.innerHTML = body;
+  nodes.resultsFilter.hidden =
+    Boolean(summary.setupError) || !summary.cases.length;
+  nodes.resultsContent.innerHTML = body;
 }
 
 function addTranscript(speaker, text, final) {
