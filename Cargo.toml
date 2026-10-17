@@ -130,3 +130,8 @@ debug-assertions = true
 
 [profile.test.package.rust-embed]
 debug-assertions = true
+
+# Moves LiveKit's build helper off vulnerable zip 0.6. See
+# vendor/webrtc-sys-build/README.md for what changed and when to remove it.
+[patch.crates-io]
+webrtc-sys-build = { path = "vendor/webrtc-sys-build" }

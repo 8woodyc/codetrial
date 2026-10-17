@@ -50,9 +50,10 @@ if printf '%s\n' "$staged" | grep -q '[[:blank:]]'; then
     echo "pre-commit: the staged paths above contain whitespace" >&2
     exit 1
 fi
+# Vendored code keeps upstream's formatting and edition, so no lane checks it.
 matching()
 {
-    printf '%s\n' "$staged" | grep -E "$1" | grep -vE '^web/vendor/'
+    printf '%s\n' "$staged" | grep -E "$1" | grep -vE '^(web/)?vendor/'
 }
 
 run_in_work()
