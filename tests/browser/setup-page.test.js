@@ -85,6 +85,54 @@ test("setup palette stays aligned with the lobby", async (t) => {
   }
 });
 
+// The desktop app's starting page loads before any server can serve the lobby's
+// stylesheet, so it carries a copy; this is what keeps the copy from drifting.
+test("desktop start page palette stays aligned with the lobby", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const startCss = read("desktop/ui/start.css");
+  const startTokens = [
+    ...new Set(
+      [...startCss.matchAll(/^\s+(--[a-z-]+):/gm)].map((match) => match[1]),
+    ),
+  ];
+  assert.ok(startTokens.length > 0, "start page tokens exist");
+  for (const colorScheme of ["light", "dark"]) {
+    const startPage = await browser.newPage({ colorScheme });
+    const lobbyPage = await browser.newPage({ colorScheme });
+    t.after(() => Promise.all([startPage.close(), lobbyPage.close()]));
+    await startPage.setContent("<body></body>");
+    await startPage.addStyleTag({ content: startCss });
+    await lobbyPage.setContent('<body class="practice-page"></body>');
+    await lobbyPage.addStyleTag({ content: lobbyCss });
+
+    const tokensOn = (page, selector) =>
+      page.locator(selector).evaluate((element, names) => {
+        const style = getComputedStyle(element);
+        return Object.fromEntries(
+          names.map((name) => [name, style.getPropertyValue(name)]),
+        );
+      }, startTokens);
+    const startValues = await tokensOn(startPage, ":root");
+    const lobbyValues = await tokensOn(lobbyPage, ".practice-page");
+    const compact = (value) => value.replace(/\s+/g, "");
+    let compared = 0;
+    for (const name of startTokens) {
+      // A token the lobby does not define is the start page's own.
+      if (!lobbyValues[name].trim()) continue;
+      compared++;
+      assert.equal(
+        compact(startValues[name]),
+        compact(lobbyValues[name]),
+        `${colorScheme} ${name} differs from the lobby`,
+      );
+    }
+    assert.ok(
+      compared >= 8,
+      `${colorScheme}: only ${compared} tokens compared`,
+    );
+  }
+});
+
 test("setup shows distinct credential groups without narrow-screen overflow", async (t) => {
   if (!browser) return t.skip("playwright chromium unavailable");
   for (const colorScheme of ["light", "dark"]) {

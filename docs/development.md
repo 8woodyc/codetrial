@@ -72,13 +72,16 @@ npm ci                            # ESLint and Prettier, pinned
 npx playwright install chromium   # the browser tests, the whole lobby flow
 cargo install cargo-audit         # the dependency advisory scan
 cargo install cargo-deny          # dependency licenses and sources, deny.toml
+sudo apt install libwebkit2gtk-4.1-dev   # Linux: clippy and tests of desktop/
 ```
 
 CI runs `scripts/test.sh rust`, `scripts/test.sh portable` and
 `scripts/test.sh browser` in parallel, with fail-fast disabled so a failure in
 one lane does not hide the others. Clippy and Rust tests share the Rust lane's
-build cache; formatting, Python and shell checks run in the portable
-lane; Node browser tests have their own lane, except the face-detector suite,
+build cache; the desktop app's clippy and tests run in the same lane against
+their own lockfile and cache, after it installs WebKitGTK. Formatting, Python
+and shell checks run in the portable lane; Node browser tests have their own
+lane, except the face-detector suite,
 which needs the Rust binary and runs after its build. All lanes fetch and
 verify vendor assets; each restores the vendored-asset cache, and only the
 portable lane saves it, after its gates pass. Each lane has its own job

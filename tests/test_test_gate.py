@@ -200,7 +200,13 @@ gate()
         self.assertEqual(rust & portable, shared)
         self.assertEqual(
             rust - shared,
-            {"clippy", "cargo-test", "browser-server-tests", "cargo-deny"},
+            {
+                "clippy",
+                "cargo-test",
+                "browser-server-tests",
+                "cargo-deny",
+                "desktop",
+            },
         )
         self.assertEqual(rust & browser, shared)
         self.assertEqual(portable & browser, shared)

@@ -2779,6 +2779,86 @@ fn a_first_data_dir_launch_writes_the_exported_setup_keys() {
     assert_eq!(mode, 0o600, "{mode:o}");
 }
 
+/// The first line of the child's stdout that says where it is listening, or
+/// nothing when it prints none within a few seconds. Read on a thread: a server
+/// keeps its stdout open, so a line that never comes would otherwise hang the
+/// test instead of failing it.
+fn printed_bound_line(server: &mut ServerProcess) -> Option<String> {
+    use std::io::BufRead as _;
+
+    let stdout = server.stdout.take().expect("stdout is piped");
+    let (sender, receiver) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        for line in std::io::BufReader::new(stdout)
+            .lines()
+            .map_while(Result::ok)
+        {
+            if line.starts_with("codetrial: open http://") {
+                let _ = sender.send(line);
+                return;
+            }
+        }
+    });
+    receiver.recv_timeout(Duration::from_secs(10)).ok()
+}
+
+/// The desktop app starts the server and waits for this line, and nothing else
+/// tells it the window can load the page, so each way the server starts has to
+/// print it, naming the address it bound.
+#[test]
+fn a_cold_start_prints_the_address_it_bound_for_a_launcher() {
+    let home = exe_temp_path("bound-line-cold-exe");
+    std::fs::create_dir_all(&home).unwrap();
+    let exe = binary_beside(&home);
+    let (addr, mut server) = spawn_cold_start(&exe, &home, &[]);
+    let line = printed_bound_line(&mut server);
+    drop(server);
+    let _ = std::fs::remove_dir_all(&home);
+
+    assert_eq!(
+        line,
+        Some(format!(
+            "codetrial: open http://{addr} in your browser to continue setup"
+        ))
+    );
+}
+
+#[test]
+fn a_configured_launch_prints_the_address_it_bound_for_a_launcher() {
+    let home = exe_temp_path("bound-line-full-exe");
+    let data = temp_path("bound-line-full-data");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&data).unwrap();
+    let exe = binary_beside(&home);
+    let livekit_addr = spawn_livekit_room_service("key", "secret");
+    std::fs::write(
+        data.join("codetrial.env.local"),
+        format!(
+            "LIVEKIT_URL=http://{livekit_addr}\nLIVEKIT_API_KEY=key\nLIVEKIT_API_SECRET=secret\n"
+        ),
+    )
+    .unwrap();
+    let data_arg = data.to_str().unwrap().to_string();
+    let (addr, mut server) = spawn_server(|addr| {
+        let mut command = Command::new(&exe);
+        scrubbed(&mut command)
+            .args(["web", "--web-addr", addr, "--data-dir", &data_arg])
+            .current_dir(&home)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        command
+    });
+    let line = printed_bound_line(&mut server);
+    drop(server);
+    let _ = std::fs::remove_dir_all(&home);
+    let _ = std::fs::remove_dir_all(&data);
+
+    assert_eq!(
+        line,
+        Some(format!("codetrial: open http://{addr} in your browser"))
+    );
+}
+
 /// The shell that started the first launch may export the same keys again on
 /// the next one. The folder already has its config then, and the launch has to
 /// serve from it and leave it as it was, not fail on writing it a second time.
