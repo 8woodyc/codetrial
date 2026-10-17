@@ -5,7 +5,7 @@
 //! test and not an integration test: private items are in scope.
 
 use super::*;
-use crate::agent::ThinkingHold;
+use crate::agent::{InterviewLoop, ThinkingHold};
 
 /// A pause arms the discard so a turn already in flight cannot speak over
 /// the resume. Arming it on a turn that has finished is the failure: its
@@ -1533,6 +1533,57 @@ fn the_phase_judge_follows_a_candidate_turn_within_seconds() {
     assert_eq!(activity.phase_judges, MAX_PHASE_JUDGES);
     assert_eq!(activity.last_phase_judge, Some(idle));
     assert!(!activity.reserve_phase_judge(idle + PHASE_JUDGE_COOLDOWN));
+}
+
+/// Without the evidence tool only the judge records STAR, so the coding
+/// round's routine judgments must not spend the calls a behavioral round still
+/// to come needs. The end and a round transition may: after either nothing is
+/// left to keep them for. Nothing is held back once that round has opened,
+/// been refused, or was never planned.
+#[test]
+fn the_coding_round_leaves_judgments_for_the_behavioral_round() {
+    let start = Instant::now();
+    let spoke = |state: RuntimeState| RuntimeState {
+        transcript: vec!["Candidate: so I merge the overlapping intervals".to_string()],
+        ..state
+    };
+    let coding = spoke(RuntimeState::default());
+    assert_eq!(coding.interview_loop, InterviewLoop::CodingBehavioral);
+    let at = start + PHASE_JUDGE_IDLE;
+    let mut activity = RuntimeActivity::new(start);
+    activity.phase_judges = MAX_PHASE_JUDGES - BEHAVIORAL_PHASE_JUDGES;
+    assert!(
+        !activity.claim_phase_judge(&coding, at),
+        "the rest is the behavioral round's"
+    );
+    assert!(
+        activity.reserve_phase_judge(at),
+        "the end or a transition may use it"
+    );
+    for state in [
+        RuntimeState {
+            behavioral_round_started: true,
+            round_transition_seen: true,
+            ..RuntimeState::default()
+        },
+        RuntimeState {
+            round_transition_seen: true,
+            ..RuntimeState::default()
+        },
+        RuntimeState {
+            interview_loop: InterviewLoop::CodingOnly,
+            ..RuntimeState::default()
+        },
+        // A whiteboard interviewer records STAR itself.
+        RuntimeState {
+            interview_mode: crate::agent::InterviewMode::Whiteboard,
+            ..RuntimeState::default()
+        },
+    ] {
+        let mut activity = RuntimeActivity::new(start);
+        activity.phase_judges = MAX_PHASE_JUDGES - BEHAVIORAL_PHASE_JUDGES;
+        assert!(activity.claim_phase_judge(&spoke(state), at));
+    }
 }
 
 /// Typing pauses every few seconds while Coding is open, so a judgment asked

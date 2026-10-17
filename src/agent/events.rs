@@ -622,7 +622,11 @@ fn apply_test_results(
     };
 
     if let Some(evidence) = recorded {
-        if let Some(reminder) = super::unrecorded_earlier_phases(state, &evidence) {
+        // The reminder asks for an evidence call, which an editor without the
+        // tool cannot make; the judge records what the candidate did.
+        if super::evidence_tool_declared(state.interview_mode)
+            && let Some(reminder) = super::unrecorded_earlier_phases(state, &evidence)
+        {
             reply.push('\n');
             reply.push_str(&reminder);
         }
@@ -819,6 +823,13 @@ fn control_round_transition(
         state.behavioral_round_prior_turn =
             super::last_speaker_line(&state.transcript, INTERVIEWER_SPEAKER)
                 .map(|(index, line)| (index, line.clone()));
+
+        // The judge reads the round from where it opens, which is here until
+        // the interviewer turn in flight at this packet is seen to change and
+        // moves it back: an answer the coding round's judgments read is then
+        // judged again for STAR, because it is inside the round.
+        state.judged_round_from = state.transcript.len();
+        state.judged_last_turn.clear();
         state
             .evidence_ledger
             .record_lifecycle(receipt_timestamp_ms, LifecycleTransition::BehavioralStarted);
@@ -830,7 +841,7 @@ fn control_round_transition(
     } else {
         DataEventResult {
             round_changed: Some("skipped"),
-            generate_reply: Some(round_skipped()),
+            generate_reply: Some(round_skipped(state.interview_mode)),
             ..DataEventResult::default()
         }
     }
@@ -878,10 +889,15 @@ fn control_end_interview(
     payload: &serde_json::Value,
     receipt_timestamp_ms: u64,
 ) -> DataEventResult {
-    // Only for a round that never opened. Once it has, a step left without a
-    // row may be one the candidate declined, which stays unassessed rather than
-    // skipped, and only the conversation can tell the two apart.
-    if !state.behavioral_round_started {
+    // A round that never opened is closed here. Once it has, a step left
+    // without a row may be one the candidate declined, which stays unassessed
+    // rather than skipped, and only the conversation can tell the two apart. An
+    // interviewer holding the evidence tool reads it and records the skips at
+    // the wrap-up. Without the tool the phase judge has read it: the end waits
+    // for its last judgment, which says whether the probe was declined.
+    if !state.behavioral_round_started
+        || (!super::evidence_tool_declared(state.interview_mode) && !state.star_declined)
+    {
         super::skip_unassessed_star(state, "The session ended before assessment.");
     }
     let prior_code = state.code.clone();

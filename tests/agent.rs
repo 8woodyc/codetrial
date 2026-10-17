@@ -223,6 +223,19 @@ fn prompt_samples() -> Value {
         "def two_sum(nums, target):\n    seen = {}\n    return []\n",
     )
     .expect("an edit has an excerpt");
+
+    // The editor the excerpt was cut from, so the nudge and the code it quotes
+    // describe one editor.
+    let working_state = RuntimeState {
+        language: "python".to_string(),
+        code_templates: [(
+            "python".to_string(),
+            "def two_sum(nums, target):\n    return []\n".to_string(),
+        )]
+        .into(),
+        code: "def two_sum(nums, target):\n    seen = {}\n    return []\n".to_string(),
+        ..RuntimeState::default()
+    };
     let problem = get_problem(Some("two-sum"));
     let full_profile = InterviewProfile {
         role: "backend engineer".to_string(),
@@ -264,7 +277,8 @@ fn prompt_samples() -> Value {
         "resume": resume(false),
         "resumeBehavioral": resume(true),
         "roundStarted": round_started(),
-        "roundSkipped": round_skipped(),
+        "roundSkipped": round_skipped(InterviewMode::Coding),
+        "roundSkippedBoard": round_skipped(InterviewMode::Whiteboard),
         "compressedContextBehavioral": compressed_context(&behavioral_state),
         "compressedContextEmpty": compressed_context(&RuntimeState::default()),
         "compressedContextCoding": compressed_context(&cold_state),
@@ -346,7 +360,7 @@ fn prompt_samples() -> Value {
         "silenceBehavioral": behavioral_silence_nudge(),
         "silenceEmpty": silence_nudge(&RuntimeState::default(), &empty, None),
         "silenceEarly": silence_nudge(&RuntimeState::default(), &early, None),
-        "silenceWorking": silence_nudge(&RuntimeState::default(), &working, Some(&excerpt)),
+        "silenceWorking": silence_nudge(&working_state, &working, Some(&excerpt)),
         "coldRestart": cold_restart(&cold_state),
         "coldRestartEmpty": cold_restart(&RuntimeState::default()),
 

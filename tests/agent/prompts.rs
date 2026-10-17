@@ -121,11 +121,11 @@ fn disabled_execution_prompts_request_traces_across_recovery_and_editor_events()
             },
         );
         assert!(opening.contains("trace their written code on one ordinary case"));
-        assert!(opening.contains("candidate_speech"));
+        assert!(opening.contains("The platform records Test from that trace"));
         assert!(opening.contains("never ask them to click Run"));
         assert!(!opening.contains("clicking Run. A verbal trace alone"));
         assert!(opening.contains("no test-run result can arrive"));
-        assert!(opening.contains("only after candidate speech or an editor snapshot"));
+        assert!(!opening.contains("record_framework_evidence"));
         assert!(!opening.contains("Test runs arrive as a [SYSTEM EVENT]"));
         assert!(!opening.contains("or a test event supports"));
         for prompt in [
@@ -200,7 +200,7 @@ fn prompt_golden_digest_matches_versions() {
     // the failure worth catching is a version bumped with the golden left
     // alone, which a digest comparison on its own reads as fine.
     let recorded_versions = (27, 20);
-    let recorded_digest = "ca65404d1bb87ca2705d5107044257718e5f3b717b603c5ff5decc8abde3a5b7";
+    let recorded_digest = "1d66d16f043936347748cbcefe769b99f26936d18cfeb57a11bbb6486f358f77";
 
     assert_eq!(
         (LIVE_PROMPT_VERSION, REPORT_PROMPT_VERSION),
@@ -304,9 +304,15 @@ fn interview_prompt_pins_reacto_star_and_safety_boundaries() {
         "never add or combine steps",
         "says the behavioral round",
         "Never invent a story",
-        "`record_framework_evidence`",
-        "`observed` for a\n  direct statement/action",
-        "Never repeat identical evidence or read the evidence state back as a checklist",
+        // At an editor the platform records every step; see
+        // `evidence_tool_declared`.
+        "Evidence: there is no tool for it",
+        "`frameworkState.phases` in a\n  `read_editor` reply, the actual checklist",
+        "never claim a tick it does not show",
+        // Without the tool's replies the model read the editor to learn whether
+        // a step was recorded, a tool round in front of the reply.
+        "Never call `read_editor` to see whether a step is recorded",
+        "judge\nfrom what they said whether a step is done",
         // The guardrails on ending the session, which matter more than the
         // tool: an interviewer that reaches for it during a hard silence turns
         // a stuck candidate into a closed interview.
@@ -1775,10 +1781,19 @@ fn compressed_behavioral_transcript_pins_opening_and_refusal_beside_a_long_tail(
         checkpoint
             .contains("request to finish provides no Situation, Task, Action, or Result evidence")
     );
-    assert!(checkpoint.contains("including as skipped"));
-    assert!(checkpoint.contains("solely because of that refusal or request"));
-    assert!(checkpoint.contains("A later trusted wrap-up may request `session_timing` skips"));
-    assert!(checkpoint.contains("under its normal refusal exception"));
+
+    // An editor interviewer has no evidence tool, so it is told only not to
+    // press; a whiteboard one, which records, is told what not to record.
+    assert!(checkpoint.contains("Leave unsupported STAR parts unassessed; do not press for them"));
+    assert!(!checkpoint.contains("record_framework_evidence"));
+    let board = compressed_context(&RuntimeState {
+        interview_mode: InterviewMode::Whiteboard,
+        ..state.clone()
+    });
+    assert!(board.contains("including as skipped"));
+    assert!(board.contains("solely because of that refusal or request"));
+    assert!(board.contains("A later trusted wrap-up may request `session_timing` skips"));
+    assert!(board.contains("under its normal refusal exception"));
     state
         .transcript
         .push(format!("Candidate: {}", "α".repeat(3000)));

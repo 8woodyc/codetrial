@@ -45,6 +45,13 @@ pub(super) const PHASE_JUDGE_COOLDOWN: Duration = Duration::from_secs(6);
 /// A ceiling for a session whose open steps never close, as when the candidate
 /// never restates the problem: past it the interviewer's own calls remain.
 pub(super) const MAX_PHASE_JUDGES: usize = 48;
+/// How much of that ceiling the coding round's routine judgments leave for a
+/// behavioral round still to come, whose STAR steps only the judge records
+/// once the evidence tool is gone: a coding round whose steps never closed
+/// would otherwise spend all of it first. The judgments the end and a round
+/// transition ask for may use it, since after either none of it is needed
+/// for the coding round's sake.
+pub(super) const BEHAVIORAL_PHASE_JUDGES: usize = 8;
 /// Between two judgments asked for by the editor alone, and how many of the
 /// ceiling they may take. Typing pauses every few seconds while Coding is
 /// open, and at the ordinary cooldown the ceiling would be spent in minutes of
@@ -1538,6 +1545,8 @@ impl RuntimeActivity {
             .is_none_or(|at| now.saturating_duration_since(at) >= cooldown);
         if !rested
             || (editor_only && self.editor_phase_judges >= MAX_EDITOR_PHASE_JUDGES)
+            || (reserves_for_behavioral(state)
+                && self.phase_judges >= MAX_PHASE_JUDGES - BEHAVIORAL_PHASE_JUDGES)
             || !self.reserve_phase_judge(now)
         {
             return false;
@@ -1977,6 +1986,17 @@ pub(super) fn closing_order(
 /// socket. The report is written over HTTP from what this process holds, so
 /// losing the interviewer costs the goodbye and not the assessment.
 pub(super) const INTERVIEWER_UNAVAILABLE: &str = "interviewer_unavailable";
+
+/// Whether a behavioral round may still open, which the coding round's routine
+/// judgments leave `BEHAVIORAL_PHASE_JUDGES` for.
+/// An interviewer holding the evidence tool records STAR itself, so a
+/// whiteboard keeps the whole budget.
+fn reserves_for_behavioral(state: &RuntimeState) -> bool {
+    !crate::agent::evidence_tool_declared(state.interview_mode)
+        && state.interview_loop == crate::agent::InterviewLoop::CodingBehavioral
+        && !state.behavioral_round_started
+        && !state.round_transition_seen
+}
 
 /// No goodbye for a candidate who left, and none from an interviewer that
 /// stopped answering: asking it for one would only spend `WRAP_UP_WAIT` in
