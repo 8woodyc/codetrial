@@ -82,7 +82,7 @@ export function mediaReadiness({
       steps,
       ready: false,
       blocker: "mic-error",
-      message: `Microphone unavailable: ${micError}. Grant access, then test again.`,
+      message: `Microphone unavailable: ${micError}. ${micErrorAdvice(micError)}`,
     };
   }
   if (cameraError && !cameraSkipped) {
@@ -135,32 +135,46 @@ export function mediaReadiness({
   };
 }
 
-/// Sorts a camera error into what the candidate can do about it, so the advice
-/// here and the reason `interview.js` records for a skipped camera cannot
-/// disagree about the same error.
+/// Sorts a camera or microphone error into what the candidate can do about it,
+/// so the advice here and the reason `interview.js` records for a skipped
+/// camera cannot disagree about the same error.
 ///
 /// A missing device and a refused permission are checked first, so an error
-/// that names either is never reported as a busy camera. `busy` is a camera
+/// that names either is never reported as a busy device. `busy` is a device
 /// the browser holds a grant for but cannot start, which is not a permission
-/// problem. On Windows a device is exclusive, so a meeting or recording app
+/// problem. On Windows a camera is exclusive, so a meeting or recording app
 /// with its video on (Zoom, OBS, Teams) makes Chromium fail with
 /// `NotReadableError` ("Could not start video source", "Device in use", or
 /// `TrackStartError` in older builds) and Firefox with `AbortError: Starting
-/// video failed`. The preflight's own "no active video track" is the same
-/// situation seen later: the grant stands but the track stopped, for example
-/// behind a privacy shutter or with the device unplugged. Anything else is
-/// `other`.
-const NO_CAMERA = /not ?found|no camera/i;
-const DENIED_CAMERA = /permission|denied|not ?allowed/i;
-const BUSY_CAMERA =
-  /NotReadableError|TrackStartError|AbortError|could not start video source|starting video failed|device in use|no active video track/i;
+/// video failed`. A microphone is shared by default and is only busy while an
+/// app holds it in exclusive mode, which Chromium reports with the same
+/// `NotReadableError: Device in use`, or "Could not start audio source". The
+/// pool's own "no active video track" is the same situation seen later: the
+/// grant stands but the track stopped, for example behind a privacy shutter or
+/// with the device unplugged. "no active audio track" is narrower, a grant that
+/// came back with no audio track at all; an unplugged microphone ends its
+/// track, and asking again fails as not found. Anything else is `other`.
+const NO_DEVICE = /not ?found|no camera/i;
+const DENIED_DEVICE = /permission|denied|not ?allowed/i;
+const BUSY_DEVICE =
+  /NotReadableError|TrackStartError|AbortError|could not start (?:audio|video) source|starting video failed|device in use|no active (?:audio|video) track/i;
 
-export function cameraErrorKind(error) {
+export function deviceErrorKind(error) {
   const words = String(error || "");
-  if (NO_CAMERA.test(words)) return "no_device";
-  if (DENIED_CAMERA.test(words)) return "denied";
-  if (BUSY_CAMERA.test(words)) return "busy";
+  if (NO_DEVICE.test(words)) return "no_device";
+  if (DENIED_DEVICE.test(words)) return "denied";
+  if (BUSY_DEVICE.test(words)) return "busy";
   return "other";
+}
+
+/// The microphone counterpart of the camera advice below. It has no
+/// presentation route to offer: the microphone stays with CodeTrial for the
+/// whole interview, so the other app has to let go of it before Start.
+function micErrorAdvice(micError) {
+  if (deviceErrorKind(micError) === "busy") {
+    return "The microphone is allowed but will not start: another app may be holding it for itself, for example a recording or call app using exclusive mode. Free it and this check picks it up again by itself.";
+  }
+  return "Grant access, then test again.";
 }
 
 /// "Grant access" sends a busy camera to settings that are already right. The
@@ -169,7 +183,7 @@ export function cameraErrorKind(error) {
 /// presentation box hands the camera back to the other app after Start, but
 /// it also stops the camera being watched and recorded, so the advice says so.
 function cameraErrorAdvice(cameraError) {
-  if (cameraErrorKind(cameraError) === "busy") {
+  if (deviceErrorKind(cameraError) === "busy") {
     return 'The camera is allowed but will not start: another app (for example Zoom, OBS or Teams) may be using it, or it is covered or unplugged. Free it and this check picks it up again by itself. If that app needs the camera during the interview, pass this check first, then tick "I will present this interview in Google Meet", start the interview, and turn that app\'s video back on; CodeTrial then stops watching and recording the camera.';
   }
   return "Grant access, then test again.";
