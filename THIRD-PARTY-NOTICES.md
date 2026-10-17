@@ -35,5 +35,11 @@ License texts and source details are shipped with the relevant assets:
 - `web/vendor/pyodide/README.md`
 - `web/vendor/pdfjs/README.md`
 
+The build also patches one Rust crate, kept in source form with its license:
+
+- `vendor/webrtc-sys-build/` ([webrtc-sys-build](https://crates.io/crates/webrtc-sys-build)
+  0.3.19, Apache-2.0), LiveKit's libwebrtc download helper, moved to zip 9;
+  its `README.md` and `LICENSE` say what changed
+
 Compiler Explorer is a remote service, not bundled software. C, C++, and Java
 source is sent to it only when remote test runs are enabled.
