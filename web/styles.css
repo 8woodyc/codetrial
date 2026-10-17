@@ -7,6 +7,9 @@
   --muted: #7d776a;
   --hairline: #2d2b26;
   --accent: #3987e5;
+  /* Solid fill behind white button text. --accent itself measures 3.6:1 under
+     white, short of the 4.5 that button labels need. */
+  --accent-fill: #2069bd;
   --accent-deep: #2069bd;
   --good: #24b47e;
   --critical: #ff6b6b;
@@ -98,6 +101,7 @@ main {
 }
 
 .lobby {
+  width: min(100%, 76rem);
   padding-block: 1.5rem;
 }
 
@@ -145,10 +149,10 @@ header {
 
 .account-input {
   width: 12rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--hairline);
   border-radius: 6px;
   padding: 0.35rem 0.5rem;
-  background: var(--panel);
+  background: var(--surface);
   color: var(--ink);
   font: inherit;
 }
@@ -376,7 +380,7 @@ p {
 
 .duration-button.selected,
 .start-button {
-  background: var(--accent);
+  background: var(--accent-fill);
   color: #ffffff;
 }
 
@@ -1235,7 +1239,7 @@ p {
 
 .run-button {
   border-color: var(--accent);
-  background: var(--accent);
+  background: var(--accent-fill);
   color: white;
 }
 
@@ -1715,7 +1719,7 @@ table.phase-scores {
 .report-actions button {
   border: 1px solid var(--hairline);
   border-radius: 8px;
-  background: var(--accent);
+  background: var(--accent-fill);
   color: white;
   padding: 0.75rem 1rem;
   cursor: pointer;
@@ -1795,14 +1799,6 @@ table.phase-scores {
   .sync-state {
     display: block;
   }
-}
-
-/* Keeps the round plan and the surface apart inside one row. */
-.row-divider {
-  width: 1px;
-  height: 1.25rem;
-  margin: 0 0.25rem;
-  background: var(--hairline);
 }
 
 /* The whiteboard, in place of the editor. The surface scrolls inside the
@@ -2394,5 +2390,659 @@ table.phase-scores {
 @media (max-width: 480px) {
   .interviewer-style-controls {
     grid-template-columns: 1fr;
+  }
+}
+
+/* The practice entrance. It has its own light palette; the interview, replay
+   and observer pages keep the dark one from :root, and the editor keeps its
+   own --code-* theme. Every rule here is scoped to .practice-page or .lobby so
+   none of it reaches those pages. */
+.practice-page {
+  color-scheme: light;
+  --page: #f6f6f9;
+  --surface: #ffffff;
+  --ink: #171d2d;
+  --sub: #4f5b73;
+  --muted: #5f6b84;
+  /* Decorative edges: card outlines and dividers. */
+  --hairline: #e3e5ec;
+  /* The edge that identifies a form control, which needs 3:1 against the card
+     where --hairline measures 1.28. */
+  --control-border: #858fa3;
+  --accent: #6e2bf0;
+  --accent-fill: #6e2bf0;
+  --accent-deep: #5520c4;
+  --good: #137b56;
+  --critical: #c52d43;
+  --practice-tint: #f3edff;
+  /* The progress chart's tooltip sits on this; the dark default would put
+     the light palette's dark text on a dark box. */
+  --float-surface: #ffffff;
+  --practice-tint-edge: #ddd0fb;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --shadow-card: 0 1px 2px rgb(23 29 45 / 4%), 0 8px 24px rgb(23 29 45 / 6%);
+  --shadow-cta: 0 6px 16px rgb(110 43 240 / 24%);
+}
+
+.practice-page :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.lobby > header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  margin-bottom: 2rem;
+}
+
+.lobby > header .brand {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1.125rem;
+  letter-spacing: -0.02em;
+}
+
+.lobby .account-row {
+  margin: 0;
+}
+
+.lobby .account-input,
+.lobby .practice-filters select,
+.lobby .interview-context input:not([type="checkbox"]),
+.lobby .interview-context select {
+  min-width: 0;
+  min-height: 2.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.lobby .account-link:hover {
+  color: var(--accent-deep);
+}
+
+/* Hero: a headline and one sentence. The numbered cards below are the guide. */
+.practice-hero {
+  margin-bottom: 2rem;
+}
+
+.practice-badge {
+  display: inline-block;
+  margin-bottom: 1rem;
+  padding: 0.375rem 0.875rem;
+  border: 1px solid var(--practice-tint-edge);
+  border-radius: 999px;
+  background: var(--practice-tint);
+  color: var(--accent-deep);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.lobby h1 {
+  max-width: none;
+  font-size: clamp(2rem, 5vw, 3.25rem);
+  font-weight: 750;
+  line-height: 1.1;
+  letter-spacing: -0.035em;
+}
+
+.practice-lead {
+  max-width: 40rem;
+  margin-top: 0.875rem;
+  font-size: 1.0625rem;
+  line-height: 1.55;
+}
+
+.step-number {
+  display: inline-grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: var(--practice-tint);
+  color: var(--accent-deep);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+/* The two setup cards. */
+/* The problem card is widest so the selected problem fits beside its button
+   (see .random-picker .recommendation below); the session card next, for the
+   format pairs. */
+.setup-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.setup-panel {
+  min-width: 0;
+  padding: 1.5rem 1.75rem;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.setup-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.875rem;
+}
+
+.setup-heading .step-number {
+  background: var(--accent-fill);
+  color: #ffffff;
+}
+
+.setup-heading h2 {
+  margin: 0.125rem 0 0;
+  font-size: 1.25rem;
+  letter-spacing: -0.02em;
+}
+
+.setup-heading p {
+  margin-top: 0.25rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+/* One caption style for every control group, fieldset legend or heading. */
+.lobby .difficulty-row legend,
+.lobby .editor-options-row legend,
+.setting-label {
+  margin: 0;
+  padding: 0 0 0.5rem;
+  color: var(--ink);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.setting-label {
+  margin-top: 1.25rem;
+}
+
+.lobby .difficulty-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.lobby .difficulty-row,
+.lobby .editor-options-row {
+  margin: 1.25rem 0 0;
+}
+
+/* Chips: a checkbox or a choice button. Selected ones are tinted, so the one
+   solid purple control on the page is Start. */
+.lobby .difficulty-row label,
+.lobby .duration-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--sub);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.lobby .difficulty-row label:hover,
+.lobby .duration-button:hover {
+  border-color: var(--accent);
+}
+
+.lobby .difficulty-row label:has(:checked),
+.lobby .duration-button.selected {
+  border-color: var(--accent);
+  background: var(--practice-tint);
+  color: var(--accent-deep);
+}
+
+/* Editor options are settings rather than filters, so they read as a plain
+   two-column checklist instead of chips. */
+.lobby .editor-options-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, max-content));
+  gap: 0.25rem 1rem;
+}
+
+.lobby .editor-options-row legend {
+  float: left;
+  grid-column: 1 / -1;
+}
+
+.lobby .editor-options-row label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2rem;
+  color: var(--ink);
+  font-size: 0.875rem;
+}
+
+/* The whiteboard has no editor, so app.js disables the whole fieldset. */
+.lobby .editor-options-row:disabled label {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.lobby input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.lobby .duration-row {
+  margin-top: 0;
+}
+
+.session-panel .format-choices {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.session-choice-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.lobby #random-problem,
+.lobby .interview-context button,
+.lobby #problem-filters-reset {
+  min-height: 2.5rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.lobby #random-problem:not(:disabled):hover,
+.lobby .interview-context button:hover,
+.lobby #problem-filters-reset:hover {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+/* Top-aligned, so a title that wraps grows downward and the button stays put
+   from one draw to the next. */
+.lobby .random-picker {
+  align-items: flex-start;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--hairline);
+}
+
+.lobby .recommendation {
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+/* Narrower than the base 12rem so the line still fits beside the button in
+   the problem card on a 1280px screen, which keeps the lobby on one screen.
+   Tied to the card's share of the .setup-grid columns: narrow that column and
+   the line drops below the button, which "the selected problem drops below
+   the button only when it cannot fit beside it" in lobby.test.js catches. */
+.lobby .random-picker .recommendation {
+  flex-basis: 9rem;
+}
+
+.lobby .problem-picker summary,
+.lobby .interview-context summary {
+  color: var(--accent-deep);
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+/* The panel is narrower than the page, and a phone narrower than one 16rem
+   card, so a column never asks for more than the width it has. */
+.lobby .problem-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+}
+
+.lobby .problem-card {
+  min-height: 6rem;
+  border-radius: var(--radius-md);
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.lobby .problem-card:hover,
+.lobby .problem-card.selected {
+  background: var(--practice-tint);
+  box-shadow: var(--shadow-card);
+}
+
+.lobby .problem-title {
+  font-size: 1rem;
+}
+
+.lobby .interview-context {
+  margin-top: 1.25rem;
+  padding: 0.75rem 1rem;
+  border-color: var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--page);
+}
+
+.lobby .interview-context fieldset {
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+
+.lobby .interview-context fieldset + fieldset {
+  padding-top: 1rem;
+  border-top: 1px solid var(--hairline);
+}
+
+.lobby .interview-context label {
+  min-width: 0;
+  color: var(--sub);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.lobby .interview-context label:has(input[type="checkbox"]) {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.lobby .interview-context input[type="checkbox"] {
+  flex-shrink: 0;
+  margin-top: 0.25rem;
+}
+
+.lobby .interview-context input:not([type="checkbox"]),
+.lobby .interview-context select {
+  width: 100%;
+}
+
+.lobby .interview-context input::file-selector-button {
+  margin-right: 0.5rem;
+  padding: 0.25rem 0.625rem;
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.lobby .interview-context p {
+  margin-top: 0.375rem;
+  line-height: 1.5;
+}
+
+.lobby .interview-context p:empty,
+.lobby #grounding-choices:empty {
+  display: none;
+}
+
+.start-panel .start-row {
+  margin-top: 1.25rem;
+}
+
+.lobby .start-button {
+  width: 100%;
+  min-height: 3rem;
+  border: 0;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-cta);
+  font-size: 1rem;
+}
+
+.lobby .start-button:not(:disabled):hover {
+  background: var(--accent-deep);
+}
+
+.lobby .start-button:disabled {
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.next-steps {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0 0 1.25rem;
+  padding: 0;
+  list-style: none;
+  color: var(--sub);
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+/* The dot is painted, not a marker or generated content: the stylesheet draws
+   no text, and tests/browser/replay-render.test.js holds it to that. */
+.next-steps li {
+  padding-left: 1.125rem;
+  background: radial-gradient(circle, var(--accent) 60%, transparent 66%) 0
+    0.3125em / 0.5rem 0.5rem no-repeat;
+}
+
+/* Progress below the setup reads as more cards of the same family. */
+.lobby .recent-performance,
+.lobby .history {
+  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+/* A saved report opens inside the lobby's history, and these report parts
+   paint fixed dark fills meant for the interview page. */
+.lobby .report-card pre,
+.lobby .score-grid > div,
+.lobby .transcript-row > div,
+.lobby .board-step {
+  background: var(--page);
+}
+
+.lobby .progress-chart-tooltip {
+  border-color: var(--control-border);
+  box-shadow: var(--shadow-card);
+}
+
+.lobby .progress-filters select,
+.lobby #attempt-history > li > button {
+  min-height: 2.5rem;
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.lobby #attempt-history > li > button {
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.lobby #attempt-history > li > button:not(:disabled):hover {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.lobby #attempt-history > li > button[data-delete-report] {
+  color: var(--critical);
+}
+
+.lobby #attempt-history > li > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.lobby .site-credits a,
+.lobby .history a {
+  color: var(--accent-deep);
+}
+
+@media (max-width: 1100px) {
+  .setup-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .start-panel {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 760px) {
+  .setup-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .start-panel {
+    grid-column: auto;
+  }
+
+  .setup-panel {
+    padding: 1.25rem;
+  }
+}
+
+/* Phones: 44px tap targets, and 16px fields so iOS does not zoom on focus. */
+@media (max-width: 480px) {
+  .lobby > header {
+    margin-bottom: 1.25rem;
+  }
+
+  .lobby .account-row {
+    width: 100%;
+  }
+
+  .lobby .account-input {
+    flex: 1 1 10rem;
+    width: auto;
+  }
+
+  .lobby input:not([type="checkbox"]),
+  .lobby select {
+    font-size: 1rem;
+  }
+
+  .practice-hero {
+    margin-bottom: 1.5rem;
+  }
+
+  .practice-lead {
+    font-size: 1rem;
+  }
+
+  .setup-grid {
+    gap: 1rem;
+  }
+
+  .lobby .difficulty-row label,
+  .lobby .editor-options-row label,
+  .lobby .duration-button,
+  .lobby #random-problem {
+    min-height: 2.75rem;
+  }
+
+  /* Equal-width segments: three lengths in one row, each format pair in
+     its own row so a pair never interleaves with the other. */
+  .lobby .duration-row:not(.format-choices) {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .session-choice-group {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lobby .difficulty-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr));
+  }
+
+  .lobby .editor-options-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lobby .difficulty-row label {
+    justify-content: center;
+  }
+
+  .lobby .duration-button {
+    justify-content: center;
+  }
+}
+
+/* A laptop screen: keep the whole setup on one 1280x800 screen. */
+@media (min-width: 1024px) and (max-height: 850px) {
+  .lobby > header {
+    margin-bottom: 1.25rem;
+  }
+
+  .practice-hero {
+    margin-bottom: 1.25rem;
+  }
+
+  .lobby h1 {
+    font-size: 2.5rem;
+  }
+
+  .practice-badge {
+    margin-bottom: 0.625rem;
+  }
+
+  .practice-lead {
+    margin-top: 0.5rem;
+    font-size: 1rem;
+  }
+
+  .setup-panel {
+    padding: 1.25rem;
+  }
+
+  .setting-label {
+    margin-top: 1rem;
+  }
+
+  .lobby .difficulty-row,
+  .lobby .editor-options-row {
+    margin-top: 1rem;
+  }
+
+  .lobby .difficulty-row label,
+  .lobby .duration-button {
+    min-height: 2.25rem;
+    padding: 0.375rem 0.625rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lobby .difficulty-row label,
+  .lobby .duration-button,
+  .lobby #random-problem,
+  .lobby .problem-card,
+  .lobby .start-button {
+    transition: none;
   }
 }
