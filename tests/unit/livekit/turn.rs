@@ -5,7 +5,7 @@
 //! test and not an integration test: private items are in scope.
 
 use super::*;
-use crate::agent::ThinkingHold;
+use crate::agent::{InterviewLoop, ThinkingHold};
 
 /// A pause arms the discard so a turn already in flight cannot speak over
 /// the resume. Arming it on a turn that has finished is the failure: its
@@ -1371,20 +1371,45 @@ fn a_hold_asked_for_aloud_is_owed_its_reply_inside_the_cooldown() {
 }
 
 /// An operator's `CODETRIAL_GEMINI_REPLY_TIMEOUT_S` is the deadline the
-/// watchdog holds, for an unstarted reply and for a generation that stalls.
+/// watchdog holds for a generation that stalls. A reply nothing has started
+/// toward is not waited on that long, whatever it is set to.
 #[test]
 fn the_configured_reply_timeout_is_the_one_the_watchdog_holds() {
     let start = Instant::now();
     let timeout = REPLY_TIMEOUT + Duration::from_secs(15);
     let mut activity = RuntimeActivity::new(start).with_reply_timeout(timeout);
     activity.note_candidate_finished(start, false);
-    assert!(!activity.reply_timed_out(start + REPLY_TIMEOUT, false));
-    assert!(activity.reply_timed_out(start + timeout, false));
+    assert!(activity.reply_timed_out(start + FIRST_OUTPUT_DEADLINE, false));
 
     activity.note_output(Instant::now());
     let progress = activity.last_output_at.unwrap();
     assert!(!activity.reply_timed_out(progress + REPLY_TIMEOUT, false));
     assert!(activity.reply_timed_out(progress + timeout, false));
+}
+
+/// The configured first-output deadline replaces the default for a reply
+/// nothing has started toward, and never outlasts the reply timeout.
+#[test]
+fn the_configured_first_output_deadline_is_capped_by_the_reply_timeout() {
+    let start = Instant::now();
+    let deadline = FIRST_OUTPUT_DEADLINE + Duration::from_secs(20);
+    let mut activity = RuntimeActivity::new(start).with_first_output_deadline(deadline);
+    activity.note_candidate_finished(start, false);
+    assert!(!activity.reply_timed_out(start + FIRST_OUTPUT_DEADLINE, false));
+    assert_eq!(
+        activity.expired_reply_wait(start + deadline, false),
+        Some(deadline)
+    );
+
+    let reply_timeout = deadline - Duration::from_secs(5);
+    let mut capped = RuntimeActivity::new(start)
+        .with_reply_timeout(reply_timeout)
+        .with_first_output_deadline(deadline);
+    capped.note_candidate_finished(start, false);
+    assert_eq!(
+        capped.expired_reply_wait(start + reply_timeout, false),
+        Some(reply_timeout)
+    );
 }
 
 /// A completed turn hands the floor to the candidate at once when nothing is
@@ -1508,6 +1533,57 @@ fn the_phase_judge_follows_a_candidate_turn_within_seconds() {
     assert_eq!(activity.phase_judges, MAX_PHASE_JUDGES);
     assert_eq!(activity.last_phase_judge, Some(idle));
     assert!(!activity.reserve_phase_judge(idle + PHASE_JUDGE_COOLDOWN));
+}
+
+/// Without the evidence tool only the judge records STAR, so the coding
+/// round's routine judgments must not spend the calls a behavioral round still
+/// to come needs. The end and a round transition may: after either nothing is
+/// left to keep them for. Nothing is held back once that round has opened,
+/// been refused, or was never planned.
+#[test]
+fn the_coding_round_leaves_judgments_for_the_behavioral_round() {
+    let start = Instant::now();
+    let spoke = |state: RuntimeState| RuntimeState {
+        transcript: vec!["Candidate: so I merge the overlapping intervals".to_string()],
+        ..state
+    };
+    let coding = spoke(RuntimeState::default());
+    assert_eq!(coding.interview_loop, InterviewLoop::CodingBehavioral);
+    let at = start + PHASE_JUDGE_IDLE;
+    let mut activity = RuntimeActivity::new(start);
+    activity.phase_judges = MAX_PHASE_JUDGES - BEHAVIORAL_PHASE_JUDGES;
+    assert!(
+        !activity.claim_phase_judge(&coding, at),
+        "the rest is the behavioral round's"
+    );
+    assert!(
+        activity.reserve_phase_judge(at),
+        "the end or a transition may use it"
+    );
+    for state in [
+        RuntimeState {
+            behavioral_round_started: true,
+            round_transition_seen: true,
+            ..RuntimeState::default()
+        },
+        RuntimeState {
+            round_transition_seen: true,
+            ..RuntimeState::default()
+        },
+        RuntimeState {
+            interview_loop: InterviewLoop::CodingOnly,
+            ..RuntimeState::default()
+        },
+        // A whiteboard interviewer records STAR itself.
+        RuntimeState {
+            interview_mode: crate::agent::InterviewMode::Whiteboard,
+            ..RuntimeState::default()
+        },
+    ] {
+        let mut activity = RuntimeActivity::new(start);
+        activity.phase_judges = MAX_PHASE_JUDGES - BEHAVIORAL_PHASE_JUDGES;
+        assert!(activity.claim_phase_judge(&spoke(state), at));
+    }
 }
 
 /// Typing pauses every few seconds while Coding is open, so a judgment asked
@@ -2097,10 +2173,10 @@ fn incoming_speech_defers_output_wait_and_gets_a_fresh_reply_budget_after_end() 
     assert_eq!(activity.prompted_at, Some(end));
     assert_eq!(activity.prompt_text.as_deref(), Some("resume"));
     assert!(!activity.reply_timed_out(
-        end + activity.reply_timeout - Duration::from_millis(1),
+        end + FIRST_OUTPUT_DEADLINE - Duration::from_millis(1),
         false
     ));
-    assert!(activity.reply_timed_out(end + activity.reply_timeout, false));
+    assert!(activity.reply_timed_out(end + FIRST_OUTPUT_DEADLINE, false));
 }
 
 #[test]
@@ -2324,4 +2400,576 @@ fn review_settling_silent_delivery_and_cut_sync_hold_at_their_edges() {
     activity.observe_turn_complete(state.context_compression);
     activity.sync_cut_plausible(&mut state);
     assert!(!state.context_cut_plausible);
+}
+
+#[test]
+fn latency_recovery_prompt_keeps_the_wait_and_runtime_prompt_debt() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.latency.voice(start);
+    activity.live_socket = 2;
+    activity.reset_context_observations(true);
+    activity.mark_recovery_prompted(start + Duration::from_secs(10), Some("owed"));
+    let record = activity
+        .latency
+        .audio(start + Duration::from_secs(11))
+        .unwrap();
+    assert_eq!(record["origin"], "last_voiced_pcm");
+    assert_eq!(record["elapsed_ms"], 11_000);
+    assert!(activity.owes_prompt());
+    assert_eq!(activity.prompt_text.as_deref(), Some("owed"));
+}
+
+#[test]
+fn a_late_transcript_does_not_seed_the_next_latency_trace() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.latency.voice(start);
+    activity.latency.audio(start + Duration::from_millis(500));
+    let ended = start + Duration::from_secs(1);
+    activity
+        .latency
+        .boundary(super::super::latency::Boundary::TurnComplete, ended);
+    activity.turn_completed_at = Some(ended);
+    activity.note_latency_transcript(ended + Duration::from_millis(500));
+    let record = activity
+        .latency
+        .audio(ended + Duration::from_secs(30))
+        .unwrap();
+    assert_eq!(record["origin"], "provider_event");
+    assert_eq!(record["elapsed_ms"], 0);
+}
+
+#[test]
+fn either_confirmation_path_closes_a_provisional_holds_latency_trace() {
+    for timed_out in [false, true] {
+        let start = Instant::now();
+        let mut activity = RuntimeActivity::new(start);
+        activity.latency.voice(start);
+        let mut state = RuntimeState {
+            thinking_hold: ThinkingHold::Requested { since: start },
+            ..RuntimeState::default()
+        };
+        let declared = start + crate::agent::THINKING_REQUEST_SETTLE;
+        if timed_out {
+            activity.settle_stale_request(&mut state, declared, 1);
+        } else {
+            activity.confirm_thinking_request(&mut state, declared, 1);
+        }
+        assert!(state.thinking_hold.is_active());
+        assert!(state.end_thinking(2));
+        let released = declared + Duration::from_secs(45);
+        activity.note_latency_transcript(released);
+        let record = activity
+            .latency
+            .audio(released + Duration::from_millis(500))
+            .unwrap();
+        assert_eq!(record["origin"], "transcript");
+        assert_eq!(record["elapsed_ms"], 500);
+    }
+}
+
+/// A generation that only called tools leaves the candidate who finished
+/// speaking unanswered; one that spoke, or that nobody was waiting on, does
+/// not.
+#[test]
+fn only_a_tool_only_answer_to_a_waiting_candidate_is_unvoiced() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.note_output(start);
+    assert!(!activity.answered_without_speaking(), "nobody was waiting");
+
+    activity.note_turn_boundary(start);
+    activity.note_candidate_finished(start, false);
+    activity.note_output(start + Duration::from_millis(500));
+    assert!(activity.answered_without_speaking());
+
+    activity.note_reply_audible();
+    assert!(!activity.answered_without_speaking(), "the reply was heard");
+
+    let mut cut = RuntimeActivity::new(start);
+    cut.note_candidate_finished(start, false);
+    cut.note_output(start);
+    cut.discarding_output = true;
+    assert!(
+        !cut.answered_without_speaking(),
+        "a cut generation is not an answer"
+    );
+}
+
+#[test]
+fn recovery_debt_preserves_the_yield_for_current_and_pending_candidate_input() {
+    for pending in [false, true] {
+        let start = Instant::now();
+        let mut activity = RuntimeActivity::new(start);
+        activity.latency.voice(start);
+        if pending {
+            activity.latency.audio(start + Duration::from_millis(100));
+            activity.latency.voice_start();
+            activity.latency.voice(start + Duration::from_millis(200));
+        }
+        activity.latency.yielded(start + Duration::from_millis(300));
+        activity.mark_recovery_prompted(start + Duration::from_millis(400), None);
+        if pending {
+            activity.latency.boundary(
+                super::super::latency::Boundary::TurnComplete,
+                start + Duration::from_millis(500),
+            );
+        }
+        let record = activity
+            .latency
+            .audio(start + Duration::from_millis(800))
+            .unwrap();
+        assert_eq!(record["origin"], "last_voiced_pcm");
+        assert_eq!(
+            record["candidate_yield_ms"],
+            if pending { 100 } else { 300 }
+        );
+    }
+}
+
+/// A reply somebody is waiting on and nothing has started toward is given up
+/// on at `FIRST_OUTPUT_DEADLINE`, not the far longer `reply_timeout`; one that
+/// has spoken, or a prompt silence answers, is not.
+#[test]
+fn an_unstarted_reply_is_recovered_at_the_first_output_deadline() {
+    let start = Instant::now();
+    let mut waiting = RuntimeActivity::new(start);
+    assert!(waiting.reply_timeout > FIRST_OUTPUT_DEADLINE);
+    waiting.note_candidate_finished(start, false);
+    assert!(!waiting.reply_timed_out(
+        start + FIRST_OUTPUT_DEADLINE - Duration::from_millis(1),
+        false
+    ));
+    assert!(waiting.reply_timed_out(start + FIRST_OUTPUT_DEADLINE, false));
+    assert!(
+        !waiting.reply_timed_out(start + FIRST_OUTPUT_DEADLINE, true),
+        "audio still playing"
+    );
+
+    // Tool calls are output, but the continuation they wait on is not.
+    waiting.note_output(start + Duration::from_secs(1));
+    assert!(!waiting.reply_timed_out(start + FIRST_OUTPUT_DEADLINE, false));
+    let responded = start + Duration::from_secs(2);
+    waiting.note_tool_response(responded);
+    assert!(!waiting.reply_timed_out(
+        responded + FIRST_OUTPUT_DEADLINE - Duration::from_millis(1),
+        false
+    ));
+    assert!(waiting.reply_timed_out(responded + FIRST_OUTPUT_DEADLINE, false));
+
+    // A continuation that began is under the progress rule.
+    waiting.note_output(responded + Duration::from_secs(1));
+    assert!(!waiting.reply_timed_out(responded + FIRST_OUTPUT_DEADLINE * 2, false));
+
+    let mut prompted = RuntimeActivity::new(start);
+    prompted.mark_prompted(start, Some("owed"), false);
+    assert!(prompted.reply_timed_out(start + FIRST_OUTPUT_DEADLINE, false));
+
+    let mut optional = RuntimeActivity::new(start);
+    optional.mark_prompted(start, Some("review"), true);
+    assert!(!optional.reply_timed_out(start + FIRST_OUTPUT_DEADLINE, false));
+}
+
+/// A prompt sent after a stalled continuation restarts the deadline, so its
+/// own answer is waited on before the socket is replaced.
+#[test]
+fn a_reply_check_gets_its_own_first_output_deadline() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.note_candidate_finished(start, false);
+    activity.note_output(start);
+    activity.note_tool_response(start);
+    let asked = start + Duration::from_secs(8);
+    activity.mark_recovery_prompted(asked, Some("reply due?"));
+    assert!(!activity.reply_timed_out(start + FIRST_OUTPUT_DEADLINE, false));
+    assert!(activity.reply_timed_out(asked + FIRST_OUTPUT_DEADLINE, false));
+}
+
+/// A cold socket's context starts over; a resumed one keeps its size.
+#[test]
+fn a_cold_socket_forgets_the_last_context_size() {
+    for resumed in [false, true] {
+        let start = Instant::now();
+        let mut activity = RuntimeActivity::new(start);
+        activity.latency.observe_usage(9000, 0);
+        activity.reset_context_observations(resumed);
+        activity.latency.voice(start);
+        let record = activity.latency.audio(start).unwrap();
+        assert_eq!(
+            record["context_tokens"],
+            if resumed {
+                serde_json::json!(9000)
+            } else {
+                serde_json::Value::Null
+            }
+        );
+    }
+}
+
+/// While Gemini reports the candidate mid-turn, a pause in their speech is
+/// not a reply that never came; only the far longer `reply_timeout` applies.
+#[test]
+fn the_first_output_deadline_waits_out_a_candidate_mid_turn() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.mark_prompted(start, Some("nudge"), false);
+    activity.note_candidate_voice_activity(true, start + Duration::from_secs(2));
+    assert!(!activity.reply_timed_out(start + FIRST_OUTPUT_DEADLINE * 2, false));
+    assert!(activity.reply_timed_out(start + activity.reply_timeout, false));
+}
+
+#[test]
+fn a_required_prompt_tool_continuation_uses_the_first_output_deadline() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.mark_prompted(start, Some("greeting"), false);
+    activity.note_output(start + Duration::from_secs(1));
+    let responded = start + Duration::from_secs(2);
+    activity.note_tool_response(responded);
+    assert!(!activity.reply_in_flight());
+    assert!(!activity.owes_prompt());
+    assert!(!activity.reply_timed_out(
+        responded + FIRST_OUTPUT_DEADLINE - Duration::from_millis(1),
+        false
+    ));
+    assert!(activity.reply_timed_out(responded + FIRST_OUTPUT_DEADLINE, false));
+    activity.note_output(responded + Duration::from_secs(1));
+    assert!(!activity.reply_timed_out(responded + FIRST_OUTPUT_DEADLINE * 2, false));
+    assert!(activity.reply_timed_out(
+        responded + Duration::from_secs(1) + activity.reply_timeout,
+        false
+    ));
+}
+
+#[test]
+fn interrupted_text_continuation_preserves_an_unheard_required_prompt() {
+    let start = Instant::now();
+    for audible in [false, true] {
+        let mut activity = RuntimeActivity::new(start);
+        activity.mark_prompted(start, Some("greeting"), false);
+        activity.note_output(start + Duration::from_secs(1));
+        activity.note_tool_response(start + Duration::from_secs(2));
+        activity.note_output(start + Duration::from_secs(3));
+        if audible {
+            activity.note_reply_audible();
+        }
+        let interrupted = start + Duration::from_secs(4);
+        let debt = activity.debt_past_interruption(interrupted);
+        activity.note_turn_boundary(interrupted);
+        activity.settle_completed_turn(false);
+        activity.keep_reply_debt(debt);
+        assert_eq!(activity.owes_reply(), !audible);
+        assert_eq!(
+            activity.reply_timed_out(interrupted + FIRST_OUTPUT_DEADLINE, false),
+            !audible
+        );
+    }
+}
+
+#[test]
+fn interrupted_tools_do_not_require_optional_or_already_audible_replies() {
+    let start = Instant::now();
+    for (optional, stalled) in [(false, false), (true, false), (false, true), (true, true)] {
+        let mut activity = RuntimeActivity::new(start);
+        if optional {
+            activity.mark_prompted(start, Some("optional review"), true);
+        } else {
+            activity.note_candidate_finished(start, false);
+        }
+        activity.note_output(start + Duration::from_secs(1));
+        if !optional {
+            activity.note_reply_audible();
+        }
+        activity.note_tool_response(start + Duration::from_secs(2));
+        let interrupted = if stalled {
+            let at = start + Duration::from_secs(2) + PROMPT_STALL;
+            activity.settle_stalls(at, false);
+            at
+        } else {
+            start + Duration::from_secs(3)
+        };
+        let debt = activity.debt_past_interruption(interrupted);
+        activity.note_turn_boundary(interrupted);
+        activity.settle_completed_turn(false);
+        activity.keep_reply_debt(debt);
+        assert!(!activity.owes_reply());
+        assert!(!activity.reply_timed_out(interrupted + activity.reply_timeout, false));
+    }
+}
+
+#[test]
+fn interruptions_preserve_rebased_required_prompt_deadlines() {
+    let start = Instant::now();
+    for queued in [false, true] {
+        let mut activity = RuntimeActivity::new(start);
+        if queued {
+            activity.note_output(start);
+        }
+        activity.mark_prompted(start, Some("required reaction"), false);
+        let released = start + Duration::from_secs(30);
+        if queued {
+            activity.note_turn_boundary(released);
+            activity.settle_completed_turn(false);
+        } else {
+            activity.resume_reply_wait(released);
+        }
+        let interrupted = released + Duration::from_secs(1);
+        let debt = activity.debt_past_interruption(interrupted);
+        activity.note_turn_boundary(interrupted);
+        activity.settle_completed_turn(false);
+        activity.keep_reply_debt(debt);
+        assert!(!activity.reply_timed_out(interrupted, false));
+        assert!(!activity.reply_timed_out(
+            released + FIRST_OUTPUT_DEADLINE - Duration::from_millis(1),
+            false
+        ));
+        assert!(activity.reply_timed_out(released + FIRST_OUTPUT_DEADLINE, false));
+    }
+}
+
+#[test]
+fn required_prompt_clean_completion_can_intentionally_be_silent() {
+    let start = Instant::now();
+    for tools in [false, true] {
+        let mut activity = RuntimeActivity::new(start);
+        activity.mark_prompted(start, Some("required reaction"), false);
+        if tools {
+            activity.note_output(start);
+            activity.note_tool_response(start);
+        }
+        activity.note_turn_boundary(start + Duration::from_secs(1));
+        activity.settle_completed_turn(false);
+        assert!(!activity.owes_reply());
+        assert!(!activity.reply_timed_out(start + activity.reply_timeout, false));
+    }
+}
+
+#[test]
+fn a_queued_required_prompt_supersedes_the_tool_only_followup() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.note_candidate_finished(start, false);
+    activity.note_output(start);
+    activity.note_tool_response(start);
+    activity.mark_prompted(start + Duration::from_secs(1), Some("test result"), false);
+    assert!(!activity.answered_without_speaking());
+    activity.note_turn_boundary(start + Duration::from_secs(2));
+    activity.settle_completed_turn(false);
+    assert!(!activity.reply_in_flight());
+    assert_eq!(activity.prompt_text.as_deref(), Some("test result"));
+    activity.note_output(start + Duration::from_secs(3));
+    assert!(!activity.answered_without_speaking());
+}
+
+/// One acknowledgement per candidate wait, however many tool rounds hold the
+/// reply back, and none without a wait or during a discard.
+#[test]
+fn a_tool_acknowledgement_plays_once_per_wait() {
+    let start = Instant::now();
+    let at = |ms| start + Duration::from_millis(ms);
+    let mut activity = RuntimeActivity::new(start);
+    assert!(!activity.take_tool_ack(at(0)), "nobody is waiting");
+    activity.note_candidate_finished(at(0), false);
+    assert!(activity.take_tool_ack(at(10)));
+    assert!(!activity.take_tool_ack(at(20)), "the same wait");
+
+    // A wait rebased across an interruption is still the same request.
+    activity.awaiting_reply_since = Some(at(3_000));
+    assert!(!activity.take_tool_ack(at(3_010)), "a rebased wait");
+
+    activity.clear_candidate_reply_wait();
+    activity.note_candidate_finished(at(5_000), false);
+    activity.discarding_output = true;
+    assert!(!activity.take_tool_ack(at(5_010)), "a discarded generation");
+    activity.discarding_output = false;
+
+    // Never over the candidate speaking again.
+    activity.note_candidate_voice_activity(true, at(5_020));
+    activity.note_candidate_voice(at(5_030));
+    assert!(
+        !activity.take_tool_ack(at(5_040)),
+        "the candidate is speaking"
+    );
+    activity.note_candidate_voice_activity(false, at(5_050));
+    assert!(activity.take_tool_ack(at(9_000)), "a new wait, once quiet");
+
+    activity.note_candidate_finished(at(9_500), false);
+    activity.clear_candidate_reply_wait();
+    activity.awaiting_reply_since = Some(at(9_600));
+    assert!(!activity.take_tool_ack(at(9_700)), "an answered request");
+
+    // A cut that keeps the wait keeps the acknowledgement owed with it.
+    activity.clear_candidate_reply_wait();
+    activity.note_candidate_finished(at(12_000), false);
+    let debt = activity.debt_past_interruption(at(12_100));
+    activity.clear_candidate_reply_wait();
+    activity.keep_reply_debt(debt);
+    assert!(
+        activity.take_tool_ack(at(12_200)),
+        "a wait kept across a cut"
+    );
+}
+
+/// Microphone frames from before the provider's end of speech belong to the
+/// utterance that ended, so they are not the candidate cutting in; only a
+/// voiced frame after that end is.
+#[test]
+fn voiced_frames_before_the_end_of_speech_are_not_an_interruption() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.note_candidate_voice_activity(true, start);
+    activity.note_candidate_voice(start + Duration::from_millis(100));
+    activity.note_candidate_voice_activity(false, start + Duration::from_millis(200));
+    assert!(!activity.candidate_interrupting(start + Duration::from_millis(300)));
+    activity.note_candidate_voice(start + Duration::from_millis(400));
+    assert!(activity.candidate_interrupting(start + Duration::from_millis(500)));
+}
+
+/// An interruption owes the candidate's incoming speech only when the
+/// candidate is the one cutting in; an unfinished reply interrupted while
+/// nobody speaks owes no new speech.
+#[test]
+fn an_interruption_with_nobody_speaking_owes_no_incoming_speech() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.note_output(start);
+    assert!(activity.reply_unfinished());
+    let debt = activity.debt_past_interruption(start + Duration::from_secs(1));
+    assert!(!debt.incoming_speech_owed);
+    activity.note_candidate_voice_activity(true, start + Duration::from_secs(1));
+    let debt = activity.debt_past_interruption(start + Duration::from_secs(2));
+    assert!(debt.incoming_speech_owed);
+}
+
+/// A voiced frame at exactly the provider's end of speech belongs to the
+/// utterance that ended, as the latency trace's end keeps frames at or before
+/// it, so it is not the candidate cutting in.
+#[test]
+fn a_voiced_frame_at_the_end_of_speech_is_not_an_interruption() {
+    let start = Instant::now();
+    let ended = start + Duration::from_millis(200);
+    let mut activity = RuntimeActivity::new(start);
+    activity.note_candidate_voice_activity(true, start);
+    activity.note_candidate_voice(ended);
+    activity.note_candidate_voice_activity(false, ended);
+    assert!(!activity.candidate_interrupting(ended + Duration::from_millis(100)));
+}
+
+/// A short first-output setting does not cut a replacement's briefing at the
+/// short deadline: the recovery gets the default one, timed from its own
+/// request, and is replaced only when that runs out.
+#[test]
+fn a_five_second_limit_does_not_cut_the_replacement_briefing() {
+    let start = Instant::now();
+    let short = Duration::from_secs(5);
+    let mut activity = RuntimeActivity::new(start).with_first_output_deadline(short);
+    activity.note_candidate_finished(start, false);
+    assert_eq!(
+        activity.expired_reply_wait(start + short, false),
+        Some(short)
+    );
+    let briefed = start + Duration::from_secs(6);
+    activity.mark_recovery_prompted(briefed, None);
+    assert_eq!(
+        activity.expired_reply_wait(briefed + Duration::from_millis(5_300), false),
+        None
+    );
+    assert_eq!(
+        activity.expired_reply_wait(
+            briefed + FIRST_OUTPUT_DEADLINE - Duration::from_millis(1),
+            false
+        ),
+        None
+    );
+    assert_eq!(
+        activity.expired_reply_wait(briefed + FIRST_OUTPUT_DEADLINE, false),
+        Some(FIRST_OUTPUT_DEADLINE)
+    );
+    assert_eq!(
+        activity.expired_reply_wait(briefed + FIRST_OUTPUT_DEADLINE, true),
+        None
+    );
+
+    // A longer setting is kept for a recovery too.
+    let long = Duration::from_secs(30);
+    let mut activity = RuntimeActivity::new(start).with_first_output_deadline(long);
+    activity.mark_recovery_prompted(start, None);
+    assert_eq!(
+        activity.expired_reply_wait(start + FIRST_OUTPUT_DEADLINE, false),
+        None
+    );
+    assert_eq!(activity.expired_reply_wait(start + long, false), Some(long));
+}
+
+/// Once ordinary work supersedes the recovery, the configured deadline is
+/// back: a new candidate turn, an ordinary prompt, or a continuation.
+#[test]
+fn recovery_timeout_does_not_leak_into_superseding_requests() {
+    let start = Instant::now();
+    let short = Duration::from_secs(5);
+    for candidate in [false, true] {
+        let mut activity = RuntimeActivity::new(start).with_first_output_deadline(short);
+        activity.mark_recovery_prompted(start, None);
+        let next = start + Duration::from_secs(1);
+        if candidate {
+            activity.note_candidate_finished(next, false);
+        } else {
+            activity.mark_prompted(next, Some("ordinary prompt"), false);
+        }
+        assert_eq!(
+            activity.expired_reply_wait(next + short, false),
+            Some(short)
+        );
+    }
+    let mut activity = RuntimeActivity::new(start).with_first_output_deadline(short);
+    activity.mark_recovery_prompted(start, None);
+    activity.note_output(start + Duration::from_secs(1));
+    let responded = start + Duration::from_secs(2);
+    activity.note_tool_response(responded);
+    assert_eq!(
+        activity.expired_reply_wait(responded + short, false),
+        Some(short)
+    );
+}
+
+/// A recovery cut by an interruption keeps its own deadline across the cut.
+#[test]
+fn an_interruption_keeps_the_recovery_prompts_timeout() {
+    let start = Instant::now();
+    let mut activity =
+        RuntimeActivity::new(start).with_first_output_deadline(Duration::from_secs(5));
+    activity.mark_recovery_prompted(start, Some("owed"));
+    let interrupted = start + Duration::from_secs(1);
+    let debt = activity.debt_past_interruption(interrupted);
+    activity.note_turn_boundary(interrupted);
+    activity.keep_reply_debt(debt);
+    assert_eq!(
+        activity.expired_reply_wait(start + Duration::from_secs(6), false),
+        None
+    );
+    assert_eq!(
+        activity.expired_reply_wait(start + FIRST_OUTPUT_DEADLINE, false),
+        Some(FIRST_OUTPUT_DEADLINE)
+    );
+}
+
+/// A recovery sent behind a generation still running keeps its request past
+/// that generation's output; a tool continuation after it is newer work and is
+/// held to the configured deadline, not the recovery's longer one.
+#[test]
+fn a_continuation_after_a_recovery_behind_a_turn_keeps_the_configured_deadline() {
+    let start = Instant::now();
+    let short = Duration::from_secs(5);
+    let mut activity = RuntimeActivity::new(start).with_first_output_deadline(short);
+    activity.note_output(start);
+    activity.mark_recovery_prompted(start + Duration::from_secs(1), None);
+    activity.note_output(start + Duration::from_secs(2));
+    assert!(activity.prompted_at.is_some(), "the recovery is still owed");
+    let responded = start + Duration::from_secs(3);
+    activity.note_tool_response(responded);
+    assert_eq!(
+        activity.expired_reply_wait(responded + short, false),
+        Some(short)
+    );
 }

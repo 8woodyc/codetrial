@@ -4,7 +4,7 @@
 
 use super::{
     MIN_WRITTEN_CHARS, RuntimeState, TestedCode, changed_characters, code_written, edited_within,
-    rewritten, uncommented_chars,
+    rewritten, typed_comments, uncommented_chars,
 };
 
 #[test]
@@ -215,6 +215,31 @@ fn uncommented_chars_drops_comments_and_keeps_literals() {
     assert_eq!(
         kept("javascript", "s = 'open // still string"),
         "s='open//stillstring"
+    );
+}
+
+/// A typed explanation is whatever the comparison leaves out, from the same
+/// lexer: a comment trailing code counts, and a marker inside a string, even
+/// one opening a line of a docstring, does not.
+#[test]
+fn typed_comments_are_what_uncommented_chars_leaves_out() {
+    assert_eq!(
+        typed_comments(
+            "python",
+            "x = 1  # why
+y = 2"
+        ),
+        " why\n"
+    );
+    assert_eq!(
+        typed_comments("python", "s = \"\"\"\n# not a comment\n\"\"\"\n# one\n"),
+        " one\n"
+    );
+    assert_eq!(typed_comments("javascript", "u = 'http://x'; // y"), " y\n");
+    assert_eq!(
+        typed_comments("c", "/*\n * a\n */\n*rest = b; // c"),
+        "\n * a\n \n c\n",
+        "a star line is a comment only inside the block"
     );
 }
 

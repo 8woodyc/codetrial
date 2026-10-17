@@ -46,21 +46,36 @@ replacement asks for one, so a run of sockets that each answer their briefing
 and die still ends the interview.
 
 A candidate turn, required prompt (including the opening greeting), or tool
-continuation that produces no output for 45 seconds replaces the socket even
-without a `GoAway`. `CODETRIAL_GEMINI_REPLY_TIMEOUT_S` sets that interval
-within 20 to 120 seconds. The `codetrial turn_timing` summaries record observed
-reply waits; [reply timing](turn-timing.md) defines their measurement boundaries
-and unavailable observations. A reply the watchdog replaces is paid for twice,
-so an endpoint whose slow replies do arrive warrants a longer timeout. For
-recovery, a candidate turn is timed from the last transcript fragment of it,
-and a fragment arriving within two seconds of a turn that said something is
-taken as the lagging tail of speech that turn already answered, so it owes
-nothing. The replacement, resumed or cold, carries
+continuation that gets nothing back for 10 seconds, not even the end of a turn
+that chose silence, replaces the socket even without a `GoAway`. This bounds
+sockets that stay open without answering.
+`CODETRIAL_GEMINI_FIRST_OUTPUT_S` sets that deadline within 5 to 120 seconds,
+never above the reply timeout below, for a model whose replies are slow to
+begin. The deadline waits while Gemini reports the candidate still mid-turn. A
+prompt sent after such a reply waits its own full deadline, and when Gemini
+cuts a stalled generation to take the prompt, the cut leaves the reply owed
+rather than settled, since the candidate did not cause it. A generation that
+has started and then stops producing output is given longer, 45 seconds, since
+its next chunk may simply be slow; `CODETRIAL_GEMINI_REPLY_TIMEOUT_S` sets that
+interval within 20 to 120 seconds. A recovery prompt, a replacement
+socket's briefing or a same-socket reply check, is timed from its own request
+and never given less than the default 10 seconds for its first output, so a
+shorter `CODETRIAL_GEMINI_FIRST_OUTPUT_S` cannot cut one recovery straight into
+the next. A superseding candidate turn or ordinary prompt uses the configured
+deadline again. The `codetrial turn_timing` summaries
+record observed reply waits, and [reply timing](turn-timing.md) defines their
+measurement boundaries and unavailable observations; the
+[latency records](latency-observability.md) break the server reply path into
+segments, including tool batches and output queueing. A reply the watchdog
+replaces is paid for twice, so an endpoint whose slow replies do arrive
+warrants a longer timeout. For recovery, a candidate turn is timed from the
+last transcript fragment of it, and a fragment arriving within two seconds of
+a turn that said something is taken as the lagging tail of speech that turn
+already answered, so it owes nothing. The replacement, resumed or cold, carries
 the unanswered reply across and publishes the same reconnecting state. A reply
 cut off mid-generation is owed too, and the replacement is told not to repeat
 what was already said. Optional editor reviews accept silence; queued audio and
-a paused interview do not trigger this watchdog. A generation that stops
-producing output for the same interval also recovers. Periodic nudges wait
+a paused interview do not trigger this watchdog. Periodic nudges wait
 while a reply is owed rather than replacing its debt. Until a socket has
 transcribed the candidate, the first one and every replacement alike, the idle
 timers also count the candidate's microphone level as speech, so a socket that
@@ -180,11 +195,15 @@ rate. `CODETRIAL_MAX_INTERIM_REVIEWS` defaults to 6, accepts `0` to disable
 the reviews, and is capped at 72. This is a quota guard, not a completeness
 limit: the final report still receives the complete transcript and editor state.
 
-The phase judge, which records the conversational REACTO steps from the
-candidate's own words, uses the same report model and keys. Every judgment
-needs a candidate turn or editor it has not read, or the window of a call that
-failed, and a step it records still open: Repeat, Example and Algorithm until
-Coding is recorded, Coding and Optimizations while there is code. On the watch
+The phase judge, which records the interview's steps from the candidate's own
+words and editor, uses the same report model and keys. At a typed editor it is
+their only recorder, since the interviewer has no evidence tool there. Every
+judgment needs a candidate turn or editor it has not read, or the window of a
+call that failed, and a step it records still open: Repeat, Example and
+Algorithm until Coding is recorded, and at a typed editor after it while a step
+about the code is, Coding and Optimizations while there is code, and at a typed
+editor Test while nothing can run the written code and the STAR steps once the
+behavioral round has opened, read from where it opened. On the watch
 tick one starts once the candidate has been quiet and not typing for 2 seconds,
 no more often than every 6 seconds, or every 30 seconds when only the editor
 changed; typing pauses every few seconds while Coding is open, so editor-only
@@ -192,9 +211,10 @@ judgments also take at most 12 of the calls. The end and a held round
 transition may start one sooner: the end waits at most 5 seconds in all for its
 judgments, and a round transition is held at most 5 seconds while the room
 keeps running, or until the resume when the interview is paused. Both share the
-ceiling of 48 calls per interview. Each reads at most 6 KiB of transcript tail
-and 6 KiB of editor. A rate limit on a judgment does not cool the key, so the
-judge cannot leave the final report without one.
+ceiling of 48 calls per interview, of which a coding round at a typed editor
+leaves 8 for a behavioral round still to come. Each reads at most 6 KiB of
+transcript tail and 6 KiB of editor. A rate limit on a judgment does not cool
+the key, so the judge cannot leave the final report without one.
 
 ## What bounds concurrency
 
@@ -393,8 +413,8 @@ and prohibit returning to it merely to recover earlier work. They also omit
 coding-run progress cues. Coding checkpoint output is unchanged by these mode
 guards; no token reduction is claimed for this correctness fix.
 
-Only while a pair is configured do `read_editor`, `log_hint` and
-`record_framework_evidence` answers also carry the latest unanswered candidate
+Only while a pair is configured do `read_editor`, `log_hint` and, at a
+whiteboard, `record_framework_evidence` answers also carry the latest unanswered candidate
 utterance, as quoted data, so a reply owed across a cut is not lost, and only
 while a cut is plausible (as below) and the floor is not held. Without a
 pair these application-level additions are omitted. Provider-default sliding

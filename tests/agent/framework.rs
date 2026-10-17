@@ -1220,21 +1220,32 @@ fn the_platform_closes_unasked_star_steps_itself() {
         && item.confidence == 100));
     assert!(framework_progress(&unopened).is_empty());
 
-    // Ending an active round preserves an answered step and leaves unsupported
-    // parts open, since they may belong to a declined probe.
-    let mut ended = RuntimeState {
-        behavioral_round_started: true,
-        ..RuntimeState::default()
-    };
-    record_framework_evidence(
-        &mut ended,
-        &json!({"phase":"situation","source":"candidate_speech","kind":"observed",
-                "confidence":80,"summary":"Described the outage."}),
-    )
-    .unwrap();
-    apply_data_event(&mut ended, TOPIC_CONTROL, &end, 99.0);
-    assert!(skips(&ended).is_empty());
-    assert_eq!(framework_progress(&ended), ["situation"]);
+    // Ending an active round preserves an answered step. At an editor, where
+    // the interviewer has no evidence tool, the platform closes the rest,
+    // unless the phase judge found the probe declined: those parts stay
+    // unassessed. A whiteboard interviewer reads that itself at the wrap-up.
+    for (mode, declined, closed) in [
+        (InterviewMode::Coding, false, true),
+        (InterviewMode::Coding, true, false),
+        (InterviewMode::Whiteboard, false, false),
+    ] {
+        let mut ended = RuntimeState {
+            behavioral_round_started: true,
+            interview_mode: mode,
+            star_declined: declined,
+            ..RuntimeState::default()
+        };
+        record_framework_evidence(
+            &mut ended,
+            &json!({"phase":"situation","source":"candidate_speech","kind":"observed",
+                    "confidence":80,"summary":"Described the outage."}),
+        )
+        .unwrap();
+        apply_data_event(&mut ended, TOPIC_CONTROL, &end, 99.0);
+        let expected = if closed { &star[1..] } else { &[][..] };
+        assert_eq!(skips(&ended), expected, "{mode:?}, declined={declined}");
+        assert_eq!(framework_progress(&ended), ["situation"]);
+    }
 
     // A warning inside a running behavioral round leaves its parts open for the
     // one follow-up the round still allows.
@@ -1243,8 +1254,9 @@ fn the_platform_closes_unasked_star_steps_itself() {
     apply_data_event(&mut behavioral, TOPIC_CONTROL, &warning, 99.0);
     assert!(skips(&behavioral).is_empty());
 
-    // Nor does the end of one: a step left without evidence there may belong to
-    // a probe the candidate declined, which the wrap-up leaves unassessed.
+    // The end of one closes them at an editor, as above, but not where the
+    // probe was declined.
+    behavioral.star_declined = true;
     apply_data_event(&mut behavioral, TOPIC_CONTROL, &end, 99.0);
     assert!(skips(&behavioral).is_empty());
 
@@ -2508,7 +2520,7 @@ fn a_passing_rerun_after_the_analysis_does_not_reopen_optimizations() {
     let mut state = with_written_code(RuntimeState::default());
     let first = run_tests(&mut state, 3, 3).generate_reply.unwrap();
     assert!(first.contains("move to Optimizations"), "{first}");
-    assert!(first.contains("record that evidence silently instead of asking them to repeat it"));
+    assert!(first.contains("do not ask them to repeat it; the platform records it"));
 
     record_framework_evidence(
         &mut state,
@@ -2612,13 +2624,17 @@ fn a_run_after_a_setup_error_is_not_a_repeat() {
 }
 
 /// A skipped round must not turn missing bookkeeping into a request to repeat
-/// work the candidate already did.
+/// work the candidate already did. A whiteboard interviewer records it; at the
+/// editor the platform does, and the interviewer has no tool to record with.
 #[test]
 fn a_skipped_round_records_covered_work_before_asking_again() {
     assert!(
-        round_skipped()
+        round_skipped(InterviewMode::Whiteboard)
             .contains("record that evidence silently instead of asking them to repeat it")
     );
+    let editor = round_skipped(InterviewMode::Coding);
+    assert!(editor.contains("do not ask them to repeat it; the platform records it"));
+    assert!(!editor.contains("record that evidence"));
 }
 
 /// A small edit after the analysis keeps it: only a rewrite asks whether it
@@ -2872,7 +2888,7 @@ fn review_and_time_warning_follow_the_recorded_test_progress() {
     );
     assert_eq!(empty.last_test_run.as_ref().unwrap()["total"], 0);
     assert!(time_warning(&empty).contains("click Run on the highest-value tests"));
-    assert!(silence_nudge(&empty, "", None).contains("narrate or test it"));
+    assert!(silence_nudge(&empty, "", None).contains("narrate or test their code"));
     assert!(!proactive_review(&empty, "", None).contains("latest test run"));
 
     // A setup error is not a run, so the warning still asks for one.
@@ -2915,7 +2931,7 @@ fn silence_after_a_setup_error_allows_retrying_without_code_changes() {
 #[test]
 fn silence_after_tests_does_not_send_the_candidate_back_to_test() {
     let untested = silence_nudge(&with_written_code(RuntimeState::default()), "", None);
-    assert!(untested.contains("narrate or test it"));
+    assert!(untested.contains("narrate or test their code"));
 
     let mut state = with_written_code(RuntimeState {
         last_test_run: Some(json!({"language": "python", "passed": 3, "total": 3,
@@ -3073,7 +3089,7 @@ fn the_reported_timeline_asks_for_nothing_already_done() {
         .push("Candidate: O(n) time and space with the map; duplicates are fine.".into());
     let current =
         "The latest test run executed the code on screen, so do not ask them to run tests again";
-    let record = "record that evidence silently instead of asking them to repeat it";
+    let record = "do not ask them to repeat it; the platform records it";
 
     // Answered but not recorded, then recorded: at every stage each prompt
     // carries the fact that the run covers this code, and none asks for a run
@@ -3220,7 +3236,7 @@ fn the_progress_clause_names_the_step_actually_open() {
     let mut empty = with_written_code(RuntimeState::default());
     let packet = json!({"language": empty.language, "passed": 0, "total": 0, "code": empty.code});
     apply_data_event(&mut empty, TOPIC_TEST_RESULTS, &packet, 100.0);
-    assert!(silence_nudge(&empty, "", None).contains("narrate or test it"));
+    assert!(silence_nudge(&empty, "", None).contains("narrate or test their code"));
 }
 
 /// A passing result can land after the candidate has typed past the code it
@@ -3300,8 +3316,8 @@ fn a_rewrite_is_asked_about_once() {
         "{first}"
     );
     assert!(
-        first.contains("record Optimizations for the new code"),
-        "{first}"
+        !first.contains("record Optimizations"),
+        "an editor has no evidence call to make: {first}"
     );
     let again = run_tests(&mut state, 3, 3).generate_reply.unwrap();
     assert!(!again.contains("may no longer describe"), "{again}");
@@ -3722,12 +3738,8 @@ fn automatic_test_record_retains_reconciliation_and_follow_ups() {
     .unwrap();
     let reply = run_tests(&mut state, 3, 3).generate_reply.unwrap();
     assert!(
-        reply.contains("repeat, example, algorithm, coding"),
-        "{reply}"
-    );
-    assert!(
-        reply.contains("if they skipped it, record nothing"),
-        "{reply}"
+        !reply.contains("Unrecorded earlier"),
+        "an editor has no evidence call to make: {reply}"
     );
     assert!(
         reply.contains(&released_follow_ups(&state).unwrap()),
@@ -3762,7 +3774,7 @@ fn a_held_run_keeps_its_reconciliation_and_released_follow_ups() {
     assert!(!result.yield_turn);
     assert_eq!(result.thinking_changed, None);
     let context = result.held_context.unwrap();
-    assert!(context.contains("Unrecorded earlier step(s)"));
+    assert!(!context.contains("Unrecorded earlier step(s)"));
     assert!(context.contains(&released_follow_ups(&state).unwrap()));
     assert_eq!(framework_progress(&state), ["optimizations", "test"]);
 }
@@ -3908,9 +3920,13 @@ fn the_phase_judge_is_refused_anything_it_cannot_ground() {
     assert!(apply_phase_judgment(&mut state, &steps).is_empty());
     assert_eq!(state.framework_evidence.len(), 1);
 
-    // No REACTO step is recorded once the behavioral round is open.
+    // No REACTO step is recorded once the behavioral round is open; the STAR
+    // steps are, since without the evidence tool nothing else records them.
     state.behavioral_round_started = true;
-    assert!(phase_judge_open(&state).is_empty());
+    assert_eq!(
+        phase_judge_open(&state),
+        ["situation", "task", "action", "result"]
+    );
 }
 
 /// Coding is grounded in what the candidate typed, never in speech or in the
@@ -3942,6 +3958,275 @@ fn the_phase_judge_grounds_coding_in_what_the_candidate_typed() {
     let recorded = judge(&mut state, code);
     assert_eq!(recorded.len(), 1);
     assert_eq!(recorded[0].source, EvidenceSource::EditorSnapshot);
+}
+
+/// At an editor the interviewer has no evidence tool, so the judge records the
+/// behavioral round too: from what the candidate said inside it, never from an
+/// answer given before it was asked for, and never from a story the
+/// interviewer told first and the candidate agreed with.
+#[test]
+fn the_phase_judge_records_star_only_from_inside_the_round() {
+    let story = "I traced the outage to a cache entry that never expired";
+    let mut state = RuntimeState {
+        transcript: vec![
+            format!("Candidate: {story}"),
+            "Interviewer: Tell me about a hard bug you fixed.".into(),
+        ],
+        behavioral_round_started: true,
+        behavioral_round_transcript_start: 1,
+        ..RuntimeState::default()
+    };
+    let situation = json!([{"step": "situation", "quote": story, "summary": "An outage."}]);
+    assert!(
+        judge(&mut state, situation.clone()).is_empty(),
+        "said before the round opened"
+    );
+    let window = take_phase_judge_window(&mut state, get_problem(Some("insert-interval")));
+    assert!(
+        !window.contains("cache entry that never expired"),
+        "{window}"
+    );
+
+    state
+        .transcript
+        .push(format!("Candidate: {story}, last spring."));
+    let recorded = judge(&mut state, situation);
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].phase, FrameworkPhase::Situation);
+    assert_eq!(recorded[0].source, EvidenceSource::CandidateSpeech);
+
+    state.transcript.extend([
+        "Interviewer: So you rolled back the deploy to stop the errors?".into(),
+        "Candidate: Yes, I rolled back the deploy to stop the errors.".into(),
+    ]);
+    let echo = json!([{"step": "action", "quote": "rolled back the deploy to stop the errors",
+        "summary": "Rolled back."}]);
+    assert!(
+        judge(&mut state, echo).is_empty(),
+        "the interviewer said it first"
+    );
+    assert_eq!(phase_judge_open(&state), ["task", "action", "result"]);
+
+    // A refusal comes with no steps, and is kept for the end, which leaves the
+    // declined probe unassessed instead of skipping it.
+    assert!(!state.star_declined);
+    take_phase_judge_window(&mut state, get_problem(Some("insert-interval")));
+    assert!(apply_phase_judgment(&mut state, r#"{"steps": [], "declined": true}"#).is_empty());
+    assert!(state.star_declined);
+}
+
+/// The round can open at the interviewer turn in flight when its packet
+/// arrives, once that turn is seen to change, so an answer after it that the
+/// coding round's judgments already read is judged again for STAR rather than
+/// left unjudged.
+#[test]
+fn opening_the_round_has_the_judge_read_it_from_the_question() {
+    let mut state = with_written_code(RuntimeState::default());
+    past_the_coding_gate(&mut state);
+    state.transcript.extend([
+        "Interviewer: Tell me about a hard bug".into(),
+        "Candidate: I traced an outage to a cache entry that never expired.".into(),
+    ]);
+    take_phase_judge_window(&mut state, get_problem(Some("insert-interval")));
+    assert!(!phase_judge_due(&state));
+    apply_data_event(
+        &mut state,
+        TOPIC_CONTROL,
+        &json!({"type": "round_transition", "round": "behavioral"}),
+        99.0,
+    );
+    assert!(state.behavioral_round_started);
+    assert!(!phase_judge_due(&state), "nothing is said in the round yet");
+    let question = state.transcript.len() - 2;
+    state
+        .transcript
+        .push("Candidate: Let me think about it.".into());
+    let early = take_phase_judge_window(&mut state, get_problem(Some("insert-interval")));
+    assert!(!early.contains("cache entry"), "{early}");
+    assert!(!phase_judge_due(&state));
+    state.transcript[question] = "Interviewer: Tell me about a hard bug you fixed.".into();
+    assert!(phase_judge_due(&state), "the round now holds the answer");
+    let window = take_phase_judge_window(&mut state, get_problem(Some("insert-interval")));
+    assert!(
+        window.contains("cache entry that never expired"),
+        "{window}"
+    );
+    assert!(
+        !window.contains("return sorted"),
+        "STAR is not about code: {window}"
+    );
+}
+
+/// A hand trace is judged against the code it traces, so the editor is shown
+/// while Test is the last step open.
+#[test]
+fn a_hand_trace_is_judged_with_the_code_in_view() {
+    let mut state = with_written_code(RuntimeState::default());
+    state.code_execution_disabled = true;
+    for phase in ["repeat", "example", "algorithm", "coding", "optimizations"] {
+        record_framework_evidence(
+            &mut state,
+            &json!({"phase": phase, "source": observed_source(phase), "kind": "observed",
+                "confidence": 90, "summary": "Done."}),
+        )
+        .unwrap();
+    }
+    assert_eq!(phase_judge_open(&state), ["test"]);
+    let window = take_phase_judge_window(&mut state, get_problem(Some("insert-interval")));
+    assert!(window.contains("return sorted(nums)"), "{window}");
+}
+
+/// A candidate whose speech was not recognized is asked to type their
+/// explanation as a comment, and at an editor nobody but the judge can record
+/// it. A comment counts; the code, the starter's comments and a whiteboard do
+/// not.
+#[test]
+fn a_step_explained_in_a_typed_comment_is_the_candidates_own() {
+    let quote = "merge every interval that overlaps the new one";
+    let mut typed = with_written_code(RuntimeState::default());
+    typed.code = format!("# {quote}\n{}", typed.code);
+    let algorithm = |quote: &str| json!([{"step": "algorithm", "quote": quote, "summary": "s"}]);
+    let recorded = judge(&mut typed.clone(), algorithm(quote));
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(
+        recorded[0].source,
+        EvidenceSource::EditorSnapshot,
+        "typed, not said"
+    );
+    assert!(
+        judge(
+            &mut typed.clone(),
+            algorithm("def solve nums return sorted nums")
+        )
+        .is_empty(),
+        "code is Coding's"
+    );
+
+    let mut starter = typed.clone();
+    let language = starter.language.clone();
+    starter
+        .code_templates
+        .insert(language, format!("# {quote}\n"));
+    assert!(
+        judge(&mut starter, algorithm(quote)).is_empty(),
+        "the starter's"
+    );
+
+    // A hand trace stays spoken, which is how Test without a run is told apart,
+    // so one typed as well is still recorded from what they said.
+    let trace = "for three one two it returns one two three";
+    let mut traced = typed.clone();
+    traced.code_execution_disabled = true;
+    traced.code = format!("# {trace}\n{}", traced.code);
+    let test = || json!([{"step": "test", "quote": trace, "summary": "s"}]);
+    assert!(
+        judge(&mut traced.clone(), test()).is_empty(),
+        "a typed trace"
+    );
+    traced.transcript.push(format!("Candidate: {trace}"));
+    let recorded = judge(&mut traced, test());
+    assert_eq!(recorded.len(), 1, "a trace typed and said");
+    assert_eq!(recorded[0].source, EvidenceSource::CandidateSpeech);
+
+    let mut board = typed.clone();
+    board.interview_mode = InterviewMode::Whiteboard;
+    assert!(
+        judge(&mut board, algorithm(quote)).is_empty(),
+        "a whiteboard"
+    );
+
+    // In C a line beginning with `*` is a comment only inside a block.
+    let mut c = with_written_code(RuntimeState {
+        language: "c".into(),
+        ..RuntimeState::default()
+    });
+    let body = "int f(int *rest) {\n    *rest = keep_every_other_interval_as_it_was;\n}\n";
+    c.code = body.to_string();
+    let deref = "rest keep every other interval as it was";
+    assert!(
+        judge(&mut c.clone(), algorithm(deref)).is_empty(),
+        "a dereference"
+    );
+    c.code = format!("/*\n * {quote}\n */\n{body}");
+    assert!(
+        judge(&mut c.clone(), algorithm(deref)).is_empty(),
+        "code after the block"
+    );
+    assert_eq!(judge(&mut c, algorithm(quote)).len(), 1, "a block comment");
+
+    // A comment typed after Coding is recorded is judged without waiting for
+    // the candidate to speak again; other edits are not.
+    record_framework_evidence(
+        &mut typed,
+        &json!({"phase": "coding", "source": "editor_snapshot", "kind": "observed",
+            "confidence": 90, "summary": "Wrote it."}),
+    )
+    .unwrap();
+    take_phase_judge_window(&mut typed, get_problem(Some("insert-interval")));
+    typed.code.push_str("x = 1\n");
+    assert_eq!(phase_judge_need(&typed), PhaseJudgeDue::No);
+    typed
+        .code
+        .push_str("# then I insert the new interval in order\n");
+    assert_eq!(phase_judge_need(&typed), PhaseJudgeDue::EditorOnly);
+    let mut behavioral = typed.clone();
+    behavioral.behavioral_round_started = true;
+    assert_eq!(
+        phase_judge_need(&behavioral),
+        PhaseJudgeDue::No,
+        "STAR is not typed"
+    );
+    record_framework_evidence(
+        &mut typed,
+        &json!({"phase": "optimizations", "source": "candidate_speech", "kind": "observed",
+            "confidence": 90, "summary": "O(n)."}),
+    )
+    .unwrap();
+    assert_eq!(
+        phase_judge_need(&typed),
+        PhaseJudgeDue::No,
+        "nothing left open"
+    );
+}
+
+/// A whiteboard interviewer holds the evidence tool and records a hand trace
+/// and STAR itself, so the judge leaves both to it there.
+#[test]
+fn a_whiteboard_leaves_a_hand_trace_and_star_to_its_interviewer() {
+    let mut state = RuntimeState {
+        interview_mode: InterviewMode::Whiteboard,
+        board_drawn: true,
+        code_execution_disabled: true,
+        ..RuntimeState::default()
+    };
+    assert!(phase_judge_open(&state).contains(&"optimizations"));
+    assert!(!phase_judge_open(&state).contains(&"test"));
+    state.behavioral_round_started = true;
+    assert!(phase_judge_open(&state).is_empty());
+}
+
+/// Test is the run's evidence, so the judge is asked for it only while nothing
+/// can run the code; a hand trace is then the only testing, and without the
+/// evidence tool the judge is the only one who can record it.
+#[test]
+fn the_phase_judge_records_a_hand_trace_only_when_nothing_can_run() {
+    let mut state = with_written_code(RuntimeState::default());
+    assert!(!phase_judge_open(&state).contains(&"test"));
+    state.code_execution_disabled = true;
+    assert!(phase_judge_open(&state).contains(&"test"));
+
+    state
+        .transcript
+        .push("Candidate: for three one two it returns one two three as I expect".into());
+    let short = json!([{"step": "test", "quote": "returns one two three", "summary": "s"}]);
+    assert!(judge(&mut state, short).is_empty(), "a trace is a sentence");
+    let trace = json!([{"step": "test", "quote": "for three one two it returns one two three",
+        "summary": "Traced an unsorted case."}]);
+    let recorded = judge(&mut state, trace);
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].phase, FrameworkPhase::Test);
+    assert_eq!(recorded[0].source, EvidenceSource::CandidateSpeech);
+    assert!(!phase_judge_open(&state).contains(&"test"));
 }
 
 /// A judgment about code the candidate rewrote while the call was out is
@@ -4077,14 +4362,18 @@ fn the_phase_judge_is_due_only_for_what_it_has_not_read() {
     take_phase_judge_window(&mut state, problem);
     assert!(!phase_judge_due(&state));
 
-    // Recorded Coding closes the spoken steps to the judge.
+    // Recorded Coding leaves the spoken steps open only beside a step about the
+    // code, since at an editor nobody else records one explained late.
     record_framework_evidence(
         &mut state,
         &json!({"phase": "coding", "source": "editor_snapshot", "kind": "observed",
             "confidence": 90, "summary": "Wrote it."}),
     )
     .unwrap();
-    assert_eq!(phase_judge_open(&state), ["optimizations"]);
+    assert_eq!(
+        phase_judge_open(&state),
+        ["repeat", "example", "algorithm", "optimizations"]
+    );
     record_framework_evidence(
         &mut state,
         &json!({"phase": "optimizations", "source": "candidate_speech", "kind": "observed",
@@ -4170,22 +4459,34 @@ fn steps_in_one_judgment_are_judged_against_the_steps_open_when_it_was_asked() {
     );
     assert!(recorded[1].summary.starts_with("Restated."), "{recorded:?}");
 
-    // A later call, with Coding recorded, no longer records a spoken step.
-    let mut state = with_written_code(RuntimeState {
-        transcript: vec![
-            "Candidate: for one two three and target five it returns one and two".into(),
-        ],
-        ..RuntimeState::default()
-    });
-    record_framework_evidence(
-        &mut state,
-        &json!({"phase": "coding", "source": "editor_snapshot", "kind": "observed",
-            "confidence": 90, "summary": "Wrote it."}),
-    )
-    .unwrap();
-    let late = json!([{"step": "example",
-        "quote": "target five it returns one and two", "summary": "Worked a case."}]);
-    assert!(judge(&mut state, late).is_empty());
+    // A later call, with Coding and Optimizations recorded, no longer records a
+    // spoken step; with Optimizations still open it does.
+    let late_example = |analysed: bool| {
+        let mut state = with_written_code(RuntimeState {
+            transcript: vec![
+                "Candidate: for one two three and target five it returns one and two".into(),
+            ],
+            ..RuntimeState::default()
+        });
+        let phases: &[&str] = if analysed {
+            &["coding", "optimizations"]
+        } else {
+            &["coding"]
+        };
+        for phase in phases {
+            record_framework_evidence(
+                &mut state,
+                &json!({"phase": phase, "source": "editor_snapshot", "kind": "observed",
+                    "confidence": 90, "summary": "Done."}),
+            )
+            .unwrap();
+        }
+        let late = json!([{"step": "example",
+            "quote": "target five it returns one and two", "summary": "Worked a case."}]);
+        judge(&mut state, late).len()
+    };
+    assert_eq!(late_example(true), 0);
+    assert_eq!(late_example(false), 1);
 }
 
 /// The judge reads a bounded tail of the transcript and head of the editor:

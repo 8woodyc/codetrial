@@ -318,6 +318,7 @@ gate calibration-fixtures "$PYTHON" "$ROOT/scripts/gen-calibration-fixtures.py" 
 gate calibration-tests unittest_gate "$ROOT/tests/test_calibrate_framework.py"
 gate gemini-usage-tests unittest_gate "$ROOT/tests/test_analyze_gemini_usage.py"
 gate mutants-install-tests unittest_gate "$ROOT/tests/test_mutants_install.py"
+gate latency-tests unittest_gate "$ROOT/tests/test_analyze_latency.py"
 gate browser-tests browser_tests
 gate eslint eslint_gate
 gate cargo-audit cargo_audit_gate

@@ -1810,20 +1810,6 @@ fn live_setup_uses_native_audio_voice_tools_and_transcription() {
             .contains("45-minute coding interview over video")
     );
 
-    // Schema.Type is an enum, so these are value names and the case is not
-    // cosmetic. The report schema next door is rejected for the lowercase
-    // spelling, and matching case-insensitively here would pass for the
-    // spelling that only works because this endpoint happens to be lenient.
-    let params = &setup["tools"][0]["functionDeclarations"][3]["parameters"];
-    assert_eq!(params["type"], "OBJECT");
-    for field in ["phase", "source", "kind", "summary"] {
-        assert_eq!(
-            params["properties"][field]["type"], "STRING",
-            "{field} must name Schema.Type exactly"
-        );
-    }
-    assert_eq!(params["properties"]["confidence"]["type"], "INTEGER");
-
     assert_eq!(
         setup["tools"][0]["functionDeclarations"][0]["name"],
         TOOL_READ_EDITOR
@@ -1854,28 +1840,23 @@ fn live_setup_uses_native_audio_voice_tools_and_transcription() {
         );
     }
     assert!(conversation["parameters"].get("required").is_none());
-    let framework_tool = &setup["tools"][0]["functionDeclarations"][3];
-    assert_eq!(framework_tool["name"], TOOL_RECORD_FRAMEWORK_EVIDENCE);
-    assert_eq!(
-        framework_tool["parameters"]["required"],
-        json!(["phase", "source", "kind", "confidence", "summary"])
-    );
+
+    // At a typed editor the platform records every step, so the interviewer is
+    // not offered a tool whose every call held its reply back by a second model
+    // pass; see `evidence_tool_declared`.
     assert!(
-        framework_tool["parameters"]["properties"]
-            .get("atMs")
-            .is_none()
-    );
-    assert!(
-        framework_tool["parameters"]["properties"]
-            .get("frameworkVersion")
-            .is_none()
+        setup["tools"][0]["functionDeclarations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tool| tool["name"] != TOOL_RECORD_FRAMEWORK_EVIDENCE)
     );
 
     // The tool that lets an interview end when it is over rather than when the
     // clock says so. No parameters: the reason is always the same one, and a
     // free-text field here would be a second place for the closing to be
     // written.
-    let ending_tool = &setup["tools"][0]["functionDeclarations"][4];
+    let ending_tool = &setup["tools"][0]["functionDeclarations"][3];
     assert_eq!(ending_tool["name"], TOOL_END_INTERVIEW);
     assert!(ending_tool.get("parameters").is_none());
 
@@ -1891,7 +1872,7 @@ fn live_setup_uses_native_audio_voice_tools_and_transcription() {
         .iter()
         .map(|tool| tool["name"].clone())
         .collect::<Vec<_>>();
-    assert_eq!(names.len(), 4);
+    assert_eq!(names.len(), 3);
     assert!(!names.contains(&json!(TOOL_END_INTERVIEW)));
     assert_eq!(
         setup["inputAudioTranscription"],
@@ -2004,6 +1985,27 @@ fn a_whiteboard_session_is_offered_the_board_and_not_the_editor() {
         tools[3]["parameters"]["properties"]["source"]["enum"],
         json!(["candidate_speech", "board_snapshot", "session_timing"])
     );
+
+    // Schema.Type is an enum, so these are value names and the case is not
+    // cosmetic. The report schema next door is rejected for the lowercase
+    // spelling, and matching case-insensitively here would pass for the
+    // spelling that only works because this endpoint happens to be lenient.
+    let params = &tools[3]["parameters"];
+    assert_eq!(params["type"], "OBJECT");
+    for field in ["phase", "source", "kind", "summary"] {
+        assert_eq!(
+            params["properties"][field]["type"], "STRING",
+            "{field} must name Schema.Type exactly"
+        );
+    }
+    assert_eq!(params["properties"]["confidence"]["type"], "INTEGER");
+
+    assert_eq!(
+        params["required"],
+        json!(["phase", "source", "kind", "confidence", "summary"])
+    );
+    assert!(params["properties"].get("atMs").is_none());
+    assert!(params["properties"].get("frameworkVersion").is_none());
     assert!(
         setup["systemInstruction"]["parts"][0]["text"]
             .as_str()
@@ -2216,6 +2218,32 @@ fn live_setup_omits_thinking_config_for_standard_3_8() {
                 .is_none()
         );
     }
+}
+
+#[test]
+fn every_tool_stays_blocking_on_3_8_and_3_1_declares_no_behavior() {
+    let behaviors = |model: &str| {
+        let config = live_config(&[("GEMINI_LIVE_MODEL", model)]);
+        let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+        live_setup_message(&boot, None)["setup"]["tools"][0]["functionDeclarations"]
+            .as_array()
+            .expect("declarations")
+            .iter()
+            .map(|declaration| declaration.get("behavior").cloned())
+            .collect::<Vec<_>>()
+    };
+    let standard = behaviors("models/gemini-3.8-live");
+    assert!(!standard.is_empty());
+    assert!(
+        standard
+            .iter()
+            .all(|behavior| *behavior == Some(json!("BLOCKING")))
+    );
+    assert!(
+        behaviors("gemini-3.1-flash-live-preview")
+            .iter()
+            .all(Option::is_none)
+    );
 }
 
 #[test]
@@ -4127,7 +4155,19 @@ fn provider_voice_activity_parses_only_known_activity_types() {
 
 #[test]
 fn coding_only_tool_schema_excludes_behavioral_phases_on_both_surfaces() {
+    // Only a whiteboard is offered the tool at all.
     for mode in [InterviewMode::Coding, InterviewMode::Whiteboard] {
+        if !crate::agent::evidence_tool_declared(mode) {
+            let tools = live_tool_declarations(crate::agent::InterviewLoop::CodingBehavioral, mode);
+            assert!(
+                tools
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|tool| tool["name"] != TOOL_RECORD_FRAMEWORK_EVIDENCE)
+            );
+            continue;
+        }
         let coding = live_tool_declarations(crate::agent::InterviewLoop::CodingOnly, mode);
         let full = live_tool_declarations(crate::agent::InterviewLoop::CodingBehavioral, mode);
         let find = |tools: Value| {
@@ -4496,4 +4536,129 @@ fn reconnect_setup_preserves_resolved_voice_and_accent() {
             }
         }
     }
+}
+
+#[tokio::test]
+async fn queued_transcripts_keep_the_provider_receipt_time() {
+    let config = live_config(&[]);
+    let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(socket).await.unwrap();
+        socket.next().await.unwrap().unwrap();
+        for frame in [
+            r#"{"setupComplete":{}}"#,
+            r#"{"serverContent":{"inputTranscription":{"text":"finished"},"turnComplete":true}}"#,
+        ] {
+            socket.send(Message::Text(frame.into())).await.unwrap();
+        }
+        std::future::pending::<()>().await;
+    });
+    let mut session = open_live_session_at(&url, &boot, None).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while session.events.len() < 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let queued_at = std::time::Instant::now();
+    assert!(matches!(
+        session.next_event().await,
+        Some(GeminiEvent::InputTranscript(_))
+    ));
+    let transcript_at = session.event_received_at().unwrap();
+    assert!(transcript_at <= queued_at);
+    assert!(matches!(
+        session.next_event().await,
+        Some(GeminiEvent::TurnComplete)
+    ));
+    assert_eq!(session.event_received_at(), Some(transcript_at));
+    session.shutdown().await.unwrap();
+    server.abort();
+}
+
+/// The acknowledgement is played straight into the output track, so audio at
+/// any other rate is refused rather than played at the wrong speed.
+#[test]
+fn a_tool_acknowledgement_is_taken_only_at_the_output_rate() {
+    let response = |mime: &str| {
+        json!({"candidates": [{"content": {"parts": [{"inlineData": {
+            "mimeType": mime, "data": STANDARD.encode([1u8, 0, 2, 0])
+        }}]}}]})
+    };
+    assert_eq!(
+        tool_ack_pcm(&response("audio/L16;codec=pcm;rate=24000"), 24_000).unwrap(),
+        [1, 0, 2, 0]
+    );
+    assert!(tool_ack_pcm(&response("audio/pcm;rate=24000"), 24_000).is_ok());
+    // What the speech model actually sends: lower case, spaced, with channels.
+    assert!(tool_ack_pcm(&response("audio/l16; rate=24000; channels=1"), 24_000).is_ok());
+    assert!(tool_ack_pcm(&response("audio/L16;codec=pcm;rate=16000"), 24_000).is_err());
+    assert!(tool_ack_pcm(&response("audio/L16;codec=pcm;rate=240000"), 24_000).is_err());
+    assert!(tool_ack_pcm(&response("audio/wav;rate=24000"), 24_000).is_err());
+    assert!(tool_ack_pcm(&json!({}), 24_000).is_err());
+}
+
+/// The acknowledgement is asked for in the interview's accent when it has one,
+/// so it does not sound like another speaker in front of the reply.
+#[test]
+fn a_tool_acknowledgement_is_spoken_in_the_interviews_accent() {
+    assert_eq!(
+        tool_ack_text(None),
+        "Say briefly, in a natural, thinking tone: Mm, okay."
+    );
+    assert_eq!(
+        tool_ack_text(Some("Irish")),
+        "Say briefly, in a natural, thinking tone, with a natural Irish accent: Mm, okay."
+    );
+}
+
+/// The acknowledgement is one speech request in the session's voice, with the
+/// key in a header, and comes back as the decoded samples.
+#[tokio::test]
+async fn a_tool_acknowledgement_is_one_speech_request_in_the_sessions_voice() {
+    let keys = GeminiKeys::single("tool-ack-key");
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::clone(&requests);
+    let app = axum::Router::new().route(
+        "/",
+        axum::routing::post(
+            move |headers: axum::http::HeaderMap, axum::Json(body): axum::Json<Value>| {
+                let seen = Arc::clone(&seen);
+                async move {
+                    let key = headers["x-goog-api-key"].to_str().unwrap().to_string();
+                    seen.lock().unwrap().push((key, body));
+                    axum::Json(
+                        json!({"candidates": [{"content": {"parts": [{"inlineData": {
+                            "mimeType": "audio/L16;codec=pcm;rate=24000",
+                            "data": STANDARD.encode([7u8, 0, 9, 0])
+                        }}]}}]}),
+                    )
+                }
+            },
+        ),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let clip = tool_ack_clip_at(&keys, &url, "Charon", None, 24_000)
+        .await
+        .unwrap();
+    server.abort();
+    assert_eq!(clip, [7, 0, 9, 0]);
+    assert_eq!(requests.lock().unwrap().len(), 1);
+    let (key, body) = requests.lock().unwrap()[0].clone();
+    assert_eq!(key, "tool-ack-key");
+    assert_eq!(body["contents"][0]["parts"][0]["text"], tool_ack_text(None));
+    assert_eq!(
+        body["generationConfig"]["responseModalities"],
+        json!(["AUDIO"])
+    );
+    assert_eq!(
+        body["generationConfig"]["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"],
+        "Charon"
+    );
 }

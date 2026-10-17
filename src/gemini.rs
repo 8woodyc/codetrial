@@ -128,7 +128,8 @@ const GEMINI_EVENT_QUEUE: usize = 256;
 pub struct GeminiLiveSession {
     writer: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
     reader: JoinHandle<()>,
-    events: Receiver<GeminiEvent>,
+    events: Receiver<(std::time::Instant, GeminiEvent)>,
+    event_received_at: Option<std::time::Instant>,
     /// When this socket was opened, which is how the caller tells Gemini's
     /// ordinary connection cap from an endpoint that will not stay up. It lives
     /// here rather than in the loop that reconnects because it is a fact about
@@ -267,7 +268,13 @@ impl GeminiLiveSession {
     }
 
     pub async fn next_event(&mut self) -> Option<GeminiEvent> {
-        self.events.recv().await
+        let (received_at, event) = self.events.recv().await?;
+        self.event_received_at = Some(received_at);
+        Some(event)
+    }
+
+    pub(crate) fn event_received_at(&self) -> Option<std::time::Instant> {
+        self.event_received_at
     }
 
     /// How long this socket has been up.
@@ -1521,6 +1528,25 @@ async fn generate_content_once(
     timeout: Duration,
     what: &str,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let response = post_generate_content(api_key, url, request, timeout, what).await?;
+    gemini_text(&response).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Gemini {what} response had no text"),
+        )
+        .into()
+    })
+}
+
+/// The transport half of `generate_content_once`, for a caller that reads
+/// something other than text out of the answer.
+async fn post_generate_content(
+    api_key: &str,
+    url: &str,
+    request: &Value,
+    timeout: Duration,
+    what: &str,
+) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
     let started = std::time::Instant::now();
     let response = crate::http_client()
         .post(url)
@@ -1546,13 +1572,7 @@ async fn generate_content_once(
         .map(TokenUsage::from_metadata)
         .unwrap_or_default();
     eprintln!("gemini {what} usage {}", usage.log_fields());
-    gemini_text(&response).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("Gemini {what} response had no text"),
-        )
-        .into()
-    })
+    Ok(response)
 }
 
 async fn generate_report_once(
@@ -1662,6 +1682,10 @@ async fn open_live_session_redacted_at(
             let Some(text) = websocket_message_text(message) else {
                 continue;
             };
+
+            // Before parsing, which decodes audio: the queue time a reply
+            // reports then includes this side's work, not just the channel.
+            let received_at = std::time::Instant::now();
             if let Some(error) = server_api_failure(&text)
                 && error.credential.is_some()
             {
@@ -1694,13 +1718,14 @@ async fn open_live_session_redacted_at(
             for event in message.events {
                 // Bounded on purpose: a stalled main loop must slow the socket
                 // down, not let inbound audio pile up without a ceiling.
-                if sender.send(event).await.is_err() {
+                if sender.send((received_at, event)).await.is_err() {
                     return;
                 }
             }
         }
     });
     Ok(GeminiLiveSession {
+        event_received_at: None,
         writer,
         reader,
         events,
@@ -1736,6 +1761,86 @@ pub(crate) fn gemini_live_websocket_url(api_key: &str) -> String {
 
 fn live_websocket_url_at(endpoint: &str, api_key: &str) -> String {
     format!("{endpoint}?key={}", percent_encode_component(api_key))
+}
+
+/// The model and words of the acknowledgement a tool round may play. Generated
+/// once per interview in the session's own voice and accent, so it sounds like
+/// Jim.
+const TOOL_ACK_TTS_MODEL: &str = "gemini-3.1-flash-tts-preview";
+const TOOL_ACK_WORDS: &str = "Mm, okay.";
+const TOOL_ACK_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// What the speech model is asked to say, in the interview's accent when it
+/// has one.
+fn tool_ack_text(accent: Option<&str>) -> String {
+    let accent = accent
+        .map(|accent| format!(", with a natural {accent} accent"))
+        .unwrap_or_default();
+    format!("Say briefly, in a natural, thinking tone{accent}: {TOOL_ACK_WORDS}")
+}
+
+/// A short spoken acknowledgement in `voice`, as 16-bit mono PCM at
+/// `sample_rate`, the output track's own format. One attempt on the report
+/// keys: an interview without it only loses a filler.
+pub(crate) async fn tool_ack_clip(
+    keys: &GeminiKeys,
+    voice: &str,
+    accent: Option<&str>,
+    sample_rate: u32,
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    let url = gemini_generate_content_url(TOOL_ACK_TTS_MODEL);
+    tool_ack_clip_at(keys, &url, voice, accent, sample_rate).await
+}
+
+async fn tool_ack_clip_at(
+    keys: &GeminiKeys,
+    url: &str,
+    voice: &str,
+    accent: Option<&str>,
+    sample_rate: u32,
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    let api_key = keys.select_report()?;
+    let request = json!({
+        "contents": [{ "parts": [{ "text": tool_ack_text(accent) }] }],
+        "generationConfig": {
+            "responseModalities": ["AUDIO"],
+            "speechConfig": { "voiceConfig": { "prebuiltVoiceConfig": { "voiceName": voice } } }
+        }
+    });
+    let response = post_generate_content(
+        &api_key,
+        url,
+        &request,
+        TOOL_ACK_TIMEOUT,
+        "tool acknowledgement",
+    )
+    .await?;
+    tool_ack_pcm(&response, sample_rate)
+}
+
+/// The PCM in a speech response, refusing anything but raw 16-bit samples at
+/// the output track's rate: a container or a codec would play as noise.
+fn tool_ack_pcm(
+    response: &Value,
+    sample_rate: u32,
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    let data = &response["candidates"][0]["content"]["parts"][0]["inlineData"];
+
+    // Media types are case-insensitive, and the speech model answers in lower
+    // case: "audio/l16; rate=24000; channels=1".
+    let mime = data["mimeType"].as_str().unwrap_or_default();
+    let lower = mime.to_ascii_lowercase();
+    let raw = lower.starts_with("audio/l16") || lower.starts_with("audio/pcm");
+    let rate = format!("rate={sample_rate}");
+    if !raw || !lower.split(';').any(|param| param.trim() == rate) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("acknowledgement audio is {mime:?}, not {sample_rate} Hz PCM"),
+        )
+        .into());
+    }
+    let encoded = data["data"].as_str().unwrap_or_default();
+    Ok(STANDARD.decode(encoded)?)
 }
 
 /// No `?key=` here on purpose. A `reqwest` error Displays the URL it was built
@@ -1825,16 +1930,6 @@ pub fn live_tool_declarations(
     } else {
         "Record hint usage; requested true returns the permitted clue and current editor."
     };
-    let evidence_sources = if mode.is_whiteboard() {
-        json!(["candidate_speech", "board_snapshot", "session_timing"])
-    } else {
-        json!([
-            "candidate_speech",
-            "editor_snapshot",
-            "test_event",
-            "session_timing"
-        ])
-    };
     let coding_only = interview_loop == crate::agent::InterviewLoop::CodingOnly;
     let phases = if coding_only {
         json!(crate::agent::REACTO_PHASE_IDS)
@@ -1876,7 +1971,13 @@ pub fn live_tool_declarations(
                 "required": ["requested"]
             }
         }),
-        json!({
+    ];
+
+    // Only where the platform cannot record every step itself; see
+    // `evidence_tool_declared`. A whiteboard's sources are its own: there is no
+    // editor and no test run there.
+    if crate::agent::evidence_tool_declared(mode) {
+        tools.push(json!({
             "name": TOOL_RECORD_FRAMEWORK_EVIDENCE,
             "description": evidence_description,
 
@@ -1888,15 +1989,15 @@ pub fn live_tool_declarations(
                 "type": "OBJECT",
                 "properties": {
                     "phase": { "type": "STRING", "enum": phases },
-                    "source": { "type": "STRING", "enum": evidence_sources },
+                    "source": { "type": "STRING", "enum": ["candidate_speech", "board_snapshot", "session_timing"] },
                     "kind": { "type": "STRING", "enum": ["observed", "inferred", "skipped"] },
                     "confidence": { "type": "INTEGER", "minimum": 0, "maximum": 100 },
                     "summary": { "type": "STRING", "description": "Short evidence-grounded summary without scores or private rubric text." }
                 },
                 "required": ["phase", "source", "kind", "confidence", "summary"]
             }
-        }),
-    ];
+        }));
+    }
     if interview_loop != crate::agent::InterviewLoop::CodingOnly {
         tools.push(json!({
             "name": TOOL_END_INTERVIEW,
@@ -2085,6 +2186,17 @@ fn live_setup_message(boot: &RuntimeBootstrap<'_>, resume: Option<&str>) -> Valu
             .as_object_mut()
             .expect("generation config is an object")
             .remove("thinkingConfig");
+
+        // 3.8 runs a declaration without `behavior` asynchronously, so the
+        // model would speak before a read, a hint or a recorded step it depends
+        // on had answered. Every tool here is written for the blocking turn 3.1
+        // always gives.
+        for declaration in setup["setup"]["tools"][0]["functionDeclarations"]
+            .as_array_mut()
+            .expect("tool declarations are a list")
+        {
+            declaration["behavior"] = json!("BLOCKING");
+        }
     }
 
     // Every frame stays in the context and is billed again on every later turn,

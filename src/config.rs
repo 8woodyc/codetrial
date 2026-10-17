@@ -67,6 +67,9 @@ pub const DEFAULT_WEB_DIR: &str = "web";
 pub const DEFAULT_WEB_ADDR: &str = "127.0.0.1:3000";
 pub const DEFAULT_COMPILER_EXPLORER_ENABLED: bool = true;
 pub const DEFAULT_GEMINI_CANDIDATE_VIDEO_ENABLED: bool = false;
+/// Off until measured in real interviews: a short spoken acknowledgement
+/// played while a tool round holds the reply back. See `gemini::tool_ack_clip`.
+pub const DEFAULT_GEMINI_TOOL_ACK: bool = false;
 
 /// How many interviews one `codetrial web` process will host agents for at
 /// once. Each is a LiveKit room plus a metered Gemini Live session, so an
@@ -95,6 +98,14 @@ pub const MAX_INTERIM_REVIEWS: usize = 72;
 pub const DEFAULT_GEMINI_REPLY_TIMEOUT_S: u32 = 45;
 pub const MIN_GEMINI_REPLY_TIMEOUT_S: u32 = 20;
 pub const MAX_GEMINI_REPLY_TIMEOUT_S: u32 = 120;
+
+/// How long a reply nothing has started toward may go with nothing back before
+/// the Live socket is replaced. A working socket answers well inside the
+/// default, even if only with the end of a turn that chose silence; one that
+/// hangs sends nothing. Never longer than the reply timeout, which bounds every
+/// wait, and bounded below so a slow but working start is not replaced.
+pub const DEFAULT_GEMINI_FIRST_OUTPUT_S: u32 = 10;
+pub const MIN_GEMINI_FIRST_OUTPUT_S: u32 = 5;
 
 const REQUIRED_KEYS: &[&str] = &[
     "LIVEKIT_URL",
@@ -556,8 +567,10 @@ pub struct AgentConfig {
     pub room_prefix: String,
     pub default_duration_min: u32,
     pub gemini_candidate_video_enabled: bool,
+    pub gemini_tool_ack: bool,
     pub max_interim_reviews: usize,
     pub gemini_reply_timeout_s: u32,
+    pub gemini_first_output_s: u32,
     pub pool: ProviderPool,
 }
 
@@ -747,6 +760,12 @@ pub fn load_from_pairs(
         }],
     };
 
+    let gemini_reply_timeout_s = optional_u32(
+        &values,
+        "CODETRIAL_GEMINI_REPLY_TIMEOUT_S",
+        DEFAULT_GEMINI_REPLY_TIMEOUT_S,
+    )
+    .clamp(MIN_GEMINI_REPLY_TIMEOUT_S, MAX_GEMINI_REPLY_TIMEOUT_S);
     Ok(AgentConfig {
         livekit_url,
         livekit_api_key,
@@ -767,18 +786,23 @@ pub fn load_from_pairs(
                 .get("CODETRIAL_GEMINI_CANDIDATE_VIDEO_ENABLED")
                 .map(String::as_str),
         ),
+        gemini_tool_ack: parse_bool(
+            values.get("CODETRIAL_GEMINI_TOOL_ACK").map(String::as_str),
+            DEFAULT_GEMINI_TOOL_ACK,
+        ),
         max_interim_reviews: optional_u32(
             &values,
             "CODETRIAL_MAX_INTERIM_REVIEWS",
             DEFAULT_MAX_INTERIM_REVIEWS as u32,
         )
         .min(MAX_INTERIM_REVIEWS as u32) as usize,
-        gemini_reply_timeout_s: optional_u32(
+        gemini_reply_timeout_s,
+        gemini_first_output_s: optional_u32(
             &values,
-            "CODETRIAL_GEMINI_REPLY_TIMEOUT_S",
-            DEFAULT_GEMINI_REPLY_TIMEOUT_S,
+            "CODETRIAL_GEMINI_FIRST_OUTPUT_S",
+            DEFAULT_GEMINI_FIRST_OUTPUT_S,
         )
-        .clamp(MIN_GEMINI_REPLY_TIMEOUT_S, MAX_GEMINI_REPLY_TIMEOUT_S),
+        .clamp(MIN_GEMINI_FIRST_OUTPUT_S, gemini_reply_timeout_s),
         pool,
     })
 }
