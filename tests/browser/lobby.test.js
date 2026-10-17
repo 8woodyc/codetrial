@@ -1932,6 +1932,52 @@ lobbyTest(
 
 for (const storage of ["account", "device"]) {
   lobbyTest(
+    `saved ${storage} attempt labels distinguish local times on the same day`,
+    async (page) => {
+      const entries = ["2026-01-01T16:15:00Z", "2026-01-02T10:30:00Z"].map(
+        (date, index) => ({
+          id: `attempt-${index}`,
+          problemId: EASY[0],
+          problemTitle: "Same problem",
+          language: "python",
+          date,
+          report: { decision: "HIRE" },
+        }),
+      );
+      if (storage === "account") {
+        reports = entries.map((payload) => ({ id: payload.id, payload }));
+      } else {
+        session = { signedIn: false };
+        await page.addInitScript((entries) => {
+          localStorage.setItem("codetrial_history", JSON.stringify(entries));
+        }, entries);
+      }
+      await lobby(page);
+      const times = ["Jan 2, 2026, 6:30 PM", "Jan 2, 2026, 12:15 AM"];
+      const rows = page.locator("#attempt-history > li");
+      assert.deepEqual(
+        await rows.locator(":scope > p").allTextContents(),
+        times.map((when) => `${when} · Same problem · Python · HIRE`),
+      );
+      for (const [index, when] of times.entries()) {
+        const row = rows.nth(index);
+        for (const name of [
+          `Download report (.md) for Same problem, ${when}`,
+          `Delete the ${when} report for Same problem`,
+        ]) {
+          assert.equal(
+            await row.getByRole("button", { name, exact: true }).count(),
+            1,
+          );
+        }
+      }
+    },
+    { timezoneId: "Asia/Taipei", locale: "en-US" },
+  );
+}
+
+for (const storage of ["account", "device"]) {
+  lobbyTest(
     `saved ${storage} reports download their own markdown with local timestamps`,
     async (page) => {
       const cases = [
@@ -1983,7 +2029,7 @@ for (const storage of ["account", "device"]) {
       for (const [index, item] of cases.entries()) {
         const when = `1/2/2026, ${index + 1}:30:00 AM`;
         const button = history.getByRole("button", {
-          name: `Download report (.md) for Saved report, ${when}`,
+          name: `Download report (.md) for Saved report, Jan 2, 2026, ${index + 1}:30 AM`,
           exact: true,
         });
         const downloading = page.waitForEvent("download");
