@@ -821,9 +821,9 @@ const textEncoder = new TextEncoder();
 /// function-local, moving it left the whole suite green with the supported-card
 /// branch no longer rendering, which is the defect a local constant invites.
 export const ACTIVE_CONTRACT = {
-  bundleVersion: 36,
-  livePromptVersion: 27,
-  reportPromptVersion: 20,
+  bundleVersion: 37,
+  livePromptVersion: 28,
+  reportPromptVersion: 22,
   reportSchemaVersion: 3,
   rubricVersion: 1,
 };
@@ -2001,8 +2001,16 @@ export function thinkingPayload(thinking) {
   return { type: "thinking", thinking: Boolean(thinking) };
 }
 
+export function drawingActivityPayload() {
+  return { type: "drawing_activity" };
+}
+
 export function yieldTurnPayload() {
   return { type: "yield_turn" };
+}
+
+export function drawingTurnPayload() {
+  return { type: "yield_turn", surface: "example" };
 }
 
 /// The agent attribute carrying Gemini's silence window, in milliseconds;

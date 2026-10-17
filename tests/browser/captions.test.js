@@ -385,6 +385,7 @@ test("only changed editor text dismisses Jim", async (t) => {
     nodes,
     state,
     dismissCaptions: captions.dismissCaptions,
+    drawingTurn: null,
     flushPendingLanguagePublish: () => events.push("language"),
     scheduleEditorPaint: () => events.push("paint"),
     flushPendingEditorPublish: () => events.push("publish"),

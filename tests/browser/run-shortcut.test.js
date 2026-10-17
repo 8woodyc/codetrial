@@ -448,3 +448,35 @@ test("the shortcut starts no run while the interview is paused", async (t) => {
     await page.close();
   }
 });
+
+for (const enabled of [false, true]) {
+  test(`example drawing token choice is ${enabled}`, async (t) => {
+    const ctx = await interviewPage(t, {
+      started: false,
+      media: true,
+      params: enabled ? { exampleDrawing: "1" } : {},
+    });
+    if (!ctx) return;
+    const { page, errors } = ctx;
+    try {
+      await page.route("**/api/token", (route) =>
+        route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "Offline test" }),
+        }),
+      );
+      const token = page.waitForRequest(
+        (request) => new URL(request.url()).pathname === "/api/token",
+      );
+      await clearPreflight(page);
+      assert.equal(
+        (await token).postDataJSON().exampleDrawing,
+        enabled ? true : undefined,
+      );
+      assert.deepEqual(errors, []);
+    } finally {
+      await page.close();
+    }
+  });
+}

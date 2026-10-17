@@ -999,6 +999,12 @@ async fn on_tool_calls(
     if let Err(error) = play_tool_ack(context, &calls).await {
         eprintln!("tool acknowledgement not played: {error}");
     }
+    if context.state.example_drawing_enabled
+        && !context.state.interview_mode.is_whiteboard()
+        && calls.iter().any(|call| call.name == TOOL_READ_BOARD)
+    {
+        context.board.settle_for_read(context.state).await;
+    }
     let timed = !context.state.floor_held() && !context.activity.discarding_output;
     let reviewed_revision = context.activity.substantive_revision_at_last_review;
     let tool_started = Instant::now();
@@ -2141,6 +2147,9 @@ fn tool_response(state: &mut RuntimeState, call: &GeminiFunctionCall) -> serde_j
         // `board::resend`. The text is what a picture cannot say: how much is
         // on the board, and how long ago it was drawn.
         TOOL_READ_BOARD => {
+            if !state.interview_mode.is_whiteboard() && !state.example_drawing_enabled {
+                return serde_json::json!({"error":"Example drawing is disabled for this interview."});
+            }
             state.board_resend_requested = true;
             serde_json::json!({
                 "result": read_board_text(

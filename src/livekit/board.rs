@@ -9,11 +9,9 @@
 //! queued behind it, so what the loop sees here is a channel of finished
 //! boards and nothing else.
 //!
-//! Gemini sees a board the way it sees a camera frame: a realtime image on the
-//! live socket. That is the only way an image can reach it mid-session, and it
-//! is why `read_board` cannot answer with the picture itself -- a tool
-//! response is JSON. The tool asks for the board to be sent again instead, and
-//! `resend` is what answers.
+//! Whiteboard changes reach Gemini through realtime image input. Coding
+//! example drawings are retained locally and sent only for `read_board`;
+//! neither edits, turn handovers nor reconnects send them automatically.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,7 +23,7 @@ use futures_util::{Stream, StreamExt};
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 
-use crate::agent::{InterviewMode, RuntimeState};
+use crate::agent::RuntimeState;
 use crate::gemini::GeminiLiveSession;
 use crate::runtime::TOPIC_BOARD_IMAGE;
 
@@ -108,6 +106,7 @@ pub(super) struct ReportBoard {
 /// The latest board, and when one last went out.
 pub(super) struct Board {
     latest: Option<Vec<u8>>,
+    example: bool,
     /// Whether `latest` is newer than the last board Gemini was shown. Set by
     /// every board that arrives and cleared by every send, so a board the
     /// interval held back is still owed and goes out once it lapses.
@@ -131,6 +130,7 @@ impl Board {
         let (tx, rx) = channel(BOARD_QUEUE);
         Self {
             latest: None,
+            example: false,
             unsent: false,
             checkpoints: Vec::new(),
             last_sent: None,
@@ -152,7 +152,15 @@ impl Board {
     /// permit is back; a reader waiting on a full queue holds its permit, so
     /// the queue is drained while waiting rather than after.
     pub(super) async fn settle_for_report(&mut self, state: &mut RuntimeState) {
-        let deadline = tokio::time::Instant::now() + BOARD_FINAL_WAIT;
+        self.settle_pending(state, BOARD_FINAL_WAIT).await;
+    }
+
+    pub(super) async fn settle_for_read(&mut self, state: &mut RuntimeState) {
+        self.settle_pending(state, Duration::from_millis(100)).await;
+    }
+
+    async fn settle_pending(&mut self, state: &mut RuntimeState, wait: Duration) {
+        let deadline = tokio::time::Instant::now() + wait;
         let mut arrived = Vec::new();
         loop {
             tokio::select! {
@@ -180,6 +188,11 @@ impl Board {
     /// live board and the report runs beside it. Six ordinary JPEGs are still
     /// well below the memory bound the byte-stream ceiling establishes.
     pub(super) fn report_boards(&self) -> Vec<ReportBoard> {
+        // Auxiliary drawings are displayed by the browser, never sent to the
+        // assessment model. Whiteboard work remains assessable.
+        if self.example {
+            return Vec::new();
+        }
         let mut images = self
             .checkpoints
             .iter()
@@ -205,23 +218,21 @@ impl Board {
 
 /// Whether a stream that just opened is a board this interview wants.
 ///
-/// Written apart from the event it answers so all four refusals can be tested
-/// without a room. Three of them are ordinary -- another topic, another
-/// sender, a board in an interview that has no whiteboard -- and the fourth is
-/// the one worth having: a header that declares more bytes than a board can
-/// be, refused before a single chunk is read.
+/// Coding interviews use the same bounded stream for auxiliary example
+/// drawings. Identity, topic and byte limits apply to both surfaces.
 pub(super) fn board_stream_refusal(
-    mode: InterviewMode,
+    mode: crate::agent::InterviewMode,
+    enabled: bool,
     topic: &str,
     sender: &str,
     candidate_identity: &str,
     declared_length: Option<u64>,
 ) -> Option<&'static str> {
+    if !mode.is_whiteboard() && !enabled {
+        return Some("example drawing is disabled");
+    }
     if topic != TOPIC_BOARD_IMAGE {
         return Some("not the board topic");
-    }
-    if !mode.is_whiteboard() {
-        return Some("this interview has no whiteboard");
     }
     if sender != candidate_identity {
         return Some("not the candidate");
@@ -272,7 +283,8 @@ pub(super) fn checkpoint_from_attributes(
 /// about the board when the whole of it has arrived, and stays free to carry
 /// the interview's audio in the meantime.
 pub(super) fn handle_board_event(
-    mode: InterviewMode,
+    mode: crate::agent::InterviewMode,
+    enabled: bool,
     candidate_identity: &str,
     board: &Board,
     event: &RoomEvent,
@@ -299,6 +311,7 @@ pub(super) fn handle_board_event(
     };
     if let Some(refusal) = board_stream_refusal(
         mode,
+        enabled,
         topic,
         &participant_identity.0,
         candidate_identity,
@@ -407,6 +420,7 @@ where
 /// reaches the socket, because they are what the candidate drew.
 pub(super) fn record(board: &mut Board, state: &mut RuntimeState, snapshot: BoardSnapshot) -> bool {
     let changed = board.latest.as_deref() != Some(snapshot.bytes.as_slice());
+    board.example = !state.interview_mode.is_whiteboard();
     state.board_snapshots = state.board_snapshots.saturating_add(1);
     state.board_strokes = snapshot.strokes;
     state.board_drawn |= snapshot.strokes >= crate::agent::MIN_BOARD_STROKES;
@@ -416,7 +430,7 @@ pub(super) fn record(board: &mut Board, state: &mut RuntimeState, snapshot: Boar
     // send is still the one `read_board` answers with. Dropping it here would
     // mean asking for the board during a busy stretch of drawing returns the
     // one before it.
-    if let Some(label) = snapshot.checkpoint {
+    if let Some(label) = snapshot.checkpoint.filter(|_| !board.example) {
         if let Some((_, bytes)) = board
             .checkpoints
             .iter_mut()
@@ -443,7 +457,7 @@ pub(super) async fn send_if_due(
     gemini: &mut GeminiLiveSession,
     now: Instant,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if !board.unsent || too_soon(board.last_sent, now) {
+    if board.example || !board.unsent || too_soon(board.last_sent, now) {
         return Ok(());
     }
     send(board, gemini, now).await

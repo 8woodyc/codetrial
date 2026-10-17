@@ -22,6 +22,7 @@ fn instructions(problem: &Problem, duration_min: u32) -> String {
         &codetrial::runtime::RuntimeOptions {
             voice: None,
             accent: None,
+            example_drawing_enabled: false,
             profile: InterviewProfile::default(),
             grounding: InterviewGrounding::default(),
             interview_loop: InterviewLoop::CodingBehavioral,
@@ -40,6 +41,7 @@ fn board_instructions(problem: &Problem, duration_min: u32) -> String {
         &codetrial::runtime::RuntimeOptions {
             voice: None,
             accent: None,
+            example_drawing_enabled: false,
             profile: InterviewProfile::default(),
             grounding: InterviewGrounding::default(),
             interview_loop: InterviewLoop::CodingBehavioral,
@@ -316,6 +318,7 @@ fn prompt_samples() -> Value {
             &codetrial::runtime::RuntimeOptions {
                 voice: None,
                 accent: None,
+            example_drawing_enabled: false,
                 profile: full_profile.clone(),
                 grounding: InterviewGrounding::default(),
                 interview_loop: InterviewLoop::CodingBehavioral,
@@ -329,6 +332,7 @@ fn prompt_samples() -> Value {
             &codetrial::runtime::RuntimeOptions {
                 voice: None,
                 accent: None,
+            example_drawing_enabled: false,
                 profile: InterviewProfile::default(),
                 grounding: InterviewGrounding::default(),
                 interview_loop: InterviewLoop::CodingBehavioral,
@@ -381,6 +385,7 @@ fn prompt_samples() -> Value {
         "wrapBehavioral": wrap_up("time_up", true),
         "wrapComplete": wrap_up("interview_complete", false),
         "interim": interim_review_prompt(&InterimReviewInput {
+            example_drawing_enabled: false,
             problem,
             interview_mode: InterviewMode::Coding,
             transcript_window: "Candidate: I will use a hash map.",
@@ -390,6 +395,7 @@ fn prompt_samples() -> Value {
             evidence: &working_interim,
         }),
         "boardInterim": interim_review_prompt(&InterimReviewInput {
+            example_drawing_enabled: false,
             problem,
             interview_mode: InterviewMode::Whiteboard,
             transcript_window: "Candidate: I will draw the array and walk two pointers inward.",
@@ -399,6 +405,7 @@ fn prompt_samples() -> Value {
             evidence: &empty,
         }),
         "interimEmpty": interim_review_prompt(&InterimReviewInput {
+            example_drawing_enabled: false,
             problem,
             interview_mode: InterviewMode::Coding,
             transcript_window: "",
@@ -440,6 +447,9 @@ fn prompt_samples() -> Value {
             }],
             false,
         ),
+        "exampleInstructions": build_instructions_for_plan(problem, 45, &codetrial::runtime::RuntimeOptions { example_drawing_enabled: true, ..Default::default() }),
+        "exampleReportSystem": report_system_instruction_for_examples(InterviewMode::Coding, true),
+        "exampleInterim": interim_review_prompt(&InterimReviewInput { problem, example_drawing_enabled: true, interview_mode: InterviewMode::Coding, transcript_window: "Candidate: I will use a hash map.", code: "seen = {}", language: "python", already_recorded: "", evidence: &working_interim }),
         "reportSystem": report_system_instruction(InterviewMode::Coding),
         "boardReportSystem": report_system_instruction(InterviewMode::Whiteboard),
         "testsPass": test_results_reaction("3/3 passed", true, TestRecord::Record, None, &RuntimeState::default(), SincePrevious::Other,),
@@ -629,6 +639,7 @@ fn prompt_samples() -> Value {
         &codetrial::runtime::RuntimeOptions {
             voice: None,
             accent: None,
+            example_drawing_enabled: false,
             profile: InterviewProfile::default(),
             grounding: InterviewGrounding::default(),
             interview_loop: InterviewLoop::CodingBehavioral,

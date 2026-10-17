@@ -124,6 +124,47 @@ microphone's own voice level on every frame or from provider speech detection,
 each Live socket therefore receives one presence frame and no more; during speech frames keep the
 five-second interval. Board images take their own path and are unaffected.
 
+Coding example drawings are opt-in in the lobby and disabled by default.
+The choice is carried in signed token metadata and applies to the Live tool
+declarations, instructions, interim and final report policy, and board stream
+acceptance. Disabled coding sessions carry none of that drawing prompt or tool
+overhead and refuse board streams. The first version offers pen, eraser, undo and clear. Shapes and redo are not
+part of this version. The browser syncs JPEGs to the server's bounded board
+cache; these local edits do not enter Gemini Live. Coding camera frames keep
+the presence policy above. Only a `read_board` call sends the latest example
+JPEG through realtime image input before its JSON tool response. The interviewer
+calls it when the candidate refers to the drawing, never for an unreferenced
+sketch. Changes, drawing handovers and reconnects send zero example images to
+Gemini; each tool batch requesting a drawing sends at most one current JPEG.
+A read waits at most 100 ms for pending local streams. Offline browsers retain
+edits without repeated JPEG encoding and sync them on reconnect. After an
+explicit read, the image remains in the live context and is billed on later
+turns; auxiliary drawings are excluded from final report requests.
+Coding and communication retain their original rubric and conversation evidence;
+there is no drawing-related credit or deduction. The report must not infer
+understanding from an image or the interviewer's account of one, including
+rolling notes that paraphrase visual observations as an explanation. References
+to drawings in assessment feedback enter the existing bounded repair loop;
+the same guard applies to a salvaged response. If repairs repeat those words,
+salvage removes the visual sentences, replacing fully removed schema-required
+feedback with an omission note and keeping linked practice text consistent.
+Scores and decisions remain unchanged; unrelated invalid fields are not repaired. The final image is displayed
+separately as a session artifact. This changes no call budget and no Whiteboard
+scoring rule.
+Whiteboard mode keeps its existing image input with camera forwarding disabled
+from the start.
+
+Coding drawing activity restarts the browser's turn ring using the published
+speech silence window. New ink or concurrent speech resets the countdown;
+after silence, the page waits at most two seconds to share the visible drawing
+and sends one explicit drawing yield. A failed upload still yields, and new
+activity, a pause, thinking time or a disconnected interviewer cancels a yield
+that is waiting on the upload. A drawing-only yield requests a brief response
+even without an audio turn; it does not send an image. With a spoken turn still open, the note is delivered
+as context and the audio turn is ended, allowing the existing reply fallback
+to recover silence instead of asking for two replies. Drawings still grant no
+assessment evidence. Whiteboard turn taking is unchanged.
+
 Final reporting has a shared hard budget of five Gemini HTTP calls across
 initial generation, up to two semantic repairs, and transient retries. The
 counter is consumed immediately before the network request. Authentication

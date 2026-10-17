@@ -357,6 +357,21 @@ fn token_carries_hidden_examples_only_when_true() {
     };
 
     assert_eq!(metadata(br#"{"hideExamples":true}"#)["hideExamples"], true);
+    let enabled = metadata(br#"{"exampleDrawing":true}"#);
+    assert_eq!(enabled["exampleDrawing"], true);
+    assert!(
+        codetrial::agent::parse_participant_metadata(Some(&enabled.to_string()))
+            .example_drawing_enabled
+    );
+    for body in [
+        br#"{}"#.as_slice(),
+        br#"{"exampleDrawing":false}"#.as_slice(),
+        br#"{"exampleDrawing":"true"}"#.as_slice(),
+        br#"{"exampleDrawing":1}"#.as_slice(),
+        br#"{"exampleDrawing":true,"interviewMode":"whiteboard"}"#.as_slice(),
+    ] {
+        assert!(metadata(body).get("exampleDrawing").is_none());
+    }
     for body in [
         br#"{}"#.as_slice(),
         br#"{"hideExamples":false}"#.as_slice(),

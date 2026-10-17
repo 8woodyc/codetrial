@@ -1977,6 +1977,7 @@ async fn live_checkpoint_earlier_example_recall_quality() {
             Some("two-sum"),
             30,
             crate::runtime::RuntimeOptions {
+                example_drawing_enabled: false,
                 interview_mode: crate::agent::InterviewMode::Whiteboard,
                 ..Default::default()
             },

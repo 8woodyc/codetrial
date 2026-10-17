@@ -88,6 +88,7 @@ fn the_interview_begins_from_the_plan_it_was_booked_with() {
         Some("two-sum"),
         30,
         crate::runtime::RuntimeOptions {
+            example_drawing_enabled: false,
             interview_loop: crate::agent::InterviewLoop::CodingOnly,
             interview_mode: crate::agent::InterviewMode::Whiteboard,
             code_execution_disabled: true,
@@ -175,6 +176,7 @@ fn a_two_round_interview_leaves_both_frameworks_uncovered() {
         Some("two-sum"),
         45,
         crate::runtime::RuntimeOptions {
+            example_drawing_enabled: false,
             interview_loop: crate::agent::InterviewLoop::CodingBehavioral,
             ..crate::runtime::RuntimeOptions::default()
         },
@@ -591,6 +593,30 @@ fn candidate_bootstrap_uses_participant_metadata() {
             .contains("code execution is disabled for this interview")
     );
     assert!(boot.instructions.contains("candidate selected staff"));
+}
+
+#[test]
+fn example_mutation_initial_state_carries_signed_drawing_choice() {
+    let config = load_from_pairs([
+        ("LIVEKIT_URL", "wss://example.livekit.cloud"),
+        ("LIVEKIT_API_KEY", "devkey"),
+        ("LIVEKIT_API_SECRET", "devsecret"),
+        ("GOOGLE_API_KEY", "google-key"),
+    ])
+    .unwrap();
+    for mode in ["coding", "whiteboard"] {
+        for enabled in [false, true] {
+            let metadata =
+                serde_json::json!({"interviewMode":mode,"exampleDrawing":enabled}).to_string();
+            let boot = candidate_bootstrap(&config, "example-opt-in", Some(&metadata));
+            let state = initial_runtime_state(&boot, Instant::now());
+            assert_eq!(state.example_drawing_enabled, enabled && mode == "coding");
+            assert_eq!(
+                state.interview_mode,
+                crate::agent::InterviewMode::parse(Some(mode))
+            );
+        }
+    }
 }
 
 #[test]
@@ -4040,6 +4066,74 @@ fn hold_turn(state: RuntimeState) -> TurnState {
         agent_state: Default::default(),
         activity: RuntimeActivity::new(Instant::now()),
         turns: SpeakerTurns::default(),
+    }
+}
+
+#[tokio::test]
+async fn drawing_yields_finish_audio_and_ask_once_with_or_without_speech() {
+    for speaking in [false, true] {
+        let mut turn = hold_turn(RuntimeState {
+            example_drawing_enabled: true,
+            ..Default::default()
+        });
+        if speaking {
+            turn.turns.candidate.record(
+                &mut turn.state.transcript,
+                crate::agent::CANDIDATE_SPEAKER,
+                "this box is one connected region",
+            );
+        }
+        let (mut output_audio, _frames) = test_output_audio();
+        let (mut gemini, server) = fake_recording_socket(None, if speaking { 2 } else { 3 }).await;
+        let mut media = CandidateMedia::new();
+        let result = crate::agent::apply_data_event(
+            &mut turn.state,
+            crate::runtime::TOPIC_CONTROL,
+            &serde_json::json!({"type":"yield_turn","surface":"example"}),
+            0.0,
+        );
+        let mut reply = result.generate_reply.clone();
+        let effects = settle(
+            &mut turn,
+            &mut output_audio,
+            &mut gemini,
+            &mut media,
+            &result,
+            &mut reply,
+        )
+        .await;
+        assert_eq!(effects, HoldEffects::default());
+        if speaking {
+            assert!(
+                reply.is_none(),
+                "the spoken turn carries the drawing context"
+            );
+            assert!(turn.activity.thinking_reply_fallback.is_some());
+        } else {
+            let prompt = reply.expect("drawing alone still needs an explicit reply");
+            send_model_text(
+                &mut gemini,
+                &mut turn.state,
+                ModelInputKind::Turn,
+                TurnCause::Turn,
+                &prompt,
+            )
+            .await
+            .unwrap();
+        }
+        let sent = server.await.unwrap();
+        if speaking {
+            assert_eq!(sent[0]["clientContent"]["turnComplete"], false);
+            assert!(sent[0].to_string().contains("Example drawing"));
+            assert_eq!(sent[1], crate::gemini::realtime_audio_end_message());
+        } else {
+            assert_eq!(sent[0], crate::gemini::realtime_audio_end_message());
+            assert_eq!(sent[1]["clientContent"]["turnComplete"], false);
+            assert!(sent[1].to_string().contains("TIMER:"));
+            assert_eq!(sent[2]["clientContent"]["turnComplete"], true);
+            assert!(sent[2].to_string().contains("Example drawing"));
+            assert!(!sent[2].to_string().contains("TIMER:"));
+        }
     }
 }
 

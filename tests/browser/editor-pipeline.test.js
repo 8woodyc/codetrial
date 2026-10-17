@@ -1309,3 +1309,72 @@ test("unfinished f-string expressions retain bracket editing with a loaded parse
     await page.close();
   }
 });
+
+test("example drawing is hidden unless the lobby enabled it", async (t) => {
+  for (const enabled of [false, true]) {
+    const fixture = await editorPage(t, {
+      params: enabled ? { exampleDrawing: "1" } : {},
+    });
+    if (!fixture) return;
+    const { page, errors } = fixture;
+    try {
+      await page.waitForFunction(
+        (enabled) =>
+          document.querySelector("#example-board").hidden === !enabled,
+        enabled,
+      );
+      assert.equal(
+        await page.locator("#example-board").evaluate((node) => node.hidden),
+        !enabled,
+      );
+      assert.equal(
+        await page.locator("#results-body").evaluate((node) => node.hidden),
+        enabled,
+      );
+      assert.equal(
+        (await page.locator("#results-chevron").textContent()).trim(),
+        enabled ? ">" : "v",
+      );
+      if (enabled) {
+        await page.evaluate(() => {
+          document.querySelector("#audio-check").hidden = true;
+        });
+        await page.locator("#example-board summary").click();
+        await page.waitForFunction(() =>
+          document.querySelector("#test-drawer").style.height.endsWith("px"),
+        );
+        const before = await page
+          .locator("#test-drawer")
+          .evaluate((node) => node.clientHeight);
+        const handle = await page.locator("#test-drawer-resizer").boundingBox();
+        await page.mouse.move(
+          handle.x + handle.width / 2,
+          handle.y + handle.height / 2,
+        );
+        await page.mouse.down();
+        await page.mouse.move(
+          handle.x + handle.width / 2,
+          handle.y + handle.height / 2 - 72,
+          { steps: 4 },
+        );
+        await page.mouse.up();
+        await page.waitForFunction(
+          (height) =>
+            document.querySelector("#test-drawer").clientHeight > height + 50,
+          before,
+        );
+        assert.equal(
+          await page
+            .locator(".editor-panel")
+            .evaluate((node) =>
+              node.style.getPropertyValue("--test-drawer-height"),
+            ),
+          "",
+        );
+      }
+      assert.deepEqual(errors, []);
+    } finally {
+      await page.close();
+    }
+  }
+});

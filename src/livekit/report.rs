@@ -15,8 +15,8 @@ use std::time::Duration;
 
 use crate::agent::{
     ModelInputKind, ReportPromptInput, RuntimeState, final_report, format_test_run,
-    framework_evidence_json, interview_contract_json, report_prompt, report_system_instruction,
-    rolling_assessment, transcript_for_report,
+    framework_evidence_json, interview_contract_json, report_prompt,
+    report_system_instruction_for_examples, rolling_assessment, transcript_for_report,
 };
 use crate::gemini::{GeminiKeys, ReportMaterial, generate_report_with_keys};
 use crate::runtime::{RuntimeBootstrap, TOPIC_REPORT};
@@ -50,7 +50,10 @@ fn freeze_report_prompt(
         ModelInputKind::FinalReport,
         &format!(
             "{}\n\n{prompt}",
-            report_system_instruction(boot.interview_mode)
+            report_system_instruction_for_examples(
+                boot.interview_mode,
+                boot.example_drawing_enabled
+            )
         ),
     );
     prompt
@@ -67,6 +70,10 @@ pub(super) struct FrozenAssessment {
 }
 
 impl FrozenAssessment {
+    pub(super) fn drawing_received(&self) -> bool {
+        self.state.board_snapshots > 0
+    }
+
     pub(super) fn rounds(&self) -> crate::agent::ReportRounds {
         crate::agent::ReportRounds::of(&self.state)
     }
@@ -89,6 +96,11 @@ pub(super) fn freeze_assessment(
     elapsed_min: f64,
     boards: Vec<ReportBoard>,
 ) -> FrozenAssessment {
+    let boards = if boot.interview_mode.is_whiteboard() {
+        boards
+    } else {
+        Vec::new()
+    };
     let prompt = freeze_report_prompt(boot, state, elapsed_min, !boards.is_empty());
     FrozenAssessment {
         prompt,
@@ -108,7 +120,7 @@ pub(super) async fn generate_report_bounded(
     boot: &RuntimeBootstrap<'_>,
     prompt: &str,
     boards: &[(&str, &[u8])],
-    rounds: crate::agent::ReportRounds,
+    (rounds, drawing_received): (crate::agent::ReportRounds, bool),
     api_key: &GeminiKeys,
     seed: i64,
     refused: &std::sync::atomic::AtomicBool,
@@ -121,6 +133,8 @@ pub(super) async fn generate_report_bounded(
             prompt,
             ReportMaterial {
                 mode: boot.interview_mode,
+                drawing_received,
+                example_drawing_enabled: boot.example_drawing_enabled,
                 boards,
             },
             boot.problem,
@@ -709,6 +723,7 @@ pub(super) async fn publish_with_recovery(
     let refused = refused.into_inner() || refused_report(&generated);
     let again = std::sync::atomic::AtomicBool::new(false);
     let rounds = crate::agent::ReportRounds::of(&state);
+    let drawing_received = state.board_snapshots > 0;
     let boards = labeled_boards(&boards);
     let mut room = LiveRecoveryRoom {
         room,
@@ -730,7 +745,7 @@ pub(super) async fn publish_with_recovery(
             boot,
             &prompt,
             &boards,
-            rounds,
+            (rounds, drawing_received),
             keys,
             regeneration_seed(refused),
             &again,

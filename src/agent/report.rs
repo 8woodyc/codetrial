@@ -9,7 +9,7 @@
 //! The strictness is deliberate. A report reaches a candidate, so a field that
 //! quietly defaults is a verdict nobody wrote.
 
-use super::{Problem, RUBRIC_VERSION};
+use super::{InterviewMode, Problem, RUBRIC_VERSION};
 
 /// Lowercase ASCII words, split on anything that is not a letter or a digit
 /// and inside identifiers where their case changes, the way `spelled_words` in
@@ -434,7 +434,8 @@ impl ReportRounds {
     }
 }
 
-/// `validate_report_candidate`, which also refuses any STAR plan item when
+/// `validate_report_candidate`, which refuses picture-only credit in coding
+/// reports and any STAR plan item when
 /// the platform never opened the behavioral round, and clears the STAR scores
 /// of the report it accepts.
 ///
@@ -452,13 +453,22 @@ pub fn validate_report_for_round(
     raw: &serde_json::Value,
     problem: &Problem,
     rounds: ReportRounds,
+    mode: InterviewMode,
+    drawing_received: bool,
 ) -> Result<serde_json::Value, Vec<String>> {
     let judged = if rounds.follow_ups_released {
         problem.variant().follow_ups.len()
     } else {
         0
     };
-    let report = validate_report_judging(raw, problem, judged);
+    let report = validate_report_judging(raw, problem, judged).and_then(|report| {
+        let errors = example_drawing_judgments(&report, problem, mode, drawing_received);
+        if errors.is_empty() {
+            Ok(report)
+        } else {
+            Err(errors)
+        }
+    });
     if rounds.behavioral_opened {
         return report;
     }
@@ -474,6 +484,110 @@ pub fn validate_report_for_round(
             Err(errors)
         }
     }
+}
+
+// Coding assessment describes code and conversation. The optional drawing is
+// shown separately, so references to it belong in neither score's feedback.
+fn example_drawing_judgments(
+    raw: &serde_json::Value,
+    problem: &Problem,
+    mode: InterviewMode,
+    drawing_received: bool,
+) -> Vec<String> {
+    if mode.is_whiteboard() || !drawing_received {
+        return Vec::new();
+    }
+    let variant = problem.variant();
+    let problem_words = spelled_words(&format!(
+        "{} {} {} {} {} {}",
+        problem.title,
+        problem.summary,
+        variant.title,
+        variant.brief_text(),
+        variant.contract,
+        variant.constraints.join(" ")
+    ));
+    let mut errors = Vec::new();
+    for key in [
+        "summary",
+        "codingFeedback",
+        "communicationFeedback",
+        "improvementPlan",
+        "followUps",
+    ] {
+        let Some(value) = raw.get(key) else {
+            continue;
+        };
+        visit_strings(value, &format!("$.{key}"), &mut |path, text| {
+            let words = spelled_words(text);
+            let visual_reference = words.iter().enumerate().any(|(index, word)| {
+                if problem_words.contains(word) {
+                    return false;
+                }
+
+                // References to exercise input are not references to an
+                // optional drawing. Apply this exception to each mention, so an
+                // input image cannot excuse a drawing in the same item.
+                if matches!(
+                    word.as_str(),
+                    "picture" | "pictures" | "diagram" | "diagrams"
+                ) && index
+                    .checked_sub(1)
+                    .and_then(|previous| words.get(previous))
+                    .is_some_and(|previous| matches!(previous.as_str(), "input" | "source"))
+                {
+                    return false;
+                }
+                if !matches!(
+                    word.as_str(),
+                    "drawing"
+                        | "drawings"
+                        | "diagram"
+                        | "diagrams"
+                        | "sketch"
+                        | "sketches"
+                        | "picture"
+                        | "pictures"
+                        | "whiteboard"
+                ) {
+                    return false;
+                }
+                let before = &words[..index];
+                let after = &words[index + 1..];
+                if (word == "picture" && before.last().is_some_and(|word| word == "big"))
+                    || (word == "sketch" && after.first().is_some_and(|word| word == "out"))
+                    || (word == "drawing"
+                        && after.first().is_some_and(|word| word == "on")
+                        && after.get(1).is_some_and(|word| {
+                            matches!(word.as_str(), "prior" | "previous" | "past" | "experience")
+                        }))
+                {
+                    return false;
+                }
+                let owned = before.last().is_some_and(|word| word == "your")
+                    || after.starts_with(&["you".to_string(), "drew".to_string()]);
+                let produced = before.iter().rev().take(4).any(|word| {
+                    matches!(
+                        word.as_str(),
+                        "provided" | "providing" | "uploaded" | "drew"
+                    )
+                });
+                let recommendation = words.first().is_some_and(|word| word == "draw");
+                owned || produced || recommendation
+            });
+
+            // An image may be the exercise's input, rather than the candidate's
+            // optional drawing. Keep ordinary reasoning about that input.
+            let normalized = format!(" {} ", words.join(" "));
+            let candidate_image = ["your image", "provided an image", "uploaded an image"]
+                .iter()
+                .any(|phrase| normalized.contains(&format!(" {phrase} ")));
+            if visual_reference || candidate_image {
+                errors.push(format!("{path}: example drawings are outside coding and communication assessment; remove the visual reference and any credit or deduction based on it. Use only code, tests or the candidate's actual conversation under the original rubric, never the interviewer's interpretation of a picture"));
+            }
+        });
+    }
+    errors
 }
 
 fn unopened_round_errors(raw: &serde_json::Value) -> Vec<String> {
@@ -526,12 +640,163 @@ pub(crate) const SUCCESS_CRITERION_REPLACEMENT: &str =
 /// What `sanitize_report_candidate` took out of a report.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Sanitized {
+    /// Example drawing references removed from assessment text.
+    pub drawings: usize,
     /// Self-review checks dropped.
     pub checks: usize,
     /// Success criteria replaced.
     pub criteria: usize,
     /// Follow-up assessments dropped.
     pub assessments: usize,
+}
+
+/// Keep valid assessment evidence when repair attempts repeat visual wording.
+/// Scores and decisions are left untouched; an unrelated validation error
+/// still prevents this candidate from becoming a salvage.
+pub(crate) fn sanitize_example_drawing_candidate(
+    mut report: serde_json::Value,
+    problem: &Problem,
+    mode: InterviewMode,
+    drawing_received: bool,
+) -> (serde_json::Value, usize) {
+    if mode.is_whiteboard() || !drawing_received {
+        return (report, 0);
+    }
+    let refused = |text: &str| {
+        text.split_inclusive(['.', '!', '?']).any(|sentence| {
+            !example_drawing_judgments(
+                &serde_json::json!({"summary": sentence}),
+                problem,
+                mode,
+                true,
+            )
+            .is_empty()
+        })
+    };
+    let clean = |text: &str, fallback: &str| {
+        let kept = text
+            .split_inclusive(['.', '!', '?'])
+            .filter(|sentence| !refused(sentence))
+            .collect::<String>();
+        if kept.trim().is_empty() {
+            fallback.to_owned()
+        } else {
+            kept.trim().to_owned()
+        }
+    };
+    let mut removed = 0;
+    if let Some(value) = report.get_mut("summary")
+        && let Some(text) = value.as_str()
+        && refused(text)
+    {
+        *value = serde_json::json!(clean(
+            text,
+            "Assessment uses the retained code, tests and conversation evidence."
+        ));
+        removed += 1;
+    }
+    let mut replacements = std::collections::HashMap::new();
+    for section in ["codingFeedback", "communicationFeedback"] {
+        for kind in ["strengths", "improvements"] {
+            if let Some(items) = report
+                .get_mut(section)
+                .and_then(|v| v.get_mut(kind))
+                .and_then(serde_json::Value::as_array_mut)
+            {
+                for (index, value) in items.iter_mut().enumerate() {
+                    if let Some(text) = value.as_str()
+                        && refused(text)
+                    {
+                        // Preserve the schema's list bounds without inventing
+                        // candidate evidence. Linked practice items use the
+                        // same omission note instead of the removed wording.
+                        let label = if section == "codingFeedback" {
+                            "implementation"
+                        } else {
+                            "conversation"
+                        };
+                        let note = format!(
+                            "Additional {label} feedback item {} was omitted from this report.",
+                            index + 1
+                        );
+                        let kept = clean(text, &note);
+                        if kind == "improvements" {
+                            replacements.insert(text.to_owned(), kept.clone());
+                        }
+                        *value = serde_json::json!(kept);
+                        removed += 1;
+                    }
+                }
+            }
+        }
+    }
+    if let Some(items) = report
+        .get_mut("improvementPlan")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for item in items {
+            if let Some(weakness) = item.get_mut("weakness")
+                && let Some(text) = weakness.as_str()
+                && let Some(kept) = replacements.get(text)
+            {
+                *weakness = serde_json::json!(kept);
+                removed += 1;
+            }
+            for (key, fallback) in [
+                (
+                    "weakness",
+                    "This feedback item was omitted from the assessment.",
+                ),
+                (
+                    "drill",
+                    "Review the retained code and explain one evidence-supported improvement.",
+                ),
+                (
+                    "successCriterion",
+                    "Support the improvement with code, tests or actual conversation.",
+                ),
+            ] {
+                if let Some(value) = item.get_mut(key)
+                    && let Some(text) = value.as_str()
+                    && refused(text)
+                {
+                    *value = serde_json::json!(clean(text, fallback));
+                    removed += 1;
+                }
+            }
+            if let Some(checks) = item
+                .get_mut("selfReview")
+                .and_then(serde_json::Value::as_array_mut)
+            {
+                let before = checks.len();
+                checks.retain(|value| value.as_str().is_none_or(|text| !refused(text)));
+                removed += before - checks.len();
+                if before > 0 && checks.is_empty() {
+                    checks.push(serde_json::json!("Uses retained assessment evidence."));
+                }
+            }
+        }
+    }
+    if let Some(entries) = report
+        .get_mut("followUps")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for entry in entries {
+            if let Some(value) = entry.get_mut("assessment")
+                && let Some(text) = value.as_str()
+                && refused(text)
+            {
+                let kept = clean(text, "");
+                *value = if kept.is_empty() {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::json!(kept)
+                };
+                removed += 1;
+            }
+        }
+    }
+    (report, removed)
 }
 
 impl Sanitized {

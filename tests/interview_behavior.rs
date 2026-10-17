@@ -404,7 +404,7 @@ impl Conversation {
                 .json(&json!({
                     "systemInstruction": { "parts": [{ "text": self.instructions }] },
                     "contents": self.contents,
-                    "tools": [{ "functionDeclarations": live_tool_declarations(self.state.interview_loop, self.state.interview_mode) }],
+                    "tools": [{ "functionDeclarations": live_tool_declarations(self.state.interview_loop, self.state.interview_mode, self.state.example_drawing_enabled) }],
                     "generationConfig": { "temperature": 0.7 },
                 }))
                 .send()
@@ -422,22 +422,26 @@ impl Conversation {
     }
 
     async fn generate_local(&self, base: &str) -> Value {
-        let tools = live_tool_declarations(self.state.interview_loop, self.state.interview_mode)
-            .as_array()
-            .into_iter()
-            .flatten()
-            .map(|tool| {
-                let parameters = tool
-                    .get("parameters")
-                    .map(lower_schema_types)
-                    .unwrap_or_else(|| json!({ "type": "object", "properties": {} }));
-                json!({ "type": "function", "function": {
-                    "name": tool["name"],
-                    "description": tool["description"],
-                    "parameters": parameters,
-                }})
-            })
-            .collect::<Vec<_>>();
+        let tools = live_tool_declarations(
+            self.state.interview_loop,
+            self.state.interview_mode,
+            self.state.example_drawing_enabled,
+        )
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|tool| {
+            let parameters = tool
+                .get("parameters")
+                .map(lower_schema_types)
+                .unwrap_or_else(|| json!({ "type": "object", "properties": {} }));
+            json!({ "type": "function", "function": {
+                "name": tool["name"],
+                "description": tool["description"],
+                "parameters": parameters,
+            }})
+        })
+        .collect::<Vec<_>>();
         let chat: Value = self
             .client
             .post(format!("{base}/v1/chat/completions"))
@@ -610,6 +614,7 @@ fn a_played_candidate_is_read_by_what_it_asks() {
         &codetrial::runtime::RuntimeOptions {
             voice: None,
             accent: None,
+            example_drawing_enabled: false,
             profile: InterviewProfile::default(),
             grounding: InterviewGrounding::default(),
             interview_loop: InterviewLoop::CodingBehavioral,
@@ -893,6 +898,7 @@ async fn uncertain_speech_is_clarified_without_crediting_or_correcting_it() {
                     &codetrial::runtime::RuntimeOptions {
                         voice: None,
                         accent: None,
+                        example_drawing_enabled: false,
                         profile: InterviewProfile::default(),
                         grounding: InterviewGrounding::default(),
                         interview_loop,
@@ -996,6 +1002,7 @@ async fn live_interviewer_poses_the_variant_and_serves_hints_in_order() {
                     &codetrial::runtime::RuntimeOptions {
                         voice: None,
                         accent: None,
+                        example_drawing_enabled: false,
                         profile: InterviewProfile::default(),
                         grounding: InterviewGrounding::default(),
                         interview_loop: InterviewLoop::CodingBehavioral,
@@ -1470,6 +1477,7 @@ async fn played_candidates_are_held_to_the_same_rules() {
                 &codetrial::runtime::RuntimeOptions {
                     voice: None,
                     accent: None,
+                    example_drawing_enabled: false,
                     profile: InterviewProfile::default(),
                     grounding: InterviewGrounding::default(),
                     interview_loop: InterviewLoop::CodingBehavioral,
@@ -1549,6 +1557,7 @@ async fn conversational_reacto_answers_are_recorded_in_the_same_reply() {
             &codetrial::runtime::RuntimeOptions {
                 voice: None,
                 accent: None,
+                example_drawing_enabled: false,
                 profile: InterviewProfile::default(),
                 grounding: InterviewGrounding::default(),
                 interview_loop: InterviewLoop::CodingOnly,

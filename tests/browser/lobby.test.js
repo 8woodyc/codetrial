@@ -5057,3 +5057,100 @@ lobbyTest(
     assert.equal((await snapshot(page)).duration, "45");
   },
 );
+
+lobbyTest(
+  "example drawing is opt-in and stays off in Whiteboard",
+  async (page) => {
+    for (const enabled of [false, true]) {
+      await lobby(page);
+      const toggle = page.getByRole("checkbox", {
+        name: "Enable Example drawing",
+        exact: true,
+      });
+      assert.equal(await toggle.isChecked(), false);
+      if (enabled) await toggle.check();
+      await page.click("#start");
+      await page.waitForURL(/\/interview/);
+      assert.equal(
+        new URL(page.url()).searchParams.get("exampleDrawing"),
+        enabled ? "1" : null,
+      );
+    }
+    await lobby(page);
+    const toggle = page.getByRole("checkbox", {
+      name: "Enable Example drawing",
+      exact: true,
+    });
+    await toggle.check();
+    await page.click('[data-mode="whiteboard"]');
+    assert.equal(await toggle.isDisabled(), true);
+    await page.click("#start");
+    await page.waitForURL(/\/interview/);
+    assert.equal(new URL(page.url()).searchParams.get("exampleDrawing"), null);
+  },
+);
+
+lobbyTest(
+  "example drawing choice survives reload and can be turned off",
+  async (page) => {
+    await lobby(page);
+    const toggle = page.getByRole("checkbox", {
+      name: "Enable Example drawing",
+      exact: true,
+    });
+    assert.equal(await toggle.isChecked(), false);
+    await toggle.check();
+    assert.equal(
+      await page.evaluate(
+        () =>
+          JSON.parse(localStorage.getItem("codetrial.interviewSettings"))
+            ?.exampleDrawing,
+      ),
+      true,
+    );
+    await page.reload();
+    await awaitReady(page);
+    assert.equal(await toggle.isChecked(), true);
+    await page.click('[data-mode="whiteboard"]');
+    await page.reload();
+    await awaitReady(page);
+    assert.equal(await toggle.isDisabled(), true);
+    assert.equal(await toggle.isChecked(), true);
+    await page.click('[data-mode="coding"]');
+    await toggle.uncheck();
+    await page.reload();
+    await awaitReady(page);
+    assert.equal(await toggle.isChecked(), false);
+    assert.equal(await toggle.isDisabled(), false);
+  },
+);
+
+for (const settings of [
+  {},
+  { exampleDrawing: "true" },
+  { exampleDrawing: false },
+]) {
+  lobbyTest(
+    `example drawing stays off without a stored true choice: ${JSON.stringify(settings)}`,
+    async (page) => {
+      await page.addInitScript(
+        (value) =>
+          localStorage.setItem(
+            "codetrial.interviewSettings",
+            JSON.stringify(value),
+          ),
+        settings,
+      );
+      await lobby(page);
+      assert.equal(
+        await page
+          .getByRole("checkbox", {
+            name: "Enable Example drawing",
+            exact: true,
+          })
+          .isChecked(),
+        false,
+      );
+    },
+  );
+}
