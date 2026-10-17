@@ -12,6 +12,7 @@ import {
   compilerType,
   generateHarness,
   HARNESS_SIGNATURE_NOTE,
+  harnessAvailability,
   harnessGap,
   harnessLineOffset,
   languagesFor,
@@ -1605,6 +1606,10 @@ test("a class-style judge withholds C, and says why", () => {
     languagesFor(judges["lru-cache"]),
     ALL_LANGUAGES.filter((one) => one !== "c"),
   );
+  assert.deepEqual(harnessAvailability("c", judges["lru-cache"]), {
+    message: harnessGap("c", judges["lru-cache"]),
+    reason: "class problem",
+  });
   assert.match(
     harnessGap("c", judges["lru-cache"]),
     /only builds function judges/,
@@ -1619,6 +1624,10 @@ test("C is offered only once a function-style judge is known", () => {
     languagesFor(null),
     ALL_LANGUAGES.filter((one) => one !== "c"),
   );
+  assert.deepEqual(harnessAvailability("c", null), {
+    message: harnessGap("c", null),
+    reason: "waiting for judge",
+  });
   assert.match(harnessGap("c", null), /only after function-style tests load/);
 });
 
@@ -1631,6 +1640,10 @@ test("disabled compiled runners withhold their languages for every judge", () =>
     for (const spec of [null, judges["two-sum"], judges["lru-cache"]]) {
       assert.deepEqual(languagesFor(spec), ["python", "javascript"]);
       for (const language of COMPILED_LANGUAGES) {
+        assert.deepEqual(harnessAvailability(language, spec), {
+          message: harnessGap(language, spec),
+          reason: "disabled by server",
+        });
         assert.match(harnessGap(language, spec), /disabled by this server/);
       }
       const available =
