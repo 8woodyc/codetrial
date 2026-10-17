@@ -282,8 +282,11 @@ have kept it open.
 The four sweep lists are the queue, and each one has a fixed next move:
 
 - `unanswered`: no maintainer has spoken. Triage these first, oldest first,
-  with the verdicts above. The longer the first answer takes, the less likely
-  the reporter still has the build and the log it will ask for.
+  with the verdicts above. The sweep leaves out the viewer's own issues but
+  keeps a collaborator's, since a proposal that ends in "Decision needed"
+  waits on the maintainer like any report (#330). The longer the first answer
+  takes, the less likely the reporter still has the build and the log it will
+  ask for.
 - `waiting`: a maintainer spoke last and the reporter has not commented or
   edited the body since. Read that comment first. A correction or a note
   carried over from another thread is not a question; neither is "see if PR #N
