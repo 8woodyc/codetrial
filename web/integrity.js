@@ -101,12 +101,23 @@ export function startIntegrityHeartbeat() {
   }, INTEGRITY_HEARTBEAT_MS);
 }
 
+/// While a microphone switch holds LiveKit's mute flag, LiveKit has disabled
+/// the input still in the stream. That is the swap's doing, not the
+/// candidate's, so for that stretch the Mic button's state is reported instead
+/// of the track's, or the trail would read a muted microphone the candidate
+/// never muted.
+function enabledOf(source, track) {
+  if (source === "microphone" && state.microphoneSwapHolding)
+    return state.micEnabled;
+  return track?.enabled !== false;
+}
+
 export function integrityHeartbeatDetail() {
   const camera = state.localUserStream?.getVideoTracks?.()[0];
   const mic = state.localUserStream?.getAudioTracks?.()[0];
-  const status = (track) =>
-    `${track?.readyState || "missing"}/${track?.enabled === false ? "off" : "on"}/${track?.muted ? "muted" : "unmuted"}`;
-  return `camera=${status(camera)};microphone=${status(mic)};analyzer=${state.integrityAnalysisDetail}`;
+  const status = (source, track) =>
+    `${track?.readyState || "missing"}/${enabledOf(source, track) ? "on" : "off"}/${track?.muted ? "muted" : "unmuted"}`;
+  return `camera=${status("camera", camera)};microphone=${status("microphone", mic)};analyzer=${state.integrityAnalysisDetail}`;
 }
 
 export function startIntegrityTrackStateMonitor() {
@@ -119,7 +130,7 @@ export function startIntegrityTrackStateMonitor() {
   const poll = () => {
     for (const [source, track] of tracks()) {
       if (!track) continue;
-      const current = `${track.readyState || "missing"}/${track.enabled === false ? "off" : "on"}`;
+      const current = `${track.readyState || "missing"}/${enabledOf(source, track) ? "on" : "off"}`;
       const previous = state.integrityTrackStates.get(source);
       state.integrityTrackStates.set(source, current);
       if (previous && previous !== current) {
