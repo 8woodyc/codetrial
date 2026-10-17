@@ -567,3 +567,43 @@ fn guest_mode_recording_conflict_requires_both_settings() {
     assert!(!super::guest_mode_recording_conflict(true, false));
     assert!(super::guest_mode_recording_conflict(true, true));
 }
+
+/// Written by hand in a config file or by a launcher, so the spacing and a
+/// trailing comma are the writer's, and neither may become a host name that
+/// matches a request with an empty `Host`.
+#[test]
+fn the_allowed_hosts_are_a_trimmed_list_without_blanks() {
+    assert!(super::allowed_hosts(&values(&[])).unwrap().is_empty());
+    assert_eq!(
+        super::allowed_hosts(&values(&[(
+            "CODETRIAL_ALLOWED_HOSTS",
+            " 127.0.0.1:3101 ,, Desktop.Test ,"
+        )]))
+        .unwrap(),
+        ["127.0.0.1:3101", "Desktop.Test"]
+    );
+}
+
+/// A list that parses to nothing would switch the check off while the person
+/// who wrote it believes every other name is refused.
+#[test]
+fn an_allowed_hosts_list_with_no_host_is_refused_not_read_as_off() {
+    // Nothing, or only spacing, is an unset variable, as for every other
+    // setting.
+    for unset in ["", " "] {
+        assert!(
+            super::allowed_hosts(&values(&[("CODETRIAL_ALLOWED_HOSTS", unset)]))
+                .unwrap()
+                .is_empty(),
+            "{unset:?}"
+        );
+    }
+    for blank in [" , ", ",,"] {
+        assert!(
+            super::allowed_hosts(&values(&[("CODETRIAL_ALLOWED_HOSTS", blank)])).is_err(),
+            "{blank:?}"
+        );
+    }
+    let argv = ["web", "--allowed-hosts", " "].map(String::from);
+    assert!(super::parse_agent_args(&argv).is_err());
+}

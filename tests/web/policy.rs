@@ -287,3 +287,47 @@ async fn the_recording_template_is_reachable_under_a_policy_that_permits_its_roo
 
     server.shutdown().await;
 }
+
+/// A page on another origin can give its own name a short TTL, repoint it at
+/// 127.0.0.1 and then read a loopback server as same origin. The `Host` it
+/// sends still carries that name, so a server told which names are its own
+/// refuses the rest, `/healthz` included, and matches without case because a
+/// host name has none.
+#[tokio::test]
+async fn an_allowed_hosts_list_refuses_every_other_host_name() {
+    let (base, server) = spawn_web_server(WebServerConfig {
+        allowed_hosts: vec!["desktop.test:3101".to_string()],
+        ..web_config()
+    })
+    .await;
+    let status = |host: &'static str| {
+        let request = http_client()
+            .get(format!("{base}/healthz"))
+            .header(reqwest::header::HOST, host);
+        async move { request.send().await.unwrap().status().as_u16() }
+    };
+
+    assert_eq!(status("Desktop.Test:3101").await, 200);
+    assert_eq!(status("rebound.example:3101").await, 421);
+    assert_eq!(status("desktop.test:3102").await, 421);
+    // Near misses are other names: a trailing dot, a bare IPv6 literal.
+    assert_eq!(status("desktop.test.:3101").await, 421);
+    assert_eq!(status("[::1]:3101").await, 421);
+
+    // No `Host` at all, which an HTTP/1.0 request may omit, names nobody the
+    // server answers to.
+    let addr = base.strip_prefix("http://").unwrap().to_string();
+    let reply = tokio::task::spawn_blocking(move || {
+        use std::io::{Read as _, Write as _};
+        let mut stream = std::net::TcpStream::connect(addr).unwrap();
+        stream.write_all(b"GET /healthz HTTP/1.0\r\n\r\n").unwrap();
+        let mut reply = String::new();
+        stream.read_to_string(&mut reply).unwrap();
+        reply
+    })
+    .await
+    .unwrap();
+    assert!(reply.starts_with("HTTP/1.0 421"), "{reply}");
+
+    server.shutdown().await;
+}

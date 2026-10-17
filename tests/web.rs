@@ -136,6 +136,7 @@ fn web_config() -> WebServerConfig {
         compiler_explorer_enabled: true,
         guest_mode_enabled: true,
         trusted_proxy_hops: 0,
+        allowed_hosts: Vec::new(),
         recording: None,
         pool: primary_pool("wss://example.livekit.cloud", "devkey", "devsecret"),
         probe_provider_quota: false,
@@ -909,7 +910,7 @@ fn query_parameter(location: &str, name: &str) -> Option<String> {
 fn declared_routes() -> Vec<String> {
     let source = fs::read_to_string("src/web/mod.rs").unwrap();
     let router = source
-        .split_once("    Router::new()")
+        .split_once("    let router = Router::new()")
         .expect("web_router builds a Router")
         .1
         .split_once("        .fallback(")
