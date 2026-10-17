@@ -104,9 +104,9 @@ review records the head it was left on, so a moved head is a push; after a plain
 comment, the latest commit or force-push date stands in. Hidden reviews do not
 count. Two cases are left alone: a PR whose latest approving or
 changes-requested review is an approval, since the next move is not the author's
-even when a comment followed it, and a PR whose latest activity is the fixed
-rebase request while it still conflicts, since `rebase` owns that one and a
-nudge on top only adds a notification. A maintainer nudge is itself a comment,
+even when a comment followed it, and a PR whose latest activity is a rebase
+request, in any wording, while it still conflicts, since `rebase` owns that
+one and a nudge on top only adds a notification. A maintainer nudge is itself a comment,
 so a nudged PR drops out for another seven days without any bookkeeping here. A
 PR can be in `stale` and `rebase` at once; the rebase request goes out first, so
 the nudge says the branch also needs that rebase rather than leaving the author
@@ -128,9 +128,11 @@ as conflicting (the "This branch has conflicts that must be resolved" banner),
 not opened by the account running the sweep, since GitHub refuses a review of
 one's own PR. A draft is still being written and is left alone, and a PR stacked
 on another branch is left to its reviewer, since the fixed text names the
-default branch. A PR whose latest rebase request is left on its current head is
-not listed: that request is still the current one, and asking again only adds a
-notification.
+default branch. A PR whose current head already carries a visible
+changes-requested review that mentions rebase is not listed, whether it is the
+fixed text, the short request or a maintainer's own wording such as #326's
+"Rebase latest `main` branch to eliminate known vulnerabilities.": that request
+is still the current one, and asking again only adds a notification.
 
 The review body is [rebase.md](rebase.md), posted as the file itself; the
 script compares against the same file, so rewording it there keeps the two in
@@ -152,9 +154,11 @@ gh pr view "$pr" --repo "$repo" --json mergeable,headRefOid \
 ```
 
 Post it before hiding anything, so a failed post never leaves a conflicting PR
-with no visible request. `hide` lists every earlier review with that exact text
-and no inline comments on a PR in `rebase`, plus, on any other PR, all but the
-newest one. The entries for a PR in `rebase` assume its new request landed, so
+with no visible request. `hide` lists the earlier reviews with that exact text
+and no inline comments: all of them on a PR in `rebase`, or on a conflicting
+PR whose current head carries only a hand-written request (that request stays
+current and is kept out of `hide_ask`); on any other PR, all but the newest.
+The entries for a PR in `rebase` assume its new request landed, so
 hide them only after that PR's post succeeded; when the check above skipped the
 post, or the post failed, hide all of them but the newest, which is still the
 current request. Hiding does not dismiss the review; the PR stays at changes
