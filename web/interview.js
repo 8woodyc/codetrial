@@ -3,7 +3,7 @@ import { loadJudge, loadProblem } from "./problem-data.js";
 import { downloadMarkdown, reportFilename } from "./download.js";
 import { consumeSharedFocus } from "./problem-picker.js";
 import {
-  cameraErrorKind,
+  deviceErrorKind,
   outputUsable,
   preflightReadiness,
   videoTrackReady,
@@ -1674,7 +1674,7 @@ const CAMERA_SKIP_REASONS = {
 };
 
 function cameraSkipReasonFor(error) {
-  return CAMERA_SKIP_REASONS[cameraErrorKind(error)] ?? "declined";
+  return CAMERA_SKIP_REASONS[deviceErrorKind(error)] ?? "declined";
 }
 
 /// Meet cannot open a camera CodeTrial is holding, and the preflight has

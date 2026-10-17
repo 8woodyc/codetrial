@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import {
   MIC_CONFIRM_FRAMES,
   MIC_SILENT_PEAK,
-  cameraErrorKind,
+  deviceErrorKind,
   mediaReadiness,
   outputUsable,
   peakLevel,
@@ -308,18 +308,51 @@ test("a busy camera names the other app instead of asking for access", () => {
   assert.doesNotMatch(denied.message, /another app/);
 });
 
-// One classifier drives both the advice above and the reason a skipped camera
-// is recorded under, so each spelling is pinned here. Before it existed the
-// skip path knew no busy spelling and recorded a busy camera as declined.
-test("camera errors sort into what the candidate can do about them", () => {
+// The microphone is the one device the interview cannot start without, so
+// sending a busy one to permission settings strands the candidate. The
+// exclusive-mode spelling is the one measured on Windows 11 with Chrome 155
+// while another process held the device; each is fed on its own.
+test("a busy microphone names the other app instead of asking for access", () => {
+  for (const micError of [
+    "NotReadableError: Device in use",
+    "NotReadableError: Could not start audio source",
+    "no active audio track",
+  ]) {
+    const busy = mediaReadiness({ ...passingMedia, micError });
+    assert.equal(busy.blocker, "mic-error", micError);
+    assert.match(busy.message, /^Microphone unavailable: /, micError);
+    assert.match(busy.message, /another app/, micError);
+    assert.match(busy.message, /picks it up again by itself/, micError);
+    assert.doesNotMatch(busy.message, /Grant access/, micError);
+    // The camera's presentation route does not exist for the microphone.
+    assert.doesNotMatch(busy.message, /Google Meet/, micError);
+    // An unplugged microphone fails as not found, never as busy.
+    assert.doesNotMatch(busy.message, /unplugged/, micError);
+  }
+
+  const denied = mediaReadiness({
+    ...passingMedia,
+    micError: "NotAllowedError: Permission denied",
+  });
+  assert.match(denied.message, /Grant access, then test again\./);
+  assert.doesNotMatch(denied.message, /another app/);
+});
+
+// One classifier drives the camera and microphone advice and the reason a
+// skipped camera is recorded under, so each spelling is pinned here. Before it
+// existed the skip path knew no busy spelling and recorded a busy camera as
+// declined.
+test("device errors sort into what the candidate can do about them", () => {
   const cases = {
     busy: [
       "NotReadableError",
       "NotReadableError: Could not start video source",
+      "NotReadableError: Could not start audio source",
       "TrackStartError",
       "AbortError: Starting video failed",
       "Device in use",
       "no active video track",
+      "no active audio track",
     ],
     denied: [
       "NotAllowedError",
@@ -338,7 +371,7 @@ test("camera errors sort into what the candidate can do about them", () => {
   };
   for (const [kind, errors] of Object.entries(cases)) {
     for (const error of errors) {
-      assert.equal(cameraErrorKind(error), kind, String(error));
+      assert.equal(deviceErrorKind(error), kind, String(error));
     }
   }
 });

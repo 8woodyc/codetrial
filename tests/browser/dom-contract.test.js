@@ -661,7 +661,7 @@ test("an unrecorded preflight can continue without a camera", () => {
   );
   assert.match(
     script,
-    /CAMERA_SKIP_REASONS\[cameraErrorKind\(error\)\]/,
+    /CAMERA_SKIP_REASONS\[deviceErrorKind\(error\)\]/,
     "the skip reason must come from the classifier that chose the advice",
   );
   assert.match(
