@@ -698,3 +698,186 @@ test("C stays unavailable until a function-style judge has loaded", async (t) =>
     await new Promise((closed) => enabled.server.close(closed));
   }
 });
+
+const CASES_KEY = "codetrial.candidateCases.chargeback-pair-match";
+
+async function addCase(page, input) {
+  const count = await page.locator("#candidate-case-list > li").count();
+  await page.evaluate((value) => {
+    document.querySelector("#candidate-case-input").value = value;
+    document.querySelector("#candidate-case-add").click();
+  }, input);
+  await page.waitForFunction(
+    (n) => document.querySelector("#candidate-case-list").children.length === n,
+    count + 1,
+  );
+  const stored = await page.evaluate(
+    (k) => sessionStorage.getItem(k),
+    CASES_KEY,
+  );
+  assert.ok(stored?.includes(input));
+}
+
+test("ending an interview clears candidate cases from session storage", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await browser.newPage();
+  try {
+    await page.goto(`${base}/interview.html?problem=chargeback-pair-match`, {
+      waitUntil: "domcontentloaded",
+    });
+    await candidateCasesReady(page);
+    await addCase(page, "[[2,7,11,15],9]");
+
+    await page.evaluate(() => document.querySelector("#end").click());
+    await page.waitForFunction(
+      () =>
+        sessionStorage.getItem(
+          "codetrial.candidateCases.chargeback-pair-match",
+        ) === null,
+    );
+  } finally {
+    await page.close();
+  }
+});
+
+test("rendering a report clears candidate cases from session storage", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await browser.newPage();
+  try {
+    await page.goto(`${base}/interview.html?problem=chargeback-pair-match`, {
+      waitUntil: "domcontentloaded",
+    });
+    await candidateCasesReady(page);
+    await addCase(page, "[[2,7,11,15],9]");
+
+    await page.evaluate(() => {
+      document.querySelector("#force-report").click();
+    });
+    await page.waitForFunction(
+      () =>
+        sessionStorage.getItem(
+          "codetrial.candidateCases.chargeback-pair-match",
+        ) === null,
+    );
+  } finally {
+    await page.close();
+  }
+});
+
+test("in-flight candidate case additions are refused when interview leaves live", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await browser.newPage();
+  let releaseJudge = () => {};
+  try {
+    releaseJudge = await holdJudge(page);
+    await page.goto(`${base}/interview.html?problem=chargeback-pair-match`, {
+      waitUntil: "domcontentloaded",
+    });
+    await page.waitForFunction(
+      () => !document.querySelector("#candidate-case-add").disabled,
+    );
+    await page.evaluate(() => {
+      document.querySelector("#candidate-case-input").value = "[[2,7,11,15],9]";
+      document.querySelector("#candidate-case-add").click();
+      document.querySelector("#end").click();
+    });
+    releaseJudge();
+    await page.waitForFunction(
+      () => !document.querySelector("#candidate-case-add").disabled,
+    );
+    const stored = await page.evaluate(() =>
+      sessionStorage.getItem("codetrial.candidateCases.chargeback-pair-match"),
+    );
+    assert.equal(stored, null);
+    const casesCount = await page.evaluate(
+      () => document.querySelector("#candidate-case-list").children.length,
+    );
+    assert.equal(casesCount, 0);
+    const status = await page.evaluate(
+      () => document.querySelector("#candidate-case-status").textContent,
+    );
+    assert.equal(status, "The interview has ended.");
+  } finally {
+    releaseJudge();
+    await page.close();
+  }
+});
+
+test("ending an interview empties the candidate case list", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await browser.newPage();
+  try {
+    await page.goto(`${base}/interview.html?problem=chargeback-pair-match`, {
+      waitUntil: "domcontentloaded",
+    });
+    await candidateCasesReady(page);
+    await addCase(page, "[[2,7,11,15],9]");
+    await addCase(page, "[[1,2,3],5]");
+
+    await page.evaluate(() => document.querySelector("#end").click());
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#candidate-case-list").children.length === 0,
+    );
+    const count = await page.locator("#candidate-case-list > li").count();
+    assert.equal(count, 0);
+  } finally {
+    await page.close();
+  }
+});
+
+test("candidate cases do not persist across new interview sessions in the same tab", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await browser.newPage();
+  try {
+    await page.goto(`${base}/interview.html?problem=chargeback-pair-match`, {
+      waitUntil: "domcontentloaded",
+    });
+    await candidateCasesReady(page);
+    await addCase(page, "[[2,7,11,15],9]");
+
+    await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
+    await page.goto(`${base}/interview.html?problem=chargeback-pair-match`, {
+      waitUntil: "domcontentloaded",
+    });
+    await candidateCasesReady(page);
+
+    const count = await page.locator("#candidate-case-list > li").count();
+    assert.equal(count, 0);
+    const stored = await page.evaluate(
+      (k) => sessionStorage.getItem(k),
+      CASES_KEY,
+    );
+    assert.equal(stored, null);
+  } finally {
+    await page.close();
+  }
+});
+
+test("candidate cases are preserved on page reload", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await browser.newPage();
+  try {
+    await page.goto(`${base}/interview.html?problem=chargeback-pair-match`, {
+      waitUntil: "domcontentloaded",
+    });
+    await candidateCasesReady(page);
+    await addCase(page, "[[2,7,11,15],9]");
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#candidate-case-list").children.length === 1,
+    );
+
+    const count = await page.locator("#candidate-case-list > li").count();
+    assert.equal(count, 1);
+    const stored = await page.evaluate(
+      (k) => sessionStorage.getItem(k),
+      CASES_KEY,
+    );
+    assert.ok(stored?.includes("[[2,7,11,15],9]"));
+  } finally {
+    await page.close();
+  }
+});
