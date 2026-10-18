@@ -17,8 +17,8 @@ use super::{
     changed_excerpt, format_test_run_for_reaction, integrity_hash, language_choice, observe_code,
     observe_code_cached, python_truthy, resume, round_skipped, round_started,
     sanitize_integrity_event, sanitize_test_run, spoken_language, test_reaction_decision,
-    test_results_reaction, test_runner_unavailable_reaction, test_setup_error_reaction,
-    time_warning, uncredited_test_results_reaction,
+    test_results_reaction, test_runner_outage_reaction, test_runner_unavailable_reaction,
+    test_setup_error_reaction, time_warning, uncredited_test_results_reaction,
 };
 use crate::runtime::{TOPIC_CODE_UPDATE, TOPIC_CONTROL, TOPIC_INTEGRITY, TOPIC_TEST_RESULTS};
 
@@ -594,7 +594,9 @@ fn apply_test_results(
     // screen, and inviting a trace there invites a record the gate refuses.
     // Past the gate of a coding-only session an outage is still not the
     // candidate's to diagnose, so it continues from the credited run instead; a
-    // compile error keeps the setup-error reaction.
+    // compile error keeps the setup-error reaction. Anywhere else an outage in
+    // the language on screen is named as the platform's, without the trace that
+    // only an open Test may stand on.
     let uncredited = || {
         uncredited_test_results_reaction(&summary, excerpt.as_deref(), state, recorded.is_some())
     };
@@ -602,6 +604,8 @@ fn apply_test_results(
         test_runner_unavailable_reaction(&summary, excerpt.as_deref())
     } else if outage && super::coding_continues_past_gate(state) {
         uncredited()
+    } else if outage && super::runner_unavailable_on_screen(state) {
+        test_runner_outage_reaction(&summary, excerpt.as_deref())
     } else if setup_error {
         test_setup_error_reaction(&summary, excerpt.as_deref())
     } else if !credited {

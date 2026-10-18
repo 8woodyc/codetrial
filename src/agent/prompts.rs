@@ -3226,6 +3226,17 @@ pub fn test_runner_unavailable_reaction(summary_text: &str, excerpt: Option<&str
     )
 }
 
+/// An outage once no trace is wanted: Test is already recorded, or a run still
+/// covers the code on screen. It used to reach the setup-error reaction, which
+/// asks the candidate to find the stage that failed and an assumption to
+/// verify, about a failure no edit of theirs can cause or fix.
+pub fn test_runner_outage_reaction(summary_text: &str, excerpt: Option<&str>) -> String {
+    let code = reaction_code(excerpt);
+    format!(
+        "[SYSTEM EVENT] The candidate tried to run the built-in test cases, but the platform could not run them:\n{summary_text}\n{code}This is not the candidate's error and says nothing about their code. In one short sentence, say the runner is unavailable and that they may click Run once more later, then continue from the conversation; do not choose the next step from this run. Do not ask them to diagnose the failure or to walk through their code instead, do not diagnose the platform, and never read raw code or error text symbol by symbol."
+    )
+}
+
 /// The lines worth numbering: the buffer without the blank lines an editor
 /// leaves at its end, which were numbered and paid for on every snapshot.
 fn content_lines(code: &str) -> Vec<&str> {
