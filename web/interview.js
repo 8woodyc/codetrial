@@ -236,6 +236,9 @@ const SIDEBAR_NEIGHBOUR_MIN_REM = 30;
 // 1200px breakpoint ever left it beside the sidebar's old 22.5rem, so the
 // avatar gives way as it does below that breakpoint.
 const JIM_AVATAR_PANEL_MIN_REM = 49;
+/// Below this window width the editor is narrow enough that a floating avatar
+/// eats code rather than decorating it, whatever the sidebar does.
+const JIM_STAGE_NARROW_WINDOW = "(max-width: 1200px)";
 /// In rem. A fixed ladder rather than a free number, so a stored value is
 /// either one of these or ignored, and every size the page can show is one the
 /// browser check has seen keep the three editor layers in line.
@@ -546,7 +549,6 @@ const nodes = {
   resultsFilter: document.querySelector("#results-filter"),
   hidePassedTests: document.querySelector("#hide-passed-tests"),
   resultsToggle: document.querySelector("#results-toggle"),
-  resultsChevron: document.querySelector("#results-chevron"),
   ending: document.querySelector("#ending-overlay"),
   endingTitle: document.querySelector("#ending-title"),
   retryReport: document.querySelector("#retry-report"),
@@ -710,8 +712,7 @@ async function init() {
           },
         },
       );
-      nodes.resultsBody.hidden = true;
-      nodes.resultsChevron.textContent = ">";
+      setResultsOpen(false);
       nodes.editorPanel.dataset.exampleDrawing = "true";
       nodes.testDrawerResizer.classList.remove(
         "splitter",
@@ -957,10 +958,9 @@ function bindEvents() {
     "devicechange",
     () => void refreshAudioOutputs(),
   );
-  nodes.resultsToggle.addEventListener("click", () => {
-    nodes.resultsBody.hidden = !nodes.resultsBody.hidden;
-    nodes.resultsChevron.textContent = nodes.resultsBody.hidden ? "^" : "v";
-  });
+  nodes.resultsToggle.addEventListener("click", () =>
+    setResultsOpen(nodes.resultsBody.hidden),
+  );
   nodes.hidePassedTests.addEventListener("change", () => {
     if (
       state.runningTests ||
@@ -2710,13 +2710,21 @@ function applyPause(paused) {
   tickTimer();
 }
 
+/// The test results open or closed, with the toggle saying which: its
+/// chevron is drawn from aria-expanded, so a run that opens the results turns
+/// it too.
+function setResultsOpen(open) {
+  nodes.resultsBody.hidden = !open;
+  nodes.resultsToggle.setAttribute("aria-expanded", String(open));
+}
+
 async function runTests() {
   if (!editorOptions.execution) return;
   flushPendingCodePublish();
   state.runningTests = true;
   nodes.run.disabled = true;
   nodes.run.textContent = "Running...";
-  nodes.resultsBody.hidden = false;
+  setResultsOpen(true);
   setTestStatus(firstRunnerStatus(state.language));
   if (nodes.candidateCaseInput.value.trim()) {
     // Only a refusal stops the run. A sixth case the cap turned away is not a
@@ -3827,24 +3835,27 @@ function testDrawerBounds() {
   };
 }
 
-/// Takes the avatar off a panel too narrow to carry it, leaving the captions,
-/// as the stylesheet does for a narrow window. The window's width stopped
-/// being enough to tell once the sidebar could be widened: at 1280px the
-/// editor can be 592px with the avatar still over it. The stylesheet still
-/// owns what compact looks like, and the avatar's own width observer pauses
-/// and resumes its drawing from the result.
+/// Takes the avatar off a panel too narrow to carry it, or a window, leaving
+/// the captions. The window's width alone stopped being enough to tell once
+/// the sidebar could be widened: at 1280px the editor can be 592px with the
+/// avatar still over it. One class for both, so the stylesheet says what
+/// compact looks like once, and the avatar's own width observer pauses and
+/// resumes its drawing from the result.
 function compactJimStageBesideNarrowPanel(panel) {
+  const narrowWindow = matchMedia(JIM_STAGE_NARROW_WINDOW);
   const fit = () => {
     const rem = Number.parseFloat(
       getComputedStyle(document.documentElement).fontSize,
     );
     nodes.jimStage.classList.toggle(
       "compact",
-      panel.getBoundingClientRect().width < JIM_AVATAR_PANEL_MIN_REM * rem,
+      narrowWindow.matches ||
+        panel.getBoundingClientRect().width < JIM_AVATAR_PANEL_MIN_REM * rem,
     );
   };
   if (window.ResizeObserver) new window.ResizeObserver(fit).observe(panel);
   else window.addEventListener("resize", fit);
+  narrowWindow.addEventListener("change", fit);
   fit();
 }
 

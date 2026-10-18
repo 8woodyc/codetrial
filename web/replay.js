@@ -171,6 +171,14 @@ async function loadList() {
 async function select(recordingId) {
   selected = recordingId;
   nodes.title.textContent = "Recording";
+  // The detail panels stay out of view until a recording is open, and the
+  // list marks which one is, the way the timeline marks its moment.
+  document.body.dataset.recording = recordingId;
+  for (const button of nodes.list.querySelectorAll("button")) {
+    if (button.dataset.recording === recordingId)
+      button.setAttribute("aria-current", "true");
+    else button.removeAttribute("aria-current");
+  }
   clearDetail();
 
   const response = await fetch(

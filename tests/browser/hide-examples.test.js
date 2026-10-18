@@ -38,9 +38,7 @@ const problemTab = (page) =>
     examples: document.querySelectorAll("#problem-panel .examples").length,
     brief:
       document
-        .querySelector(
-          "#problem-panel .problem-detail > p:not(.interview-kicker):not(.problem-source)",
-        )
+        .querySelector("#problem-panel .problem-detail > .problem-brief")
         ?.textContent.trim() ?? "",
   }));
 

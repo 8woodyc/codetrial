@@ -1,10 +1,11 @@
 // Run with: node --test tests/browser/interview-layout.test.js
 //
-// Where the interview page puts its controls. Each case is a placement a
-// redesign could quietly undo while every behavior test stays green: Start
-// scrolled out of the setup check, the setup check no longer modal, End
-// interview pushed out of a short sidebar, Run tests wrapped onto a second
-// toolbar row, the dock a screen below the problem on a phone.
+// Where the interview page puts its controls, and one layout rule of the
+// replay page. Each case is a placement a redesign could quietly undo while
+// every behavior test stays green: Start scrolled out of the setup check, the
+// setup check no longer modal, End interview pushed out of a short sidebar,
+// Run tests wrapped onto a second toolbar row, the dock a screen below the
+// problem on a phone, the replay headline running under the column beside it.
 
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
@@ -13,6 +14,7 @@ import {
   closeSetupCheck,
   DEFAULT_RUNTIME_CONFIG,
   launchChromium,
+  read,
   startStaticServer,
 } from "./source.js";
 
@@ -209,6 +211,136 @@ test("on a phone the turn button is on the first screen, under the problem", asy
       `Your turn is done ends at ${layout.turn}, past a ${layout.viewport}px screen`,
     );
     assert.ok(layout.turn > layout.problem);
+  } finally {
+    await page.close();
+  }
+});
+
+test("a narrow window and a narrow panel both make the stage compact", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await openInterview(1440, 900);
+  try {
+    await closeSetupCheck(page);
+    const compact = () =>
+      page.evaluate(() =>
+        document.querySelector("#jim-stage").classList.contains("compact"),
+      );
+    assert.equal(await compact(), false, "a wide window keeps the avatar");
+    // Under 1024px the sidebar stacks above the editor, so the panel is wide
+    // again and only the window says compact.
+    await page.setViewportSize({ width: 1000, height: 900 });
+    const panelMinRem = Number(
+      read("web/interview.js").match(/JIM_AVATAR_PANEL_MIN_REM = (\d+);/)[1],
+    );
+    assert.ok(
+      await page.evaluate(
+        (minRem) =>
+          document.querySelector(".editor-panel").getBoundingClientRect()
+            .width >
+          minRem *
+            Number.parseFloat(
+              getComputedStyle(document.documentElement).fontSize,
+            ),
+        panelMinRem,
+      ),
+      "the panel alone would not make it compact here",
+    );
+    await page.waitForFunction(() =>
+      document.querySelector("#jim-stage").classList.contains("compact"),
+    );
+    const card = await page.evaluate(() => ({
+      avatar: getComputedStyle(document.querySelector(".jim-avatar")).display,
+      background: getComputedStyle(document.querySelector("#jim-stage"))
+        .backgroundColor,
+    }));
+    assert.equal(card.avatar, "none", "the avatar goes, the captions stay");
+    assert.notEqual(card.background, "rgba(0, 0, 0, 0)", "as one card");
+  } finally {
+    await page.close();
+  }
+});
+
+// The replay page, from the same server: its headline sits in a 300px list
+// column, and replay-render.test.js reads it through a stub document that
+// applies no stylesheet, so only a real browser sees it run under the column
+// beside it.
+test("the replay headline stays inside the list column", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await browser.newPage({
+    viewport: { width: 1440, height: 900 },
+  });
+  try {
+    await page.goto(`${base}/replay.html`, { waitUntil: "domcontentloaded" });
+    const layout = await page.evaluate(() => {
+      const heading = document.querySelector(".replay-sidebar h1");
+      // The text's own extent, not the block's: a block is as wide as its
+      // column whatever the words inside it do.
+      const range = document.createRange();
+      range.selectNodeContents(heading);
+      return {
+        text: range.getBoundingClientRect().right,
+        column: document
+          .querySelector(".replay-sidebar")
+          .getBoundingClientRect().right,
+        detail: document.querySelector(".replay-detail").getBoundingClientRect()
+          .left,
+      };
+    });
+    assert.ok(
+      layout.text <= layout.column && layout.text <= layout.detail,
+      `the headline ends at ${layout.text}, past its column at ${layout.column}`,
+    );
+  } finally {
+    await page.close();
+  }
+});
+
+// The list marks the open recording the way the timeline marks its moment.
+// `select` writes `aria-current`, so the stylesheet has to key on that and not
+// on a class nothing sets.
+test("the replay list marks the open recording", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await browser.newPage({
+    viewport: { width: 1440, height: 900 },
+  });
+  await page.route(/\/api\/recordings$/, (route) =>
+    route.fulfill({
+      json: {
+        recordings: [
+          { recordingId: "first", createdAt: 1700000000, state: "ready" },
+          { recordingId: "second", createdAt: 1700000600, state: "ready" },
+        ],
+      },
+    }),
+  );
+  await page.route(/\/api\/recordings\/.+/, (route) =>
+    route.fulfill({ status: 404, body: "" }),
+  );
+  try {
+    await page.goto(`${base}/replay.html`, { waitUntil: "domcontentloaded" });
+    await page.locator('.replay-item[data-recording="second"]').click();
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector('.replay-item[data-recording="second"]')
+          .getAttribute("aria-current") === "true",
+    );
+    const borders = await page.evaluate(() => {
+      const accent = document.createElement("div");
+      accent.style.color = "var(--accent)";
+      document.body.append(accent);
+      const border = (id) =>
+        getComputedStyle(
+          document.querySelector(`.replay-item[data-recording="${id}"]`),
+        ).borderTopColor;
+      return {
+        accent: getComputedStyle(accent).color,
+        chosen: border("second"),
+        other: border("first"),
+      };
+    });
+    assert.equal(borders.chosen, borders.accent);
+    assert.notEqual(borders.other, borders.accent);
   } finally {
     await page.close();
   }

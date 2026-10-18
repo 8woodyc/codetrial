@@ -1329,9 +1329,10 @@ test("example drawing is hidden unless the lobby enabled it", async (t) => {
         await page.locator("#results-body").evaluate((node) => node.hidden),
         enabled,
       );
+      // The chevron is drawn from the state the toggle announces.
       assert.equal(
-        (await page.locator("#results-chevron").textContent()).trim(),
-        enabled ? ">" : "v",
+        await page.locator("#results-toggle").getAttribute("aria-expanded"),
+        enabled ? "false" : "true",
       );
       if (enabled) {
         await closeSetupCheck(page);

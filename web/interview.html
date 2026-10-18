@@ -294,7 +294,9 @@
                 id="candidate-case-expected"
                 aria-label="Candidate expected output"
             /></label>
-            <button id="candidate-case-add" type="button">Add case</button>
+            <button id="candidate-case-add" class="pill-button" type="button">
+              Add case
+            </button>
             <p id="candidate-case-status" class="muted small" role="status"></p>
             <ol id="candidate-case-list" class="small"></ol>
           </details>
@@ -333,9 +335,14 @@
               drawing.
             </p>
           </details>
-          <button id="results-toggle" type="button">
+          <button
+            id="results-toggle"
+            type="button"
+            aria-expanded="true"
+            aria-controls="results-body"
+          >
             <span id="results-label">Test results</span>
-            <span id="results-chevron">v</span>
+            <span id="results-chevron" aria-hidden="true"></span>
           </button>
           <div id="results-body" class="results-body">
             <div id="results-filter" hidden>
