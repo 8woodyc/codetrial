@@ -2623,10 +2623,20 @@ async function runTests() {
 }
 
 async function initializeCandidateCases() {
+  const isReload =
+    performance.getEntriesByType("navigation")[0]?.type === "reload";
+  const activeSessionKey = "codetrial.activeSession";
+  const wasActive = Boolean(readStored(activeSessionKey, tabStorage));
+  writeStored(activeSessionKey, "1", tabStorage);
+
+  if (!isReload && wasActive) {
+    writeStored(candidateCaseStorageKey, "", tabStorage);
+  }
   try {
-    const saved = JSON.parse(
-      readStored(candidateCaseStorageKey, tabStorage) || "[]",
-    );
+    const saved =
+      !isReload && wasActive
+        ? []
+        : JSON.parse(readStored(candidateCaseStorageKey, tabStorage) || "[]");
     state.candidateCases = Array.isArray(saved)
       ? saved.slice(0, CANDIDATE_CASE_LIMIT)
       : [];
@@ -2675,6 +2685,10 @@ async function addCandidateCaseNow() {
   }
   try {
     const spec = await loadJudge(problem.page);
+    if (state.phase !== "live") {
+      nodes.candidateCaseStatus.textContent = "The interview has ended.";
+      return "refused";
+    }
     const input = parseCandidateCase(spec, nodes.candidateCaseInput.value);
     const expectedText = nodes.candidateCaseExpected.value.trim();
     const expected = expectedText ? JSON.parse(expectedText) : undefined;
@@ -2714,6 +2728,13 @@ function renderCandidateCases() {
   if (state.candidateCases.length) {
     nodes.candidateCaseStatus.textContent = `${state.candidateCases.length}/${CANDIDATE_CASE_LIMIT} cases ready.`;
   }
+}
+
+function clearCandidateCases() {
+  writeStored(candidateCaseStorageKey, "", tabStorage);
+  state.candidateCases = [];
+  renderCandidateCases();
+  nodes.candidateCaseStatus.textContent = "The interview has ended.";
 }
 
 /// Remove a saved case by position. The results panel is reset rather than
@@ -2920,6 +2941,7 @@ function endInterview(reason) {
   clearTimeout(codePublishTimer);
   codePublishTimer = null;
   pendingLanguagePublish = null;
+  clearCandidateCases();
   nodes.end.disabled = true;
   nodes.ending.hidden = false;
   // Only the interviewer answers `end_interview`, so a report is coming only
@@ -3113,6 +3135,7 @@ function renderReport() {
   stopAvatar();
   stopLocalMedia();
   stopEndingClock();
+  clearCandidateCases();
   nodes.ending.hidden = true;
   nodes.report.hidden = false;
   nodes.report.innerHTML = reportMarkup({
