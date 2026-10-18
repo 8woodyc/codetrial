@@ -444,7 +444,7 @@ test("results markup keeps first-run timeout errors visible", () => {
   const compiler = resultsMarkup(
     {
       setupError:
-        "Compiler Explorer did not respond within 20 seconds. Try again later.",
+        "Compiler Explorer did not respond to 2 requests. Try again later.",
     },
     "compiling",
   );
@@ -454,7 +454,7 @@ test("results markup keeps first-run timeout errors visible", () => {
   assert.match(compiler.body, /Compiling with Compiler Explorer/);
   assert.match(
     compiler.body,
-    /Compiler Explorer did not respond within 20 seconds/,
+    /Compiler Explorer did not respond to 2 requests\./,
   );
 });
 
@@ -478,7 +478,9 @@ test("final runner status preserves setup phase for setup errors", () => {
   );
   assert.equal(
     finalRunnerStatus(
-      { setupError: "Compiler Explorer did not respond within 20 seconds." },
+      {
+        setupError: "Compiler Explorer did not respond to 2 requests.",
+      },
       "compiling",
     ),
     "compiling",
