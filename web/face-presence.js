@@ -25,17 +25,92 @@ export function faceAssetUrl(file, baseUrl = FACE_VENDOR_BASE) {
   return `${baseUrl}${file}`;
 }
 
+// Every file the detector asks the server for, by MediaPipe's own names. The
+// four binaries are fetched at build time and not committed, so a checkout
+// that never ran `scripts/fetch-vendor.sh` serves a 404 for each of them, which
+// the detector can only report as not answering.
+export const FACE_ASSET_FILES = [
+  "face_detection.js",
+  "face_detection_short.binarypb",
+  "face_detection_short_range.tflite",
+  "face_detection_solution_simd_wasm_bin.js",
+  "face_detection_solution_simd_wasm_bin.wasm",
+  "face_detection_solution_wasm_bin.js",
+  "face_detection_solution_wasm_bin.wasm",
+];
+
+/// The detector files the server does not have, with the status it answered.
+/// A request that did not complete says nothing about the file and is not
+/// listed: an offline learner is not told the server lacks a model.
+export async function missingFaceAssets({
+  fetchFn = globalThis.fetch,
+  baseUrl = FACE_VENDOR_BASE,
+} = {}) {
+  const missing = [];
+  await Promise.all(
+    FACE_ASSET_FILES.map(async (file) => {
+      try {
+        const response = await fetchFn(faceAssetUrl(file, baseUrl), {
+          method: "HEAD",
+        });
+        if (response.status === 404) missing.push({ file, status: 404 });
+      } catch {}
+    }),
+  );
+  return missing.sort((a, b) => a.file.localeCompare(b.file));
+}
+
+// The most confident face's box and keypoints, in frame-relative units, for
+// the task workspace's look-away rule; null when there is no face or the
+// detector gives no geometry. Nothing else about the face is kept.
+export function faceGeometry(detections, score) {
+  let best = null;
+  for (const detection of detections) {
+    if (!best || score(detection) > score(best)) best = detection;
+  }
+  const box = best?.boundingBox;
+  if (
+    !box ||
+    !["xCenter", "yCenter", "width", "height"].every((key) =>
+      Number.isFinite(box[key]),
+    )
+  )
+    return null;
+  // All or none: the head-down measure reads eyes, nose and mouth by
+  // position, so dropping one bad point would shift the rest into the wrong
+  // places. Without them the measure falls back to the box.
+  const points = Array.isArray(best.landmarks) ? best.landmarks : [];
+  const landmarks = points.every(
+    (point) => Number.isFinite(point?.x) && Number.isFinite(point?.y),
+  )
+    ? points.map((point) => [point.x, point.y])
+    : [];
+  return {
+    box: [box.xCenter, box.yCenter, box.width, box.height],
+    landmarks,
+  };
+}
+
+// The twin of `normalize` in `face-worker.js`; change both together.
 export function normalizeFaceResults(results = {}) {
   const detections = Array.isArray(results.detections)
     ? results.detections
     : [];
-  const confidence = detections.reduce((best, detection) => {
-    const score = Array.isArray(detection.score)
+  const score = (detection) => {
+    const value = Array.isArray(detection.score)
       ? detection.score[0]
       : detection.score;
-    return Math.max(best, Number.isFinite(score) ? score : 0);
-  }, 0);
-  return { count: detections.length, confidence };
+    return Number.isFinite(value) ? value : 0;
+  };
+  const confidence = detections.reduce(
+    (best, detection) => Math.max(best, score(detection)),
+    0,
+  );
+  return {
+    count: detections.length,
+    confidence,
+    face: faceGeometry(detections, score),
+  };
 }
 
 /// Whether the preflight camera step may pass, given one detector sample.
@@ -148,10 +223,13 @@ export async function createFacePresenceDetector({
   loadScript = defaultLoadScript,
   baseUrl = FACE_VENDOR_BASE,
   Detector = null,
+  // `false` skips the browser's own detector, which reports a count but no
+  // face geometry.
+  native = true,
 } = {}) {
   try {
     const NativeFaceDetector = scope.FaceDetector;
-    if (!Detector && typeof NativeFaceDetector === "function") {
+    if (!Detector && native && typeof NativeFaceDetector === "function") {
       const detector = new NativeFaceDetector({ fastMode: true });
       return {
         available: true,
@@ -239,6 +317,7 @@ function createWorkerFaceDetector(scope) {
             available: true,
             count: result.count,
             confidence: result.confidence,
+            face: result.face ?? null,
           }
         : FACE_SAMPLE_UNAVAILABLE,
     );

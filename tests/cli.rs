@@ -609,6 +609,48 @@ impl Drop for ServerProcess {
     }
 }
 
+/// `Command::output` with a bound. A launch that fails to refuse serves Setup
+/// and never exits, and an unbounded wait would hang the suite instead of
+/// failing it with what the child printed.
+fn output_within_limit(command: &mut Command) -> std::process::Output {
+    const LIMIT: Duration = Duration::from_secs(60);
+
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("codetrial should start");
+    let mut out = child.stdout.take().expect("stdout is piped");
+    let mut err = child.stderr.take().expect("stderr is piped");
+    let out = thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = out.read_to_end(&mut bytes);
+        bytes
+    });
+    let err = thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = err.read_to_end(&mut bytes);
+        bytes
+    });
+    let deadline = Instant::now() + LIMIT;
+    let status = loop {
+        match child.try_wait().expect("child status should be readable") {
+            Some(status) => break status,
+            None if Instant::now() >= deadline => {
+                stop_child(&mut child);
+                let stderr = String::from_utf8_lossy(&err.join().unwrap()).into_owned();
+                panic!("codetrial was still running after {LIMIT:?}; it had to refuse: {stderr}");
+            }
+            None => thread::sleep(Duration::from_millis(25)),
+        }
+    };
+    std::process::Output {
+        status,
+        stdout: out.join().unwrap(),
+        stderr: err.join().unwrap(),
+    }
+}
+
 fn stop_child(child: &mut Child) {
     let _ = child.kill();
     let _ = child.wait();
@@ -1056,7 +1098,18 @@ fn setup_page_renders_a_form_with_all_four_credential_fields() {
         &addr,
         &format!("GET / HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n"),
     );
+
+    // An assignment link opened before any config exists gets the same form,
+    // which reloads into the link once saved.
+    let assignment = http_request(
+        &addr,
+        &format!(
+            "GET /t/classroom/delimiter-closer?site=https%3A%2F%2Fteacher.github.io%2Fc&version=1 HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n"
+        ),
+    );
     let _ = std::fs::remove_dir_all(&dir);
+    assert!(assignment.starts_with("HTTP/1.1 200 OK"), "{assignment}");
+    assert!(assignment.contains("name=\"googleApiKey\""), "{assignment}");
 
     assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
     for field in [
@@ -3125,13 +3178,11 @@ fn a_data_dir_launch_logs_its_failure_in_the_data_dir() {
     .unwrap();
     let exe = binary_beside(&home);
 
-    let output = scrubbed(&mut Command::new(&exe))
-        .args(["web", "--data-dir", data.to_str().unwrap()])
-        .current_dir(&home)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .expect("codetrial should exit");
+    let output = output_within_limit(
+        scrubbed(&mut Command::new(&exe))
+            .args(["web", "--data-dir", data.to_str().unwrap()])
+            .current_dir(&home),
+    );
     let log = std::fs::read_to_string(data.join("codetrial-error.log")).unwrap_or_default();
     let beside_exe = home.join("codetrial-error.log").exists();
     let _ = std::fs::remove_dir_all(&home);

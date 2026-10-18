@@ -114,6 +114,9 @@ pub fn session_user(
                     login: row.get(1)?,
                     avatar_url: row.get(2)?,
                     verified_email: row.get::<_, Option<String>>(3)?.filter(|_| verified != 0),
+                    github_id: u64::try_from(row.get::<_, i64>(5)?)
+                        .ok()
+                        .filter(|id| *id > 0),
                 })
             },
         ).optional()

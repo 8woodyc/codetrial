@@ -46,6 +46,14 @@ refresh it explicitly and review the resulting fixture:
 UPDATE_PROBLEM_GOLDEN=1 cargo test --test agent problem_bank_matches_imported_golden
 ```
 
+The task-mode prompts rendered from every problem are hashed in
+`tests/golden/task-prompts.json`, so editing or adding a problem changes
+that fixture too. Refresh it the same way and review the diff:
+
+```bash
+UPDATE_PROMPT_GOLDEN=1 cargo test task_bank_prompts_have_only_allowlisted_material_and_match_golden
+```
+
 ## Validation messages
 
 The generator stops at the first broken contract. These messages identify the

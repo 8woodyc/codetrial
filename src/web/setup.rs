@@ -52,6 +52,9 @@ pub fn setup_service(
     let summarized = offer.clone();
     Router::new()
         .route("/", get(setup_page))
+        // An assignment link opened before any config exists lands on Setup
+        // and, once Setup saves, reloads into the task it named.
+        .route(super::tasks::TASK_PAGE_ROUTE, get(setup_page))
         .route(
             "/api/setup/offer",
             get(move || async move { offer_summary(summarized.as_deref()) }),
@@ -95,15 +98,8 @@ pub fn setup_service(
 /// attacker's own LiveKit project into the config every later interview routes
 /// through, and the rebound name is the one thing the request still carries.
 fn host_is_loopback(host: Option<&HeaderValue>, port: u16) -> bool {
-    let Some(host) = host.and_then(|value| value.to_str().ok()) else {
+    let Some((name, host_port)) = host.and_then(split_host) else {
         return false;
-    };
-
-    // An IPv6 literal is bracketed, so a colon inside the brackets is not the
-    // port separator.
-    let (name, host_port) = match host.rsplit_once(':') {
-        Some((name, digits)) if !digits.contains(']') => (name, Some(digits)),
-        _ => (host, None),
     };
     let port_matches = match host_port {
         Some(digits) => digits.parse::<u16>() == Ok(port),
@@ -112,11 +108,33 @@ fn host_is_loopback(host: Option<&HeaderValue>, port: u16) -> bool {
         // is plain HTTP.
         None => port == 80,
     };
-    port_matches
-        && matches!(
-            name.to_ascii_lowercase().as_str(),
-            "localhost" | "127.0.0.1" | "[::1]"
-        )
+    port_matches && loopback_name(name)
+}
+
+/// Whether a `Host` names this machine, whatever port it gives: what the task
+/// routes ask, where the port is the listener's own business.
+pub(crate) fn host_names_loopback(host: Option<&HeaderValue>) -> bool {
+    host.and_then(split_host)
+        .is_some_and(|(name, _)| loopback_name(name))
+}
+
+/// A `Host` value's name and port digits.
+fn split_host(host: &HeaderValue) -> Option<(&str, Option<&str>)> {
+    let host = host.to_str().ok()?;
+
+    // An IPv6 literal is bracketed, so a colon inside the brackets is not the
+    // port separator.
+    Some(match host.rsplit_once(':') {
+        Some((name, digits)) if !digits.contains(']') => (name, Some(digits)),
+        _ => (host, None),
+    })
+}
+
+fn loopback_name(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "localhost" | "127.0.0.1" | "[::1]"
+    )
 }
 
 async fn setup_page() -> Html<&'static str> {
@@ -452,6 +470,18 @@ const SETUP_PAGE: &str = r#"<!doctype html>
     showImport('ok', 'Filled from ' + file.name + '. Check the values, then save.' + note);
   });
 
+  // Task mode has no interviewer without the Google key, so an assignment
+  // link makes it required.
+  // The shape of `TASK_PAGE_ROUTE`, the only other page this is served at.
+  const taskMode = /^\/t\/[^/]+\/[^/]+$/.test(location.pathname);
+  if (taskMode) {
+    document.getElementById('googleApiKey').required = true;
+    document.getElementById('googleApiKey').pattern = '.*\\S.*';
+    document.querySelector('h1').after(Object.assign(document.createElement('p'), {
+      textContent: 'Your assignment needs all four values; it opens once they are saved.',
+    }));
+  }
+
   async function waitForRestart() {
     // The server keeps the port and swaps what answers on it, so a request landing in
     // the handover waits in the accept backlog rather than failing. Poll anyway: the
@@ -481,6 +511,7 @@ const SETUP_PAGE: &str = r#"<!doctype html>
     useOffer.disabled = true;
     line.className = '';
     line.textContent = 'Checking credentials…';
+    if (taskMode) data.taskMode = true;
     let response;
     try {
       response = await fetch('/api/setup', {
@@ -654,9 +685,13 @@ fn validated_fields(submission: &Value) -> Result<SetupFields, String> {
             .to_string()
     };
 
+    if submission["taskMode"].as_bool() == Some(true) && field("googleApiKey").is_empty() {
+        return Err("googleApiKey is required for assignments".into());
+    }
+
     // Field order, so the first missing one is reported. `googleApiKey` is
-    // optional here, same as an operator's config file: empty means web-only,
-    // no interviewer hosted by this process.
+    // optional outside assignments, as in an operator's config: empty means
+    // web-only, no interviewer hosted by this process.
     for key in ["livekitUrl", "livekitApiKey", "livekitApiSecret"] {
         // A value of spaces is empty by now, which is what it has to be:
         // `read_config_file` trims when it reads this back and `nonempty` then
@@ -957,7 +992,8 @@ async fn submit_setup(
 ) -> Response {
     // Using the offered config is a submission the server fills in itself, so
     // the keys never pass through the page.
-    let submission = if submission.get("useOffer") == Some(&Value::Bool(true)) {
+    let task_mode = submission["taskMode"].as_bool() == Some(true);
+    let mut submission = if submission.get("useOffer") == Some(&Value::Bool(true)) {
         let Some(offer) = offer else {
             return super::json_response(
                 StatusCode::BAD_REQUEST,
@@ -973,6 +1009,12 @@ async fn submit_setup(
     } else {
         submission
     };
+
+    // The offer is the server's own answer and carries no page state, so the
+    // assignment flag the page sent has to survive the swap.
+    if task_mode {
+        submission["taskMode"] = Value::Bool(true);
+    }
     let fields = match validated_fields(&submission) {
         Ok(fields) => fields,
         Err(error) => {

@@ -34,6 +34,17 @@ const compilerExplorer = {
   cpp: { compiler: "g162", userArguments: "-O2 -std=c++20" },
   java: { compiler: "java2501", userArguments: "" },
 };
+/// The arguments a compiled run is built with. A task's judge may ask for less
+/// optimization than the default, `O0` or `O1`, so the run is the build its
+/// author measured; it can never ask for more, and the candidate's source has
+/// no way to raise it.
+export function compilerArguments(language, spec) {
+  const { userArguments } = compilerExplorer[language];
+  const level = spec?.optimization;
+  return /^O[01]$/.test(level ?? "") && userArguments.includes("-O2")
+    ? userArguments.replace("-O2", `-${level}`)
+    : userArguments;
+}
 // Served from this origin, not a CDN. All five files are pinned by SHA-256 in
 // web/vendor/pyodide/SHA256SUMS and fetched by scripts/fetch-vendor.sh, which
 // refuses a hash it does not recognise. Pinning the loader in the browser and
@@ -305,6 +316,7 @@ export async function runBrowserTests(
   language,
   onStatus = null,
   candidateCases = [],
+  taskJudge = null,
 ) {
   // `code` is what this run executed. The agent credits Test to it rather than
   // to the editor when the results land, which may have moved on since.
@@ -322,7 +334,7 @@ export async function runBrowserTests(
   // had no test cases, which is the one reading that makes them stop trying.
   let spec;
   try {
-    spec = await loadJudge(problemId);
+    spec = taskJudge ?? (await loadJudge(problemId));
   } catch {
     return {
       ...empty,
@@ -344,8 +356,12 @@ export async function runBrowserTests(
   }));
   const runnable = { ...spec, cases: [...spec.cases, ...candidates] };
   const base = { ...empty, total: spec.cases.length };
+  // Task mode alone reads a harness gap or a runner that threw as an outage.
+  // The interview contract counts a harness the case cannot be built into as
+  // a setup error the candidate can fix, and withdraws Test credit for it.
   const gap = harnessGap(language, spec);
-  if (gap) return { ...base, setupError: gap };
+  if (gap)
+    return { ...base, ...(taskJudge ? outage(gap) : { setupError: gap }) };
   const reportStatus = (status) => onStatus?.(status);
   try {
     const raw =
@@ -409,6 +425,9 @@ export async function runBrowserTests(
   } catch (error) {
     return {
       ...base,
+      ...(taskJudge
+        ? { runnerUnavailable: error?.runnerUnavailable !== false }
+        : {}),
       setupError: String(error.message || error).slice(0, 400),
       diagnostic: error?.name === "TimeoutError" ? DIAGNOSTIC.timeout : null,
     };
@@ -448,7 +467,7 @@ async function runCompilerExplorer(
         body: JSON.stringify({
           source,
           options: {
-            userArguments: config.userArguments,
+            userArguments: compilerArguments(language, spec),
             compilerOptions: { executorRequest: true },
             filters: { execute: true },
             executeParameters: { args: [], stdin: "" },
@@ -847,6 +866,7 @@ function runWorker(code, spec) {
       // Named as a timeout rather than tagged with a diagnostic, so it reaches
       // the same branch the catch below takes for `AbortSignal.timeout`.
       error.name = "TimeoutError";
+      error.runnerUnavailable = false;
       reject(error);
     }, testTimeoutMs);
     worker.onmessage = (event) => {
@@ -859,9 +879,11 @@ function runWorker(code, spec) {
       clearTimeout(timer);
       worker.terminate();
       URL.revokeObjectURL(url);
-      reject(
-        new Error(event.message || "Worker crashed while running your code."),
+      const error = new Error(
+        event.message || "Worker crashed while running your code.",
       );
+      error.runnerUnavailable = false;
+      reject(error);
     };
     worker.postMessage({ spec, name });
   });

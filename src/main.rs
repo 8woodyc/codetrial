@@ -35,6 +35,7 @@ struct CliOptions {
     allowed_hosts: Option<String>,
     room_prefix: Option<String>,
     duration_min: Option<u32>,
+    task_mode: bool,
 }
 
 /// Every mode this binary has: its name, how many positionals it takes counting
@@ -190,6 +191,13 @@ fn parse_agent_args(args: &[String]) -> Result<(Vec<String>, CliOptions), String
             continue;
         }
 
+        // The one option that takes no value: it must not read the next word as
+        // one, which would swallow a positional.
+        if arg == "--task-mode" {
+            options.task_mode = true;
+            continue;
+        }
+
         // `--flag=value` or `--flag value`. The attached form is what makes a
         // dash-prefixed value expressible at all, because in the separated form
         // a flag in the value slot is a missing value and not the value:
@@ -216,6 +224,7 @@ fn parse_agent_args(args: &[String]) -> Result<(Vec<String>, CliOptions), String
             }
             "--allowed-hosts" => options.allowed_hosts = Some(value),
             "--web-dir" => options.web_dir = Some(value),
+            "--task-mode" => return Err("--task-mode takes no value".to_string()),
             "--room-prefix" => options.room_prefix = Some(value),
             "--duration-min" => {
                 let duration = value
@@ -271,7 +280,7 @@ fn print_help(usage: Option<&str>) {
         }
     }
     println!(
-        "\nOptions:\n  --config PATH        Use PATH instead of config/codetrial.env.local\n  --data-dir DIR       Keep the config, accounts and error log in DIR only\n  --import-config PATH Offer the Setup keys in PATH on DIR's Setup page\n  --web-addr ADDR      Listen on ADDR\n  --allowed-hosts LIST Answer only these comma-separated Host values\n  --web-dir PATH       Serve files from PATH\n  --room-prefix PREFIX Prefix generated room names\n  --duration-min MIN   Set the interview duration\n  -h, --help           Show this help\n  -V, --version        Show the package version and build commit\n\nEvery option also takes `--flag=value`, which is the only way to pass a value\nthat starts with a dash. `--` ends the options."
+        "\nOptions:\n  --config PATH        Use PATH instead of config/codetrial.env.local\n  --data-dir DIR       Keep the config, accounts and error log in DIR only\n  --import-config PATH Offer the Setup keys in PATH on DIR's Setup page\n  --web-addr ADDR      Listen on ADDR\n  --allowed-hosts LIST Answer only these comma-separated Host values\n  --web-dir PATH       Serve files from PATH\n  --room-prefix PREFIX Prefix generated room names\n  --duration-min MIN   Set the interview duration\n  --task-mode          Serve learner task mode, off unless given (web only)\n  -h, --help           Show this help\n  -V, --version        Show the package version and build commit\n\nEvery option also takes `--flag=value`, which is the only way to pass a value\nthat starts with a dash. `--` ends the options."
     );
 }
 
@@ -315,6 +324,8 @@ fn web_server_config(
     recording_can_deliver(recording.as_ref())?;
 
     Ok(WebServerConfig {
+        tasks: None,
+        task_mode_requested: options.task_mode,
         web_dir: match nonempty(values, "CODETRIAL_WEB_DIR") {
             Some(dir) => PathBuf::from(dir),
 
@@ -377,7 +388,7 @@ fn run_web(options: CliOptions) -> Result<(), String> {
     let production = is_production(&values);
     let pool = web_provider_pool(&values, &options, production)?;
 
-    let config = web_server_config(&values, pool, production, &options)?;
+    let mut config = web_server_config(&values, pool, production, &options)?;
 
     if guest_mode_recording_conflict(config.guest_mode_enabled, config.recording.is_some()) {
         eprintln!(
@@ -418,6 +429,20 @@ fn run_web(options: CliOptions) -> Result<(), String> {
     }
     // Same reason `serve_setup` prints this: say where to go.
     println!("codetrial: open http://{bound} in your browser");
+
+    // Task mode is off unless `--task-mode` asks for it. It serves the learner
+    // at this machine and nobody else: it holds decrypted reference solutions
+    // in memory and trusts its page to report the test rules. Reachable from
+    // anywhere else, or set up to record or to share one fixed room, its routes
+    // say why they are off. A declared proxy makes a loopback bind as public as
+    // any other.
+    config.tasks = task_mode_enabled(
+        config.task_mode_requested,
+        reachable_from_elsewhere(&values, bound),
+        config.fixed_room_name.is_some(),
+        config.recording.is_some(),
+    )
+    .then(codetrial::tasks::access::TaskService::new);
 
     // Past every startup check, so whatever a previous run left in the log is
     // no longer true. Written on failure and removed on none, the file outlives
@@ -1306,6 +1331,21 @@ fn reachable_from_elsewhere(
     } else {
         None
     }
+}
+
+fn task_mode_allowed(reachable: Option<Reachable>, fixed_room: bool, recording: bool) -> bool {
+    reachable.is_none() && !fixed_room && !recording
+}
+
+/// Task mode is on when `--task-mode` asked for it and the server is one it may
+/// run on; either alone is not enough.
+fn task_mode_enabled(
+    requested: bool,
+    reachable: Option<Reachable>,
+    fixed_room: bool,
+    recording: bool,
+) -> bool {
+    requested && task_mode_allowed(reachable, fixed_room, recording)
 }
 
 fn published_secret_refusal(

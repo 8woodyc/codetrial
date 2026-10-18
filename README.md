@@ -121,6 +121,7 @@ URL rather than the interview. See [docs/providers.md](docs/providers.md).
 | Command | Use |
 |---|---|
 | `cargo run -- web` | The server; hosts interviewers too when `GOOGLE_API_KEY` is set |
+| `cargo run -- web --task-mode` | The server with learner task mode on, [docs/task-mode.md](docs/task-mode.md) |
 | `cargo run -- run-livekit ROOM` | Interviewer only, for one named room |
 | `cargo run -- check-gemini` | Verify Gemini credentials |
 | `codetrial --version` | Print the version and the commit the binary was built from |

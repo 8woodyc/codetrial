@@ -30,6 +30,7 @@ todo = "deny"
 unwrap_used = "deny"
 
 [dependencies]
+chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "original-uri", "query", "tokio"] }
 base64 = "0.23.1"
 futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
@@ -70,19 +71,16 @@ tree-sitter-java = "=0.23.5"
 tree-sitter-javascript = "=0.25.0"
 tree-sitter-python = "=0.25.0"
 
-# Only the tests need these. `chrono` and `livekit-protocol` unify with
-# LiveKit; HMAC and SHA-256 remain independent fixture implementations.
+# Only the tests need these. `livekit-protocol` unifies with LiveKit; HMAC and
+# SHA-256 remain independent fixture implementations.
 #
-# `chrono` parses the two RFC 3339 timestamps the recording acceptance compares
-# and bounds the reader permission to 24 hours of delivery. `livekit-protocol`
-# buys the generated `Deserialize`, which decodes an Egress request body exactly
+# `livekit-protocol` buys the generated `Deserialize`, which decodes an Egress request body exactly
 # as the server does, so a hand-written body is checked against the real message
 # instead of against a list of field names copied out of it.
 [dev-dependencies]
 # Independent implementations verify production signatures and digest fixtures.
 hmac = "0.13.0"
 sha2 = "0.11.1"
-chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 livekit-protocol = "0.8.2"
 # LiveKit's transport, reached directly to check the vendored proxy path.
 livekit-net = "0.1.4"

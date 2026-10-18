@@ -727,3 +727,61 @@ fn a_data_dir_launch_takes_its_settings_from_flags_not_the_environment() {
         ["127.0.0.1:3101"]
     );
 }
+
+#[test]
+fn task_mode_is_asked_for_by_a_flag_that_takes_no_value() {
+    let parse = |argv: &[&str]| {
+        super::parse_agent_args(&argv.iter().map(|arg| arg.to_string()).collect::<Vec<_>>())
+    };
+    let (positionals, options) = parse(&["web"]).unwrap();
+    assert_eq!(
+        (positionals, options.task_mode),
+        (vec!["web".to_string()], false)
+    );
+    // The word after the flag is a positional, not its value.
+    let (positionals, options) = parse(&["--task-mode", "web"]).unwrap();
+    assert_eq!(
+        (positionals, options.task_mode),
+        (vec!["web".to_string()], true)
+    );
+    let (_, options) = parse(&["web", "--task-mode", "--data-dir", "/data"]).unwrap();
+    assert!(options.task_mode);
+    assert_eq!(options.data_dir, Some(std::path::PathBuf::from("/data")));
+    // Refused for what it is, not as an unknown flag.
+    assert_eq!(
+        parse(&["web", "--task-mode=yes"]).unwrap_err(),
+        "--task-mode takes no value"
+    );
+}
+
+#[test]
+fn task_mode_needs_the_flag_and_a_server_it_may_run_on() {
+    assert!(super::task_mode_enabled(true, None, false, false));
+
+    // Asking is not enough on a server it may not run on, and a server it may
+    // run on is not enough without asking.
+    assert!(!super::task_mode_enabled(false, None, false, false));
+    for (reachable, fixed_room, recording) in [
+        (Some(super::Reachable::Address), false, false),
+        (Some(super::Reachable::DeclaredProxy), false, false),
+        (None, true, false),
+        (None, false, true),
+    ] {
+        assert!(!super::task_mode_enabled(
+            true, reachable, fixed_room, recording
+        ));
+    }
+}
+
+#[test]
+fn task_mode_runs_only_on_a_private_server_that_neither_records_nor_shares_a_room() {
+    assert!(super::task_mode_allowed(None, false, false));
+    for (reachable, fixed_room, recording) in [
+        (Some(super::Reachable::Address), false, false),
+        (Some(super::Reachable::DeclaredProxy), false, false),
+        (None, true, false),
+        (None, false, true),
+    ] {
+        assert!(!super::task_mode_allowed(reachable, fixed_room, recording));
+    }
+}

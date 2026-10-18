@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use crate::config::{AgentConfig, Provider};
-use crate::web::{DispatchRefusal, NoShowConsent, RoomDispatcher};
+use crate::web::{AgentJob, DispatchRefusal, NoShowConsent, RoomDispatcher};
 
 const MAX_CONCURRENT_GUEST_INTERVIEWS: usize = 2;
 
@@ -49,8 +49,13 @@ impl RoomDispatcher for LocalDispatcher {
         Some(self.config.gemini_candidate_video_enabled)
     }
 
-    fn ensure_agent(&self, room_name: &str, provider: &Provider) -> Result<(), DispatchRefusal> {
-        self.ensure_agent_with_kind(room_name, provider, false, None)
+    fn ensure_agent(
+        &self,
+        room_name: &str,
+        provider: &Provider,
+        job: AgentJob,
+    ) -> Result<(), DispatchRefusal> {
+        self.ensure_agent_with_kind(room_name, provider, false, None, job)
     }
 
     fn ensure_agent_with_no_show_release(
@@ -59,7 +64,7 @@ impl RoomDispatcher for LocalDispatcher {
         provider: &Provider,
         no_show: Option<NoShowConsent>,
     ) -> Result<(), DispatchRefusal> {
-        self.ensure_agent_with_kind(room_name, provider, false, no_show)
+        self.ensure_agent_with_kind(room_name, provider, false, no_show, AgentJob::Interview)
     }
 
     fn ensure_guest_agent(
@@ -67,7 +72,7 @@ impl RoomDispatcher for LocalDispatcher {
         room_name: &str,
         provider: &Provider,
     ) -> Result<(), DispatchRefusal> {
-        self.ensure_agent_with_kind(room_name, provider, true, None)
+        self.ensure_agent_with_kind(room_name, provider, true, None, AgentJob::Interview)
     }
 }
 
@@ -78,6 +83,7 @@ impl LocalDispatcher {
         provider: &Provider,
         guest: bool,
         no_show: Option<NoShowConsent>,
+        job: AgentJob,
     ) -> Result<(), DispatchRefusal> {
         let slot = match self.reserve_with_kind(room_name, guest) {
             Reservation::Existing => return Ok(()),
@@ -104,27 +110,44 @@ impl LocalDispatcher {
         let config = agent_config_for(&self.config, provider);
 
         // Spawned, not awaited: this runs on the request path, and the task
-        // outlives the response by the length of the interview.
+        // outlives the response by the length of the interview or attempt.
         self.runtime.spawn(async move {
             eprintln!("codetrial dispatch room={}", slot.room_name);
-            let outcome = crate::livekit::run_room_with_slot(
-                &config,
-                &slot.room_name,
-                crate::web::current_epoch_seconds(),
-                Some(&slot),
-            )
-            .await;
-            if outcome.as_ref().is_ok_and(no_show_release_required) {
-                release_no_show(no_show, &slot.room_name).await;
-            }
-            match outcome {
-                Ok(crate::livekit::RoomRunOutcome::NoCandidate) => {}
-                Ok(crate::livekit::RoomRunOutcome::FailedBeforeCandidate(error)) => {
-                    eprintln!("codetrial agent_failed room={}: {error}", slot.room_name);
+            match job {
+                AgentJob::Interview => {
+                    let outcome = crate::livekit::run_room_with_slot(
+                        &config,
+                        &slot.room_name,
+                        crate::web::current_epoch_seconds(),
+                        Some(&slot),
+                    )
+                    .await;
+                    if outcome.as_ref().is_ok_and(no_show_release_required) {
+                        release_no_show(no_show, &slot.room_name).await;
+                    }
+                    match outcome {
+                        Ok(crate::livekit::RoomRunOutcome::NoCandidate) => {}
+                        Ok(crate::livekit::RoomRunOutcome::FailedBeforeCandidate(error)) => {
+                            eprintln!("codetrial agent_failed room={}: {error}", slot.room_name);
+                        }
+                        Ok(crate::livekit::RoomRunOutcome::Completed) => {}
+                        Err(error) => {
+                            eprintln!("codetrial agent_failed room={}: {error}", slot.room_name);
+                        }
+                    }
                 }
-                Ok(crate::livekit::RoomRunOutcome::Completed) => {}
-                Err(error) => {
-                    eprintln!("codetrial agent_failed room={}: {error}", slot.room_name);
+                AgentJob::Task { candidate, task } => {
+                    if let Err(error) = crate::livekit::tasks::run(
+                        &config,
+                        &slot.room_name,
+                        &candidate,
+                        task,
+                        &slot,
+                    )
+                    .await
+                    {
+                        eprintln!("codetrial agent_failed room={}: {error}", slot.room_name);
+                    }
                 }
             }
         });

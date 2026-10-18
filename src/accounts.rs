@@ -55,6 +55,9 @@ pub struct SignedInUser {
     /// `None` for every self-declared login, which is the whole point: a typed
     /// handle is a label, and a recording is delivered to a person.
     pub verified_email: Option<String>,
+    /// GitHub's numeric account ID, for a login GitHub vouched for; `None` for
+    /// a self-declared one.
+    pub github_id: Option<u64>,
 }
 
 /// Login data: positive ids come from OAuth; negative ids are self-declared.

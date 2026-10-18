@@ -18,6 +18,8 @@ const STUB_API_SECRET: &str = "s";
 
 fn config_with(ids: &[&str]) -> WebServerConfig {
     WebServerConfig {
+        tasks: None,
+        task_mode_requested: false,
         web_dir: std::path::PathBuf::new(),
         github_client_id: None,
         github_client_secret: None,
