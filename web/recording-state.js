@@ -182,6 +182,13 @@ export function showRecordingState(status) {
   );
 }
 
+/// Both Stop recording buttons: the sidebar's, and the copy in the wait for
+/// the report, which covers the sidebar while the recording still runs. One
+/// state, so every change here is made to both.
+function withdrawButtons() {
+  return [nodes.withdrawConsent, nodes.endingWithdrawConsent];
+}
+
 /// Takes consent back, mid-interview.
 ///
 /// No confirmation step. Stopping a recording is the safe direction of a
@@ -192,7 +199,7 @@ export function showRecordingState(status) {
 /// re-agreeing would be a new interview, and this page is already in one.
 export async function withdrawRecordingConsent() {
   if (!state.interviewId) return;
-  nodes.withdrawConsent.disabled = true;
+  for (const button of withdrawButtons()) button.disabled = true;
   try {
     const response = await fetch(
       `/api/interviews/${encodeURIComponent(state.interviewId)}/consent`,
@@ -210,7 +217,8 @@ export async function withdrawRecordingConsent() {
     // the provider and scheduling the deletion is the recording lifecycle's
     // work, and a button that reports a completed action it did not perform is
     // the worst possible place to be optimistic.
-    nodes.withdrawConsent.textContent = "Recording stop requested";
+    for (const button of withdrawButtons())
+      button.textContent = "Recording stop requested";
     addTranscript(
       "interviewer",
       "Your withdrawal is recorded. Recording will stop and the file is scheduled for deletion. Copies anyone already downloaded cannot be recalled.",
@@ -218,7 +226,7 @@ export async function withdrawRecordingConsent() {
     );
   } catch (error) {
     console.warn("codetrial withdraw_consent_failed", error);
-    nodes.withdrawConsent.disabled = false;
+    for (const button of withdrawButtons()) button.disabled = false;
     setBanner(
       "connection",
       "Could not stop the recording. Try again, or end the interview.",

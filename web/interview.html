@@ -676,9 +676,20 @@
         </div>
       </div>
 
-      <section id="ending-overlay" class="overlay" hidden>
+      <!-- A dialog, but not aria-modal: Jim's stage sits over it while the
+           report is written, and his captions there have to be announced.
+           Everything else behind it is inert. -->
+      <section
+        id="ending-overlay"
+        class="overlay"
+        role="dialog"
+        aria-labelledby="ending-title"
+        hidden
+      >
         <div class="spinner"></div>
-        <p id="ending-title">Jim is writing up your evaluation...</p>
+        <p id="ending-title" tabindex="-1">
+          Jim is writing up your evaluation...
+        </p>
         <p id="ending-detail" role="status" aria-live="polite">
           Scoring your code and communication - this usually takes a few
           seconds.
@@ -696,6 +707,17 @@
         </button>
         <button id="force-report" class="pill-button" type="button">
           Show offline summary
+        </button>
+        <!-- The sidebar's Stop recording is behind this overlay, and the
+             recording runs until the report arrives. interview.js keeps this
+             one in step with it. -->
+        <button
+          id="ending-withdraw-consent"
+          class="pill-button danger"
+          type="button"
+          hidden
+        >
+          Stop recording
         </button>
       </section>
 
@@ -763,7 +785,15 @@
         </div>
       </aside>
 
-      <section id="report-modal" class="overlay" hidden></section>
+      <section
+        id="report-modal"
+        class="overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Interview report"
+        tabindex="-1"
+        hidden
+      ></section>
       <video
         id="camera-integrity-video"
         class="hidden-media"

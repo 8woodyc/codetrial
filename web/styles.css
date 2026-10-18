@@ -1882,6 +1882,50 @@ table.phase-scores {
   cursor: progress;
 }
 
+/* The overlay scrolls, not the card, so the report it focuses on opening
+   answers Page Down and the arrow keys. */
+#report-modal .report-card {
+  max-height: none;
+  overflow-y: visible;
+}
+
+/* Jim is still in the room while the report is written, so his stage sits
+   over the wait rather than under it: his closing lines stay visible, and
+   interview.js leaves the stage live so they are announced too. */
+#ending-overlay:not([hidden]) ~ .jim-stage {
+  z-index: 11;
+}
+
+/* The turn line speaks of a turn there no longer is, and the captions'
+   divider from it goes with it. */
+#ending-overlay:not([hidden]) ~ .jim-stage .turn-row {
+  display: none;
+}
+
+#ending-overlay:not([hidden]) ~ .jim-stage .captions-bar {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* The compact card runs along the bottom edge, where a long closing line would
+   grow it over the wait's buttons and take their taps. During the wait its
+   captions keep to a few lines (they still scroll), and the wait keeps that
+   much room clear below its own content. */
+#ending-overlay:not([hidden]) ~ .jim-stage.compact .captions-bar {
+  max-height: 4.5rem;
+}
+
+#ending-overlay:has(~ .jim-stage.compact) {
+  padding-bottom: 7.5rem;
+}
+
+/* Withdrawing consent is not the way on from the wait, so it sits apart, in
+   the dock's outlined danger look (with the dock's rule, below). */
+#ending-overlay .pill-button.danger {
+  margin-top: 1rem;
+}
+
 /* The wait's headline reads above its detail line, not level with it. */
 #ending-title {
   margin: 0;
@@ -2653,13 +2697,15 @@ body:not([data-recording]) .replay-detail > :not(header) {
 }
 
 /* Outlined rather than filled: present, never the loudest thing near it. */
-.session-dock .pill-button.danger {
+.session-dock .pill-button.danger,
+#ending-overlay .pill-button.danger {
   border-color: var(--danger);
   background: transparent;
   color: var(--danger-ink);
 }
 
-.session-dock .pill-button.danger:not(:disabled):hover {
+.session-dock .pill-button.danger:not(:disabled):hover,
+#ending-overlay .pill-button.danger:not(:disabled):hover {
   background: var(--danger);
   color: #ffffff;
 }
@@ -2852,9 +2898,11 @@ body:not([data-recording]) .replay-detail > :not(header) {
   color: var(--accent);
 }
 
-/* Focused by script when the dialog opens, so a screen reader starts at its
-   name; a heading is not a control, so it draws no focus ring. */
-.preflight-head h2:focus {
+/* Focused by script when a dialog opens, so a screen reader starts at its
+   name; a name is not a control, so it draws no focus ring. */
+.preflight-head h2:focus,
+#ending-title:focus,
+#report-modal:focus {
   outline: none;
 }
 

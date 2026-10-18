@@ -618,17 +618,37 @@ test("avatar canvas has an accessible name", () => {
 });
 
 test("the page covers the avatar stage for the whole preflight", () => {
-  // The stage draws nothing and is inert while covered; the stage tests drive
-  // that directly, so this pins only the page's side: covered from start-up,
-  // uncovered once the preflight resolves, and never the other way round.
+  // The stage draws nothing while covered; the stage tests drive that
+  // directly, so this pins only the page's side. The cover follows the setup
+  // check's own `hidden`, from the one function that follows every dialog,
+  // and that function is set up before the avatar can start.
   const page = read("web/interview.js");
-  const covered = page.indexOf("setStageCovered(true)");
-  const uncovered = page.indexOf("setStageCovered(false)");
-  assert.ok(covered >= 0 && uncovered >= 0, "both sides are called");
+  const hold = functionBody(page, "holdWorkspaceBehindDialogs");
+  // Inside `sync`, and `sync` runs on every change to a dialog's `hidden`:
+  // a call made once at start-up would cover the stage and never uncover it.
+  const sync = hold.slice(
+    hold.indexOf("const sync = () => {"),
+    hold.indexOf("\n  };", hold.indexOf("const sync = () => {")),
+  );
+  assert.match(sync, /setStageCovered\(!nodes\.audioCheck\.hidden\)/);
+  assert.match(hold, /new MutationObserver\(\(records\) => \{\s*sync\(\);/);
+  assert.match(
+    hold,
+    /for \(const dialog of dialogs\.keys\(\)\)\s*observer\.observe\(dialog, \{ attributes: true, attributeFilter: \["hidden"\] \}\)/,
+  );
   assert.ok(
-    covered < page.indexOf("startAvatar();") &&
-      page.indexOf("await runAudioCheck()") < uncovered,
-    "covered before the avatar starts, uncovered after the preflight",
+    hold.includes("[nodes.audioCheck, nodes.audioCheckTitle]"),
+    "the setup check is one of the dialogs observed",
+  );
+  assert.equal(
+    page.match(/setStageCovered\(/g).length,
+    1,
+    "called from that one place, nowhere else",
+  );
+  assert.ok(
+    page.indexOf("holdWorkspaceBehindDialogs();") <
+      page.indexOf("startAvatar();"),
+    "covered before the avatar starts",
   );
 });
 

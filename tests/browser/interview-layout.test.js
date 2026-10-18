@@ -5,7 +5,8 @@
 // every behavior test stays green: Start scrolled out of the setup check, the
 // setup check no longer modal, End interview pushed out of a short sidebar,
 // Run tests wrapped onto a second toolbar row, the dock a screen below the
-// problem on a phone, the replay headline running under the column beside it.
+// problem on a phone, the report letting focus fall back into the workspace
+// behind it, the replay headline running under the column beside it.
 
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
@@ -46,12 +47,13 @@ async function openInterview(width, height) {
   return page;
 }
 
-/// What holdWorkspaceBehindPreflight in web/interview.js makes inert.
+/// What holdWorkspaceBehindDialogs in web/interview.js makes inert.
 const WORKSPACE = [
   "#interview-sidebar",
   "#sidebar-resizer",
   ".editor-panel",
   "#board-panel",
+  "#jim-stage",
 ];
 
 const workspaceInert = (page) =>
@@ -112,7 +114,13 @@ test("the setup check is a modal dialog over an inert workspace", async (t) => {
     assert.equal(open.modal, "true");
     assert.equal(open.name, "Check your setup");
     assert.equal(open.focused, "audio-check-title");
-    assert.deepEqual(await workspaceInert(page), [true, true, true, true]);
+    assert.deepEqual(await workspaceInert(page), [
+      true,
+      true,
+      true,
+      true,
+      true,
+    ]);
 
     // Tab from the title stays in the dialog: the workspace behind it offers
     // nothing to land on.
@@ -125,7 +133,13 @@ test("the setup check is a modal dialog over an inert workspace", async (t) => {
     );
 
     await closeSetupCheck(page);
-    assert.deepEqual(await workspaceInert(page), [false, false, false, false]);
+    assert.deepEqual(await workspaceInert(page), [
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
   } finally {
     await page.close();
   }
@@ -216,6 +230,94 @@ test("on a phone the turn button is on the first screen, under the problem", asy
   }
 });
 
+// The wait for the report is not the report: Jim is still in the room and
+// the recording still running. The harness has no agent, so ending goes
+// straight to the report; the wait is opened here the way endInterview does.
+test("the wait keeps Jim heard and the recording withdrawable", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await openInterview(1440, 900);
+  try {
+    await closeSetupCheck(page);
+    await page.evaluate(() => {
+      document.querySelector("#ending-overlay").hidden = false;
+    });
+    const wait = await page.evaluate(() => {
+      const stage = document.querySelector("#jim-stage");
+      const overlay = document.querySelector("#ending-overlay");
+      const stop = document.querySelector("#ending-withdraw-consent");
+      return {
+        stageInert: stage.inert,
+        stageAbove:
+          Number(getComputedStyle(stage).zIndex) >
+          Number(getComputedStyle(overlay).zIndex),
+        workspaceInert: document.querySelector(".editor-panel").inert,
+        stopInWait: overlay.contains(stop),
+        stopHidden: stop.hidden,
+      };
+    });
+    assert.equal(wait.stageInert, false, "Jim's captions are announced");
+    assert.equal(wait.stageAbove, true, "and drawn over the wait");
+    assert.equal(wait.workspaceInert, true);
+    assert.equal(wait.stopInWait, true, "the wait has its own Stop recording");
+    assert.equal(wait.stopHidden, true, "hidden where nothing is recorded");
+
+    // Revealed as the page reveals it once a recording starts: on screen, and
+    // nothing around it holds it out of reach. What it does is the same
+    // withdrawal as the sidebar's; recording-state.test.js holds both.
+    await page.evaluate(() => {
+      document.querySelector("#ending-withdraw-consent").hidden = false;
+    });
+    const stop = await page.evaluate(() => {
+      const button = document.querySelector("#ending-withdraw-consent");
+      return {
+        visible: button.checkVisibility(),
+        reachable: !button.closest("[inert]"),
+      };
+    });
+    assert.deepEqual(stop, { visible: true, reachable: true });
+  } finally {
+    await page.close();
+  }
+});
+
+// On a phone the compact stage runs along the bottom edge above the wait, so a
+// long closing line must not grow it over the wait's own buttons.
+test("on a phone Jim's closing lines leave the wait's buttons reachable", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await openInterview(390, 600);
+  try {
+    await closeSetupCheck(page);
+    await page.evaluate(() => {
+      document.querySelector("#ending-overlay").hidden = false;
+      document.querySelector("#ending-withdraw-consent").hidden = false;
+      document.querySelector("#captions-text").textContent =
+        "Thanks for walking me through that. ".repeat(30);
+    });
+    const covered = await page.evaluate(() =>
+      [...document.querySelectorAll("#ending-overlay button")]
+        .filter((button) => button.offsetParent)
+        .filter((button) => {
+          const box = button.getBoundingClientRect();
+          const top = document.elementFromPoint(
+            box.x + box.width / 2,
+            box.y + box.height / 2,
+          );
+          return !button.contains(top);
+        })
+        .map((button) => button.id),
+    );
+    assert.equal(
+      await page
+        .locator("#jim-stage")
+        .evaluate((s) => s.classList.contains("compact")),
+      true,
+    );
+    assert.deepEqual(covered, []);
+  } finally {
+    await page.close();
+  }
+});
+
 test("a narrow window and a narrow panel both make the stage compact", async (t) => {
   if (!browser) return t.skip("playwright chromium unavailable");
   const page = await openInterview(1440, 900);
@@ -255,6 +357,46 @@ test("a narrow window and a narrow panel both make the stage compact", async (t)
     }));
     assert.equal(card.avatar, "none", "the avatar goes, the captions stay");
     assert.notEqual(card.background, "rgba(0, 0, 0, 0)", "as one card");
+  } finally {
+    await page.close();
+  }
+});
+
+test("the report is a modal dialog with one primary action", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await openInterview(1280, 800);
+  page.on("dialog", (dialog) => dialog.accept());
+  try {
+    await closeSetupCheck(page);
+    await page.locator("#end").click();
+    await page.locator("#force-report").click();
+    await page.locator("#report-modal #done").waitFor();
+    const state = await page.evaluate(() => {
+      const report = document.querySelector("#report-modal");
+      const fill = (selector) =>
+        getComputedStyle(report.querySelector(selector)).backgroundColor;
+      return {
+        role: report.getAttribute("role"),
+        modal: report.getAttribute("aria-modal"),
+        focused: document.activeElement === report,
+        workspaceInert: document.querySelector(".editor-panel").inert,
+        stageInert: document.querySelector("#jim-stage").inert,
+        download: fill("#download-report"),
+        done: fill("#done"),
+      };
+    });
+    assert.equal(state.role, "dialog");
+    assert.equal(state.modal, "true");
+    assert.equal(state.focused, true);
+    assert.equal(state.workspaceInert, true);
+    assert.equal(
+      state.stageInert,
+      true,
+      "Hide avatar is reachable behind the report",
+    );
+    // Done is filled; the download is outlined, not a second equal button.
+    assert.equal(state.download, "rgba(0, 0, 0, 0)");
+    assert.notEqual(state.done, "rgba(0, 0, 0, 0)");
   } finally {
     await page.close();
   }

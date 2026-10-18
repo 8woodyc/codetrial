@@ -679,11 +679,8 @@ test("Jim captions survive editor navigation and language switches", async (t) =
   };
 
   try {
-    await page.evaluate(async () => {
-      await import("/interview.js");
-      document.querySelector("#audio-check").hidden = true;
-      (await import("/avatar/stage.js")).setStageCovered(false);
-    });
+    await page.evaluate(() => import("/interview.js"));
+    await closeSetupCheck(page);
 
     await page.locator('[data-language="javascript"]').click();
     await editor.fill(code);
@@ -962,11 +959,8 @@ test("a new Jim turn starts at the top of the caption bar", async (t) => {
   };
 
   try {
-    await page.evaluate(async () => {
-      await import("/interview.js");
-      document.querySelector("#audio-check").hidden = true;
-      (await import("/avatar/stage.js")).setStageCovered(false);
-    });
+    await page.evaluate(() => import("/interview.js"));
+    await closeSetupCheck(page);
 
     await showJim(firstText, "jim-scroll-1");
     assert.equal(await bar.isVisible(), true);

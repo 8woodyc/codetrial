@@ -551,6 +551,7 @@ const nodes = {
   resultsToggle: document.querySelector("#results-toggle"),
   ending: document.querySelector("#ending-overlay"),
   endingTitle: document.querySelector("#ending-title"),
+  endingWithdrawConsent: document.querySelector("#ending-withdraw-consent"),
   retryReport: document.querySelector("#retry-report"),
   forceReport: document.querySelector("#force-report"),
   leaveRoom: document.querySelector("#leave-room"),
@@ -616,9 +617,8 @@ initReplay({ state, nodes, recordingEnabled, consentVersion, replayVersion });
 initCaptions({ nodes });
 initAvatarStage({ nodes });
 // The preflight overlay is up from the first paint; the stage stays inert and
-// undrawn under it until the preflight closes, below.
-setStageCovered(true);
-holdWorkspaceBehindPreflight();
+// undrawn under it until the preflight closes.
+holdWorkspaceBehindDialogs();
 initAudioOutput({ nodes, jimAudioElement: () => jimAudio });
 initRecording({ state, nodes, recordingEnabled, addTranscript, setBanner });
 initIntegrity({
@@ -631,31 +631,50 @@ initIntegrity({
 
 init();
 
-/// The setup check is a modal dialog, so the workspace under it is inert while
-/// it is up: Tab cannot reach Run tests or End interview unseen, and a screen
-/// reader is not offered the problem behind it. Follows the overlay's own
-/// `hidden` rather than each place that closes it, because there are several
-/// (the checks passing, the sign-in redirect) and a missed one would leave the
-/// whole interview unusable. The Jim stage has its own cover, setStageCovered.
-function holdWorkspaceBehindPreflight() {
+/// The setup check, the wait for the report and the report itself are
+/// dialogs, so the workspace under them is inert while any is up: Tab cannot
+/// reach Run tests or End interview unseen, and a screen reader is not offered
+/// the problem behind them. Follows each overlay's own `hidden` rather than
+/// each place that opens or closes it, because there are several (the checks
+/// passing, the sign-in redirect, the agent's report, the offline one) and a
+/// missed one would leave the interview unusable.
+///
+/// The one writer of the Jim stage's `inert` as well. It is held behind the
+/// setup check and the report, where Hide avatar would be reachable unseen,
+/// but not during the wait: Jim is still in the room then and may be saying
+/// his closing lines, so the stylesheet lifts the stage over that overlay and
+/// his captions stay where they can be seen and announced. And the one place
+/// that tells the stage the setup check covers it, so it draws nothing there.
+function holdWorkspaceBehindDialogs() {
   const workspace = [
     nodes.sidebar,
     nodes.sidebarResizer,
     nodes.editorPanel,
     nodes.boardPanel,
   ];
+  // Each dialog and what takes focus when it opens: its name, so the first
+  // thing read is what the dialog is and the next Tab lands inside it.
+  const dialogs = new Map([
+    [nodes.audioCheck, nodes.audioCheckTitle],
+    [nodes.ending, nodes.endingTitle],
+    [nodes.report, nodes.report],
+  ]);
   const sync = () => {
-    const open = !nodes.audioCheck.hidden;
+    const open = [...dialogs.keys()].some((dialog) => !dialog.hidden);
     for (const node of workspace) node.inert = open;
-    return open;
+    nodes.jimStage.inert = !nodes.audioCheck.hidden || !nodes.report.hidden;
+    setStageCovered(!nodes.audioCheck.hidden);
   };
-  // Focus starts on the dialog's title, so the first thing read is what the
-  // dialog is, and the first Tab lands on its first control.
-  if (sync()) nodes.audioCheckTitle.focus({ preventScroll: true });
-  new MutationObserver(sync).observe(nodes.audioCheck, {
-    attributes: true,
-    attributeFilter: ["hidden"],
+  sync();
+  for (const [dialog, name] of dialogs)
+    if (!dialog.hidden) name.focus({ preventScroll: true });
+  const observer = new MutationObserver((records) => {
+    sync();
+    for (const { target } of records)
+      if (!target.hidden) dialogs.get(target).focus({ preventScroll: true });
   });
+  for (const dialog of dialogs.keys())
+    observer.observe(dialog, { attributes: true, attributeFilter: ["hidden"] });
 }
 
 async function init() {
@@ -781,7 +800,6 @@ async function init() {
   // indistinguishable from an avatar that is never coming.
   startAvatar();
   const preflight = await runAudioCheck();
-  setStageCovered(false);
   // Before the room, so nothing downstream ever sees the camera: the publisher,
   // the watchers and the heartbeat all read the stream, and handing them a
   // track that is about to vanish is what made this a special case everywhere.
@@ -877,6 +895,11 @@ function bindEvents() {
   document.addEventListener("keydown", onTurnKey);
   nodes.end.addEventListener("click", () => endInterview("candidate_ended"));
   nodes.withdrawConsent.addEventListener("click", withdrawRecordingConsent);
+  // The wait's copy, over the sidebar while the report is written.
+  nodes.endingWithdrawConsent.addEventListener(
+    "click",
+    withdrawRecordingConsent,
+  );
   nodes.retryReport.addEventListener("click", () => reportRecovery.retry());
   nodes.forceReport.addEventListener("click", showReport);
   nodes.leaveRoom.addEventListener("click", leaveRoom);
@@ -1532,6 +1555,7 @@ async function connect(preflight, presenting = false) {
     // should not have to know that to see why this is safe.
     if (recordingEnabled && state.interviewId) {
       nodes.withdrawConsent.hidden = false;
+      nodes.endingWithdrawConsent.hidden = false;
       await startRecording();
       // First event of the replay, so a template that joins late knows the
       // interview was already running rather than inferring it from silence.
