@@ -799,6 +799,66 @@ public:
       }
     },
   );
+
+  // A Java solution returns null for an empty list or tree, and the harness
+  // holds the result as an Object, so only the judge's output type can say
+  // that null is an empty list rather than a missing answer. Both judges
+  // carry a case whose expected answer is [].
+  for (const [id, solution] of [
+    [
+      "rotate-list",
+      `class Solution {
+    public ListNode wrapPlaylistTail(ListNode head, int k) {
+        if (head == null || head.next == null) return head;
+        int n = 1;
+        ListNode tail = head;
+        while (tail.next != null) { tail = tail.next; n++; }
+        k %= n;
+        if (k == 0) return head;
+        ListNode newTail = head;
+        for (int i = 0; i < n - k - 1; i++) newTail = newTail.next;
+        ListNode newHead = newTail.next;
+        newTail.next = null;
+        tail.next = head;
+        return newHead;
+    }
+}`,
+    ],
+    [
+      "invert-binary-tree",
+      `class Solution {
+    public TreeNode mirrorLayout(TreeNode root) {
+        if (root == null) return null;
+        TreeNode left = mirrorLayout(root.left);
+        root.left = mirrorLayout(root.right);
+        root.right = left;
+        return root;
+    }
+}`,
+    ],
+  ]) {
+    it(
+      `Java ${id} harness reports an empty result as []`,
+      { skip: noJava },
+      async () => {
+        const dir = mkdtempSync(join(tmpdir(), "codetrial-java-empty-"));
+        try {
+          const source = join(dir, "Main.java");
+          writeFileSync(source, generateHarness("java", judges[id], solution));
+          await run("javac", [source]);
+          assert.deepEqual(
+            parseCompilerResults(
+              (await run("java", ["-cp", dir, "Main"], { encoding: "utf8" }))
+                .stdout,
+            ).results.map((result) => result.actual),
+            judges[id].cases.map((testCase) => testCase.expected),
+          );
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      },
+    );
+  }
 });
 
 test("harness generator handles output parameter and output prefix specs", () => {

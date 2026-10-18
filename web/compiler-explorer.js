@@ -854,6 +854,12 @@ function javaJsonExpression(spec, actualName) {
     return `nextTreeJson((Node) ${actualName})`;
   if (spec.outputType === "quadTree")
     return `quadTreeJson((Node) ${actualName})`;
+  // `actual` is an Object, and `jsonAny` answers "null" for a null one before
+  // it can look at a type, so an empty list or tree never reached the
+  // overloads that print it as [], the answer every other language gives.
+  // A null carries no type, so the judge's output type has to supply it.
+  if (spec.outputType === "linkedList") return `json((ListNode) ${actualName})`;
+  if (spec.outputType === "binaryTree") return `json((TreeNode) ${actualName})`;
   return `jsonAny(${actualName})`;
 }
 
