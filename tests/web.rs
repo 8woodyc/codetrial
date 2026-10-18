@@ -132,6 +132,7 @@ fn web_config() -> WebServerConfig {
         fixed_room_name: None,
         production: false,
         compiler_explorer_enabled: true,
+        guest_mode_enabled: true,
         trusted_proxy_hops: 0,
         recording: None,
         pool: primary_pool("wss://example.livekit.cloud", "devkey", "devsecret"),
@@ -224,7 +225,7 @@ async fn account_server(label: &str) -> (String, TestServer, std::path::PathBuf,
     let mut config = web_config();
     config.session_secret = Some("session-secret".to_string());
     config.db_path = Some(db_path.clone());
-    let (base, server) = spawn_web_server(config).await;
+    let (base, server) = spawn_web_server_with_guest_dispatcher(config).await;
     (base, server, db_path, http_client())
 }
 
@@ -354,6 +355,10 @@ struct RecordingDispatcher {
 }
 
 impl RoomDispatcher for RecordingDispatcher {
+    fn supports_guest_admission(&self) -> bool {
+        true
+    }
+
     fn ensure_agent(
         &self,
         room_name: &str,
@@ -370,6 +375,16 @@ impl RoomDispatcher for RecordingDispatcher {
             .unwrap()
             .push((room_name.to_string(), provider.url.clone()));
         Ok(())
+    }
+    fn ensure_guest_agent(
+        &self,
+        room_name: &str,
+        provider: &codetrial::config::Provider,
+    ) -> Result<(), DispatchRefusal> {
+        // This test double uses the same controllable refusal behavior for both
+        // caller kinds; production guest capacity is enforced by
+        // LocalDispatcher.
+        self.ensure_agent(room_name, provider)
     }
 }
 
@@ -399,6 +414,13 @@ async fn spawn_web_server_with_dispatcher(
         codetrial::web::web_service_with_dispatcher(config, Some(dispatcher)),
     );
     (format!("http://{addr}"), server)
+}
+
+/// Starts a test server with a dispatcher that explicitly supports guest
+/// admission.
+async fn spawn_web_server_with_guest_dispatcher(config: WebServerConfig) -> (String, TestServer) {
+    let dispatcher = std::sync::Arc::<RecordingDispatcher>::default();
+    spawn_web_server_with_dispatcher(config, dispatcher).await
 }
 
 /// The OAuth fixtures every caller of the two GitHub stubs configures: the
@@ -1274,3 +1296,36 @@ mod accounts;
 
 #[path = "web/routes.rs"]
 mod routes;
+
+/// A custom dispatcher must explicitly opt in to guest admission.
+struct DefaultGuestAdmissionDispatcher;
+
+impl RoomDispatcher for DefaultGuestAdmissionDispatcher {
+    fn ensure_agent(
+        &self,
+        _room_name: &str,
+        _provider: &codetrial::config::Provider,
+    ) -> Result<(), DispatchRefusal> {
+        Ok(())
+    }
+}
+
+#[test]
+fn custom_dispatcher_rejects_guest_admission_by_default() {
+    let dispatcher = DefaultGuestAdmissionDispatcher;
+
+    assert!(!dispatcher.supports_guest_admission());
+
+    let provider = codetrial::config::Provider {
+        id: "test-provider".to_string(),
+        url: "wss://example.test".to_string(),
+        api_key: "test-key".to_string(),
+        api_secret: "test-secret".to_string(),
+        google_api_keys: Vec::new(),
+    };
+
+    assert_eq!(
+        dispatcher.ensure_guest_agent("guest-room", &provider),
+        Err(DispatchRefusal::AtCapacity),
+    );
+}

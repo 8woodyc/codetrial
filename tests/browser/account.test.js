@@ -72,7 +72,10 @@ test("interview history routes through the shared persistence helper", () => {
     script,
     /import \{[^}]*\bsaveReportHistory\b[^}]*\} from "\.\/history\.js"/,
   );
-  assert.match(saveHistory, /await saveReportHistory\(entry\)/);
+  assert.match(
+    saveHistory,
+    /await saveReportHistory\(entry,\s*\{\s*persistAccount:\s*!state\.isGuest,\s*\}\)/,
+  );
   assert.match(saveHistory, /reportIsPersisted\(result\)/);
   assert.match(saveHistory, /state\.reportPersisted = true/);
   for (const name of ["receiveReport", "showReport"]) {

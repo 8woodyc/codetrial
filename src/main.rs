@@ -292,6 +292,7 @@ fn web_server_config(
         production,
         trusted_proxy_hops: trusted_proxy_hops(values),
         compiler_explorer_enabled: compiler_explorer_enabled(values),
+        guest_mode_enabled: guest_mode_enabled(values),
         recording,
         pool,
         probe_provider_quota: true,
@@ -329,6 +330,13 @@ fn run_web(options: CliOptions) -> Result<(), String> {
     let pool = web_provider_pool(&values, &options, production)?;
 
     let config = web_server_config(&values, pool, production, &options)?;
+
+    if guest_mode_recording_conflict(config.guest_mode_enabled, config.recording.is_some()) {
+        eprintln!(
+            "WARNING: CODETRIAL_GUEST_MODE_ENABLED=true is ignored while recording is enabled; \\
+             guest mode is unavailable"
+        );
+    }
 
     initialize_accounts(&config)?;
 
@@ -404,7 +412,7 @@ fn run_web(options: CliOptions) -> Result<(), String> {
                 Arc::new(codetrial::dispatch::LocalDispatcher {
                     config,
                     runtime: tokio::runtime::Handle::current(),
-                    live: Arc::default(),
+                    state: Arc::default(),
                     max_concurrent,
                 }) as Arc<dyn RoomDispatcher>
             });
@@ -1110,6 +1118,18 @@ fn compiler_explorer_enabled(values: &BTreeMap<String, String>) -> bool {
     codetrial::config::compiler_explorer_enabled(
         values
             .get("CODETRIAL_COMPILER_EXPLORER_ENABLED")
+            .map(String::as_str),
+    )
+}
+
+fn guest_mode_recording_conflict(guest_mode_enabled: bool, recording_enabled: bool) -> bool {
+    guest_mode_enabled && recording_enabled
+}
+
+fn guest_mode_enabled(values: &BTreeMap<String, String>) -> bool {
+    codetrial::config::guest_mode_enabled(
+        values
+            .get("CODETRIAL_GUEST_MODE_ENABLED")
             .map(String::as_str),
     )
 }

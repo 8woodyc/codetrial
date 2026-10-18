@@ -252,6 +252,11 @@ export function problemMarkup(
 export function reportSaveStatus(result) {
   if (result === null)
     return { message: "Saving report...", className: "muted small" };
+  if (result.account === "guest")
+    return {
+      message: "Temporary guest report. Download it before leaving.",
+      className: "critical small",
+    };
   if (result.account === "saved")
     return { message: "Saved to your account", className: "muted small" };
   if (result.local === "saved")

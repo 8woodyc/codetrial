@@ -2590,18 +2590,6 @@ fn binary_agent_web_uses_config_and_cli_override_precedence() {
     );
     assert!(root.contains("from cli"), "{root}");
 
-    let body = r#"{"problemId":"two-sum","durationMin":20}"#;
-    let token = http_request(
-        &cli_addr,
-        &format!(
-            "POST /api/token HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            body.len(),
-            body
-        ),
-    );
-    assert!(token.contains("401 Unauthorized"), "{token}");
-    assert!(token.contains("GitHub username"), "{token}");
-
     stop_child(&mut child);
     let _ = std::fs::remove_dir_all(file_dir);
     let _ = std::fs::remove_dir_all(cli_dir);
@@ -2637,18 +2625,6 @@ fn binary_agent_web_loads_primary_config_from_the_current_directory() {
         "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
     );
     assert!(root.contains("from local config"), "{root}");
-
-    let body = r#"{"problemId":"two-sum","durationMin":20}"#;
-    let token = http_request(
-        &cli_addr,
-        &format!(
-            "POST /api/token HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            body.len(),
-            body
-        ),
-    );
-    assert!(token.contains("401 Unauthorized"), "{token}");
-    assert!(token.contains("GitHub username"), "{token}");
 
     stop_child(&mut child);
     let _ = std::fs::remove_dir_all(cwd);

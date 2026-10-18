@@ -14,7 +14,7 @@ use axum::response::{IntoResponse, Response};
 use ring::rand::SecureRandom;
 use serde_json::{Value, json};
 
-use crate::accounts::{Accounts, SignedInUser, blocking, release_interview_room};
+use crate::accounts::{blocking, release_interview_room};
 use crate::config::{DEFAULT_DURATION_MIN, MAX_DURATION_MIN, MIN_DURATION_MIN};
 use crate::current_epoch_seconds;
 use crate::token::{LivekitTokenInput, TOKEN_TTL_SECONDS, livekit_observer_token, livekit_token};
@@ -427,41 +427,31 @@ async fn reserved_room(state: &AppState) -> Result<(String, &crate::config::Prov
     }
 }
 
+/// The caller admitted to request an interview token.
+enum AdmittedCaller {
+    Guest,
+    Owner(Owner),
+}
+
 /// Every gate that can refuse a request before any external work happens.
 ///
 /// One function rather than four checks spread down the handler, because the
 /// order between them is the property worth protecting and it is invisible
-/// when they are apart. The account gate runs ahead of the rate limit because
-/// the bucket is keyed by address, so an anonymous caller allowed to spend it
-/// could lock out the signed-in candidate sharing their NAT. The
-/// verified-email gate runs ahead of the rate limit too, so a caller who can
-/// never receive a recording is told why rather than being spent against a
-/// budget they share.
+/// when they are apart. Account and verified-email checks run before the rate
+/// limit, so requests that cannot be admitted do not consume token capacity.
 ///
-/// It does not cover the room reservation: `reserved_room` runs after this
-/// returns and advances the provider rotation, so an unverified caller refused
-/// here has cost nothing only because the refusal comes first at the call
-/// site. Nothing but that ordering enforces it.
-#[allow(clippy::result_large_err)] // Responses are immediately returned by HTTP handlers.
+/// Guests and authenticated callers share one IP-based token limit. This
+/// prevents switching authentication state from granting another request
+/// budget, although callers behind the same NAT also share that capacity.
+/// Guests are admitted only when recording is disabled.
+#[allow(clippy::result_large_err)]
 async fn admit_caller(
     state: &AppState,
     headers: &axum::http::HeaderMap,
     peer: SocketAddr,
-) -> Result<Owner, Response> {
-    // Where accounts exist, an interview belongs to one. Hiding the start
-    // button would not stop anyone opening /interview directly, so the gate
-    // lives on the credential.
-    let Some(accounts) = state.accounts.clone() else {
-        return Err(state.accounts_error());
-    };
+) -> Result<AdmittedCaller, Response> {
     let user = match current_user(state.accounts.as_ref(), headers).await {
-        Ok(Some(user)) => user,
-        Ok(None) => {
-            return Err(json_response(
-                StatusCode::UNAUTHORIZED,
-                json!({ "error": "Enter your GitHub username to start an interview." }),
-            ));
-        }
+        Ok(user) => user,
         Err(_) => {
             return Err(json_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -470,11 +460,42 @@ async fn admit_caller(
         }
     };
 
-    // Where recording is on, the interview produces a file that has to be
-    // delivered to a person, and a self-declared handle is not one. Refusing
-    // here rather than at delivery time is the difference between a candidate
-    // who cannot start and a candidate whose finished interview cannot be sent
-    // anywhere.
+    let client = client_ip(headers, peer, state.config.trusted_proxy_hops);
+    let now = Instant::now();
+
+    let Some(user) = user else {
+        // A configured but unavailable account database must fail closed.
+        if state.accounts_required && state.accounts.is_none() {
+            return Err(state.accounts_error());
+        }
+
+        if state.config.recording.is_some() {
+            return Err(json_response(
+                StatusCode::UNAUTHORIZED,
+                json!({ "error": "Sign in with GitHub to start a recorded interview." }),
+            ));
+        }
+
+        if !state.guest_mode_available() {
+            return Err(json_response(
+                StatusCode::FORBIDDEN,
+                json!({ "error": "Guest interviews are disabled." }),
+            ));
+        }
+
+        if !state.token_limit.allow(client, now) {
+            return Err(rate_limited_response(
+                "Too many session requests. Wait a minute and try again.",
+            ));
+        }
+
+        return Ok(AdmittedCaller::Guest);
+    };
+
+    let Some(accounts) = state.accounts.clone() else {
+        return Err(state.accounts_error());
+    };
+
     if state.config.recording.is_some() && user.verified_email.is_none() {
         return Err(json_response(
             StatusCode::FORBIDDEN,
@@ -485,50 +506,51 @@ async fn admit_caller(
         ));
     }
 
-    let client = client_ip(headers, peer, state.config.trusted_proxy_hops);
-    if !state.token_limit.allow(client, Instant::now()) {
+    if !state.token_limit.allow(client, now) {
         return Err(rate_limited_response(
             "Too many session requests. Wait a minute and try again.",
         ));
     }
-    Ok(Owner { accounts, user })
-}
 
-/// Starts the interviewer, and gives the consent back when there is no room.
-///
-/// `Some` is the refusal to send. The release is the reason this is not two
-/// lines at the call site: a candidate told to retry, whose first attempt
-/// spent their consent on a dispatch that never happened, is refused a second
-/// time for a reason they cannot see or fix.
+    Ok(AdmittedCaller::Owner(Owner { accounts, user }))
+}
+/// Release recorded interview consent when dispatch refuses a room.
+/// Guests have no persisted consent to release.
 async fn dispatch_or_release_consent(
     state: &AppState,
-    accounts: &Arc<Accounts>,
+    owner: Option<&Owner>,
     interview: Option<&String>,
-    owner: &SignedInUser,
     room_name: &str,
     provider: &crate::config::Provider,
 ) -> Option<Response> {
     let Some(dispatcher) = &state.dispatcher else {
         return None;
     };
-    let Err(refusal) = dispatcher.ensure_agent(room_name, provider) else {
+
+    let dispatch_result = if owner.is_none() {
+        dispatcher.ensure_guest_agent(room_name, provider)
+    } else {
+        dispatcher.ensure_agent(room_name, provider)
+    };
+
+    let Err(refusal) = dispatch_result else {
         return None;
     };
-    if let Some(interview) = interview {
-        let accounts = accounts.clone();
+
+    if let (Some(owner), Some(interview)) = (owner, interview) {
+        let accounts = owner.accounts.clone();
         let interview = interview.clone();
         let room_name = room_name.to_string();
-        let owner = owner.id;
+        let owner_id = owner.user.id;
+
         if let Err(error) =
-            blocking(move || release_interview_room(&accounts, &interview, owner, &room_name)).await
+            blocking(move || release_interview_room(&accounts, &interview, owner_id, &room_name))
+                .await
         {
             eprintln!("could not release interview consent after a refused dispatch: {error}");
         }
     }
 
-    // Refusing is the honest failure. Handing out the token anyway would put
-    // the candidate in an empty room reading "Waiting" with nothing, on screen
-    // or in any log they can see, saying why.
     let error = match refusal {
         super::DispatchRefusal::AtCapacity => {
             "The server is running as many interviews as it can right now. Try again in a few minutes."
@@ -537,26 +559,20 @@ async fn dispatch_or_release_consent(
             "This room is still finishing the previous interview's report. Try again in a few minutes."
         }
     };
+
     Some(json_response(
         StatusCode::SERVICE_UNAVAILABLE,
         json!({ "error": error }),
     ))
 }
 
-/// The signed token, or the refusal to send instead.
-///
-/// Split out for the reason the gates above it were: what remains at the call
-/// site is the sequence, and the two ways signing can fail are a pair worth
-/// reading together rather than thirty lines wedged between the consent check
-/// and the claim.
-#[allow(clippy::result_large_err)] // Responses are immediately returned by HTTP handlers.
 fn minted_token(
     state: &AppState,
     provider: &crate::config::Provider,
     body: &[u8],
     room_name: &str,
     identity: &str,
-) -> Result<TokenResponse, Response> {
+) -> Result<TokenResponse, String> {
     match token_response(
         &TokenConfig {
             api_key: &provider.api_key,
@@ -577,10 +593,7 @@ fn minted_token(
         // here could only answer a request that cannot reach it, which is why
         // both of its mutants survived the gate: nothing distinguishes a guard
         // that is never true from one that is never false.
-        Err(error) => Err(json_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            json!({ "error": error.to_string() }),
-        )),
+        Err(error) => Err(error.to_string()),
     }
 }
 
@@ -589,14 +602,9 @@ pub(crate) async fn token_handler(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     request: Request<Body>,
 ) -> Response {
-    let Owner { accounts, user } = match admit_caller(&state, request.headers(), peer).await {
-        Ok(admitted) => admitted,
-        Err(response) => return response,
-    };
-
-    // One record, so the three values cannot come from different providers.
-    let (room_name, provider) = match reserved_room(&state).await {
-        Ok(reserved) => reserved,
+    let owner = match admit_caller(&state, request.headers(), peer).await {
+        Ok(AdmittedCaller::Guest) => None,
+        Ok(AdmittedCaller::Owner(owner)) => Some(owner),
         Err(response) => return response,
     };
 
@@ -625,23 +633,43 @@ pub(crate) async fn token_handler(
     if let Err(error) = validate_interviewer_selections(&selection_request) {
         return json_response(StatusCode::BAD_REQUEST, json!({ "error": error }));
     }
-    let interview = match checked_consent(&state, &accounts, &user, body.as_ref()).await {
-        Ok(interview) => interview,
+
+    let interview = if let Some(owner) = owner.as_ref() {
+        match checked_consent(&state, &owner.accounts, &owner.user, body.as_ref()).await {
+            Ok(interview) => interview,
+            Err(response) => return response,
+        }
+    } else {
+        // Guests are admitted only when recording is disabled.
+        None
+    };
+
+    // One record, so the three values cannot come from different providers.
+    // Complete request and consent validation before reserving a room.
+    let (room_name, provider) = match reserved_room(&state).await {
+        Ok(reserved) => reserved,
         Err(response) => return response,
     };
     let identity = generated_candidate_identity();
     let response = match minted_token(&state, provider, body.as_ref(), &room_name, &identity) {
         Ok(response) => response,
-        Err(refusal) => return refusal,
+        Err(error) => {
+            return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": error }));
+        }
     };
 
     // Before the dispatcher, so two requests racing on one interview cannot
     // both start an interviewer, and after the token, so a signing failure
     // costs nothing. The loser of that race is refused here without dispatching
     // anything.
-    if let Some(interview) = &interview
-        && let Err(response) =
-            claim_consent(&accounts, user.id, interview.clone(), &room_name).await
+    if let (Some(owner), Some(interview)) = (owner.as_ref(), interview.as_ref())
+        && let Err(response) = claim_consent(
+            &owner.accounts,
+            owner.user.id,
+            interview.clone(),
+            &room_name,
+        )
+        .await
     {
         return response;
     }
@@ -650,9 +678,8 @@ pub(crate) async fn token_handler(
     // anyway never leaves an interviewer running behind it.
     if let Some(refusal) = dispatch_or_release_consent(
         &state,
-        &accounts,
+        owner.as_ref(),
         interview.as_ref(),
-        &user,
         &room_name,
         provider,
     )
@@ -661,11 +688,13 @@ pub(crate) async fn token_handler(
         return refusal;
     }
 
-    state
-        .room_authorizations
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .grant(room_name, user.id, current_epoch_seconds());
+    if let Some(owner) = owner.as_ref() {
+        state
+            .room_authorizations
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .grant(room_name, owner.user.id, current_epoch_seconds());
+    }
 
     json_response(
         StatusCode::OK,
@@ -673,6 +702,7 @@ pub(crate) async fn token_handler(
             "token": response.token,
             "serverUrl": response.server_url,
             "roomName": response.room_name,
+            "guest": owner.is_none(),
 
             // The same number the token metadata carries, so the page counts
             // down the interview the agent is running rather than the one the

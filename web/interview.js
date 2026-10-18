@@ -456,6 +456,7 @@ const state = {
   // True only after the latest report save confirms a local or account copy
   // the Past attempts flow can reopen.
   reportPersisted: false,
+  isGuest: false,
   phase: "live",
   transcript: null, // createTranscriptView, built in init once nodes exist
   latestSummary: null,
@@ -1207,7 +1208,7 @@ function bindEvents() {
     );
   });
   nodes.report.addEventListener("click", (event) => {
-    if (event.target.closest("#done")) window.location.assign("/");
+    if (event.target.closest("#done")) leaveRoom();
     if (event.target.closest("#download-report")) downloadReport();
   });
 }
@@ -1217,7 +1218,13 @@ function bindEvents() {
 async function signInRequired() {
   const session = await sessionPromise;
   // Offline practice still works; the token request is the real gate.
-  if (!session || session.signedIn || !session.loginRequired) return false;
+  if (
+    !session ||
+    session.signedIn ||
+    !session.loginRequired ||
+    session.guestModeAvailable
+  )
+    return false;
   nodes.audioCheck.hidden = true;
   nodes.agentState.textContent = "Sign in required";
   addTranscript(
@@ -1578,6 +1585,7 @@ async function connect(preflight, presenting = false) {
         (await response.json()).error || "Failed to create a session.",
       );
     const connection = await response.json();
+    state.isGuest = connection.guest === true;
     // Before the room, and before anything that reads the length: the replay's
     // opening lifecycle event carries the round split, and a split computed
     // from the requested length would be the first thing written down.
@@ -2101,6 +2109,7 @@ async function receiveReport(room, payload, flushed = Promise.resolve()) {
     state.connected = false;
     // Done navigates away, which would drop a receipt still leaving.
     const [saved] = await Promise.all([saving, flushed]);
+    state.reportReceiving = false;
     renderReportSaveStatus(saved);
   } catch (error) {
     reportRecovery.stop();
@@ -2110,6 +2119,10 @@ async function receiveReport(room, payload, flushed = Promise.resolve()) {
     // candidate the thing that did arrive.
     if (rendered) {
       console.warn("codetrial report_render_failed", error);
+      // The report is visible. Keep the exit guarded until the receipt
+      // has had its chance to leave, even if saving the report failed.
+      await flushed.catch(() => {});
+      state.reportReceiving = false;
       return;
     }
     // The interview is over whether or not the report drew, and only the
@@ -3288,6 +3301,13 @@ function leaveRoom() {
     return;
   }
   if (state.reportReceiving) return;
+  if (
+    !state.reportPersisted &&
+    state.phase === "report" &&
+    !window.confirm("This report may not be saved. Leave this page anyway?")
+  ) {
+    return;
+  }
   beforeUnloadGuard.dispose();
   stopEndingClock();
   void state.room?.disconnect?.();
@@ -3438,6 +3458,8 @@ async function saveHistory(report = state.report) {
   //
   // One id per interview, so an outcome saved over a provisional failure
   // replaces it in both stores instead of filing a second attempt.
+  // The token response is authoritative for guest mode. Always try to
+  // preserve a local copy; guests must not write account history.
   state.reportId ||= randomId();
 
   // No language at a whiteboard: nothing is compiled, the tabs are not on
@@ -3462,7 +3484,9 @@ async function saveHistory(report = state.report) {
   const generation = ++saveGeneration;
   state.reportPersisted = false;
   updateBeforeUnloadGuard();
-  const result = await saveReportHistory(entry);
+  const result = await saveReportHistory(entry, {
+    persistAccount: !state.isGuest,
+  });
   if (generation === saveGeneration && reportIsPersisted(result)) {
     state.reportPersisted = true;
     updateBeforeUnloadGuard();

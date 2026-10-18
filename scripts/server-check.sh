@@ -74,6 +74,17 @@ grep -F "Practice a live technical interview" "$TMP/home.html" > /dev/null
 grep -F 'data-problem="template-delimiter-audit"' "$TMP/home.html" > /dev/null
 grep -F "Start interview" "$TMP/home.html" > /dev/null
 
+session_json=$(curl -fsS "$BASE_URL/api/session")
+
+guest_mode_available=$(printf '%s' "$session_json" | node -e '
+let data = "";
+process.stdin.on("data", chunk => data += chunk);
+process.stdin.on("end", () => {
+    const session = JSON.parse(data);
+    process.stdout.write(String(session.guestModeAvailable === true));
+});
+')
+
 status=$(curl -sS \
     -X POST \
     -H "Content-Type: application/json" \
@@ -82,8 +93,13 @@ status=$(curl -sS \
     -w "%{http_code}" \
     "$BASE_URL/api/token")
 
-test "$status" = "401"
-grep -F "GitHub username" "$TMP/token.json" > /dev/null
+if [ "$guest_mode_available" = "true" ]; then
+    test "$status" = "200"
+    grep -F '"token"' "$TMP/token.json" > /dev/null
+else
+    test "$status" = "403"
+    grep -F "Guest interviews are disabled" "$TMP/token.json" > /dev/null
+fi
 
 session_cookie=${SERVER_CHECK_SESSION_COOKIE:-}
 if [ -z "$session_cookie" ]; then

@@ -241,8 +241,12 @@ function renamedEntries(entries, pages, markUnmapped) {
 
 export async function saveReportHistory(
   entry,
-  { fetcher = fetch, storage } = {},
+  { fetcher = fetch, storage, persistAccount = true } = {},
 ) {
+  if (!persistAccount) {
+    return { local: "skipped", account: "guest" };
+  }
+
   const local = saveLocalReport(entry, storage);
   const account = await inOrder(entry?.id, () =>
     saveAccountReport(entry, fetcher),

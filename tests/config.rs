@@ -5,7 +5,7 @@ use codetrial::config::{
     DEFAULT_GEMINI_SILENCE_MS, DEFAULT_GEMINI_START_SENSITIVITY, DEFAULT_GEMINI_VOICE,
     DEFAULT_MAX_CONCURRENT_INTERVIEWS, DEFAULT_MAX_INTERIM_REVIEWS, DEFAULT_ROOM_PREFIX,
     MAX_GEMINI_REPLY_TIMEOUT_S, MAX_GEMINI_SILENCE_MS, MAX_INTERIM_REVIEWS,
-    MIN_GEMINI_FIRST_OUTPUT_S, MIN_GEMINI_REPLY_TIMEOUT_S, load_from_pairs,
+    MIN_GEMINI_FIRST_OUTPUT_S, MIN_GEMINI_REPLY_TIMEOUT_S, guest_mode_enabled, load_from_pairs,
     max_concurrent_interviews,
 };
 use serde_json::Value;
@@ -230,6 +230,28 @@ fn config_uses_defaults_for_blank_optional_web_runtime_fields() {
         config.gemini_candidate_video_enabled,
         DEFAULT_GEMINI_CANDIDATE_VIDEO_ENABLED
     );
+}
+
+#[test]
+fn guest_mode_is_disabled_by_default_and_fails_closed() {
+    assert!(!guest_mode_enabled(None));
+    assert!(!guest_mode_enabled(Some("")));
+    assert!(!guest_mode_enabled(Some("   ")));
+
+    for on in ["true", "TRUE", "1", "yes", "on"] {
+        assert!(guest_mode_enabled(Some(on)), "{on} should mean on");
+    }
+
+    for off in ["false", "FALSE", "0", "no", "off"] {
+        assert!(!guest_mode_enabled(Some(off)), "{off} should mean off");
+    }
+
+    for invalid in ["flase", "maybe", "2"] {
+        assert!(
+            !guest_mode_enabled(Some(invalid)),
+            "{invalid} should mean off"
+        );
+    }
 }
 
 /// Asserted on the parser rather than through a config struct, because the

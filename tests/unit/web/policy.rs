@@ -22,6 +22,7 @@ fn policy_for(url: &str) -> String {
         fixed_room_name: None,
         production: true,
         compiler_explorer_enabled: false,
+        guest_mode_enabled: false,
         trusted_proxy_hops: 0,
         recording: None,
         pool: crate::config::ProviderPool {
