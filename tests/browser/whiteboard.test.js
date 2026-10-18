@@ -19,6 +19,7 @@ import {
   PEN_WIDTH,
   boardPoint,
   createBoard,
+  createBoardPainter,
   createPointerGate,
   drawBoard,
 } from "../../web/whiteboard.js";
@@ -50,7 +51,26 @@ function recordingContext() {
     fill: record("fill"),
     arc: record("arc"),
     fillRect: record("fillRect"),
+    drawImage: record("drawImage"),
   };
+}
+
+/// A painter whose layer is a recording context, and the sizes it was asked
+/// to make the layer at.
+function recordingPainter() {
+  const layer = recordingContext();
+  const canvas = { getContext: () => layer };
+  const made = [];
+  const painter = createBoardPainter((width, height) => {
+    made.push([width, height]);
+    return canvas;
+  });
+  return { painter, layer, canvas, made };
+}
+
+/// How many strokes a context was asked to paint.
+function strokesPainted(context) {
+  return context.calls.filter(([name]) => name === "stroke").length;
 }
 
 test("a stroke is kept as the points it was drawn from", () => {
@@ -329,6 +349,162 @@ test("a click with no drag is painted as a dot", () => {
     ["fill"],
     ["restore"],
   ]);
+});
+
+test("a move repaints the stroke being drawn, not the board under it", () => {
+  const board = createBoard();
+  stroke(board, 0, 0, 10, 10);
+  stroke(board, 20, 20, 30, 30);
+  stroke(board, 40, 40, 50, 50);
+  board.begin("pen", BLACK, 60, 60);
+  board.extend(70, 70);
+  const { painter, layer, canvas, made } = recordingPainter();
+  const screen = recordingContext();
+
+  painter.paint(screen, board.strokes(), board.isDrawing());
+  assert.deepEqual(made, [[BOARD_WIDTH, BOARD_HEIGHT]]);
+  assert.equal(strokesPainted(layer), 3);
+  assert.deepEqual(screen.calls[0], ["drawImage", canvas, 0, 0]);
+  assert.equal(strokesPainted(screen), 1);
+
+  // Every later move: the layer is left alone, and the screen is the layer
+  // with the open stroke over it.
+  layer.calls.length = 0;
+  screen.calls.length = 0;
+  board.extend(80, 80);
+  painter.paint(screen, board.strokes(), board.isDrawing());
+  assert.deepEqual(layer.calls, []);
+  assert.deepEqual(screen.calls[0], ["drawImage", canvas, 0, 0]);
+  assert.equal(strokesPainted(screen), 1);
+  assert.deepEqual(made, [[BOARD_WIDTH, BOARD_HEIGHT]]);
+});
+
+test("a stroke that ends is added to the layer on its own", () => {
+  const board = createBoard();
+  stroke(board, 0, 0, 10, 10);
+  const { painter, layer } = recordingPainter();
+  const screen = recordingContext();
+  painter.paint(screen, board.strokes(), board.isDrawing());
+
+  layer.calls.length = 0;
+  stroke(board, 20, 20, 30, 30);
+  painter.paint(screen, board.strokes(), board.isDrawing());
+  assert.equal(strokesPainted(layer), 1);
+  assert.equal(
+    layer.calls.some(([name]) => name === "fillRect"),
+    false,
+  );
+});
+
+test("an undo or a clear repaints the layer from the board", () => {
+  const board = createBoard();
+  stroke(board, 0, 0, 10, 10);
+  stroke(board, 20, 20, 30, 30);
+  const { painter, layer } = recordingPainter();
+  const screen = recordingContext();
+  painter.paint(screen, board.strokes(), board.isDrawing());
+
+  layer.calls.length = 0;
+  board.undo();
+  painter.paint(screen, board.strokes(), board.isDrawing());
+  assert.deepEqual(layer.calls[1], [
+    "fillRect",
+    0,
+    0,
+    BOARD_WIDTH,
+    BOARD_HEIGHT,
+  ]);
+  assert.equal(strokesPainted(layer), 1);
+
+  layer.calls.length = 0;
+  board.clear();
+  painter.paint(screen, board.strokes(), board.isDrawing());
+  assert.equal(layer.calls[1][0], "fillRect");
+  assert.equal(strokesPainted(layer), 0);
+});
+
+test("a board as long as the layer but with other strokes is repainted", () => {
+  // An undo and a new stroke before the next paint leave the board the length
+  // it was, so a layer reused by count would keep the stroke that was undone.
+  const board = createBoard();
+  stroke(board, 0, 0, 10, 10);
+  stroke(board, 20, 20, 30, 30);
+  const { painter, layer } = recordingPainter();
+  const screen = recordingContext();
+  painter.paint(screen, board.strokes(), board.isDrawing());
+
+  layer.calls.length = 0;
+  board.undo();
+  stroke(board, 40, 40, 50, 50);
+  painter.paint(screen, board.strokes(), board.isDrawing());
+  assert.equal(layer.calls[1][0], "fillRect");
+  assert.deepEqual(
+    layer.calls.filter(([name]) => name === "moveTo"),
+    [
+      ["moveTo", 0, 0],
+      ["moveTo", 40, 40],
+    ],
+  );
+});
+
+test("a stroke cancelled for a pen leaves the screen with the layer alone", () => {
+  // A palm's stroke is open, so it is on the screen and not on the layer. The
+  // layer is reused when the pen cancels it, and copying the layer over the
+  // screen is what takes the palm's ink off.
+  const board = createBoard();
+  stroke(board, 0, 0, 10, 10);
+  board.begin("pen", BLACK, 20, 20);
+  board.extend(30, 30);
+  const { painter, layer, canvas } = recordingPainter();
+  const screen = recordingContext();
+  painter.paint(screen, board.strokes(), board.isDrawing());
+  assert.equal(strokesPainted(screen), 1);
+
+  layer.calls.length = 0;
+  screen.calls.length = 0;
+  board.cancel();
+  painter.paint(screen, board.strokes(), board.isDrawing());
+  assert.deepEqual(layer.calls, []);
+  assert.deepEqual(screen.calls, [["drawImage", canvas, 0, 0]]);
+
+  screen.calls.length = 0;
+  board.begin("pen", BLACK, 40, 40);
+  board.extend(50, 50);
+  painter.paint(screen, board.strokes(), board.isDrawing());
+  assert.deepEqual(layer.calls, []);
+  assert.deepEqual(screen.calls[0], ["drawImage", canvas, 0, 0]);
+  assert.deepEqual(
+    screen.calls.filter(([name]) => name === "moveTo"),
+    [["moveTo", 40, 40]],
+  );
+});
+
+test("an undone clear draws the strokes back onto the empty layer", () => {
+  // The layer a clear leaves holds no strokes, so the restored ones extend it
+  // and are drawn over its background without painting it again.
+  const board = createBoard();
+  stroke(board, 0, 0, 10, 10);
+  stroke(board, 20, 20, 30, 30);
+  const { painter, layer } = recordingPainter();
+  const screen = recordingContext();
+  painter.paint(screen, board.strokes(), board.isDrawing());
+  board.clear();
+  painter.paint(screen, board.strokes(), board.isDrawing());
+
+  layer.calls.length = 0;
+  board.undo();
+  painter.paint(screen, board.strokes(), board.isDrawing());
+  assert.equal(
+    layer.calls.some(([name]) => name === "fillRect"),
+    false,
+  );
+  assert.deepEqual(
+    layer.calls.filter(([name]) => name === "moveTo"),
+    [
+      ["moveTo", 0, 0],
+      ["moveTo", 20, 20],
+    ],
+  );
 });
 
 test("a pointer is read in board coordinates whatever the canvas is laid out at", () => {
