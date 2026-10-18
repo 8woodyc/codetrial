@@ -473,6 +473,8 @@ test("the response window panel says what the number is worth, in words a test c
       "li",
       "click",
       "current",
+      "aria-current",
+      "true",
       "[data-moment]",
       "replay-item",
       "replay-line",

@@ -149,6 +149,18 @@ test("recording-consent the notice's promise of withdrawal is reachable", () => 
     code.includes("nodes.withdrawConsent.hidden = false;"),
     "and revealed once there is an interview to withdraw from",
   );
+  // The wait for the report covers the sidebar while the recording still
+  // runs, so it carries its own copy, wired and revealed the same way.
+  assert.ok(page.includes('id="ending-withdraw-consent"'));
+  assertIncludesCompact(
+    code,
+    'nodes.endingWithdrawConsent.addEventListener("click", withdrawRecordingConsent)',
+    "the wait's copy is wired to the same withdrawal",
+  );
+  assert.ok(
+    code.includes("nodes.endingWithdrawConsent.hidden = false;"),
+    "and revealed with the sidebar's",
+  );
 
   // The route records a withdrawal. Stopping the provider and scheduling the
   // deletion is the recording lifecycle's work, so the button must not report

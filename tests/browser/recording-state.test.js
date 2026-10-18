@@ -16,6 +16,7 @@ import {
   setRecordingPoll,
   showRecordingState,
   startRecording,
+  withdrawRecordingConsent,
 } from "../../web/recording-state.js";
 
 function response(status, body = {}) {
@@ -295,4 +296,51 @@ test("the poll drops the handle it cleared", async (t) => {
     [1, null],
     "cleared once, then there is nothing to clear",
   );
+});
+
+/// The sidebar's Stop recording and the wait's copy of it are one state: the
+/// wait covers the sidebar while the recording still runs, so a withdrawal from
+/// either has to read the same on both, and a refusal has to give both back.
+test("a withdrawal reads the same on both Stop recording buttons", async (t) => {
+  const button = () => ({ disabled: false, textContent: "Stop recording" });
+  const nodes = {
+    withdrawConsent: button(),
+    endingWithdrawConsent: button(),
+  };
+  const said = [];
+  const banners = [];
+  const savedWarn = console.warn;
+  console.warn = () => {};
+  t.after(() => {
+    console.warn = savedWarn;
+  });
+  initRecording({
+    state: { interviewId: "interview/one" },
+    nodes,
+    recordingEnabled: true,
+    addTranscript: (...line) => said.push(line),
+    setBanner: (...banner) => banners.push(banner),
+  });
+
+  let restoreFetch = failFetchWith(async () => response(503));
+  await withdrawRecordingConsent();
+  restoreFetch();
+  for (const node of Object.values(nodes))
+    assert.deepEqual(
+      node,
+      { disabled: false, textContent: "Stop recording" },
+      "a refused withdrawal leaves both buttons to try again",
+    );
+  assert.equal(banners.length, 1);
+
+  restoreFetch = failFetchWith(async () => response(204));
+  await withdrawRecordingConsent();
+  restoreFetch();
+  for (const node of Object.values(nodes))
+    assert.deepEqual(
+      node,
+      { disabled: true, textContent: "Recording stop requested" },
+      "an accepted one is done on both",
+    );
+  assert.equal(said.length, 1, "and is said once, not once per button");
 });

@@ -4,6 +4,7 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  closeSetupCheck,
   DEFAULT_RUNTIME_CONFIG,
   launchChromium,
   startStaticServer,
@@ -52,12 +53,9 @@ async function editorPage(t, { params = {}, beforeLoad } = {}) {
     waitUntil: "domcontentloaded",
   });
   await page.waitForSelector("#pause:not([hidden])");
-  // The media preflight overlay sits over the editor until a candidate (or a
-  // stubbed device) clears it, and it blocks Playwright's own click on
-  // whatever is under it. A keystroke only needs the element focused, not
-  // clicked, so this reaches through the overlay the same way the existing
-  // candidate-cases.test.js does for its own buttons -- .click()/.focus() in
-  // page.evaluate bypasses the hit-test a real pointer click would fail.
+  // The editor cannot take focus under the setup check; a keystroke only
+  // needs focus, not a click.
+  await closeSetupCheck(page);
   await page.evaluate(() => document.querySelector("#editor").focus());
   // The starter code carries its own brackets; clearing it keeps every
   // assertion below about exactly the characters this test types.
@@ -681,11 +679,8 @@ test("Jim captions survive editor navigation and language switches", async (t) =
   };
 
   try {
-    await page.evaluate(async () => {
-      await import("/interview.js");
-      document.querySelector("#audio-check").hidden = true;
-      (await import("/avatar/stage.js")).setStageCovered(false);
-    });
+    await page.evaluate(() => import("/interview.js"));
+    await closeSetupCheck(page);
 
     await page.locator('[data-language="javascript"]').click();
     await editor.fill(code);
@@ -964,11 +959,8 @@ test("a new Jim turn starts at the top of the caption bar", async (t) => {
   };
 
   try {
-    await page.evaluate(async () => {
-      await import("/interview.js");
-      document.querySelector("#audio-check").hidden = true;
-      (await import("/avatar/stage.js")).setStageCovered(false);
-    });
+    await page.evaluate(() => import("/interview.js"));
+    await closeSetupCheck(page);
 
     await showJim(firstText, "jim-scroll-1");
     assert.equal(await bar.isVisible(), true);
@@ -1331,14 +1323,13 @@ test("example drawing is hidden unless the lobby enabled it", async (t) => {
         await page.locator("#results-body").evaluate((node) => node.hidden),
         enabled,
       );
+      // The chevron is drawn from the state the toggle announces.
       assert.equal(
-        (await page.locator("#results-chevron").textContent()).trim(),
-        enabled ? ">" : "v",
+        await page.locator("#results-toggle").getAttribute("aria-expanded"),
+        enabled ? "false" : "true",
       );
       if (enabled) {
-        await page.evaluate(() => {
-          document.querySelector("#audio-check").hidden = true;
-        });
+        await closeSetupCheck(page);
         await page.locator("#example-board summary").click();
         await page.waitForFunction(() =>
           document.querySelector("#test-drawer").style.height.endsWith("px"),

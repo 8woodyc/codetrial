@@ -30,7 +30,7 @@ const script = interviewSource();
 const firstPartyScripts = webScripts();
 
 const steps = [
-  "Start the CodeTrial interview and confirm the media preflight.",
+  "Start the CodeTrial interview and finish the setup check.",
   "In Meet, click Present now.",
   "Choose <strong>A tab</strong>.",
   "Select the CodeTrial tab.",

@@ -236,7 +236,7 @@ export function problemMarkup(
       <p class="interview-kicker">Interview exercise</p>
       ${showSources && problem.source ? `<p class="problem-source">LeetCode: ${escapeHtml(problem.source)}</p>` : ""}
       ${problem.requestedPage ? `<p class="muted small">The link asked for an exercise this bank does not have, so this is the default exercise.</p>` : ""}
-      ${problem.brief.map((text) => `<p>${escapeHtml(text)}</p>`).join("")}
+      ${problem.brief.map((text) => `<p class="problem-brief">${escapeHtml(text)}</p>`).join("")}
       ${
         examples
           ? `<div class="examples">
@@ -396,7 +396,7 @@ export function reportMarkup({
       ${atBoard ? "" : finalCodeMarkup(language, code)}
       ${!atBoard && boardImage(exampleDrawing) ? `<figure class="board-final"><figcaption>Example drawing</figcaption><p class="muted small">Saved from your interview. Example drawings do not affect coding or communication scores.</p><img class="report-board" src="${exampleDrawing}" alt="Your final example drawing"></figure>` : ""}
       ${saveStatus ? `<p id="report-save-status" class="${saveStatus.className}" role="status">${saveStatus.message}</p>` : ""}
-      <div class="report-actions"><button id="download-report" type="button">Download report (.md)</button><button id="done" type="button"${saveResult === null ? " disabled" : ""}>Done - back to lobby</button></div>
+      <div class="report-actions"><button id="download-report" class="secondary" type="button">Download report (.md)</button><button id="done" type="button"${saveResult === null ? " disabled" : ""}>Done - back to lobby</button></div>
     </div>
   `;
 }

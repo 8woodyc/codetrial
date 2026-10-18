@@ -273,6 +273,19 @@ export async function startStaticServer({ handle, runtimeConfig } = {}) {
   return { server, base: `http://127.0.0.1:${server.address().port}` };
 }
 
+/// The interview's setup check closed the way a passing check closes it, for a
+/// test about what lies behind it. It is a modal dialog over an inert
+/// workspace, so this waits for the workspace to come back rather than for a
+/// fixed time: until then nothing behind it can take focus.
+export async function closeSetupCheck(page) {
+  await page.evaluate(() => {
+    document.querySelector("#audio-check").hidden = true;
+  });
+  await page.waitForFunction(
+    () => !document.querySelector(".editor-panel").inert,
+  );
+}
+
 export function captures(source, pattern) {
   return [...source.matchAll(pattern)].map((match) => match[1]);
 }

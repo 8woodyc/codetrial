@@ -364,14 +364,23 @@ test("the shortcut does nothing once the interview has ended", async (t) => {
   const { page, errors } = ctx;
   try {
     const code = await page.locator("#editor").inputValue();
-    // Focus back in the editor is the time-up case: the candidate was still
-    // typing when the clock ran out. Asserted, because a press that reached
-    // no listener would pass this test without testing anything.
+    // The time-up case: the candidate was still typing when the clock ran out.
+    // The wait for the report is a modal dialog, so the workspace behind it,
+    // the editor included, is inert and focus moves to the dialog; the press
+    // lands there. The listener is the document's, so it still sees it, and
+    // the defaultPrevented check below proves it did rather than the press
+    // reaching nothing.
     await page.click("#end");
-    await page.focus("#editor");
+    await page.waitForFunction(
+      () => document.querySelector(".editor-panel").inert,
+    );
     assert.equal(
-      await page.evaluate(() => document.activeElement?.id),
-      "editor",
+      await page.evaluate(() =>
+        document
+          .querySelector("#ending-overlay")
+          .contains(document.activeElement),
+      ),
+      true,
     );
     await page.keyboard.press("ControlOrMeta+Enter");
     assert.equal(await runs(page), 0);

@@ -376,14 +376,13 @@ test("stage waits for the preflight before drawing or reachable controls", async
   const s = await mountStage(env);
   await s.start();
   assert.equal(s.nodes.jimAvatar.dataset.avatarState, "ready");
-  // Nothing is drawn and nothing is scheduled behind the overlay, and the
-  // stage is inert, so its Hide control cannot be reached there unseen.
-  assert.equal(s.nodes.jimStage.inert, true);
+  // Nothing is drawn and nothing is scheduled behind the overlay. Whether the
+  // stage can be reached by keyboard there is the page's dialogs' to decide;
+  // interview-layout.test.js holds that in a browser.
   assert.equal(env.frames.size, 0);
   assert.equal(s.counts.draws, 0);
   assert.equal(env.intervals.size, 0, "no stats are read behind it either");
   s.closePreflight();
-  assert.equal(s.nodes.jimStage.inert, false);
   assert.equal(s.nodes.hideAvatar.hidden, false);
   assert.equal(s.counts.draws, 1);
   assert.equal(env.frames.size, 1);

@@ -335,8 +335,13 @@ test("a narrow interview can scroll horizontally to an enlarged input", async (t
       fontSizes: { standard: 32 },
     });
     await openInterview(page);
+    // Bring the field into view vertically only; the horizontal reach is what
+    // is under test. The page bottom is not enough: stacked case fields can
+    // put this one a screen above it.
     await page.evaluate(() => {
-      window.scrollTo(0, document.documentElement.scrollHeight);
+      const input = document.querySelector("#candidate-case-expected");
+      const box = input.getBoundingClientRect();
+      window.scrollBy(0, box.top + box.height / 2 - innerHeight / 2);
     });
     const box = await page.locator("#candidate-case-expected").boundingBox();
     await page.mouse.move(240, box.y + box.height / 2);

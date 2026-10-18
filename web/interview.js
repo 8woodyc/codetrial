@@ -236,6 +236,9 @@ const SIDEBAR_NEIGHBOUR_MIN_REM = 30;
 // 1200px breakpoint ever left it beside the sidebar's old 22.5rem, so the
 // avatar gives way as it does below that breakpoint.
 const JIM_AVATAR_PANEL_MIN_REM = 49;
+/// Below this window width the editor is narrow enough that a floating avatar
+/// eats code rather than decorating it, whatever the sidebar does.
+const JIM_STAGE_NARROW_WINDOW = "(max-width: 1200px)";
 /// In rem. A fixed ladder rather than a free number, so a stored value is
 /// either one of these or ignored, and every size the page can show is one the
 /// browser check has seen keep the three editor layers in line.
@@ -546,9 +549,9 @@ const nodes = {
   resultsFilter: document.querySelector("#results-filter"),
   hidePassedTests: document.querySelector("#hide-passed-tests"),
   resultsToggle: document.querySelector("#results-toggle"),
-  resultsChevron: document.querySelector("#results-chevron"),
   ending: document.querySelector("#ending-overlay"),
   endingTitle: document.querySelector("#ending-title"),
+  endingWithdrawConsent: document.querySelector("#ending-withdraw-consent"),
   retryReport: document.querySelector("#retry-report"),
   forceReport: document.querySelector("#force-report"),
   leaveRoom: document.querySelector("#leave-room"),
@@ -556,6 +559,7 @@ const nodes = {
   endingElapsed: document.querySelector("#ending-elapsed"),
   report: document.querySelector("#report-modal"),
   audioCheck: document.querySelector("#audio-check"),
+  audioCheckTitle: document.querySelector("#audio-check-title"),
   audioTestTone: document.querySelector("#audio-test-tone"),
   audioTestSpeech: document.querySelector("#audio-test-speech"),
   audioTestVoice: document.querySelector("#audio-test-voice"),
@@ -613,8 +617,8 @@ initReplay({ state, nodes, recordingEnabled, consentVersion, replayVersion });
 initCaptions({ nodes });
 initAvatarStage({ nodes });
 // The preflight overlay is up from the first paint; the stage stays inert and
-// undrawn under it until the preflight closes, below.
-setStageCovered(true);
+// undrawn under it until the preflight closes.
+holdWorkspaceBehindDialogs();
 initAudioOutput({ nodes, jimAudioElement: () => jimAudio });
 initRecording({ state, nodes, recordingEnabled, addTranscript, setBanner });
 initIntegrity({
@@ -626,6 +630,52 @@ initIntegrity({
 });
 
 init();
+
+/// The setup check, the wait for the report and the report itself are
+/// dialogs, so the workspace under them is inert while any is up: Tab cannot
+/// reach Run tests or End interview unseen, and a screen reader is not offered
+/// the problem behind them. Follows each overlay's own `hidden` rather than
+/// each place that opens or closes it, because there are several (the checks
+/// passing, the sign-in redirect, the agent's report, the offline one) and a
+/// missed one would leave the interview unusable.
+///
+/// The one writer of the Jim stage's `inert` as well. It is held behind the
+/// setup check and the report, where Hide avatar would be reachable unseen,
+/// but not during the wait: Jim is still in the room then and may be saying
+/// his closing lines, so the stylesheet lifts the stage over that overlay and
+/// his captions stay where they can be seen and announced. And the one place
+/// that tells the stage the setup check covers it, so it draws nothing there.
+function holdWorkspaceBehindDialogs() {
+  const workspace = [
+    nodes.sidebar,
+    nodes.sidebarResizer,
+    nodes.editorPanel,
+    nodes.boardPanel,
+  ];
+  // Each dialog and what takes focus when it opens: its name, so the first
+  // thing read is what the dialog is and the next Tab lands inside it.
+  const dialogs = new Map([
+    [nodes.audioCheck, nodes.audioCheckTitle],
+    [nodes.ending, nodes.endingTitle],
+    [nodes.report, nodes.report],
+  ]);
+  const sync = () => {
+    const open = [...dialogs.keys()].some((dialog) => !dialog.hidden);
+    for (const node of workspace) node.inert = open;
+    nodes.jimStage.inert = !nodes.audioCheck.hidden || !nodes.report.hidden;
+    setStageCovered(!nodes.audioCheck.hidden);
+  };
+  sync();
+  for (const [dialog, name] of dialogs)
+    if (!dialog.hidden) name.focus({ preventScroll: true });
+  const observer = new MutationObserver((records) => {
+    sync();
+    for (const { target } of records)
+      if (!target.hidden) dialogs.get(target).focus({ preventScroll: true });
+  });
+  for (const dialog of dialogs.keys())
+    observer.observe(dialog, { attributes: true, attributeFilter: ["hidden"] });
+}
 
 async function init() {
   state.transcript = createTranscriptView(document, nodes.transcriptPanel);
@@ -681,8 +731,7 @@ async function init() {
           },
         },
       );
-      nodes.resultsBody.hidden = true;
-      nodes.resultsChevron.textContent = ">";
+      setResultsOpen(false);
       nodes.editorPanel.dataset.exampleDrawing = "true";
       nodes.testDrawerResizer.classList.remove(
         "splitter",
@@ -719,7 +768,11 @@ async function init() {
       property: "--test-drawer-height",
       storageKey: TEST_DRAWER_HEIGHT_KEY,
       bounds: testDrawerBounds,
-      resizeTargets: [nodes.editorStack, nodes.editorToolbar],
+      resizeTargets: [
+        nodes.editorStack,
+        nodes.editorToolbar,
+        nodes.compileDisclosure,
+      ],
     });
   }
   compactJimStageBesideNarrowPanel(
@@ -747,7 +800,6 @@ async function init() {
   // indistinguishable from an avatar that is never coming.
   startAvatar();
   const preflight = await runAudioCheck();
-  setStageCovered(false);
   // Before the room, so nothing downstream ever sees the camera: the publisher,
   // the watchers and the heartbeat all read the stream, and handing them a
   // track that is about to vanish is what made this a special case everywhere.
@@ -843,6 +895,11 @@ function bindEvents() {
   document.addEventListener("keydown", onTurnKey);
   nodes.end.addEventListener("click", () => endInterview("candidate_ended"));
   nodes.withdrawConsent.addEventListener("click", withdrawRecordingConsent);
+  // The wait's copy, over the sidebar while the report is written.
+  nodes.endingWithdrawConsent.addEventListener(
+    "click",
+    withdrawRecordingConsent,
+  );
   nodes.retryReport.addEventListener("click", () => reportRecovery.retry());
   nodes.forceReport.addEventListener("click", showReport);
   nodes.leaveRoom.addEventListener("click", leaveRoom);
@@ -924,10 +981,9 @@ function bindEvents() {
     "devicechange",
     () => void refreshAudioOutputs(),
   );
-  nodes.resultsToggle.addEventListener("click", () => {
-    nodes.resultsBody.hidden = !nodes.resultsBody.hidden;
-    nodes.resultsChevron.textContent = nodes.resultsBody.hidden ? "^" : "v";
-  });
+  nodes.resultsToggle.addEventListener("click", () =>
+    setResultsOpen(nodes.resultsBody.hidden),
+  );
   nodes.hidePassedTests.addEventListener("change", () => {
     if (
       state.runningTests ||
@@ -1499,6 +1555,7 @@ async function connect(preflight, presenting = false) {
     // should not have to know that to see why this is safe.
     if (recordingEnabled && state.interviewId) {
       nodes.withdrawConsent.hidden = false;
+      nodes.endingWithdrawConsent.hidden = false;
       await startRecording();
       // First event of the replay, so a template that joins late knows the
       // interview was already running rather than inferring it from silence.
@@ -2677,13 +2734,21 @@ function applyPause(paused) {
   tickTimer();
 }
 
+/// The test results open or closed, with the toggle saying which: its
+/// chevron is drawn from aria-expanded, so a run that opens the results turns
+/// it too.
+function setResultsOpen(open) {
+  nodes.resultsBody.hidden = !open;
+  nodes.resultsToggle.setAttribute("aria-expanded", String(open));
+}
+
 async function runTests() {
   if (!editorOptions.execution) return;
   flushPendingCodePublish();
   state.runningTests = true;
   nodes.run.disabled = true;
   nodes.run.textContent = "Running...";
-  nodes.resultsBody.hidden = false;
+  setResultsOpen(true);
   setTestStatus(firstRunnerStatus(state.language));
   if (nodes.candidateCaseInput.value.trim()) {
     // Only a refusal stops the run. A sixth case the cap turned away is not a
@@ -3782,7 +3847,8 @@ function testDrawerBounds() {
   const room =
     nodes.editorPanel.clientHeight -
     nodes.editorToolbar.offsetHeight -
-    nodes.testDrawerResizer.offsetHeight;
+    nodes.testDrawerResizer.offsetHeight -
+    nodes.compileDisclosure.offsetHeight;
   const rootFontSize = Number.parseFloat(
     getComputedStyle(document.documentElement).fontSize,
   );
@@ -3793,24 +3859,27 @@ function testDrawerBounds() {
   };
 }
 
-/// Takes the avatar off a panel too narrow to carry it, leaving the captions,
-/// as the stylesheet does for a narrow window. The window's width stopped
-/// being enough to tell once the sidebar could be widened: at 1280px the
-/// editor can be 592px with the avatar still over it. The stylesheet still
-/// owns what compact looks like, and the avatar's own width observer pauses
-/// and resumes its drawing from the result.
+/// Takes the avatar off a panel too narrow to carry it, or a window, leaving
+/// the captions. The window's width alone stopped being enough to tell once
+/// the sidebar could be widened: at 1280px the editor can be 592px with the
+/// avatar still over it. One class for both, so the stylesheet says what
+/// compact looks like once, and the avatar's own width observer pauses and
+/// resumes its drawing from the result.
 function compactJimStageBesideNarrowPanel(panel) {
+  const narrowWindow = matchMedia(JIM_STAGE_NARROW_WINDOW);
   const fit = () => {
     const rem = Number.parseFloat(
       getComputedStyle(document.documentElement).fontSize,
     );
     nodes.jimStage.classList.toggle(
       "compact",
-      panel.getBoundingClientRect().width < JIM_AVATAR_PANEL_MIN_REM * rem,
+      narrowWindow.matches ||
+        panel.getBoundingClientRect().width < JIM_AVATAR_PANEL_MIN_REM * rem,
     );
   };
   if (window.ResizeObserver) new window.ResizeObserver(fit).observe(panel);
   else window.addEventListener("resize", fit);
+  narrowWindow.addEventListener("change", fit);
   fit();
 }
 

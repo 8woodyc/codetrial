@@ -77,11 +77,15 @@ function onStageWidth(width) {
 
 /// The page covers the stage with its preflight and uncovers it after. Told
 /// rather than read, so the stage does not depend on another component's DOM.
-/// Covered, the stage is inert, so nothing on it can be reached by keyboard
-/// unseen, and nothing is drawn behind the overlay: its level meter and face
-/// detector need the main thread more than a face nobody can see does.
+/// Covered, nothing is drawn behind the overlay: its level meter and face
+/// detector need the main thread more than a face nobody can see does. Whether
+/// the stage can be reached by keyboard is the page's dialogs' business, not
+/// this module's, so it is decided in one place.
+let stageCovered = false;
+
 export function setStageCovered(covered) {
-  nodes.jimStage.inert = covered;
+  if (covered === stageCovered) return;
+  stageCovered = covered;
   if (!covered) resumeAvatar();
 }
 
@@ -162,7 +166,7 @@ export function startAvatar() {
 /// Whether a drawn frame would be seen. Below the CSS breakpoint the mount has
 /// no width, and the preflight overlay is opaque over the stage while it is up.
 function stageVisible() {
-  return stageWidth > 0 && !nodes.jimStage.inert;
+  return stageWidth > 0 && !stageCovered;
 }
 
 export function pumpAvatar(at) {

@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="/styles.css" />
     <script type="module" src="/app.js"></script>
   </head>
-  <body>
+  <body class="practice-page">
     <main class="lobby">
       <header>
         <div class="brand">CODETRIAL</div>
@@ -32,1014 +32,1098 @@
             Sign out
           </button>
         </div>
-        <h1>Practice a live technical interview</h1>
-        <p>
-          Pick difficulty, join a LiveKit room, talk through your solution, and
-          receive the agent's final report.
-        </p>
       </header>
 
-      <!-- Medium is checked because a candidate who touches nothing has to end
+      <section class="practice-hero" aria-labelledby="practice-title">
+        <span class="practice-badge">Voice AI mock interviews</span>
+        <h1 id="practice-title">Practice a live technical interview</h1>
+        <p class="practice-lead">
+          Talk through your solution with Jim, your AI interviewer, while you
+          code. Feedback on every phase arrives when the session ends.
+        </p>
+      </section>
+
+      <div class="setup-grid">
+        <section class="setup-panel" aria-labelledby="challenge-heading">
+          <div class="setup-heading">
+            <span class="step-number" aria-hidden="true">1</span>
+            <div>
+              <h2 id="challenge-heading">Choose a problem</h2>
+              <p>Get a random problem at your level, or pick one by name.</p>
+            </div>
+          </div>
+          <!-- Medium is checked because a candidate who touches nothing has to end
            up on the server's own default length, and app.js derives the length
            from this box. A section with an aria-label is a region, not a group,
            so the checkboxes live in a fieldset. -->
-      <fieldset class="difficulty-row">
-        <legend>Difficulty</legend>
-        <label
-          ><input type="checkbox" name="difficulty" value="Easy" /> Easy</label
-        >
-        <label
-          ><input type="checkbox" name="difficulty" value="Medium" checked />
-          Medium</label
-        >
-        <label
-          ><input type="checkbox" name="difficulty" value="Hard" /> Hard</label
-        >
-      </fieldset>
+          <fieldset class="difficulty-row">
+            <legend>Difficulty</legend>
+            <label
+              ><input type="checkbox" name="difficulty" value="Easy" />
+              Easy</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                name="difficulty"
+                value="Medium"
+                checked
+              />
+              Medium</label
+            >
+            <label
+              ><input type="checkbox" name="difficulty" value="Hard" />
+              Hard</label
+            >
+          </fieldset>
 
-      <fieldset class="editor-options-row">
-        <legend>Editor options</legend>
-        <label
-          ><input
-            type="checkbox"
-            name="editor-option"
-            value="highlight"
-            checked
-          />
-          Syntax highlighting</label
-        >
-        <label
-          ><input
-            type="checkbox"
-            name="editor-option"
-            value="execution"
-            checked
-          />
-          Code execution</label
-        >
-        <label
-          ><input
-            type="checkbox"
-            name="editor-option"
-            value="autoIndent"
-            checked
-          />
-          Auto indentation</label
-        >
-        <label
-          ><input
-            type="checkbox"
-            name="editor-option"
-            value="autoClose"
-            checked
-          />
-          Bracket auto-close</label
-        >
-        <label
-          ><input
-            type="checkbox"
-            name="editor-option"
-            value="monospace"
-            checked
-          />
-          Monospace font</label
-        >
-      </fieldset>
-
-      <div class="random-picker">
-        <button id="random-problem" type="button" disabled>
-          Pick a random problem
-        </button>
-        <p id="recommendation" class="recommendation" aria-live="polite"></p>
-      </div>
-      <p id="practice-focus" class="muted small" aria-live="polite" hidden></p>
-      <label id="practice-focus-share" class="muted small" hidden
-        ><input id="practice-focus-share-input" type="checkbox" /> Share this
-        focus with Jim. It may guide one neutral follow-up; it does not change
-        the problem or score.</label
-      >
-
-      <details class="problem-picker">
-        <summary>Choose a specific problem instead</summary>
-        <label class="muted small source-toggle"
-          ><input id="show-sources" type="checkbox" /> Show the LeetCode problem
-          on each card, for drilling one by name. The interview names it in
-          small print either way.</label
-        >
-        <fieldset class="practice-filters">
-          <legend>Filter problems</legend>
-          <label for="problem-topic">Topic</label>
-          <select id="problem-topic" disabled>
-            <option value="">All topics</option>
-          </select>
-          <button id="problem-filters-reset" type="button">Reset filter</button>
+          <div class="random-picker">
+            <button id="random-problem" type="button" disabled>
+              Pick a random problem
+            </button>
+            <p
+              id="recommendation"
+              class="recommendation"
+              aria-live="polite"
+            ></p>
+          </div>
           <p
-            id="problem-filter-summary"
+            id="practice-focus"
             class="muted small"
             aria-live="polite"
+            hidden
           ></p>
-        </fieldset>
-        <!-- prettier-ignore -->
-        <section class="problem-grid" aria-label="Problems">
-          <!-- Generated by scripts/gen-problem-cards.py from problem-bank/. Do not edit by hand. -->
-          <button class="problem-card" type="button" data-problem="template-delimiter-audit" data-difficulty="Easy">
-            <span class="problem-title">Template Delimiter Audit</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="chargeback-pair-match" data-difficulty="Easy">
-            <span class="problem-title">Chargeback Pair Match</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="firmware-buffer-splice" data-difficulty="Easy">
-            <span class="problem-title">Firmware Buffer Splice</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="muted-alert-filter" data-difficulty="Easy">
-            <span class="problem-title">Muted Alert Filter</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="telemetry-reading-dedupe" data-difficulty="Easy">
-            <span class="problem-title">Telemetry Reading Dedupe</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="alert-digest-trimming" data-difficulty="Medium">
-            <span class="problem-title">Alert Digest Trimming</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="replica-quorum-version" data-difficulty="Easy">
-            <span class="problem-title">Replica Quorum Version</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="carousel-slot-shift" data-difficulty="Medium">
-            <span class="problem-title">Carousel Slot Shift</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="single-resale-window" data-difficulty="Easy">
-            <span class="problem-title">Single Resale Window</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="single-slot-reseller" data-difficulty="Medium">
-            <span class="problem-title">Single Slot Reseller</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="relay-chain-reachability" data-difficulty="Medium">
-            <span class="problem-title">Relay Chain Reachability</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="drone-pad-hopping" data-difficulty="Medium">
-            <span class="problem-title">Drone Pad Hopping</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="package-impact-score" data-difficulty="Medium">
-            <span class="problem-title">Package Impact Score</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="backend-pool-sampler" data-difficulty="Medium">
-            <span class="problem-title">Backend Pool Sampler</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="pipeline-stage-gains" data-difficulty="Medium">
-            <span class="problem-title">Pipeline Stage Gains</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="circular-route-charging" data-difficulty="Medium">
-            <span class="problem-title">Circular Route Charging</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="shift-crew-bonus-points" data-difficulty="Hard">
-            <span class="problem-title">Shift Crew Bonus Points</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Hard</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="terrain-runoff-pooling" data-difficulty="Hard">
-            <span class="problem-title">Terrain Runoff Pooling</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Hard</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="archive-volume-numbers" data-difficulty="Easy">
-            <span class="problem-title">Archive Volume Numbers</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="film-credits-year-stamp" data-difficulty="Medium">
-            <span class="problem-title">Film Credits Year Stamp</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="autocomplete-token-width" data-difficulty="Easy">
-            <span class="problem-title">Autocomplete Token Width</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="metric-namespace-root" data-difficulty="Easy">
-            <span class="problem-title">Metric Namespace Root</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="backwards-caption-repair" data-difficulty="Medium">
-            <span class="problem-title">Backwards Caption Repair</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="bouncing-print-head" data-difficulty="Medium">
-            <span class="problem-title">Bouncing Print Head</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="firmware-signature-scan" data-difficulty="Easy">
-            <span class="problem-title">Firmware Signature Scan</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="thermal-receipt-layout" data-difficulty="Hard">
-            <span class="problem-title">Thermal Receipt Layout</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Hard</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="mirror-phrase-contest-filter" data-difficulty="Easy">
-            <span class="problem-title">Mirror Phrase Contest Filter</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="ordered-event-trace-check" data-difficulty="Easy">
-            <span class="problem-title">Ordered Event Trace Check</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="billboard-pole-banner" data-difficulty="Medium">
-            <span class="problem-title">Billboard Pole Banner</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="gift-card-bundle-pair" data-difficulty="Medium">
-            <span class="problem-title">Gift Card Bundle Pair</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="ledger-cancellation-groups" data-difficulty="Medium">
-            <span class="problem-title">Ledger Cancellation Groups</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="firmware-checksum-settling" data-difficulty="Easy">
-            <span class="problem-title">Firmware Checksum Settling</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="distinct-keystroke-stretch" data-difficulty="Medium">
-            <span class="problem-title">Distinct Keystroke Stretch</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="required-marker-span" data-difficulty="Hard">
-            <span class="problem-title">Required Marker Span</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Hard</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="packet-chunk-block-offsets" data-difficulty="Hard">
-            <span class="problem-title">Packet Chunk Block Offsets</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Hard</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="shortest-upload-batch" data-difficulty="Medium">
-            <span class="problem-title">Shortest Upload Batch</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="puzzle-grid-save-check" data-difficulty="Medium">
-            <span class="problem-title">Puzzle Grid Save Check</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="led-panel-ring-scan" data-difficulty="Medium">
-            <span class="problem-title">LED Panel Ring Scan</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="sensor-frame-quarter-turn" data-difficulty="Medium">
-            <span class="problem-title">Sensor Frame Quarter Turn</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="faulty-sensor-grid-blanking" data-difficulty="Medium">
-            <span class="problem-title">Faulty Sensor Grid Blanking</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="microbe-culture-tick" data-difficulty="Medium">
-            <span class="problem-title">Microbe Culture Tick</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="marquee-letter-tiles" data-difficulty="Easy">
-            <span class="problem-title">Marquee Letter Tiles</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="anonymizer-substitution-audit" data-difficulty="Easy">
-            <span class="problem-title">Anonymizer Substitution Audit</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="log-line-shape-template" data-difficulty="Easy">
-            <span class="problem-title">Log Line Shape Template</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="scrambled-label-match" data-difficulty="Easy">
-            <span class="problem-title">Scrambled Label Match</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="letter-rack-clusters" data-difficulty="Medium">
-            <span class="problem-title">Letter Rack Clusters</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="recent-card-repeat-alert" data-difficulty="Easy">
-            <span class="problem-title">Recent Card Repeat Alert</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="allocated-port-block" data-difficulty="Medium">
-            <span class="problem-title">Allocated Port Block</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="rack-slot-range-labels" data-difficulty="Easy">
-            <span class="problem-title">Rack Slot Range Labels</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="room-booking-busy-blocks" data-difficulty="Medium">
-            <span class="problem-title">Room Booking Busy Blocks</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="batch-health-check-windows" data-difficulty="Medium">
-            <span class="problem-title">Batch Health Check Windows</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="upload-location-normalizer" data-difficulty="Medium">
-            <span class="problem-title">Upload Location Normalizer</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="tentative-bid-ledger" data-difficulty="Medium">
-            <span class="problem-title">Tentative Bid Ledger</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="pricing-rule-bytecode" data-difficulty="Medium">
-            <span class="problem-title">Pricing Rule Bytecode</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="budget-sheet-formulas" data-difficulty="Hard">
-            <span class="problem-title">Budget Sheet Formulas</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Hard</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="workflow-handoff-loop" data-difficulty="Easy">
-            <span class="problem-title">Workflow Handoff Loop</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="odometer-digit-chains" data-difficulty="Medium">
-            <span class="problem-title">Odometer Digit Chains</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="replica-event-interleave" data-difficulty="Easy">
-            <span class="problem-title">Replica Event Interleave</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="outline-snapshot-duplicator" data-difficulty="Medium">
-            <span class="problem-title">Outline Snapshot Duplicator</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="playlist-segment-flip" data-difficulty="Medium">
-            <span class="problem-title">Playlist Segment Flip</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="radio-frame-batching" data-difficulty="Hard">
-            <span class="problem-title">Radio Frame Batching</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Hard</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="activity-feed-retraction" data-difficulty="Medium">
-            <span class="problem-title">Activity Feed Retraction</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="single-scan-badge-filter" data-difficulty="Medium">
-            <span class="problem-title">Single Scan Badge Filter</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="playlist-tail-wraparound" data-difficulty="Medium">
-            <span class="problem-title">Playlist Tail Wraparound</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="print-queue-triage" data-difficulty="Medium">
-            <span class="problem-title">Print Queue Triage</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="edge-thumbnail-store" data-difficulty="Medium">
-            <span class="problem-title">Edge Thumbnail Store</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="fraud-rule-worst-case" data-difficulty="Easy">
-            <span class="problem-title">Fraud Rule Worst Case</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="staging-drift-check" data-difficulty="Easy">
-            <span class="problem-title">Staging Drift Check</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="right-to-left-layout" data-difficulty="Easy">
-            <span class="problem-title">Right To Left Layout</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="kiosk-panel-mirror-audit" data-difficulty="Easy">
-            <span class="problem-title">Kiosk Panel Mirror Audit</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="crash-dump-index-rebuild" data-difficulty="Medium">
-            <span class="problem-title">Crash Dump Index Rebuild</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="query-parse-cache-restore" data-difficulty="Medium">
-            <span class="problem-title">Query Parse Cache Restore</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="org-chart-row-navigation" data-difficulty="Medium">
-            <span class="problem-title">Org Chart Row Navigation</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="screen-reader-menu-chain" data-difficulty="Medium">
-            <span class="problem-title">Screen Reader Menu Chain</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="dungeon-route-budget" data-difficulty="Easy">
-            <span class="problem-title">Dungeon Route Budget</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="menu-extension-checksum" data-difficulty="Medium">
-            <span class="problem-title">Menu Extension Checksum</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="grid-segment-net-yield" data-difficulty="Hard">
-            <span class="problem-title">Grid Segment Net Yield</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Hard</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="ordered-index-cursor" data-difficulty="Medium">
-            <span class="problem-title">Ordered Index Cursor</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="heap-slot-census" data-difficulty="Medium">
-            <span class="problem-title">Heap Slot Census</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="shared-approver-lookup" data-difficulty="Medium">
-            <span class="problem-title">Shared Approver Lookup</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="collapsed-panel-labels" data-difficulty="Medium">
-            <span class="problem-title">Collapsed Panel Labels</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="hop-depth-signal-means" data-difficulty="Easy">
-            <span class="problem-title">Hop Depth Signal Means</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="rollout-wave-planner" data-difficulty="Medium">
-            <span class="problem-title">Rollout Wave Planner</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="serpentine-tier-sweep" data-difficulty="Medium">
-            <span class="problem-title">Serpentine Tier Sweep</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="tightest-channel-spacing" data-difficulty="Easy">
-            <span class="problem-title">Tightest Channel Spacing</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="latency-rank-query" data-difficulty="Medium">
-            <span class="problem-title">Latency Rank Query</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="restored-index-integrity" data-difficulty="Medium">
-            <span class="problem-title">Restored Index Integrity</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="copper-pad-continuity" data-difficulty="Medium">
-            <span class="problem-title">Copper Pad Continuity</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="sealed-air-pocket-backfill" data-difficulty="Medium">
-            <span class="problem-title">Sealed Air Pocket Backfill</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="sandbox-topology-replica" data-difficulty="Medium">
-            <span class="problem-title">Sandbox Topology Replica</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="lab-unit-converter" data-difficulty="Medium">
-            <span class="problem-title">Lab Unit Converter</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="onboarding-track-feasibility" data-difficulty="Medium">
-            <span class="problem-title">Onboarding Track Feasibility</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="migration-run-order" data-difficulty="Medium">
-            <span class="problem-title">Migration Run Order</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="portal-dice-race" data-difficulty="Medium">
-            <span class="problem-title">Portal Dice Race</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="approved-sequence-edits" data-difficulty="Medium">
-            <span class="problem-title">Approved Sequence Edits</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="hostname-rename-chain" data-difficulty="Hard">
-            <span class="problem-title">Hostname Rename Chain</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Hard</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="command-palette-index" data-difficulty="Medium">
-            <span class="problem-title">Command Palette Index</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="crossword-pattern-matcher" data-difficulty="Medium">
-            <span class="problem-title">Crossword Pattern Matcher</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="letter-grid-tracer" data-difficulty="Hard">
-            <span class="problem-title">Letter Grid Tracer</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Hard</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="vanity-dial-expansion" data-difficulty="Medium">
-            <span class="problem-title">Vanity Dial Expansion</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="canary-host-selection" data-difficulty="Medium">
-            <span class="problem-title">Canary Host Selection</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="startup-order-sweep" data-difficulty="Medium">
-            <span class="problem-title">Startup Order Sweep</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="freight-pallet-loadouts" data-difficulty="Medium">
-            <span class="problem-title">Freight Pallet Loadouts</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="interference-free-towers" data-difficulty="Hard">
-            <span class="problem-title">Interference Free Towers</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Hard</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="nesting-fuzzer-corpus" data-difficulty="Medium">
-            <span class="problem-title">Nesting Fuzzer Corpus</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="letter-panel-tracing" data-difficulty="Medium">
-            <span class="problem-title">Letter Panel Tracing</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="sensor-calibration-index" data-difficulty="Easy">
-            <span class="problem-title">Sensor Calibration Index</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="maintenance-window-consolidation" data-difficulty="Medium">
-            <span class="problem-title">Maintenance Window Consolidation</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="mirrored-tag-segment" data-difficulty="Medium">
-            <span class="problem-title">Mirrored Tag Segment</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="sorted-schedule-slot" data-difficulty="Easy">
-            <span class="problem-title">Sorted Schedule Slot</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="serial-counter-advance" data-difficulty="Easy">
-            <span class="problem-title">Serial Counter Advance</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="wide-register-arithmetic" data-difficulty="Easy">
-            <span class="problem-title">Wide Register Arithmetic</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="unmatched-badge-scan" data-difficulty="Easy">
-            <span class="problem-title">Unmatched Badge Scan</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="symmetric-lottery-tickets" data-difficulty="Easy">
-            <span class="problem-title">Symmetric Lottery Tickets</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="robot-stride-plans" data-difficulty="Easy">
-            <span class="problem-title">Robot Stride Plans</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="integer-magnitude-estimator" data-difficulty="Easy">
-            <span class="problem-title">Integer Magnitude Estimator</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="arrangement-count-suffix" data-difficulty="Medium">
-            <span class="problem-title">Arrangement Count Suffix</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="highway-billboard-leasing" data-difficulty="Medium">
-            <span class="problem-title">Highway Billboard Leasing</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="trading-streak-report" data-difficulty="Medium">
-            <span class="problem-title">Trading Streak Report</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="kiosk-token-payout" data-difficulty="Medium">
-            <span class="problem-title">Kiosk Token Payout</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="benchmark-progress-chain" data-difficulty="Medium">
-            <span class="problem-title">Benchmark Progress Chain</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="paged-catalog-lookup" data-difficulty="Medium">
-            <span class="problem-title">Paged Catalog Lookup</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="signal-crest-locator" data-difficulty="Medium">
-            <span class="problem-title">Signal Crest Locator</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="shifted-price-snapshot" data-difficulty="Medium">
-            <span class="problem-title">Shifted Price Snapshot</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="conveyor-grid-routing" data-difficulty="Medium">
-            <span class="problem-title">Conveyor Grid Routing</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="picking-robot-floor-plan" data-difficulty="Medium">
-            <span class="problem-title">Picking Robot Floor Plan</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="hashtag-vocabulary-splitter" data-difficulty="Medium">
-            <span class="problem-title">Hashtag Vocabulary Splitter</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="permission-flag-counter" data-difficulty="Easy">
-            <span class="problem-title">Permission Flag Counter</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="replica-write-audit" data-difficulty="Medium">
-            <span class="problem-title">Replica Write Audit</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="address-block-shared-bits" data-difficulty="Medium">
-            <span class="problem-title">Address Block Shared Bits</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="mine-level-descent" data-difficulty="Medium">
-            <span class="problem-title">Mine Level Descent</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="scanner-code-reconciliation" data-difficulty="Medium">
-            <span class="problem-title">Scanner Code Reconciliation</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="rooftop-panel-footprint" data-difficulty="Medium">
-            <span class="problem-title">Rooftop Panel Footprint</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="orbital-energy-window" data-difficulty="Medium">
-            <span class="problem-title">Orbital Energy Window</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="ring-buffer-dump-lookup" data-difficulty="Medium">
-            <span class="problem-title">Ring Buffer Dump Lookup</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="rating-leaderboard-cutoff" data-difficulty="Medium">
-            <span class="problem-title">Rating Leaderboard Cutoff</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="log-timestamp-span" data-difficulty="Medium">
-            <span class="problem-title">Log Timestamp Span</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="compound-growth-factor" data-difficulty="Medium">
-            <span class="problem-title">Compound Growth Factor</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="shared-buffer-keystroke-audit" data-difficulty="Medium">
-            <span class="problem-title">Shared Buffer Keystroke Audit</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="spot-capacity-round-trips" data-difficulty="Hard">
-            <span class="problem-title">Spot Capacity Round Trips</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Hard</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="freight-slot-trading-limit" data-difficulty="Hard">
-            <span class="problem-title">Freight Slot Trading Limit</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Hard</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="firmware-event-chain-ordering" data-difficulty="Medium">
-            <span class="problem-title">Firmware Event Chain Ordering</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="twin-sensor-midpoint-reading" data-difficulty="Hard">
-            <span class="problem-title">Twin Sensor Midpoint Reading</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Hard</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="survey-stake-alignment" data-difficulty="Hard">
-            <span class="problem-title">Survey Stake Alignment</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Hard</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="serial-link-word-mirror" data-difficulty="Easy">
-            <span class="problem-title">Serial Link Word Mirror</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Easy</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="studio-contract-bankroll" data-difficulty="Hard">
-            <span class="problem-title">Studio Contract Bankroll</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Hard</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="flight-combo-fare-shortlist" data-difficulty="Medium">
-            <span class="problem-title">Flight Combo Fare Shortlist</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="shard-result-consolidation" data-difficulty="Hard">
-            <span class="problem-title">Shard Result Consolidation</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Hard</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="live-clock-offset-monitor" data-difficulty="Hard">
-            <span class="problem-title">Live Clock Offset Monitor</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Hard</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="terrain-mask-tiling" data-difficulty="Medium">
-            <span class="problem-title">Terrain Mask Tiling</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-          <button class="problem-card" type="button" data-problem="bounded-event-queue" data-difficulty="Medium">
-            <span class="problem-title">Bounded Event Queue</span>
-            <span class="problem-source" hidden></span>
-            <span class="problem-meta">Medium</span>
-          </button>
-        </section>
-      </details>
-
-      <details class="interview-context">
-        <summary>Optional interview context</summary>
-        <fieldset>
-          <legend>Tailor the behavioral question</legend>
-          <p class="muted small">
-            Skip any or all fields. Coding correctness is unchanged.
-          </p>
-          <label
-            >Target role
-            <input
-              id="profile-role"
-              type="text"
-              maxlength="80"
-              autocomplete="organization-title"
-          /></label>
-          <label
-            >Seniority
-            <select id="profile-seniority">
-              <option value="">Not specified</option>
-              <option value="intern">Intern</option>
-              <option value="junior">Junior</option>
-              <option value="mid">Mid-level</option>
-              <option value="senior">Senior</option>
-              <option value="staff">Staff+</option>
-              <option value="manager">Engineering manager</option>
-            </select>
-          </label>
-          <label
-            >Target company
-            <input
-              id="profile-company"
-              type="text"
-              maxlength="80"
-              autocomplete="organization"
-          /></label>
-        </fieldset>
-        <fieldset>
-          <legend>Ground questions in selected document snippets</legend>
-          <p class="muted small">
-            Optional. Files stay in this browser. Nothing is selected or sent
-            automatically.
-          </p>
-          <label
-            >Job description (.txt up to 64 KiB, or .pdf up to 4 MiB)
-            <input
-              id="grounding-jd"
-              type="file"
-              accept=".txt,text/plain,.pdf,application/pdf"
-          /></label>
-          <p id="grounding-jd-status" class="muted small" role="status"></p>
-          <label
-            >Resume (.txt up to 64 KiB, or .pdf up to 4 MiB)
-            <input
-              id="grounding-resume"
-              type="file"
-              accept=".txt,text/plain,.pdf,application/pdf"
-          /></label>
-          <p id="grounding-resume-status" class="muted small" role="status"></p>
-          <div id="grounding-choices"></div>
-          <label
-            ><input id="grounding-consent" type="checkbox" /> Send only my
-            selected snippets to the AI interviewer.</label
+          <label id="practice-focus-share" class="muted small" hidden
+            ><input id="practice-focus-share-input" type="checkbox" /> Share
+            this focus with Jim. It may guide one neutral follow-up; it does not
+            change the problem or score.</label
           >
-          <button id="grounding-clear" type="button">
-            Clear document grounding
-          </button>
-          <p id="grounding-error" role="alert"></p>
-        </fieldset>
-      </details>
 
-      <section class="duration-row" aria-label="Duration">
-        <button class="duration-button" type="button" data-duration="30">
-          30 min
-        </button>
-        <button
-          class="duration-button selected"
-          type="button"
-          data-duration="45"
+          <details class="problem-picker">
+            <summary>Choose a specific problem instead</summary>
+            <label class="muted small source-toggle"
+              ><input id="show-sources" type="checkbox" /> Show the LeetCode
+              problem on each card, for drilling one by name. The interview
+              names it in small print either way.</label
+            >
+            <fieldset class="practice-filters">
+              <legend>Filter problems</legend>
+              <label for="problem-topic">Topic</label>
+              <select id="problem-topic" disabled>
+                <option value="">All topics</option>
+              </select>
+              <button id="problem-filters-reset" type="button">
+                Reset filter
+              </button>
+              <p
+                id="problem-filter-summary"
+                class="muted small"
+                aria-live="polite"
+              ></p>
+            </fieldset>
+            <!-- prettier-ignore -->
+            <section class="problem-grid" aria-label="Problems">
+              <!-- Generated by scripts/gen-problem-cards.py from problem-bank/. Do not edit by hand. -->
+              <button class="problem-card" type="button" data-problem="template-delimiter-audit" data-difficulty="Easy">
+                <span class="problem-title">Template Delimiter Audit</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="chargeback-pair-match" data-difficulty="Easy">
+                <span class="problem-title">Chargeback Pair Match</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="firmware-buffer-splice" data-difficulty="Easy">
+                <span class="problem-title">Firmware Buffer Splice</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="muted-alert-filter" data-difficulty="Easy">
+                <span class="problem-title">Muted Alert Filter</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="telemetry-reading-dedupe" data-difficulty="Easy">
+                <span class="problem-title">Telemetry Reading Dedupe</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="alert-digest-trimming" data-difficulty="Medium">
+                <span class="problem-title">Alert Digest Trimming</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="replica-quorum-version" data-difficulty="Easy">
+                <span class="problem-title">Replica Quorum Version</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="carousel-slot-shift" data-difficulty="Medium">
+                <span class="problem-title">Carousel Slot Shift</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="single-resale-window" data-difficulty="Easy">
+                <span class="problem-title">Single Resale Window</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="single-slot-reseller" data-difficulty="Medium">
+                <span class="problem-title">Single Slot Reseller</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="relay-chain-reachability" data-difficulty="Medium">
+                <span class="problem-title">Relay Chain Reachability</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="drone-pad-hopping" data-difficulty="Medium">
+                <span class="problem-title">Drone Pad Hopping</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="package-impact-score" data-difficulty="Medium">
+                <span class="problem-title">Package Impact Score</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="backend-pool-sampler" data-difficulty="Medium">
+                <span class="problem-title">Backend Pool Sampler</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="pipeline-stage-gains" data-difficulty="Medium">
+                <span class="problem-title">Pipeline Stage Gains</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="circular-route-charging" data-difficulty="Medium">
+                <span class="problem-title">Circular Route Charging</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="shift-crew-bonus-points" data-difficulty="Hard">
+                <span class="problem-title">Shift Crew Bonus Points</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Hard</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="terrain-runoff-pooling" data-difficulty="Hard">
+                <span class="problem-title">Terrain Runoff Pooling</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Hard</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="archive-volume-numbers" data-difficulty="Easy">
+                <span class="problem-title">Archive Volume Numbers</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="film-credits-year-stamp" data-difficulty="Medium">
+                <span class="problem-title">Film Credits Year Stamp</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="autocomplete-token-width" data-difficulty="Easy">
+                <span class="problem-title">Autocomplete Token Width</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="metric-namespace-root" data-difficulty="Easy">
+                <span class="problem-title">Metric Namespace Root</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="backwards-caption-repair" data-difficulty="Medium">
+                <span class="problem-title">Backwards Caption Repair</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="bouncing-print-head" data-difficulty="Medium">
+                <span class="problem-title">Bouncing Print Head</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="firmware-signature-scan" data-difficulty="Easy">
+                <span class="problem-title">Firmware Signature Scan</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="thermal-receipt-layout" data-difficulty="Hard">
+                <span class="problem-title">Thermal Receipt Layout</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Hard</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="mirror-phrase-contest-filter" data-difficulty="Easy">
+                <span class="problem-title">Mirror Phrase Contest Filter</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="ordered-event-trace-check" data-difficulty="Easy">
+                <span class="problem-title">Ordered Event Trace Check</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="billboard-pole-banner" data-difficulty="Medium">
+                <span class="problem-title">Billboard Pole Banner</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="gift-card-bundle-pair" data-difficulty="Medium">
+                <span class="problem-title">Gift Card Bundle Pair</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="ledger-cancellation-groups" data-difficulty="Medium">
+                <span class="problem-title">Ledger Cancellation Groups</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="firmware-checksum-settling" data-difficulty="Easy">
+                <span class="problem-title">Firmware Checksum Settling</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="distinct-keystroke-stretch" data-difficulty="Medium">
+                <span class="problem-title">Distinct Keystroke Stretch</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="required-marker-span" data-difficulty="Hard">
+                <span class="problem-title">Required Marker Span</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Hard</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="packet-chunk-block-offsets" data-difficulty="Hard">
+                <span class="problem-title">Packet Chunk Block Offsets</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Hard</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="shortest-upload-batch" data-difficulty="Medium">
+                <span class="problem-title">Shortest Upload Batch</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="puzzle-grid-save-check" data-difficulty="Medium">
+                <span class="problem-title">Puzzle Grid Save Check</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="led-panel-ring-scan" data-difficulty="Medium">
+                <span class="problem-title">LED Panel Ring Scan</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="sensor-frame-quarter-turn" data-difficulty="Medium">
+                <span class="problem-title">Sensor Frame Quarter Turn</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="faulty-sensor-grid-blanking" data-difficulty="Medium">
+                <span class="problem-title">Faulty Sensor Grid Blanking</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="microbe-culture-tick" data-difficulty="Medium">
+                <span class="problem-title">Microbe Culture Tick</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="marquee-letter-tiles" data-difficulty="Easy">
+                <span class="problem-title">Marquee Letter Tiles</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="anonymizer-substitution-audit" data-difficulty="Easy">
+                <span class="problem-title">Anonymizer Substitution Audit</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="log-line-shape-template" data-difficulty="Easy">
+                <span class="problem-title">Log Line Shape Template</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="scrambled-label-match" data-difficulty="Easy">
+                <span class="problem-title">Scrambled Label Match</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="letter-rack-clusters" data-difficulty="Medium">
+                <span class="problem-title">Letter Rack Clusters</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="recent-card-repeat-alert" data-difficulty="Easy">
+                <span class="problem-title">Recent Card Repeat Alert</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="allocated-port-block" data-difficulty="Medium">
+                <span class="problem-title">Allocated Port Block</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="rack-slot-range-labels" data-difficulty="Easy">
+                <span class="problem-title">Rack Slot Range Labels</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="room-booking-busy-blocks" data-difficulty="Medium">
+                <span class="problem-title">Room Booking Busy Blocks</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="batch-health-check-windows" data-difficulty="Medium">
+                <span class="problem-title">Batch Health Check Windows</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="upload-location-normalizer" data-difficulty="Medium">
+                <span class="problem-title">Upload Location Normalizer</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="tentative-bid-ledger" data-difficulty="Medium">
+                <span class="problem-title">Tentative Bid Ledger</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="pricing-rule-bytecode" data-difficulty="Medium">
+                <span class="problem-title">Pricing Rule Bytecode</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="budget-sheet-formulas" data-difficulty="Hard">
+                <span class="problem-title">Budget Sheet Formulas</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Hard</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="workflow-handoff-loop" data-difficulty="Easy">
+                <span class="problem-title">Workflow Handoff Loop</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="odometer-digit-chains" data-difficulty="Medium">
+                <span class="problem-title">Odometer Digit Chains</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="replica-event-interleave" data-difficulty="Easy">
+                <span class="problem-title">Replica Event Interleave</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="outline-snapshot-duplicator" data-difficulty="Medium">
+                <span class="problem-title">Outline Snapshot Duplicator</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="playlist-segment-flip" data-difficulty="Medium">
+                <span class="problem-title">Playlist Segment Flip</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="radio-frame-batching" data-difficulty="Hard">
+                <span class="problem-title">Radio Frame Batching</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Hard</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="activity-feed-retraction" data-difficulty="Medium">
+                <span class="problem-title">Activity Feed Retraction</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="single-scan-badge-filter" data-difficulty="Medium">
+                <span class="problem-title">Single Scan Badge Filter</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="playlist-tail-wraparound" data-difficulty="Medium">
+                <span class="problem-title">Playlist Tail Wraparound</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="print-queue-triage" data-difficulty="Medium">
+                <span class="problem-title">Print Queue Triage</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="edge-thumbnail-store" data-difficulty="Medium">
+                <span class="problem-title">Edge Thumbnail Store</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="fraud-rule-worst-case" data-difficulty="Easy">
+                <span class="problem-title">Fraud Rule Worst Case</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="staging-drift-check" data-difficulty="Easy">
+                <span class="problem-title">Staging Drift Check</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="right-to-left-layout" data-difficulty="Easy">
+                <span class="problem-title">Right To Left Layout</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="kiosk-panel-mirror-audit" data-difficulty="Easy">
+                <span class="problem-title">Kiosk Panel Mirror Audit</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="crash-dump-index-rebuild" data-difficulty="Medium">
+                <span class="problem-title">Crash Dump Index Rebuild</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="query-parse-cache-restore" data-difficulty="Medium">
+                <span class="problem-title">Query Parse Cache Restore</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="org-chart-row-navigation" data-difficulty="Medium">
+                <span class="problem-title">Org Chart Row Navigation</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="screen-reader-menu-chain" data-difficulty="Medium">
+                <span class="problem-title">Screen Reader Menu Chain</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="dungeon-route-budget" data-difficulty="Easy">
+                <span class="problem-title">Dungeon Route Budget</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="menu-extension-checksum" data-difficulty="Medium">
+                <span class="problem-title">Menu Extension Checksum</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="grid-segment-net-yield" data-difficulty="Hard">
+                <span class="problem-title">Grid Segment Net Yield</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Hard</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="ordered-index-cursor" data-difficulty="Medium">
+                <span class="problem-title">Ordered Index Cursor</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="heap-slot-census" data-difficulty="Medium">
+                <span class="problem-title">Heap Slot Census</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="shared-approver-lookup" data-difficulty="Medium">
+                <span class="problem-title">Shared Approver Lookup</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="collapsed-panel-labels" data-difficulty="Medium">
+                <span class="problem-title">Collapsed Panel Labels</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="hop-depth-signal-means" data-difficulty="Easy">
+                <span class="problem-title">Hop Depth Signal Means</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="rollout-wave-planner" data-difficulty="Medium">
+                <span class="problem-title">Rollout Wave Planner</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="serpentine-tier-sweep" data-difficulty="Medium">
+                <span class="problem-title">Serpentine Tier Sweep</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="tightest-channel-spacing" data-difficulty="Easy">
+                <span class="problem-title">Tightest Channel Spacing</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="latency-rank-query" data-difficulty="Medium">
+                <span class="problem-title">Latency Rank Query</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="restored-index-integrity" data-difficulty="Medium">
+                <span class="problem-title">Restored Index Integrity</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="copper-pad-continuity" data-difficulty="Medium">
+                <span class="problem-title">Copper Pad Continuity</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="sealed-air-pocket-backfill" data-difficulty="Medium">
+                <span class="problem-title">Sealed Air Pocket Backfill</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="sandbox-topology-replica" data-difficulty="Medium">
+                <span class="problem-title">Sandbox Topology Replica</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="lab-unit-converter" data-difficulty="Medium">
+                <span class="problem-title">Lab Unit Converter</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="onboarding-track-feasibility" data-difficulty="Medium">
+                <span class="problem-title">Onboarding Track Feasibility</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="migration-run-order" data-difficulty="Medium">
+                <span class="problem-title">Migration Run Order</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="portal-dice-race" data-difficulty="Medium">
+                <span class="problem-title">Portal Dice Race</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="approved-sequence-edits" data-difficulty="Medium">
+                <span class="problem-title">Approved Sequence Edits</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="hostname-rename-chain" data-difficulty="Hard">
+                <span class="problem-title">Hostname Rename Chain</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Hard</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="command-palette-index" data-difficulty="Medium">
+                <span class="problem-title">Command Palette Index</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="crossword-pattern-matcher" data-difficulty="Medium">
+                <span class="problem-title">Crossword Pattern Matcher</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="letter-grid-tracer" data-difficulty="Hard">
+                <span class="problem-title">Letter Grid Tracer</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Hard</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="vanity-dial-expansion" data-difficulty="Medium">
+                <span class="problem-title">Vanity Dial Expansion</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="canary-host-selection" data-difficulty="Medium">
+                <span class="problem-title">Canary Host Selection</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="startup-order-sweep" data-difficulty="Medium">
+                <span class="problem-title">Startup Order Sweep</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="freight-pallet-loadouts" data-difficulty="Medium">
+                <span class="problem-title">Freight Pallet Loadouts</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="interference-free-towers" data-difficulty="Hard">
+                <span class="problem-title">Interference Free Towers</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Hard</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="nesting-fuzzer-corpus" data-difficulty="Medium">
+                <span class="problem-title">Nesting Fuzzer Corpus</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="letter-panel-tracing" data-difficulty="Medium">
+                <span class="problem-title">Letter Panel Tracing</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="sensor-calibration-index" data-difficulty="Easy">
+                <span class="problem-title">Sensor Calibration Index</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="maintenance-window-consolidation" data-difficulty="Medium">
+                <span class="problem-title">Maintenance Window Consolidation</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="mirrored-tag-segment" data-difficulty="Medium">
+                <span class="problem-title">Mirrored Tag Segment</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="sorted-schedule-slot" data-difficulty="Easy">
+                <span class="problem-title">Sorted Schedule Slot</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="serial-counter-advance" data-difficulty="Easy">
+                <span class="problem-title">Serial Counter Advance</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="wide-register-arithmetic" data-difficulty="Easy">
+                <span class="problem-title">Wide Register Arithmetic</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="unmatched-badge-scan" data-difficulty="Easy">
+                <span class="problem-title">Unmatched Badge Scan</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="symmetric-lottery-tickets" data-difficulty="Easy">
+                <span class="problem-title">Symmetric Lottery Tickets</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="robot-stride-plans" data-difficulty="Easy">
+                <span class="problem-title">Robot Stride Plans</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="integer-magnitude-estimator" data-difficulty="Easy">
+                <span class="problem-title">Integer Magnitude Estimator</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="arrangement-count-suffix" data-difficulty="Medium">
+                <span class="problem-title">Arrangement Count Suffix</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="highway-billboard-leasing" data-difficulty="Medium">
+                <span class="problem-title">Highway Billboard Leasing</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="trading-streak-report" data-difficulty="Medium">
+                <span class="problem-title">Trading Streak Report</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="kiosk-token-payout" data-difficulty="Medium">
+                <span class="problem-title">Kiosk Token Payout</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="benchmark-progress-chain" data-difficulty="Medium">
+                <span class="problem-title">Benchmark Progress Chain</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="paged-catalog-lookup" data-difficulty="Medium">
+                <span class="problem-title">Paged Catalog Lookup</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="signal-crest-locator" data-difficulty="Medium">
+                <span class="problem-title">Signal Crest Locator</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="shifted-price-snapshot" data-difficulty="Medium">
+                <span class="problem-title">Shifted Price Snapshot</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="conveyor-grid-routing" data-difficulty="Medium">
+                <span class="problem-title">Conveyor Grid Routing</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="picking-robot-floor-plan" data-difficulty="Medium">
+                <span class="problem-title">Picking Robot Floor Plan</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="hashtag-vocabulary-splitter" data-difficulty="Medium">
+                <span class="problem-title">Hashtag Vocabulary Splitter</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="permission-flag-counter" data-difficulty="Easy">
+                <span class="problem-title">Permission Flag Counter</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="replica-write-audit" data-difficulty="Medium">
+                <span class="problem-title">Replica Write Audit</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="address-block-shared-bits" data-difficulty="Medium">
+                <span class="problem-title">Address Block Shared Bits</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="mine-level-descent" data-difficulty="Medium">
+                <span class="problem-title">Mine Level Descent</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="scanner-code-reconciliation" data-difficulty="Medium">
+                <span class="problem-title">Scanner Code Reconciliation</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="rooftop-panel-footprint" data-difficulty="Medium">
+                <span class="problem-title">Rooftop Panel Footprint</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="orbital-energy-window" data-difficulty="Medium">
+                <span class="problem-title">Orbital Energy Window</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="ring-buffer-dump-lookup" data-difficulty="Medium">
+                <span class="problem-title">Ring Buffer Dump Lookup</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="rating-leaderboard-cutoff" data-difficulty="Medium">
+                <span class="problem-title">Rating Leaderboard Cutoff</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="log-timestamp-span" data-difficulty="Medium">
+                <span class="problem-title">Log Timestamp Span</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="compound-growth-factor" data-difficulty="Medium">
+                <span class="problem-title">Compound Growth Factor</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="shared-buffer-keystroke-audit" data-difficulty="Medium">
+                <span class="problem-title">Shared Buffer Keystroke Audit</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="spot-capacity-round-trips" data-difficulty="Hard">
+                <span class="problem-title">Spot Capacity Round Trips</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Hard</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="freight-slot-trading-limit" data-difficulty="Hard">
+                <span class="problem-title">Freight Slot Trading Limit</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Hard</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="firmware-event-chain-ordering" data-difficulty="Medium">
+                <span class="problem-title">Firmware Event Chain Ordering</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="twin-sensor-midpoint-reading" data-difficulty="Hard">
+                <span class="problem-title">Twin Sensor Midpoint Reading</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Hard</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="survey-stake-alignment" data-difficulty="Hard">
+                <span class="problem-title">Survey Stake Alignment</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Hard</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="serial-link-word-mirror" data-difficulty="Easy">
+                <span class="problem-title">Serial Link Word Mirror</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Easy</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="studio-contract-bankroll" data-difficulty="Hard">
+                <span class="problem-title">Studio Contract Bankroll</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Hard</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="flight-combo-fare-shortlist" data-difficulty="Medium">
+                <span class="problem-title">Flight Combo Fare Shortlist</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="shard-result-consolidation" data-difficulty="Hard">
+                <span class="problem-title">Shard Result Consolidation</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Hard</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="live-clock-offset-monitor" data-difficulty="Hard">
+                <span class="problem-title">Live Clock Offset Monitor</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Hard</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="terrain-mask-tiling" data-difficulty="Medium">
+                <span class="problem-title">Terrain Mask Tiling</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+              <button class="problem-card" type="button" data-problem="bounded-event-queue" data-difficulty="Medium">
+                <span class="problem-title">Bounded Event Queue</span>
+                <span class="problem-source" hidden></span>
+                <span class="problem-meta">Medium</span>
+              </button>
+            </section>
+          </details>
+        </section>
+        <section
+          class="setup-panel session-panel"
+          aria-labelledby="session-heading"
         >
-          45 min
-        </button>
-        <button class="duration-button" type="button" data-duration="60">
-          60 min
-        </button>
-      </section>
+          <div class="setup-heading">
+            <span class="step-number" aria-hidden="true">2</span>
+            <div>
+              <h2 id="session-heading">Set up your session</h2>
+              <p>Choose the length, format and editor you want.</p>
+            </div>
+          </div>
+          <h3 id="length-label" class="setting-label">Session length</h3>
+          <section class="duration-row" aria-labelledby="length-label">
+            <button class="duration-button" type="button" data-duration="30">
+              30 min
+            </button>
+            <button
+              class="duration-button selected"
+              type="button"
+              data-duration="45"
+            >
+              45 min
+            </button>
+            <button class="duration-button" type="button" data-duration="60">
+              60 min
+            </button>
+          </section>
 
-      <!-- Written by app.js from the cap `/api/session` reports, so a length
+          <!-- Written by app.js from the cap `/api/session` reports, so a length
            this deployment cannot record is disabled with the reason beside it
            rather than silently shortened after the candidate presses start. -->
-      <p id="duration-note" class="duration-note" aria-live="polite" hidden></p>
-      <!-- The round plan and the surface, in one row rather than two. The
-           lobby is held to a single screen by
-           tests/browser/lobby.test.js, and a row of its own for the second
-           pair was seventeen pixels past it.
+          <p
+            id="duration-note"
+            class="duration-note"
+            aria-live="polite"
+            hidden
+          ></p>
+          <h3 id="format-label" class="setting-label">Interview format</h3>
+          <section
+            class="duration-row format-choices"
+            aria-labelledby="format-label"
+          >
+            <div
+              class="session-choice-group"
+              role="group"
+              aria-label="Round plan"
+            >
+              <button
+                class="duration-button"
+                type="button"
+                data-loop="coding_only"
+              >
+                Coding only
+              </button>
+              <button
+                class="duration-button selected"
+                type="button"
+                data-loop="coding_behavioral"
+              >
+                Coding + behavioral
+              </button>
+            </div>
+            <div
+              class="session-choice-group"
+              role="group"
+              aria-label="Workspace"
+            >
+              <button
+                class="duration-button selected"
+                type="button"
+                data-mode="coding"
+                aria-pressed="true"
+              >
+                Editor
+              </button>
+              <button
+                class="duration-button"
+                type="button"
+                data-mode="whiteboard"
+                aria-pressed="false"
+              >
+                Whiteboard
+              </button>
+            </div>
+            <label class="duration-note"
+              ><input id="enable-example-drawing" type="checkbox" /> Enable
+              Example drawing</label
+            >
+          </section>
+          <p class="duration-note" id="mode-note" aria-live="polite" hidden></p>
 
-           A whiteboard interview takes the same problem and the same steps,
-           and swaps the editor and the test runner for a board: nothing runs,
-           and the candidate explains by drawing. -->
-      <section class="duration-row" aria-label="Interview loop and format">
-        <button class="duration-button" type="button" data-loop="coding_only">
-          Coding only
-        </button>
-        <button
-          class="duration-button selected"
-          type="button"
-          data-loop="coding_behavioral"
+          <fieldset class="editor-options-row">
+            <legend>Editor options</legend>
+            <label
+              ><input
+                type="checkbox"
+                name="editor-option"
+                value="highlight"
+                checked
+              />
+              Syntax highlighting</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                name="editor-option"
+                value="execution"
+                checked
+              />
+              Code execution</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                name="editor-option"
+                value="autoIndent"
+                checked
+              />
+              Auto indentation</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                name="editor-option"
+                value="autoClose"
+                checked
+              />
+              Bracket auto-close</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                name="editor-option"
+                value="monospace"
+                checked
+              />
+              Monospace font</label
+            >
+          </fieldset>
+        </section>
+        <section
+          class="setup-panel start-panel"
+          aria-labelledby="start-heading"
         >
-          Coding + behavioral
-        </button>
-        <span class="row-divider" aria-hidden="true"></span>
-        <button
-          class="duration-button selected"
-          type="button"
-          data-mode="coding"
-          aria-pressed="true"
-        >
-          Editor
-        </button>
-        <button
-          class="duration-button"
-          type="button"
-          data-mode="whiteboard"
-          aria-pressed="false"
-        >
-          Whiteboard
-        </button>
-        <label class="duration-note"
-          ><input id="enable-example-drawing" type="checkbox" /> Enable Example
-          drawing</label
-        >
-      </section>
-      <p class="duration-note" id="mode-note" aria-live="polite" hidden></p>
+          <div class="setup-heading">
+            <span class="step-number" aria-hidden="true">3</span>
+            <div>
+              <h2 id="start-heading">Check in and start</h2>
+              <p>Add optional context, then join the interview.</p>
+            </div>
+          </div>
+          <details class="interview-context">
+            <summary>Optional interview context</summary>
+            <fieldset>
+              <legend>Tailor the behavioral question</legend>
+              <p class="muted small">
+                Skip any or all fields. Coding correctness is unchanged.
+              </p>
+              <label
+                >Target role
+                <input
+                  id="profile-role"
+                  type="text"
+                  maxlength="80"
+                  autocomplete="organization-title"
+              /></label>
+              <label
+                >Seniority
+                <select id="profile-seniority">
+                  <option value="">Not specified</option>
+                  <option value="intern">Intern</option>
+                  <option value="junior">Junior</option>
+                  <option value="mid">Mid-level</option>
+                  <option value="senior">Senior</option>
+                  <option value="staff">Staff+</option>
+                  <option value="manager">Engineering manager</option>
+                </select>
+              </label>
+              <label
+                >Target company
+                <input
+                  id="profile-company"
+                  type="text"
+                  maxlength="80"
+                  autocomplete="organization"
+              /></label>
+            </fieldset>
+            <fieldset>
+              <legend>Ground questions in selected document snippets</legend>
+              <p class="muted small">
+                Optional. Files stay in this browser. Nothing is selected or
+                sent automatically.
+              </p>
+              <label
+                >Job description (.txt up to 64 KiB, or .pdf up to 4 MiB)
+                <input
+                  id="grounding-jd"
+                  type="file"
+                  accept=".txt,text/plain,.pdf,application/pdf"
+              /></label>
+              <p id="grounding-jd-status" class="muted small" role="status"></p>
+              <label
+                >Resume (.txt up to 64 KiB, or .pdf up to 4 MiB)
+                <input
+                  id="grounding-resume"
+                  type="file"
+                  accept=".txt,text/plain,.pdf,application/pdf"
+              /></label>
+              <p
+                id="grounding-resume-status"
+                class="muted small"
+                role="status"
+              ></p>
+              <div id="grounding-choices"></div>
+              <label
+                ><input id="grounding-consent" type="checkbox" /> Send only my
+                selected snippets to the AI interviewer.</label
+              >
+              <button id="grounding-clear" type="button">
+                Clear document grounding
+              </button>
+              <p id="grounding-error" role="alert"></p>
+            </fieldset>
+          </details>
 
-      <section class="start-row">
-        <!-- Enabled by app.js once a problem is chosen, so the button cannot
+          <section class="start-row">
+            <!-- Enabled by app.js once a problem is chosen, so the button cannot
              start an interview on a problem the page has not picked yet. -->
-        <button id="start" class="start-button" type="button" disabled>
-          Start interview
-        </button>
-      </section>
+            <h3 id="next-steps-label" class="setting-label">
+              What happens next
+            </h3>
+            <ol class="next-steps" aria-labelledby="next-steps-label">
+              <li>A quick microphone and camera check</li>
+              <li>A live interview with Jim, by voice</li>
+              <li>A scored report for every phase</li>
+            </ol>
+            <button id="start" class="start-button" type="button" disabled>
+              Start interview
+            </button>
+          </section>
+        </section>
+      </div>
 
       <section
         id="recent-performance"

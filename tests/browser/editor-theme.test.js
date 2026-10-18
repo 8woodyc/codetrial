@@ -11,6 +11,7 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  closeSetupCheck,
   DEFAULT_RUNTIME_CONFIG,
   launchChromium,
   startStaticServer,
@@ -34,14 +35,12 @@ after(async () => {
 });
 
 /// Out from behind the media preflight, which covers the toolbar until a
-/// device check clears it. Mirrors the same helper in editor-font-size.test.js.
+/// device check clears it.
 async function openEditor(page) {
   await page.waitForFunction(
     () => document.querySelector("#candidate-case-input").placeholder !== "",
   );
-  await page.evaluate(() => {
-    document.querySelector("#audio-check").hidden = true;
-  });
+  await closeSetupCheck(page);
 }
 
 /// def and return are Python keywords (see highlight.test.js), so this gives
@@ -101,6 +100,36 @@ const themeMetrics = (page) =>
       stored: localStorage.getItem("codetrial:editorTheme"),
     };
   });
+
+/// The page's own scheme and background, as the browser resolved them.
+const bodyPalette = (page) =>
+  page.evaluate(() => {
+    const style = getComputedStyle(document.body);
+    return { scheme: style.colorScheme, background: style.backgroundColor };
+  });
+
+test("the light practice entrance does not change the live interview palette", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await browser.newPage();
+  try {
+    await page.goto(`${base}/index.html`, { waitUntil: "domcontentloaded" });
+    assert.deepEqual(await bodyPalette(page), {
+      scheme: "light",
+      background: "rgb(246, 246, 249)",
+    });
+
+    await page.goto(`${base}/interview.html`, {
+      waitUntil: "domcontentloaded",
+    });
+    await openEditor(page);
+    assert.deepEqual(await bodyPalette(page), {
+      scheme: "dark",
+      background: "rgb(17, 17, 15)",
+    });
+  } finally {
+    await page.close();
+  }
+});
 
 test("the theme toggle switches every editor surface and is remembered", async (t) => {
   if (!browser) return t.skip("playwright chromium unavailable");

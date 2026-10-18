@@ -44,11 +44,44 @@
             hidden
             aria-label="Interview steps"
           ></ol>
+        </header>
+
+        <nav class="tab-row" aria-label="Interview details">
+          <button id="problem-tab" class="tab-button selected" type="button">
+            Problem
+          </button>
+          <button id="transcript-tab" class="tab-button" type="button">
+            Transcript
+          </button>
+        </nav>
+
+        <section id="problem-panel" class="side-panel"></section>
+        <section id="transcript-panel" class="side-panel" hidden>
+          <div class="empty-transcript">
+            <span aria-hidden="true">...</span>
+            <p>No conversation yet</p>
+            <p>
+              Everything you and Jim say appears here in real time, and is
+              included in your downloadable report.
+            </p>
+          </div>
+        </section>
+        <!-- The controls a candidate reaches for while talking, docked under
+             the problem rather than above it. Handing the turn over is the
+             action used most, so it leads; ending the interview sits apart at
+             the far end of the row below, where it is not hit by mistake. -->
+        <section class="session-dock" aria-label="Interview controls">
+          <button
+            id="yield-turn"
+            class="pill-button turn-button"
+            type="button"
+            title="Alt+Enter"
+            aria-keyshortcuts="Alt+Enter"
+          >
+            Your turn is done
+          </button>
           <div class="control-row">
             <button id="mic" class="pill-button" type="button">Mic on</button>
-            <button id="pause" class="pill-button" type="button" hidden>
-              Pause
-            </button>
             <button
               id="thinking"
               class="pill-button"
@@ -57,21 +90,21 @@
             >
               Thinking
             </button>
-            <button
-              id="yield-turn"
-              class="pill-button"
-              type="button"
-              title="Alt+Enter"
-              aria-keyshortcuts="Alt+Enter"
-            >
-              Your turn is done
+            <button id="pause" class="pill-button" type="button" hidden>
+              Pause
             </button>
-            <button id="end" class="pill-button danger" type="button">
-              End interview
-            </button>
+            <span class="dock-end">
+              <button id="end" class="pill-button danger" type="button">
+                End interview
+              </button>
+            </span>
+          </div>
+          <!-- Recording, apart from ending: withdrawing consent and ending the
+               interview are different acts and should not sit side by side. -->
+          <div class="recording-row">
             <!-- The notice promises a candidate can withdraw during the
-                 interview, so there has to be something to withdraw with.
-                 Hidden unless this server records. -->
+                   interview, so there has to be something to withdraw with.
+                   Hidden unless this server records. -->
             <button
               id="withdraw-consent"
               class="pill-button danger"
@@ -89,7 +122,6 @@
               role="status"
             ></span>
           </div>
-
           <!-- Meet is a presentation channel, not CodeTrial's audio transport:
                LiveKit plays Jim into this tab and Meet re-shares the tab. -->
           <details id="meet-mode" class="meet-mode">
@@ -97,7 +129,7 @@
             <div class="meet-mode-body">
               <ol id="meet-mode-steps" class="meet-mode-steps">
                 <li>
-                  Start the CodeTrial interview and confirm the media preflight.
+                  Start the CodeTrial interview and finish the setup check.
                 </li>
                 <li>In Meet, click Present now.</li>
                 <li>Choose <strong>A tab</strong>.</li>
@@ -130,27 +162,6 @@
               </p>
             </div>
           </details>
-        </header>
-
-        <nav class="tab-row" aria-label="Interview details">
-          <button id="problem-tab" class="tab-button selected" type="button">
-            Problem
-          </button>
-          <button id="transcript-tab" class="tab-button" type="button">
-            Transcript
-          </button>
-        </nav>
-
-        <section id="problem-panel" class="side-panel"></section>
-        <section id="transcript-panel" class="side-panel" hidden>
-          <div class="empty-transcript">
-            <span aria-hidden="true">...</span>
-            <p>No conversation yet</p>
-            <p>
-              Everything you and Jim say appears here in real time, and is
-              included in your downloadable report.
-            </p>
-          </div>
         </section>
       </aside>
 
@@ -195,52 +206,56 @@
               Java
             </button>
           </div>
-          <div
-            class="font-size-control"
-            role="group"
-            aria-label="Code font size"
-          >
+          <!-- Display settings and the run button share the right end, so the
+               toolbar stays one row: what you write on the left, how it looks
+               and running it on the right. -->
+          <div class="toolbar-end">
+            <div class="sync-state"><span></span>Live-synced to Jim</div>
+            <div class="editor-view-controls">
+              <div
+                class="font-size-control"
+                role="group"
+                aria-label="Code font size"
+              >
+                <button
+                  id="editor-font-smaller"
+                  class="font-size-button"
+                  type="button"
+                  title="Smaller code"
+                  aria-label="Smaller code"
+                >
+                  A-
+                </button>
+                <button
+                  id="editor-font-larger"
+                  class="font-size-button"
+                  type="button"
+                  title="Larger code"
+                  aria-label="Larger code"
+                >
+                  A+
+                </button>
+              </div>
+              <button
+                id="editor-theme-toggle"
+                class="font-size-button"
+                type="button"
+                title="Light editor theme"
+                aria-pressed="false"
+              >
+                Light editor theme
+              </button>
+            </div>
             <button
-              id="editor-font-smaller"
-              class="font-size-button"
+              id="run-tests"
+              class="run-button"
               type="button"
-              title="Smaller code"
-              aria-label="Smaller code"
+              title="Run tests (Ctrl+Enter / &#8984;Enter)"
+              aria-keyshortcuts="Control+Enter Meta+Enter"
             >
-              A-
-            </button>
-            <button
-              id="editor-font-larger"
-              class="font-size-button"
-              type="button"
-              title="Larger code"
-              aria-label="Larger code"
-            >
-              A+
+              Run tests
             </button>
           </div>
-          <p class="compile-disclosure">
-            C, C++ and Java runs are sent to Compiler Explorer.
-          </p>
-          <div class="sync-state"><span></span>Live-synced to Jim</div>
-          <button
-            id="editor-theme-toggle"
-            class="font-size-button"
-            type="button"
-            title="Light editor theme"
-            aria-pressed="false"
-          >
-            Light editor theme
-          </button>
-          <button
-            id="run-tests"
-            class="run-button"
-            type="button"
-            title="Run tests (Ctrl+Enter / &#8984;Enter)"
-            aria-keyshortcuts="Control+Enter Meta+Enter"
-          >
-            Run tests
-          </button>
         </div>
         <!-- The textarea stays the source of truth and keeps native editing;
              the pre behind it only paints the colors. -->
@@ -279,7 +294,9 @@
                 id="candidate-case-expected"
                 aria-label="Candidate expected output"
             /></label>
-            <button id="candidate-case-add" type="button">Add case</button>
+            <button id="candidate-case-add" class="pill-button" type="button">
+              Add case
+            </button>
             <p id="candidate-case-status" class="muted small" role="status"></p>
             <ol id="candidate-case-list" class="small"></ol>
           </details>
@@ -318,9 +335,14 @@
               drawing.
             </p>
           </details>
-          <button id="results-toggle" type="button">
+          <button
+            id="results-toggle"
+            type="button"
+            aria-expanded="true"
+            aria-controls="results-body"
+          >
             <span id="results-label">Test results</span>
-            <span id="results-chevron">v</span>
+            <span id="results-chevron" aria-hidden="true"></span>
           </button>
           <div id="results-body" class="results-body">
             <div id="results-filter" hidden>
@@ -343,6 +365,12 @@
             </div>
           </div>
         </section>
+        <!-- Where runs go, or that there are none. A footnote rather than a
+             toolbar item, and outside the drawer, which is hidden when
+             execution is off: that is when this line matters most. -->
+        <p class="compile-disclosure">
+          C, C++ and Java runs are sent to Compiler Explorer.
+        </p>
       </section>
 
       <!-- The other half of the shell, in place of the editor when the lobby
@@ -406,184 +434,228 @@
 
       <!-- Shown before the room is joined: the interview starts only after
            required local media is proven. -->
-      <section id="audio-check" class="overlay">
+      <section
+        id="audio-check"
+        class="overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="audio-check-title"
+      >
         <div class="audio-check-card">
-          <h2>Media preflight</h2>
-          <p>
-            Confirm output and microphone before the interview starts. Camera is
-            optional unless this interview is recorded.
-          </p>
-          <div class="interviewer-style-controls">
-            <div>
-              <label for="interviewer-voice">Jim's voice</label>
-              <select id="interviewer-voice">
-                <option value="">Default</option>
-                <option value="Puck">Puck</option>
-                <option value="Charon">Charon</option>
-                <option value="Kore">Kore</option>
-                <option value="Orus">Orus</option>
-                <option value="Random">Random</option>
-              </select>
+          <header class="preflight-head">
+            <p class="preflight-kicker">Before you join</p>
+            <h2 id="audio-check-title" tabindex="-1">Check your setup</h2>
+            <p>
+              Confirm you can hear Jim and he can hear you. The camera is
+              optional unless this interview is recorded.
+            </p>
+            <p id="round-plan-summary" class="muted small"></p>
+          </header>
+          <div class="preflight-body">
+            <div
+              class="preflight-column"
+              role="group"
+              aria-labelledby="prefs-title"
+            >
+              <!-- Hidden unless the server says it records. Shown here rather than
+                   in the sidebar for the same reason the Meet checkbox is: it has
+                   to be settled before the room starts, because consent is written
+                   down before any recording can begin. -->
+              <div class="audio-check-step" id="recording-consent-step" hidden>
+                <h3 class="preflight-section-title">Recording</h3>
+                <p>
+                  <label for="recording-consent">
+                    <input type="checkbox" id="recording-consent" />
+                    I agree to this interview being recorded
+                  </label>
+                </p>
+                <p id="recording-consent-disclosure" class="muted small">
+                  Your camera, microphone, and this page are recorded to one
+                  video file. It is shared with the verified email address on
+                  your GitHub account, as a read-only link, and both the link
+                  and the file are deleted 24 hours later. You can withdraw
+                  consent during the interview: recording stops and the file is
+                  scheduled for deletion. Anything already downloaded by someone
+                  who had the link is outside CodeTrial's control and cannot be
+                  recalled.
+                </p>
+              </div>
+              <h3 id="prefs-title" class="preflight-section-title">
+                Interview preferences
+              </h3>
+              <div class="interviewer-style-controls">
+                <div>
+                  <label for="interviewer-voice">Jim's voice</label>
+                  <select id="interviewer-voice">
+                    <option value="">Default</option>
+                    <option value="Puck">Puck</option>
+                    <option value="Charon">Charon</option>
+                    <option value="Kore">Kore</option>
+                    <option value="Orus">Orus</option>
+                    <option value="Random">Random</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="interviewer-accent">English accent</label>
+                  <select id="interviewer-accent">
+                    <option value="">Default</option>
+                    <option value="American">American</option>
+                    <option value="British">British</option>
+                    <option value="Australian">Australian</option>
+                    <option value="Canadian">Canadian</option>
+                    <option value="Indian">Indian</option>
+                    <option value="Random">Random</option>
+                  </select>
+                </div>
+              </div>
+              <p class="muted small">Random is chosen once per interview.</p>
+
+              <div class="audio-check-step" id="audio-step-examples">
+                <p>
+                  <label for="hide-examples">
+                    <input type="checkbox" id="hide-examples" />
+                    Hide the worked examples
+                  </label>
+                </p>
+                <p class="muted small">
+                  The Problem tab shows the scenario without Example 1 and 2, so
+                  the cases you walk through in the Example step are your own.
+                </p>
+              </div>
+              <h3 class="preflight-section-title">Presenting</h3>
+              <!-- Decided here, not in the sidebar: it changes which tracks the
+                   interview publishes, so it has to be settled before the room
+                   starts. -->
+              <div class="audio-check-step" id="audio-step-meet">
+                <p>
+                  <label for="meet-presentation">
+                    <input type="checkbox" id="meet-presentation" />
+                    I will present this interview in Google Meet
+                  </label>
+                </p>
+                <p class="muted small">
+                  CodeTrial hands the camera to Meet after this check and stops
+                  watching it, so camera integrity is off for this interview and
+                  the report says so. Your microphone stays with CodeTrial.
+                </p>
+              </div>
             </div>
-            <div>
-              <label for="interviewer-accent">English accent</label>
-              <select id="interviewer-accent">
-                <option value="">Default</option>
-                <option value="American">American</option>
-                <option value="British">British</option>
-                <option value="Australian">Australian</option>
-                <option value="Canadian">Canadian</option>
-                <option value="Indian">Indian</option>
-                <option value="Random">Random</option>
-              </select>
+            <div
+              class="preflight-column"
+              role="group"
+              aria-labelledby="devices-title"
+            >
+              <h3 id="devices-title" class="preflight-section-title">
+                Devices
+              </h3>
+              <div class="audio-check-step" id="audio-step-output">
+                <p>
+                  <span class="step-mark" aria-hidden="true"></span
+                  ><strong>Sound</strong> —
+                  <span id="audio-output-state" aria-live="polite"
+                    >play a test sound and confirm you heard it.</span
+                  >
+                </p>
+                <div class="audio-check-actions">
+                  <button
+                    id="audio-test-tone"
+                    class="pill-button"
+                    type="button"
+                  >
+                    Play test tone
+                  </button>
+                  <button
+                    id="audio-test-speech"
+                    class="pill-button"
+                    type="button"
+                  >
+                    Can't hear the tone?
+                  </button>
+                  <button
+                    id="audio-heard"
+                    class="pill-button waiting"
+                    type="button"
+                    aria-disabled="true"
+                  >
+                    I heard it
+                  </button>
+                </div>
+                <audio
+                  id="audio-test-voice"
+                  src="./audio/test-voice.wav"
+                  preload="none"
+                  hidden
+                ></audio>
+                <p class="muted small">
+                  If the tone is silent, try the test voice. Playback noise
+                  reduction or audio enhancements may filter test sounds. If
+                  both are silent, check your output device and volume, or try
+                  turning those effects off in your audio settings.
+                </p>
+              </div>
+
+              <div class="audio-check-step" id="audio-step-mic">
+                <p>
+                  <span class="step-mark" aria-hidden="true"></span
+                  ><strong>Microphone</strong> — say something and watch the
+                  level.
+                </p>
+                <div
+                  class="audio-meter"
+                  role="img"
+                  aria-label="Microphone input level"
+                >
+                  <span id="audio-meter-fill"></span>
+                </div>
+              </div>
+
+              <div class="audio-check-step" id="audio-step-camera">
+                <p>
+                  <span class="step-mark" aria-hidden="true"></span
+                  ><strong>Camera</strong> —
+                  <span id="camera-state" aria-live="polite"
+                    >grant access and keep video on.</span
+                  >
+                </p>
+                <p id="camera-name-disclosure" class="muted small">
+                  The camera's name is recorded in your report so a reviewer can
+                  see which device was opened. On Apple devices that name often
+                  contains your own, for example "Alex's iPhone". CodeTrial
+                  opens whichever camera your browser treats as the default, so
+                  change that default in your browser or system settings before
+                  starting if you would rather it did not.
+                </p>
+                <div class="audio-check-actions">
+                  <button
+                    id="camera-skip"
+                    class="pill-button"
+                    type="button"
+                    hidden
+                  >
+                    Continue without camera
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
-          <p class="muted small">Random is chosen once per interview.</p>
-          <p id="round-plan-summary" class="muted small"></p>
-
-          <div class="audio-check-step" id="audio-step-output">
-            <p>
-              <span class="step-mark" aria-hidden="true"></span
-              ><strong>Output</strong> —
-              <span id="audio-output-state" aria-live="polite"
-                >play a test sound and confirm you heard it.</span
-              >
+          <footer class="preflight-footer">
+            <p id="audio-check-status" class="muted small" role="status">
+              Starting camera and microphone...
             </p>
             <div class="audio-check-actions">
-              <button id="audio-test-tone" class="pill-button" type="button">
-                Play test tone
-              </button>
-              <button id="audio-test-speech" class="pill-button" type="button">
-                Can't hear the tone?
+              <button id="audio-check-leave" class="pill-button" type="button">
+                Back to lobby
               </button>
               <button
-                id="audio-heard"
-                class="pill-button waiting"
+                id="audio-check-join"
+                class="start-button"
                 type="button"
-                aria-disabled="true"
+                disabled
               >
-                I heard it
+                Start interview
               </button>
             </div>
-            <audio
-              id="audio-test-voice"
-              src="./audio/test-voice.wav"
-              preload="none"
-              hidden
-            ></audio>
-            <p class="muted small">
-              If the tone is silent, try the test voice. Playback noise
-              reduction or audio enhancements may filter test sounds. If both
-              are silent, check your output device and volume, or try turning
-              those effects off in your audio settings.
-            </p>
-          </div>
-
-          <div class="audio-check-step" id="audio-step-mic">
-            <p>
-              <span class="step-mark" aria-hidden="true"></span
-              ><strong>Microphone</strong> — say something and watch the level.
-            </p>
-            <div
-              class="audio-meter"
-              role="img"
-              aria-label="Microphone input level"
-            >
-              <span id="audio-meter-fill"></span>
-            </div>
-          </div>
-
-          <div class="audio-check-step" id="audio-step-camera">
-            <p>
-              <span class="step-mark" aria-hidden="true"></span
-              ><strong>Camera</strong> —
-              <span id="camera-state" aria-live="polite"
-                >grant access and keep video on.</span
-              >
-            </p>
-            <p id="camera-name-disclosure" class="muted small">
-              The camera's name is recorded in your report so a reviewer can see
-              which device was opened. On Apple devices that name often contains
-              your own, for example "Alex's iPhone". CodeTrial opens whichever
-              camera your browser treats as the default, so change that default
-              in your browser or system settings before starting if you would
-              rather it did not.
-            </p>
-            <div class="audio-check-actions">
-              <button id="camera-skip" class="pill-button" type="button" hidden>
-                Continue without camera
-              </button>
-            </div>
-          </div>
-
-          <div class="audio-check-step" id="audio-step-examples">
-            <p>
-              <label for="hide-examples">
-                <input type="checkbox" id="hide-examples" />
-                Hide the worked examples
-              </label>
-            </p>
-            <p class="muted small">
-              The Problem tab shows the scenario without Example 1 and 2, so the
-              cases you walk through in the Example step are your own.
-            </p>
-          </div>
-
-          <!-- Decided here, not in the sidebar: it changes which tracks the
-               interview publishes, so it has to be settled before the room
-               starts. -->
-          <div class="audio-check-step" id="audio-step-meet">
-            <p>
-              <label for="meet-presentation">
-                <input type="checkbox" id="meet-presentation" />
-                I will present this interview in Google Meet
-              </label>
-            </p>
-            <p class="muted small">
-              CodeTrial hands the camera to Meet after this check and stops
-              watching it, so camera integrity is off for this interview and the
-              report says so. Your microphone stays with CodeTrial.
-            </p>
-          </div>
-
-          <!-- Hidden unless the server says it records. Shown here rather than
-               in the sidebar for the same reason the Meet checkbox is: it has
-               to be settled before the room starts, because consent is written
-               down before any recording can begin. -->
-          <div class="audio-check-step" id="recording-consent-step" hidden>
-            <p>
-              <label for="recording-consent">
-                <input type="checkbox" id="recording-consent" />
-                I agree to this interview being recorded
-              </label>
-            </p>
-            <p id="recording-consent-disclosure" class="muted small">
-              Your camera, microphone, and this page are recorded to one video
-              file. It is shared with the verified email address on your GitHub
-              account, as a read-only link, and both the link and the file are
-              deleted 24 hours later. You can withdraw consent during the
-              interview: recording stops and the file is scheduled for deletion.
-              Anything already downloaded by someone who had the link is outside
-              CodeTrial's control and cannot be recalled.
-            </p>
-          </div>
-
-          <p id="audio-check-status" class="muted small" role="status">
-            Starting camera and microphone...
-          </p>
-          <div class="audio-check-actions">
-            <button id="audio-check-leave" class="pill-button" type="button">
-              Back to lobby
-            </button>
-            <button
-              id="audio-check-join"
-              class="start-button"
-              type="button"
-              disabled
-            >
-              Start interview
-            </button>
-          </div>
+          </footer>
         </div>
       </section>
 
@@ -604,9 +676,20 @@
         </div>
       </div>
 
-      <section id="ending-overlay" class="overlay" hidden>
+      <!-- A dialog, but not aria-modal: Jim's stage sits over it while the
+           report is written, and his captions there have to be announced.
+           Everything else behind it is inert. -->
+      <section
+        id="ending-overlay"
+        class="overlay"
+        role="dialog"
+        aria-labelledby="ending-title"
+        hidden
+      >
         <div class="spinner"></div>
-        <p id="ending-title">Jim is writing up your evaluation...</p>
+        <p id="ending-title" tabindex="-1">
+          Jim is writing up your evaluation...
+        </p>
         <p id="ending-detail" role="status" aria-live="polite">
           Scoring your code and communication - this usually takes a few
           seconds.
@@ -624,6 +707,17 @@
         </button>
         <button id="force-report" class="pill-button" type="button">
           Show offline summary
+        </button>
+        <!-- The sidebar's Stop recording is behind this overlay, and the
+             recording runs until the report arrives. interview.js keeps this
+             one in step with it. -->
+        <button
+          id="ending-withdraw-consent"
+          class="pill-button danger"
+          type="button"
+          hidden
+        >
+          Stop recording
         </button>
       </section>
 
@@ -691,7 +785,15 @@
         </div>
       </aside>
 
-      <section id="report-modal" class="overlay" hidden></section>
+      <section
+        id="report-modal"
+        class="overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Interview report"
+        tabindex="-1"
+        hidden
+      ></section>
       <video
         id="camera-integrity-video"
         class="hidden-media"

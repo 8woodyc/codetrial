@@ -1,15 +1,48 @@
 :root {
   color-scheme: dark;
+  /* One scale for every page. Type steps, in rem: 0.6875 0.75 0.8125 0.875
+     0.9375 1 1.125 1.25 1.5 2, plus the lobby's fluid headline. Radii: a
+     control or small box, a card or bubble, a page-level panel; 999px for a
+     pill and 50% for a dot. */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
   --page: #11110f;
   --surface: #1b1b18;
   --ink: #f6f3ea;
   --sub: #b7b2a5;
-  --muted: #7d776a;
+  /* Secondary small text: 5.2:1 on the surface and 4.7 on a raised box,
+     still a step quieter than --sub. */
+  --muted: #928c7e;
   --hairline: #2d2b26;
-  --accent: #3987e5;
-  --accent-deep: #2069bd;
+  /* The brand violet, oklch(0.516 0.262 288.8) in the lobby, at the same hue
+     for a dark page: --accent is the violet that reads as text and edges here
+     (6.6:1 on the surface), --accent-fill the solid behind white button text
+     (5.4:1), --accent-deep its hover, one step darker so the hover shows.
+     --accent-ink is violet text; the lobby gives it a darker value. */
+  --accent: #a291ff;
+  --accent-fill: #744ce6;
+  --accent-deep: #6437d2;
+  --accent-ink: var(--accent);
   --good: #24b47e;
   --critical: #ff6b6b;
+  /* A destructive control: its border and fill, and its text on the surface
+     when it is outlined rather than filled (7.6:1). */
+  --danger: #c44545;
+  --danger-ink: #ff8a8a;
+  /* The edge of a form field: 4.6:1 against the surface, past the 3:1 a
+     control boundary needs. */
+  --control-border: #8a8473;
+  /* A card set into the surface, such as a step of the setup check or a
+     code block. */
+  --step-surface: #151512;
+  /* A box raised on the surface: a score, a transcript turn, a board step. */
+  --inset-surface: #24241f;
+  /* What floats over the editor: the avatar, or the compact caption card. */
+  --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* The chosen tab or language, one step above a raised box. */
+  --selected-surface: #2f2f29;
   /* The floating avatar stage. Opaque on purpose: this sits over the editor,
      which repaints on every keystroke, and a backdrop-filter under it re-ran a
      blur pass per repaint for an effect 82% opaque paint already hid. */
@@ -28,11 +61,11 @@
      stay light on a light selection background in the light theme. */
   --code-selection-ink: var(--ink);
   --code-match-outline: #a6cfff;
-  /* The gutter's own text and divider, defaulting to the page's dark-scheme
-     --muted and --hairline so the dark theme is unchanged; the light theme
-     below overrides both, since neither page variable meets 4.5:1 against a
-     light gutter background. */
-  --code-gutter-ink: var(--muted);
+  /* The gutter's own text and divider. Line numbers stay a step under the
+     page's --muted, which was raised for text a candidate reads, so the code
+     beside them keeps the lead; the light theme below overrides both, since
+     neither meets 4.5:1 against a light gutter background. */
+  --code-gutter-ink: #7d776a;
   --code-gutter-border: var(--hairline);
   /* Indent guides sit under the code, so they stay fainter than it in both
      themes. */
@@ -56,7 +89,7 @@
   margin: 0.5rem 0;
   padding: 0.375rem 0.625rem;
   background: var(--hairline);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-size: 0.8125rem;
   color: var(--ink);
   line-height: 1.3;
@@ -90,6 +123,13 @@ button {
   font: inherit;
 }
 
+/* One keyboard ring on every page, in the page's accent. Zero specificity,
+   so a control that draws its own focus keeps it. */
+:where(:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 main {
   width: min(100%, 64rem);
   min-height: 100vh;
@@ -98,6 +138,7 @@ main {
 }
 
 .lobby {
+  width: min(100%, 76rem);
   padding-block: 1.5rem;
 }
 
@@ -143,21 +184,17 @@ header {
   color: var(--ink);
 }
 
+/* Its look is the lobby's field style, with the other fields there. */
 .account-input {
   width: 12rem;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 0.35rem 0.5rem;
-  background: var(--panel);
-  color: var(--ink);
-  font: inherit;
 }
 
+/* A page heading. The lobby's hero sizes its own, below. */
 h1 {
   max-width: 56rem;
   margin: 0;
-  font-size: clamp(2.25rem, 7vw, 3.75rem);
-  line-height: 1;
+  font-size: 2rem;
+  line-height: 1.15;
 }
 
 p {
@@ -168,7 +205,7 @@ p {
 
 .problem-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
   gap: 0.75rem;
 }
 
@@ -184,8 +221,6 @@ p {
     padding-block: 1rem;
   }
 
-  .lobby .difficulty-row,
-  .lobby .editor-options-row,
   .lobby .random-picker,
   .lobby .problem-picker {
     margin-top: 1rem;
@@ -217,8 +252,7 @@ p {
 }
 
 /* `--sub` for the same reason the fieldset legend uses it: this explains a
-   control rather than decorating it, and `--muted` measures under the 4.5 that
-   normal text needs. */
+   control rather than decorating it, so it reads as text, not as a footnote. */
 .duration-note {
   margin-top: 0.5rem;
   color: var(--sub);
@@ -252,7 +286,7 @@ p {
   min-height: 8rem;
   padding: 1rem;
   border: 1px solid var(--hairline);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--ink);
   text-align: left;
@@ -310,7 +344,7 @@ p {
 .practice-filters select {
   padding: 0.4rem 0.6rem;
   border: 1px solid var(--hairline);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--ink);
 }
@@ -320,8 +354,10 @@ p {
   margin: 0;
 }
 
-.interview-kicker {
-  margin-bottom: 0.5rem;
+/* The small uppercase label over a section, here and in the setup check. */
+.interview-kicker,
+.preflight-kicker,
+.preflight-section-title {
   color: var(--sub);
   font-size: 0.75rem;
   font-weight: 700;
@@ -376,7 +412,7 @@ p {
 
 .duration-button.selected,
 .start-button {
-  background: var(--accent);
+  background: var(--accent-fill);
   color: #ffffff;
 }
 
@@ -388,7 +424,7 @@ p {
   margin-top: 1.5rem;
   padding: 1rem;
   border: 1px solid var(--hairline);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
 }
 
@@ -405,12 +441,12 @@ p {
   margin-top: 1rem;
   padding: 0.75rem;
   border: 1px solid var(--hairline);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }
 
 .interview-context fieldset {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
   gap: 0.75rem;
   margin-top: 0.75rem;
   padding: 0;
@@ -429,11 +465,14 @@ p {
 
 .start-button {
   border-color: var(--accent);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 0.75rem 1rem;
 }
 
-.start-button:hover {
+.start-button:not(:disabled):hover,
+.run-button:not(:disabled):hover,
+.session-dock .turn-button:hover,
+.report-actions button:not(.secondary):not(:disabled):hover {
   background: var(--accent-deep);
 }
 
@@ -473,12 +512,12 @@ p {
   margin-top: 1rem;
   padding: 1rem;
   border: 1px solid var(--hairline);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }
 
 .progress-filters {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
   gap: 0.75rem;
   margin: 0;
   padding: 0;
@@ -621,7 +660,7 @@ p {
 .progress-chart-axis-label,
 .progress-chart-axis-title {
   fill: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .progress-chart-axis-title {
@@ -636,10 +675,10 @@ p {
   padding: 0.4rem 0.55rem;
   transform: translate(-50%, calc(-100% - 0.7rem));
   border: 1px solid var(--hairline);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--float-surface);
   color: var(--ink);
-  font-size: 0.8rem;
+  font-size: 0.8125rem;
   line-height: 1.3;
   pointer-events: none;
   white-space: nowrap;
@@ -652,7 +691,7 @@ p {
 .progress-chart-tooltip-version {
   margin-top: 0.15rem;
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: 0.6875rem;
 }
 
 .progress-chart-details-wrap {
@@ -773,7 +812,7 @@ p {
   min-width: 0;
   overflow: auto;
   border: 1px solid var(--hairline);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
 }
 
@@ -839,9 +878,9 @@ p {
   position: relative;
   height: 158px;
   border: 1px solid var(--hairline);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--float-surface);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-float);
   overflow: hidden;
 }
 
@@ -863,11 +902,18 @@ p {
 
 /* The turn countdown sits beside the line that explains it. The ring is a
    conic fill masked to a band, driven by `--turn-progress` from 0 to 1. */
+/* On its own surface, like the avatar and the captions: the stage floats
+   over the editor, and bare text there sat on whatever code ran under it. */
 .turn-row {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  margin-top: 0.35rem;
+  gap: 0.375rem;
+  margin-top: 0.375rem;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--float-surface);
+  line-height: 1.4;
 }
 
 .turn-row p {
@@ -910,28 +956,13 @@ p {
   white-space: nowrap;
 }
 
-@media (max-width: 1200px) {
-  /* Below this the editor is narrow enough that a floating panel starts eating
-     code rather than decorating it. The AVATAR goes, not the stage: captions
-     are the accessible transcript of what Jim is saying, and hiding the whole
-     stage took them away from exactly the narrow windows most likely to need
-     them. They move to the bottom corner, clear of the toolbar entirely. */
-  .jim-avatar,
-  .hide-avatar {
-    display: none;
-  }
-
-  .jim-stage {
-    top: auto;
-    bottom: 1.5rem;
-    width: min(260px, calc(100vw - 3rem));
-  }
-}
-
-/* The same retreat for a panel the candidate made narrow. The breakpoint
-   above knows the window and not the sidebar, which can now take half of it,
-   so interview.js marks the stage once the panel under it is narrower than
-   that breakpoint ever left it. */
+/* Compact: a window or an editor panel too narrow for a floating avatar to
+   decorate rather than cover code. interview.js decides, for both, so this is
+   the one place that says what compact looks like. The AVATAR goes, not the
+   stage: captions are the accessible transcript of what Jim is saying, and
+   hiding the whole stage took them away from exactly the narrow windows most
+   likely to need them. What is left is one floating card in the bottom
+   corner, clear of the toolbar, with the turn line and captions inside it. */
 .jim-stage.compact .jim-avatar,
 .jim-stage.compact .hide-avatar {
   display: none;
@@ -941,6 +972,37 @@ p {
   top: auto;
   bottom: 1.5rem;
   width: min(260px, calc(100vw - 3rem));
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--float-surface);
+  box-shadow: var(--shadow-float);
+}
+
+.jim-stage.compact .turn-row,
+.jim-stage.compact .captions-bar {
+  margin-top: 0;
+  padding-inline: 0;
+  border: 0;
+  background: transparent;
+}
+
+.jim-stage.compact .captions-bar:not([hidden]) {
+  margin-top: 0.375rem;
+  padding-top: 0.375rem;
+  border-top: 1px solid var(--hairline);
+  border-radius: 0;
+}
+
+/* A phone: the card spans the bottom edge. After the card's own rule, which
+   it narrows. */
+@media (max-width: 480px) {
+  .jim-stage.compact {
+    right: 1rem;
+    bottom: 1rem;
+    width: auto;
+    left: 1rem;
+  }
 }
 
 /* A fixed stage outside the viewport cannot be reached by page scrolling.
@@ -997,7 +1059,7 @@ p {
 .presence-banner {
   margin-top: 0.75rem;
   padding: 0.5rem 0.75rem;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: rgba(255, 107, 107, 0.12);
   color: #ff9b9b;
   font-size: 0.8125rem;
@@ -1014,7 +1076,7 @@ p {
 .run-button {
   border: 1px solid var(--hairline);
   border-radius: 999px;
-  background: #24241f;
+  background: var(--inset-surface);
   color: var(--sub);
 }
 
@@ -1028,10 +1090,10 @@ p {
 }
 
 .agent-pill.ready {
-  border-color: rgba(45, 212, 132, 0.65);
-  background: rgba(45, 212, 132, 0.12);
+  border-color: color-mix(in srgb, var(--good) 65%, transparent);
+  background: color-mix(in srgb, var(--good) 12%, transparent);
   color: #d7f7e5;
-  box-shadow: 0 0 0 3px rgba(45, 212, 132, 0.08);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 8%, transparent);
 }
 
 .agent-viz {
@@ -1049,17 +1111,17 @@ p {
 }
 
 .agent-pill.ready .agent-viz span {
-  background: #2dd484;
+  background: var(--good);
 }
 
 .timer {
   padding: 0.375rem 0.75rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-weight: 700;
 }
 
 .timer.urgent {
-  color: #ff6b6b;
+  color: var(--critical);
 }
 
 .control-row {
@@ -1071,8 +1133,8 @@ p {
 .meet-mode {
   margin-top: 0.75rem;
   border: 1px solid var(--hairline);
-  border-radius: 0.5rem;
-  background: #24241f;
+  border-radius: var(--radius-sm);
+  background: var(--inset-surface);
   font-size: 0.75rem;
 }
 
@@ -1115,7 +1177,7 @@ p {
   width: 100%;
   padding: 0.35rem 0.5rem;
   border: 1px solid var(--hairline);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--sub);
   font: inherit;
@@ -1126,15 +1188,42 @@ p {
 .language-button,
 .font-size-button,
 .run-button {
-  padding: 0.4rem 0.75rem;
+  padding: 0.375rem 0.75rem;
   cursor: pointer;
   font-size: 0.75rem;
   font-weight: 700;
+  transition:
+    border-color 140ms ease-out,
+    background-color 140ms ease-out,
+    color 140ms ease-out;
+}
+
+/* Every pill answers the pointer the same way: its edge and label brighten,
+   and a press settles it onto the selected fill. No specificity of its own,
+   so a pill with its own look (the turn button, a danger pill, a pressed
+   toggle) keeps it without being listed here. */
+:where(
+  .pill-button:not(:disabled),
+  .tab-button:not(.selected),
+  .language-button:not(.selected):not(:disabled),
+  .font-size-button:not([aria-disabled="true"])
+):hover {
+  border-color: var(--control-border);
+  color: var(--ink);
+}
+
+:where(
+  .pill-button:not(:disabled),
+  .tab-button,
+  .language-button:not(:disabled),
+  .font-size-button:not([aria-disabled="true"])
+):active {
+  background: var(--selected-surface);
 }
 
 .pill-button.danger {
-  border-color: #c44545;
-  background: #c44545;
+  border-color: var(--danger);
+  background: var(--danger);
   color: white;
 }
 
@@ -1146,7 +1235,7 @@ p {
 
 .tab-button.selected,
 .language-button.selected {
-  background: #2f2f29;
+  background: var(--selected-surface);
   color: var(--ink);
 }
 
@@ -1162,8 +1251,29 @@ p {
   color: var(--sub);
 }
 
+/* The column's gap is the only spacing between its parts; a paragraph's own
+   top margin on top of it put two gaps between every two lines of brief. */
+.problem-detail > * {
+  margin: 0;
+}
+
+.problem-detail > .problem-brief {
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+
+/* The label sits with the text it labels, not a full gap above it. */
+.problem-detail > .interview-kicker {
+  margin-bottom: -0.5rem;
+}
+
+.problem-detail .examples {
+  display: grid;
+  gap: 0.75rem;
+}
+
 .problem-detail h2 {
-  margin: 0 0 0.4rem;
+  margin: 0 0 0.375rem;
   color: var(--ink);
   font-size: 0.875rem;
 }
@@ -1173,19 +1283,19 @@ p {
 .report-card pre {
   overflow-x: auto;
   border: 1px solid var(--hairline);
-  border-radius: 8px;
-  background: #151512;
+  border-radius: var(--radius-sm);
+  background: var(--step-surface);
   padding: 0.75rem;
   color: var(--sub);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.8125rem;
   white-space: pre-wrap;
 }
 
 .hint-box {
-  border: 1px solid rgba(57, 135, 229, 0.3);
-  border-radius: 8px;
-  background: rgba(57, 135, 229, 0.08);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
   padding: 0.75rem;
 }
 
@@ -1198,14 +1308,19 @@ p {
   text-align: center;
 }
 
+/* A query container: the toolbar's sync note is hidden by the panel's own
+   width, below, not the window's, because the sidebar's width is the
+   candidate's. */
 .editor-panel {
   display: flex;
   min-height: 34rem;
   flex-direction: column;
   background: #1e1e1e;
+  container-type: inline-size;
 }
 
 .editor-toolbar {
+  row-gap: 0.5rem;
   justify-content: space-between;
   border-bottom: 1px solid var(--hairline);
   background: var(--surface);
@@ -1218,9 +1333,16 @@ p {
   font-size: 0.75rem;
 }
 
+/* A footnote under the editor rather than a toolbar item, so the toolbar
+   stays one row. --sub, not --muted: this is a sentence to read. */
 .compile-disclosure {
+  flex: none;
+  max-width: none;
   margin: 0;
-  color: var(--muted);
+  padding: 0.375rem 1rem;
+  border-top: 1px solid var(--hairline);
+  background: var(--surface);
+  color: var(--sub);
   font-size: 0.75rem;
 }
 
@@ -1230,12 +1352,13 @@ p {
   height: 0.4rem;
   margin-right: 0.35rem;
   border-radius: 999px;
-  background: #24b47e;
+  background: var(--good);
 }
 
-.run-button {
+.run-button,
+.session-dock .turn-button {
   border-color: var(--accent);
-  background: var(--accent);
+  background: var(--accent-fill);
   color: white;
 }
 
@@ -1245,8 +1368,7 @@ p {
      but never drops below 3.25rem, or a four-digit one is clipped at the
      smallest. */
   --editor-font-size: 0.875rem;
-  --editor-font-family:
-    ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --editor-font-family: var(--font-mono);
   --editor-gutter: max(3.25rem, calc(var(--editor-font-size) * 3.72));
   position: relative;
   flex: 1;
@@ -1373,7 +1495,7 @@ p {
   color: var(--code-gutter-ink);
   background-color: var(--code-gutter);
   border-right: 1px solid var(--code-gutter-border);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: var(--editor-font-size);
   line-height: 1.5;
   text-align: right;
@@ -1533,6 +1655,27 @@ p {
   padding: 0.5rem 1rem;
   cursor: pointer;
   font-weight: 700;
+  align-items: center;
+}
+
+#results-toggle:hover {
+  color: var(--ink);
+}
+
+/* Drawn rather than typed, and turned by the state the button announces:
+   down while the results are open, up to say they can be opened. */
+#results-chevron {
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: 0.25rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-25%) rotate(45deg);
+  transition: transform 140ms ease-out;
+}
+
+#results-toggle[aria-expanded="false"] #results-chevron {
+  transform: translateY(25%) rotate(-135deg);
 }
 
 .results-body {
@@ -1568,7 +1711,7 @@ p {
 
 .result-list li {
   border: 1px solid var(--hairline);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   margin-top: 0.5rem;
   padding: 0.5rem;
 }
@@ -1585,20 +1728,20 @@ p {
 .transcript-row > div {
   max-width: 85%;
   border: 1px solid var(--hairline);
-  border-radius: 12px;
-  background: #24241f;
+  border-radius: var(--radius-md);
+  background: var(--inset-surface);
   padding: 0.5rem 0.75rem;
 }
 
 .transcript-row.alex > div {
-  border-color: rgba(57, 135, 229, 0.3);
-  background: rgba(57, 135, 229, 0.1);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .transcript-row p:first-child {
   margin: 0 0 0.2rem;
   color: var(--accent);
-  font-size: 0.625rem;
+  font-size: 0.6875rem;
   font-weight: 700;
 }
 
@@ -1629,8 +1772,7 @@ p {
 /* Tabular figures because this counts up once a second in place: proportional
    digits make the whole line shuffle sideways on every tick, which reads as the
    page doing something rather than as the wait it is reporting. `--sub` and not
-   `--muted` for the reason the fieldset legend gives: this is normal text and
-   `--muted` measures under 4.5. */
+   `--muted` for the reason the fieldset legend gives: this is text to read. */
 .ending-elapsed {
   color: var(--sub);
   font-variant-numeric: tabular-nums;
@@ -1650,7 +1792,7 @@ p {
   max-height: 92vh;
   overflow-y: auto;
   border: 1px solid var(--hairline);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--surface);
   padding: 1.5rem;
 }
@@ -1672,15 +1814,15 @@ p {
 
 .score-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
   gap: 1rem;
   margin: 1rem 0;
 }
 
 .score-grid > div {
   border: 1px solid var(--hairline);
-  border-radius: 8px;
-  background: #24241f;
+  border-radius: var(--radius-sm);
+  background: var(--inset-surface);
   padding: 1rem;
 }
 
@@ -1714,12 +1856,82 @@ table.phase-scores {
 
 .report-actions button {
   border: 1px solid var(--hairline);
-  border-radius: 8px;
-  background: var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-fill);
   color: white;
   padding: 0.75rem 1rem;
   cursor: pointer;
   font-weight: 700;
+}
+
+/* Done is the way on; the download is a copy to keep, so it is outlined
+   rather than a second filled button of equal weight beside it. */
+.report-actions .secondary {
+  border-color: var(--control-border);
+  background: transparent;
+  color: var(--ink);
+}
+
+.report-actions .secondary:hover {
+  border-color: var(--accent);
+}
+
+/* Done waits for the report to be saved; until then it should look it. */
+.report-actions button:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+/* The overlay scrolls, not the card, so the report it focuses on opening
+   answers Page Down and the arrow keys. */
+#report-modal .report-card {
+  max-height: none;
+  overflow-y: visible;
+}
+
+/* Jim is still in the room while the report is written, so his stage sits
+   over the wait rather than under it: his closing lines stay visible, and
+   interview.js leaves the stage live so they are announced too. */
+#ending-overlay:not([hidden]) ~ .jim-stage {
+  z-index: 11;
+}
+
+/* The turn line speaks of a turn there no longer is, and the captions'
+   divider from it goes with it. */
+#ending-overlay:not([hidden]) ~ .jim-stage .turn-row {
+  display: none;
+}
+
+#ending-overlay:not([hidden]) ~ .jim-stage .captions-bar {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* The compact card runs along the bottom edge, where a long closing line would
+   grow it over the wait's buttons and take their taps. During the wait its
+   captions keep to a few lines (they still scroll), and the wait keeps that
+   much room clear below its own content. */
+#ending-overlay:not([hidden]) ~ .jim-stage.compact .captions-bar {
+  max-height: 4.5rem;
+}
+
+#ending-overlay:has(~ .jim-stage.compact) {
+  padding-bottom: 7.5rem;
+}
+
+/* Withdrawing consent is not the way on from the wait, so it sits apart, in
+   the dock's outlined danger look (with the dock's rule, below). */
+#ending-overlay .pill-button.danger {
+  margin-top: 1rem;
+}
+
+/* The wait's headline reads above its detail line, not level with it. */
+#ending-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1.25rem;
+  font-weight: 650;
 }
 
 @keyframes spin {
@@ -1797,14 +2009,6 @@ table.phase-scores {
   }
 }
 
-/* Keeps the round plan and the surface apart inside one row. */
-.row-divider {
-  width: 1px;
-  height: 1.25rem;
-  margin: 0 0.25rem;
-  background: var(--hairline);
-}
-
 /* The whiteboard, in place of the editor. The surface scrolls inside the
    panel rather than fitting itself to the window: the board is a fixed size in
    its own coordinates, so what the candidate draws is where the interviewer
@@ -1814,7 +2018,7 @@ table.phase-scores {
   min-height: 34rem;
   flex-direction: column;
   border: 1px solid var(--hairline);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
 }
 
@@ -1890,7 +2094,7 @@ table.phase-scores {
   color: inherit;
   cursor: pointer;
   font: inherit;
-  font-size: 0.8rem;
+  font-size: 0.8125rem;
   padding: 0.25rem 0.7rem;
 }
 
@@ -1921,7 +2125,7 @@ table.phase-scores {
   min-width: 40rem;
   aspect-ratio: 1600 / 1000;
   border: 1px solid var(--hairline);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: #ffffff;
   cursor: crosshair;
   touch-action: none;
@@ -1935,13 +2139,44 @@ table.phase-scores {
 
 /* Pre-flight media gate. Sits above the shell until required local media
    passes, so the candidate never meets the interviewer through dead devices. */
+/* Devices on one side, preferences on the other, and the way out and the way
+   in pinned below both, so Start is never scrolled away. */
 .audio-check-card {
-  width: min(32rem, 90vw);
-  padding: 1.75rem;
+  display: flex;
+  width: min(60rem, 100%);
+  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
+  flex-direction: column;
+  overflow: hidden;
   border: 1px solid var(--hairline);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
   text-align: left;
+}
+
+/* The observer's one card: the setup check's surface, sized for a short
+   notice and a button rather than the two-column check. */
+.observer-card {
+  gap: 0.75rem;
+  width: min(32rem, 100%);
+  margin: 12vh auto 0;
+  padding: 2rem;
+}
+
+.observer-card h1 {
+  font-size: 1.5rem;
+}
+
+.observer-card p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.observer-card .start-button {
+  align-self: flex-start;
+  margin-top: 0.5rem;
+  padding-inline: 1.5rem;
 }
 
 .audio-check-card h2 {
@@ -2015,21 +2250,15 @@ table.phase-scores {
 }
 
 /* Once both checks pass the only thing left to do is start, so the button
-   takes focus and says so rather than quietly turning blue. */
+   takes focus and says so rather than quietly changing colour. */
 .start-button.ready {
-  box-shadow: 0 0 0 3px rgba(57, 135, 229, 0.35);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
   animation: start-ready 1.6s ease-in-out 3;
 }
 
 @keyframes start-ready {
   50% {
-    box-shadow: 0 0 0 7px rgba(57, 135, 229, 0.12);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .start-button.ready {
-    animation: none;
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 12%, transparent);
   }
 }
 
@@ -2065,7 +2294,7 @@ table.phase-scores {
   width: 100%;
   padding: 0.5rem 0.65rem;
   border: 1px solid var(--hairline);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--float-surface);
   color: inherit;
   font: inherit;
@@ -2090,8 +2319,20 @@ table.phase-scores {
   margin-top: 0.35rem;
 }
 
-.replay-moment.current {
-  border-color: var(--accent, #8ab4f8);
+.replay-moment.current,
+.replay-item[aria-current="true"] {
+  border-color: var(--accent);
+}
+
+.replay-item:not([aria-current]):hover,
+.replay-moment:not(.current):hover {
+  border-color: var(--control-border);
+}
+
+/* Before a recording is chosen the page is its prompt and nothing else: four
+   empty headings under it read as a page that failed to load. */
+body:not([data-recording]) .replay-detail > :not(header) {
+  display: none;
 }
 
 .replay-panels {
@@ -2117,7 +2358,7 @@ table.phase-scores {
 .replay-line {
   padding: 0.35rem 0;
   border-bottom: 1px solid var(--hairline);
-  font-size: 0.95rem;
+  font-size: 0.9375rem;
 }
 
 .replay-code {
@@ -2126,7 +2367,7 @@ table.phase-scores {
   overflow-x: auto;
   background: var(--float-surface);
   border: 1px solid var(--hairline);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   white-space: pre;
 }
 
@@ -2137,7 +2378,7 @@ table.phase-scores {
   display: block;
   width: 100%;
   border: 1px solid var(--hairline);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: #ffffff;
 }
 
@@ -2146,7 +2387,7 @@ table.phase-scores {
    the summary it explains. */
 .board-timeline ol {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
   align-items: start;
   gap: 0.75rem;
   margin: 0;
@@ -2156,8 +2397,8 @@ table.phase-scores {
 
 .board-step {
   border: 1px solid var(--hairline);
-  border-radius: 8px;
-  background: #24241f;
+  border-radius: var(--radius-sm);
+  background: var(--inset-surface);
   padding: 0.75rem;
 }
 
@@ -2196,7 +2437,7 @@ table.phase-scores {
   width: 100%;
   aspect-ratio: 1600 / 1000;
   border: 1px solid var(--hairline);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: #ffffff;
 }
 
@@ -2210,7 +2451,7 @@ table.phase-scores {
   margin: 0.35rem 0 0;
   padding: 0;
   list-style: none;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   line-height: 1.5;
   color: var(--muted);
 }
@@ -2268,14 +2509,14 @@ table.phase-scores {
   overflow: auto;
   padding: 0.9rem 1.2rem 1rem;
   border: 1px solid var(--hairline);
-  border-radius: 0.6rem;
+  border-radius: var(--radius-sm);
   background: var(--float-surface);
   box-shadow: 0 1.2rem 3rem rgb(0 0 0 / 45%);
 }
 
 .framework-hint-title {
   margin: 0 0 0.6rem;
-  font-size: 0.9rem;
+  font-size: 0.875rem;
   color: var(--ink);
 }
 
@@ -2283,7 +2524,7 @@ table.phase-scores {
    than a column tall enough to hide the page it is explaining. */
 .framework-hint-body {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
   gap: 0.5rem 1.4rem;
 }
 
@@ -2292,14 +2533,14 @@ table.phase-scores {
 .framework-hint-body table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   line-height: 1.45;
 }
 
 .framework-hint-body caption {
   text-align: left;
   padding-bottom: 0.3rem;
-  font-size: 0.82rem;
+  font-size: 0.8125rem;
   font-weight: 600;
   color: var(--ink);
 }
@@ -2309,7 +2550,7 @@ table.phase-scores {
 .framework-hint-body caption span {
   display: block;
   font-weight: 400;
-  font-size: 0.74rem;
+  font-size: 0.75rem;
   color: var(--muted);
 }
 
@@ -2335,7 +2576,7 @@ table.phase-scores {
    this was missing. */
 .star-fields {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
   gap: 0.8rem;
   margin-bottom: 1rem;
 }
@@ -2345,14 +2586,14 @@ table.phase-scores {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   color: var(--sub);
 }
 
 #star-suggestion label {
   display: block;
   margin-bottom: 0.3rem;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   color: var(--sub);
 }
 
@@ -2362,11 +2603,11 @@ table.phase-scores {
   box-sizing: border-box;
   padding: 0.4rem 0.5rem;
   border: 1px solid var(--hairline);
-  border-radius: 0.35rem;
+  border-radius: var(--radius-sm);
   background: var(--page);
   color: var(--ink);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   resize: vertical;
 }
 
@@ -2386,13 +2627,1050 @@ table.phase-scores {
   font-size: 0.875rem;
 }
 
-.interviewer-style-controls select {
+/* The dark field: the setup check's selects and the test drawer's case. */
+.interviewer-style-controls select,
+#candidate-case textarea,
+#candidate-case input {
   width: 100%;
   min-width: 0;
+  min-height: 2.25rem;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
+  background: var(--step-surface);
+  color: var(--ink);
+  font: inherit;
 }
 
 @media (max-width: 480px) {
   .interviewer-style-controls {
     grid-template-columns: 1fr;
+  }
+}
+
+/* The interview's layout: where each control lives. Dark like the rest of
+   the workspace; only placement and grouping are decided here. */
+
+/* The problem fills the sidebar and scrolls; the control dock stays at the
+   bottom of it, always in reach. */
+.interview-sidebar .side-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.session-dock {
+  display: grid;
+  flex: none;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem 1rem;
+  border-top: 1px solid var(--hairline);
+  background: var(--surface);
+}
+
+.session-dock .control-row {
+  margin-top: 0;
+}
+
+/* The action used most: handing the turn to Jim. */
+.session-dock .turn-button {
+  width: 100%;
+  min-height: 2.5rem;
+  font-size: 0.875rem;
+}
+
+.session-dock .control-row .pill-button {
+  min-height: 2rem;
+}
+
+.pill-button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+/* Ending is final, so it sits apart at the far end and is outlined rather
+   than filled: present, but never the loudest thing in the dock. */
+.dock-end {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+/* Outlined rather than filled: present, never the loudest thing near it. */
+.session-dock .pill-button.danger,
+#ending-overlay .pill-button.danger {
+  border-color: var(--danger);
+  background: transparent;
+  color: var(--danger-ink);
+}
+
+.session-dock .pill-button.danger:not(:disabled):hover,
+#ending-overlay .pill-button.danger:not(:disabled):hover {
+  background: var(--danger);
+  color: #ffffff;
+}
+
+.session-dock .meet-mode {
+  margin-top: 0;
+}
+
+/* Open, the Meet notes scroll inside themselves rather than pushing the
+   dock, and End interview with it, out of a short sidebar. */
+.session-dock .meet-mode-body {
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+.recording-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.recording-row:not(:has(> :not([hidden]))) {
+  display: none;
+}
+
+/* Stacked, the sidebar would grow to the problem's full length and put the
+   dock a screen or more below it. Capped, the problem scrolls inside and the
+   controls stay in view under it. */
+@media (max-width: 1023px) {
+  .interview-sidebar {
+    max-height: 80vh;
+    max-height: 80dvh;
+  }
+}
+
+/* One toolbar row: languages on the left; sync state, display settings and
+   Run tests on the right. */
+.toolbar-end {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-left: auto;
+}
+
+/* The sync note is reassurance, not a control: it gives way first, below
+   the width where the toolbar holds it on one row. */
+@container (max-width: 58rem) {
+  .toolbar-end .sync-state {
+    display: none;
+  }
+}
+
+/* How much of the tab row's far edge fades; animated by the row's own scroll,
+   so it is 2rem with tabs still to the right and none at the end. */
+@property --tabs-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@keyframes tabs-fade {
+  from {
+    --tabs-fade: 2rem;
+  }
+
+  to {
+    --tabs-fade: 0px;
+  }
+}
+
+/* A phone-width panel: two rows rather than three. The languages keep one
+   row and scroll sideways instead of wrapping, with Run tests at its end as
+   on a laptop, and the display settings take the row under them. The end
+   group lets go of its children so they can sit on different rows. */
+@container (max-width: 34rem) {
+  /* A thin scrollbar says there is more to the side; where scroll timelines
+     run, the far edge also fades while a tab is still out of view. */
+  .editor-toolbar .language-tabs {
+    flex: 1 1 0;
+    min-width: 0;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 0.25rem;
+    scrollbar-width: thin;
+    scrollbar-color: var(--control-border) transparent;
+  }
+
+  @supports (animation-timeline: scroll()) {
+    .editor-toolbar .language-tabs {
+      mask-image: linear-gradient(
+        to right,
+        #000 calc(100% - var(--tabs-fade)),
+        transparent
+      );
+      animation: tabs-fade linear both;
+      animation-timeline: scroll(self inline);
+    }
+  }
+
+  .editor-toolbar .language-button {
+    flex: none;
+  }
+
+  .toolbar-end {
+    display: contents;
+  }
+
+  .toolbar-end .run-button {
+    flex: none;
+  }
+
+  .toolbar-end .editor-view-controls {
+    order: 1;
+    flex-basis: 100%;
+  }
+}
+
+.editor-view-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.toolbar-end .run-button {
+  min-height: 2rem;
+  padding-inline: 1rem;
+}
+
+#candidate-case > summary {
+  padding: 0.5rem 1rem;
+  color: var(--sub);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+#candidate-case[open] {
+  padding-bottom: 0.5rem;
+}
+
+#candidate-case > label,
+#candidate-case > button,
+#candidate-case > p,
+#candidate-case > ol {
+  margin-inline: 1rem;
+}
+
+/* Name over field, the setup check's field style, and the two side by side
+   with Add case on their baseline where the drawer is wide enough. */
+#candidate-case > label {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  width: min(100% - 2rem, 18rem);
+  margin-bottom: 0.5rem;
+  vertical-align: top;
+  color: var(--sub);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.25rem;
+}
+
+#candidate-case textarea,
+#candidate-case input {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  font-weight: 400;
+}
+
+#candidate-case textarea {
+  resize: vertical;
+}
+
+/* Down by the label's line and gap, so it sits level with the fields. */
+#candidate-case > button {
+  min-height: 2.25rem;
+  margin-top: 1.5rem;
+  vertical-align: top;
+}
+
+.preflight-head {
+  padding: 1.5rem 1.75rem 1.25rem;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.preflight-kicker {
+  margin: 0 0 0.25rem;
+  color: var(--accent);
+}
+
+/* Focused by script when a dialog opens, so a screen reader starts at its
+   name; a name is not a control, so it draws no focus ring. */
+.preflight-head h2:focus,
+#ending-title:focus,
+#report-modal:focus {
+  outline: none;
+}
+
+.preflight-head h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  letter-spacing: -0.02em;
+}
+
+.preflight-head p {
+  margin-top: 0.5rem;
+  line-height: 1.5;
+}
+
+.preflight-head #round-plan-summary:empty {
+  display: none;
+}
+
+.preflight-body {
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  overflow-y: auto;
+}
+
+.preflight-column {
+  padding: 1.25rem 1.75rem;
+}
+
+.preflight-column + .preflight-column {
+  border-left: 1px solid var(--hairline);
+}
+
+.preflight-section-title {
+  margin: 0 0 0.75rem;
+}
+
+.preflight-column .audio-check-step:not([hidden]) + .preflight-section-title {
+  margin-top: 1.5rem;
+}
+
+/* Each check is its own card, ticked off in place when it passes. */
+.preflight-column .audio-check-step {
+  margin: 0 0 0.75rem;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--step-surface);
+  transition: border-color 140ms ease;
+}
+
+.preflight-column .audio-check-step.done {
+  border-color: color-mix(in srgb, var(--good) 55%, transparent);
+}
+
+.preflight-column .audio-check-step > p:first-child,
+.audio-check-step > .preflight-section-title + p {
+  margin-top: 0;
+}
+
+.audio-check-step > .preflight-section-title {
+  margin-bottom: 0.5rem;
+}
+
+.preflight-column .audio-check-step .muted.small {
+  line-height: 1.5;
+}
+
+.preflight-column .interviewer-style-controls + p {
+  margin: 0.5rem 0 0.75rem;
+}
+
+.interviewer-style-controls label {
+  color: var(--sub);
+  font-weight: 700;
+}
+
+.preflight-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  padding: 1rem 1.75rem;
+  border-top: 1px solid var(--hairline);
+  background: var(--surface);
+}
+
+.preflight-footer #audio-check-status {
+  flex: 1 1 16rem;
+  margin: 0;
+}
+
+.preflight-footer .audio-check-actions {
+  margin-top: 0;
+}
+
+.preflight-footer .start-button {
+  min-height: 2.5rem;
+  padding: 0.625rem 1.5rem;
+}
+
+@media (max-width: 860px) {
+  .preflight-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .preflight-column + .preflight-column {
+    border-top: 1px solid var(--hairline);
+    border-left: 0;
+  }
+
+  .preflight-head,
+  .preflight-column,
+  .preflight-footer {
+    padding-inline: 1.25rem;
+  }
+}
+
+/* The practice entrance. On a light system it has its own light palette. On
+   a dark one it takes the interview's warm dark from :root, so moving from
+   the lobby into a session does not flash from one product to another, and
+   only the lobby's own roles below change. The editor keeps its own --code-*
+   theme either way. Every rule here is scoped to .practice-page or .lobby so
+   none of it reaches the other pages. */
+@media not all and (prefers-color-scheme: dark) {
+  .practice-page {
+    color-scheme: light;
+    --page: #f6f6f9;
+    --surface: #ffffff;
+    --ink: #171d2d;
+    --sub: #4f5b73;
+    --muted: #5f6b84;
+    /* Decorative edges: card outlines and dividers. */
+    --hairline: #e3e5ec;
+    /* The edge that identifies a form control, which needs 3:1 against the
+       card where --hairline measures 1.28. */
+    --control-border: #858fa3;
+    --accent: #6e2bf0;
+    --accent-fill: #6e2bf0;
+    --accent-deep: #5520c4;
+    /* Violet text: links, a selected chip, the step numbers. --accent is the
+       fill's violet here, too light for small text. */
+    --accent-ink: #5520c4;
+    --good: #137b56;
+    --critical: #c52d43;
+    --practice-tint: #f3edff;
+    --practice-tint-edge: #ddd0fb;
+    /* The surfaces the dark page sets dark: a saved report opened in the
+       lobby's history, and the progress chart's tooltip, take light ones. */
+    --float-surface: #ffffff;
+    --step-surface: var(--page);
+    --inset-surface: var(--page);
+    --selected-surface: var(--hairline);
+    --shadow-card: 0 1px 2px rgb(23 29 45 / 4%), 0 8px 24px rgb(23 29 45 / 6%);
+    --shadow-cta: 0 6px 16px rgb(110 43 240 / 24%);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .practice-page {
+    /* 7.5:1 on the surface: a selected chip's label sits on the tint. */
+    --accent-ink: #ab9eff;
+    --practice-tint: color-mix(
+      in oklch,
+      var(--accent-fill) 16%,
+      var(--surface)
+    );
+    --practice-tint-edge: #473983;
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 30%), 0 8px 24px rgb(0 0 0 / 24%);
+    --shadow-cta: 0 6px 16px rgb(116 76 230 / 28%);
+  }
+}
+
+.practice-page :focus-visible {
+  outline-offset: 3px;
+}
+
+.lobby > header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  margin-bottom: 2rem;
+}
+
+.lobby > header .brand {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1.125rem;
+  letter-spacing: -0.02em;
+}
+
+.lobby .account-row {
+  margin: 0;
+}
+
+.lobby .account-input,
+.lobby .practice-filters select,
+.lobby .progress-filters select,
+.lobby .interview-context input:not([type="checkbox"]),
+.lobby .interview-context select {
+  min-width: 0;
+  min-height: 2.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.lobby .account-link:hover {
+  color: var(--accent-ink);
+}
+
+/* Hero: a headline and one sentence. The numbered cards below are the guide. */
+.practice-hero {
+  margin-bottom: 2rem;
+}
+
+.practice-badge {
+  display: inline-block;
+  margin-bottom: 1rem;
+  padding: 0.375rem 0.875rem;
+  border: 1px solid var(--practice-tint-edge);
+  border-radius: 999px;
+  background: var(--practice-tint);
+  color: var(--accent-ink);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.lobby h1 {
+  max-width: none;
+  font-size: clamp(2rem, 5vw, 3.25rem);
+  font-weight: 750;
+  line-height: 1.1;
+  letter-spacing: -0.035em;
+}
+
+.practice-lead {
+  max-width: 40rem;
+  margin-top: 0.875rem;
+  font-size: 1.125rem;
+  line-height: 1.55;
+}
+
+.step-number {
+  display: inline-grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: var(--practice-tint);
+  color: var(--accent-ink);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+/* The three setup cards. The problem card is widest so the selected problem
+   fits beside its button (see .random-picker .recommendation below); the
+   session card next, for the format pairs. */
+.setup-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.setup-panel,
+.lobby .recent-performance,
+.lobby .history {
+  min-width: 0;
+  padding: 1.5rem;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.setup-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.875rem;
+}
+
+.setup-heading .step-number {
+  background: var(--accent-fill);
+  color: #ffffff;
+}
+
+.setup-heading h2 {
+  margin: 0.125rem 0 0;
+  font-size: 1.25rem;
+  letter-spacing: -0.02em;
+}
+
+.setup-heading p {
+  margin-top: 0.25rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+/* One caption style for every control group, fieldset legend or heading. */
+.lobby .difficulty-row legend,
+.lobby .editor-options-row legend,
+.setting-label {
+  margin: 0;
+  padding: 0 0 0.5rem;
+  color: var(--ink);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.setting-label {
+  margin-top: 1.25rem;
+}
+
+.lobby .difficulty-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.lobby .difficulty-row,
+.lobby .editor-options-row {
+  margin: 1.25rem 0 0;
+}
+
+/* Chips: a checkbox or a choice button. Selected ones are tinted, so the one
+   solid purple control on the page is Start. */
+.lobby .difficulty-row label,
+.lobby .duration-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--sub);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.lobby .difficulty-row label:hover,
+.lobby .duration-button:hover {
+  border-color: var(--accent);
+}
+
+.lobby .difficulty-row label:has(:checked),
+.lobby .duration-button.selected {
+  border-color: var(--accent);
+  background: var(--practice-tint);
+  color: var(--accent-ink);
+}
+
+/* Editor options are settings rather than filters, so they read as a plain
+   two-column checklist instead of chips. */
+.lobby .editor-options-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, max-content));
+  gap: 0.25rem 1rem;
+}
+
+.lobby .editor-options-row legend {
+  float: left;
+  grid-column: 1 / -1;
+}
+
+.lobby .editor-options-row label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2rem;
+  color: var(--ink);
+  font-size: 0.875rem;
+}
+
+/* The whiteboard has no editor, so app.js disables the whole fieldset. */
+.lobby .editor-options-row:disabled label {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.lobby input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.lobby .duration-row {
+  margin-top: 0;
+}
+
+.session-panel .format-choices {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.session-choice-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.lobby #random-problem,
+.lobby .interview-context button,
+.lobby #problem-filters-reset,
+.lobby #attempt-history > li > button {
+  min-height: 2.5rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.lobby #random-problem:not(:disabled):hover,
+.lobby .interview-context button:hover,
+.lobby #problem-filters-reset:hover,
+.lobby #attempt-history > li > button:not(:disabled):hover {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* Top-aligned, so a title that wraps grows downward and the button stays put
+   from one draw to the next. */
+.lobby .random-picker {
+  align-items: flex-start;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--hairline);
+}
+
+.lobby .recommendation {
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+/* Narrower than the base 12rem so the line still fits beside the button in
+   the problem card on a 1280px screen, which keeps the lobby on one screen.
+   Tied to the card's share of the .setup-grid columns: narrow that column and
+   the line drops below the button, which "the selected problem drops below
+   the button only when it cannot fit beside it" in lobby.test.js catches. */
+.lobby .random-picker .recommendation {
+  flex-basis: 9rem;
+}
+
+.lobby .problem-picker summary,
+.lobby .interview-context summary {
+  color: var(--accent-ink);
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+/* The panel is narrower than the page, and a phone narrower than one 16rem
+   card, so a column never asks for more than the width it has. */
+.lobby .problem-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+}
+
+.lobby .problem-card {
+  min-height: 6rem;
+  border-radius: var(--radius-md);
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.lobby .problem-card:hover,
+.lobby .problem-card.selected {
+  background: var(--practice-tint);
+  box-shadow: var(--shadow-card);
+}
+
+.lobby .problem-title {
+  font-size: 1rem;
+}
+
+.lobby .interview-context {
+  margin-top: 1.25rem;
+  padding: 0.75rem 1rem;
+  border-color: var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--page);
+}
+
+.lobby .interview-context fieldset {
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+
+.lobby .interview-context fieldset + fieldset {
+  padding-top: 1rem;
+  border-top: 1px solid var(--hairline);
+}
+
+.lobby .interview-context label {
+  min-width: 0;
+  color: var(--sub);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.lobby .interview-context label:has(input[type="checkbox"]) {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.lobby .interview-context input[type="checkbox"] {
+  flex-shrink: 0;
+  margin-top: 0.25rem;
+}
+
+.lobby .interview-context input:not([type="checkbox"]),
+.lobby .interview-context select {
+  width: 100%;
+}
+
+.lobby .interview-context input::file-selector-button {
+  margin-right: 0.5rem;
+  padding: 0.25rem 0.625rem;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.lobby .interview-context p {
+  margin-top: 0.375rem;
+  line-height: 1.5;
+}
+
+.lobby .interview-context p:empty,
+.lobby #grounding-choices:empty {
+  display: none;
+}
+
+.start-panel .start-row {
+  margin-top: 1.25rem;
+}
+
+.lobby .start-button {
+  width: 100%;
+  min-height: 3rem;
+  border: 0;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-cta);
+  font-size: 1rem;
+}
+
+.lobby .start-button:disabled {
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.next-steps {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0 0 1.25rem;
+  padding: 0;
+  list-style: none;
+  color: var(--sub);
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+/* The dot is painted, not a marker or generated content: the stylesheet draws
+   no text, and tests/browser/replay-render.test.js holds it to that. */
+.next-steps li {
+  padding-left: 1.125rem;
+  background: radial-gradient(circle, var(--accent) 60%, transparent 66%) 0
+    0.3125em / 0.5rem 0.5rem no-repeat;
+}
+
+/* Progress below the setup: cards of the same family as the setup's. */
+.lobby .recent-performance,
+.lobby .history {
+  padding-block: 1.25rem;
+}
+
+.lobby .progress-chart-tooltip {
+  border-color: var(--control-border);
+  box-shadow: var(--shadow-card);
+}
+
+.lobby #attempt-history > li > button[data-delete-report] {
+  color: var(--critical);
+}
+
+.lobby #attempt-history > li > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.lobby .site-credits a,
+.lobby .history a {
+  color: var(--accent-ink);
+}
+
+@media (min-width: 761px) and (max-width: 1100px) {
+  .setup-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .start-panel {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 760px) {
+  .setup-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .setup-panel {
+    padding: 1.25rem;
+  }
+}
+
+/* Phones: 44px tap targets, and 16px fields so iOS does not zoom on focus. */
+@media (max-width: 480px) {
+  .lobby > header {
+    margin-bottom: 1.25rem;
+  }
+
+  .lobby .account-row {
+    width: 100%;
+  }
+
+  .lobby .account-input {
+    flex: 1 1 10rem;
+    width: auto;
+  }
+
+  .lobby input:not([type="checkbox"]),
+  .lobby select {
+    font-size: 1rem;
+  }
+
+  .practice-hero {
+    margin-bottom: 1.5rem;
+  }
+
+  .practice-lead {
+    font-size: 1rem;
+  }
+
+  .setup-grid {
+    gap: 1rem;
+  }
+
+  .lobby .difficulty-row label,
+  .lobby .editor-options-row label,
+  .lobby .duration-button,
+  .lobby #random-problem {
+    min-height: 2.75rem;
+  }
+
+  /* Equal-width segments: three lengths in one row, each format pair in
+     its own row so a pair never interleaves with the other. */
+  .lobby .duration-row:not(.format-choices) {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .session-choice-group {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lobby .difficulty-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr));
+  }
+
+  .lobby .editor-options-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lobby .difficulty-row label,
+  .lobby .duration-button {
+    justify-content: center;
+  }
+}
+
+/* A laptop screen: keep the whole setup on one 1280x800 screen. */
+@media (min-width: 1024px) and (max-height: 850px) {
+  .lobby > header {
+    margin-bottom: 1.25rem;
+  }
+
+  .practice-hero {
+    margin-bottom: 1.25rem;
+  }
+
+  .lobby h1 {
+    font-size: 2.5rem;
+  }
+
+  .practice-badge {
+    margin-bottom: 0.625rem;
+  }
+
+  .practice-lead {
+    margin-top: 0.5rem;
+    font-size: 1rem;
+  }
+
+  .setup-panel {
+    padding: 1.25rem;
+  }
+
+  .setting-label {
+    margin-top: 1rem;
+  }
+
+  .lobby .difficulty-row,
+  .lobby .editor-options-row {
+    margin-top: 1rem;
+  }
+
+  .lobby .difficulty-row label,
+  .lobby .duration-button {
+    min-height: 2.25rem;
+    padding: 0.375rem 0.625rem;
+  }
+}
+
+/* Every page's motion, stopped in one place. Last in the file, so it
+   outranks each transition it names at the same specificity. The spinner
+   slows rather than stops, so the wait still visibly progresses. */
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2.4s;
+  }
+
+  .start-button.ready {
+    animation: none;
+  }
+
+  .duration-button,
+  #random-problem,
+  .start-button,
+  .problem-card,
+  .lobby .problem-card,
+  .pill-button,
+  .tab-button,
+  .language-button,
+  .font-size-button,
+  .run-button,
+  .step-mark,
+  .preflight-column .audio-check-step,
+  #results-chevron {
+    transition: none;
   }
 }
