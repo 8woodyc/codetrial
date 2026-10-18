@@ -196,6 +196,56 @@ test("harness generator covers every function problem without network access", (
   }
 });
 
+// The C starters describe struct Node in a comment, and the harness declares
+// the struct the code is compiled against. Nothing ties the two copies
+// together, so a field named in one and not the other only shows up as a
+// compile error for a candidate who wrote what the comment said, as the
+// graph clone starter's numNeighbors once did against a harness that
+// named the field neighborsSize.
+test("every struct Node field a C starter documents is one the harness declares", () => {
+  const fieldsOf = (body) =>
+    body
+      .split(";")
+      .map((declaration) => declaration.trim())
+      .filter(Boolean)
+      .map((declaration) => {
+        const name = declaration.match(/^\w+(?:\s+\w+)?[\s*]+(\w+)$/)?.[1];
+        assert.ok(
+          name,
+          `cannot read a struct Node field from "${declaration}"`,
+        );
+        return name;
+      });
+  const harness = generateHarness("c", judges["clone-graph"], "").match(
+    /struct\s+Node\s*\{([^}]*)\}/,
+  );
+  assert.ok(harness, "the C harness no longer declares struct Node");
+  const declared = new Set(fieldsOf(harness[1]));
+
+  for (const [id, { page }] of Object.entries(pageMap)) {
+    const starter = JSON.parse(
+      readFileSync(webFile(`problems/${page}.json`), "utf8"),
+    ).starterCode.c;
+    const usesNode = [
+      ...(judges[id].paramTypes ?? []),
+      judges[id].returnType,
+    ].includes("Node");
+    if (!usesNode) continue;
+    // Drop the comment's leading asterisks first, so a brace on its own line
+    // still reads as part of the struct.
+    const comment = starter
+      ?.replace(/^\s*\*/gm, "")
+      .match(/struct\s+Node\s*\{([^}]*)\}/);
+    assert.ok(comment, `${page}: the C starter does not document struct Node`);
+    for (const field of fieldsOf(comment[1])) {
+      assert.ok(
+        declared.has(field),
+        `${page}: the C starter documents struct Node field ${field}, which the harness does not declare`,
+      );
+    }
+  }
+});
+
 test("harness generator covers every class problem without network access", () => {
   for (const [id, spec] of Object.entries(judges)) {
     if (spec.kind !== "class") continue;
