@@ -1361,7 +1361,7 @@ function renderAttemptHistory(attempts) {
       ? "INCOMPLETE"
       : (attempt.report.decision ?? "UNSCORED");
     const label = document.createElement("p");
-    label.textContent = `${when} · ${attempt.problemTitle} · ${languageLabel(attempt.language ?? "not recorded")} · ${verdict}`;
+    label.textContent = `${when} · ${attempt.problemTitle} · ${attempt.difficulty ?? "Difficulty not recorded"} · ${languageLabel(attempt.language ?? "not recorded")} · ${verdict}`;
     const open = document.createElement("button");
     open.type = "button";
     open.textContent = "Open report";
