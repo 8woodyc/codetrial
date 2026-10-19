@@ -1542,6 +1542,46 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
 }
 `);
       await runAndExpectPassing(PROBLEM_IDS.copyRandomList);
+      // Copying random from the original node is the usual slip here. Both
+      // browser runners have to name it, as the compiled harnesses do.
+      const randomOutsideCopy = page.locator("#results-body").filter({
+        hasText: "Returned random pointer must stay inside the copied list.",
+      });
+      await page.getByLabel("Code editor")
+        .fill(`function snapshotOutline(head) {
+  if (!head) return null;
+  const copies = new Map();
+  for (let node = head; node; node = node.next) copies.set(node, new _Node(node.val));
+  for (let node = head; node; node = node.next) {
+    copies.get(node).next = node.next ? copies.get(node.next) : null;
+    copies.get(node).random = node.random;
+  }
+  return copies.get(head);
+}
+`);
+      await page.getByRole("button", { name: /Run tests/ }).click();
+      await page.getByRole("button", { name: "Run tests" }).waitFor();
+      await randomOutsideCopy.waitFor();
+      await selectLanguage(page, "Python");
+      await page.getByLabel("Code editor").fill(`class Solution:
+    def snapshotOutline(self, head):
+        copies = {}
+        node = head
+        while node:
+            copies[node] = Node(node.val)
+            node = node.next
+        node = head
+        while node:
+            copies[node].next = copies.get(node.next)
+            copies[node].random = node.random
+            node = node.next
+        return copies.get(head)
+`);
+      await page.getByRole("button", { name: /Run tests/ }).click();
+      await page
+        .getByRole("button", { name: "Run tests" })
+        .waitFor({ timeout: 120000 });
+      await randomOutsideCopy.waitFor({ timeout: 120000 });
 
       await page.goto(interviewUrl(PROBLEM_IDS.rotateList), {
         waitUntil: "domcontentloaded",
