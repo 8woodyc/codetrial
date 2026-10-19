@@ -1542,6 +1542,21 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
 }
 `);
       await runAndExpectPassing(PROBLEM_IDS.copyRandomList);
+      // A Map lookup of a null random leaves undefined, not null. That is
+      // still no pointer, so the copy has to pass rather than show -1.
+      await page.getByLabel("Code editor")
+        .fill(`function snapshotOutline(head) {
+  if (!head) return null;
+  const copies = new Map();
+  for (let node = head; node; node = node.next) copies.set(node, new _Node(node.val));
+  for (let node = head; node; node = node.next) {
+    copies.get(node).next = node.next ? copies.get(node.next) : null;
+    copies.get(node).random = copies.get(node.random);
+  }
+  return copies.get(head);
+}
+`);
+      await runAndExpectPassing(PROBLEM_IDS.copyRandomList);
       // Copying random from the original node is the usual slip here. Both
       // browser runners have to name it, as the compiled harnesses do.
       const randomOutsideCopy = page.locator("#results-body").filter({

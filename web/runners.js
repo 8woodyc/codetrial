@@ -703,7 +703,10 @@ const JS_RUNNER_SOURCE = `
           nodes.push(node);
           node = node.next;
         }
-        return nodes.map((item) => [item.val, item.random === null ? null : nodes.indexOf(item.random)]);
+        return nodes.map((item) => {
+          if (item.random != null && !seen.has(item.random)) throw new TypeError("Returned random pointer must stay inside the copied list.");
+          return [item.val, item.random == null ? null : nodes.indexOf(item.random)];
+        });
       };
       const graphToAdjacency = (node) => {
         if (!node) return [];
@@ -1032,7 +1035,12 @@ def _random_list_to_array(node):
         seen.add(id(node))
         nodes.append(node)
         node = node.next
-    return [[node.val, None if node.random is None else nodes.index(node.random)] for node in nodes]
+    rows = []
+    for node in nodes:
+        if node.random is not None and id(node.random) not in seen:
+            raise TypeError("Returned random pointer must stay inside the copied list.")
+        rows.append([node.val, None if node.random is None else nodes.index(node.random)])
+    return rows
 
 def _graph_to_adjacency(node):
     if node is None:

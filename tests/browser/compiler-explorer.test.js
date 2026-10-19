@@ -1929,6 +1929,17 @@ test("harness generator prepares adapter arguments and mutable char matrices", (
     cRandomList,
     /Returned random pointer must stay inside the copied list/,
   );
+  // The browser runners serialize the same list, once in JavaScript and once
+  // in Python, and have to refuse the same pointer before indexing it.
+  const runners = readFileSync(webFile("runners.js"), "utf8");
+  assert.match(
+    runners,
+    /item\.random != null && !seen\.has\(item\.random\)\) throw new TypeError\("Returned random pointer must stay inside the copied list\."\)/,
+  );
+  assert.match(
+    runners,
+    /node\.random is not None and id\(node\.random\) not in seen:\n\s+raise TypeError\("Returned random pointer must stay inside the copied list\."\)/,
+  );
   assert.match(graph, /Returned graph must be a deep copy/);
   assert.match(cGraph, /Returned graph must be a deep copy/);
   assert.match(nextTree, /next pointers do not match the tree level order/);
