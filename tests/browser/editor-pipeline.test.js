@@ -973,11 +973,14 @@ test("a new Jim turn starts at the top of the caption bar", async (t) => {
       async ({ text, id }) => {
         const captions = await import("/captions.js");
         captions.updateCaptions("interviewer", text, id, { final: true });
-        await new Promise((resolve) => requestAnimationFrame(resolve));
+        const node = document.querySelector("#captions-text");
+        if (node.textContent === `[Jim]: ${text.slice(0, 8)}`) {
+          for (let i = 0; i < Math.ceil(text.length / 8); i++)
+            captions.paceInterviewerCaption();
+        }
       },
       { text, id },
     );
-    await revealCaption(page, text);
   };
 
   const scrollDown = async () => {
