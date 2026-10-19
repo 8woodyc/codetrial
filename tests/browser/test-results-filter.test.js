@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_RUNTIME_CONFIG,
   launchChromium,
+  pauseClock,
   startStaticServer,
 } from "./source.js";
 
@@ -164,14 +165,14 @@ test("new runs hide stale results and retain the filter through success and erro
     globalThis.holdTestRun = true;
   });
   await page.locator("#editor").fill(correct);
+  // Stop the page's clock before the run arms its five-second loop timeout,
+  // so a slow machine checking the running state below cannot time the held
+  // run out and hide the filter.
+  await pauseClock(page);
   await page.locator("#run-tests").click();
   await page.waitForFunction(
     () => typeof globalThis.releaseTestRun === "function",
   );
-  // The runner's five-second loop timeout is already counting while the run
-  // is held. Stop the page's clock so a slow machine checking the running
-  // state below cannot time the held run out and hide the filter.
-  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
   assert.equal(await toggle.isVisible(), false);
   assert.match(await content.textContent(), /Running test cases/);
   assert.equal(await content.locator("li").count(), 0);

@@ -286,6 +286,23 @@ export async function closeSetupCheck(page) {
   );
 }
 
+/// Stops a page's installed fake clock about where it stands. Playwright pauses
+/// only at a named time, and the clock keeps moving between reading the time
+/// and pausing at it: a loaded machine has spent more than 100ms there, past
+/// the target, and `pauseAt` refuses to go back. The refused call has already
+/// stopped the clock, so a target read again lands ahead of it.
+export async function pauseClock(page) {
+  for (let attempt = 1; ; attempt++) {
+    const at = await page.evaluate(() => Date.now() + 100);
+    try {
+      return await page.clock.pauseAt(at);
+    } catch (error) {
+      if (attempt === 5 || !/fast-forward to the past/.test(error.message))
+        throw error;
+    }
+  }
+}
+
 export function captures(source, pattern) {
   return [...source.matchAll(pattern)].map((match) => match[1]);
 }

@@ -8,6 +8,7 @@ import {
   DEFAULT_RUNTIME_CONFIG,
   launchChromium,
   FAKE_SPEECH_CAPTURE,
+  pauseClock,
   startStaticServer,
 } from "./source.js";
 
@@ -46,10 +47,11 @@ after(async () => {
 /// `started` hides the media preflight, which is how the shortcut tells
 /// whether the interview has begun. `media` opens the page in a browser with a
 /// fake microphone and camera instead, for a case that clears the preflight
-/// for real.
+/// for real. `clock` installs Playwright's fake clock before the page loads,
+/// for a case that has to stop the page's timers.
 async function interviewPage(
   t,
-  { started = true, media = false, params = {} } = {},
+  { started = true, media = false, params = {}, clock = false } = {},
 ) {
   if (!browser) {
     t.skip("playwright chromium unavailable");
@@ -58,6 +60,7 @@ async function interviewPage(
   const page = await (media ? await mediaBrowser(t) : browser).newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  if (clock) await page.clock.install();
   const query = new URLSearchParams({
     problem: "chargeback-pair-match",
     ...params,
@@ -359,7 +362,7 @@ test("the shortcut does nothing while the media preflight is still up", async (t
 });
 
 test("the shortcut does nothing once the interview has ended", async (t) => {
-  const ctx = await interviewPage(t);
+  const ctx = await interviewPage(t, { clock: true });
   if (!ctx) return;
   const { page, errors } = ctx;
   try {
@@ -370,6 +373,12 @@ test("the shortcut does nothing once the interview has ended", async (t) => {
     // lands there. The listener is the document's, so it still sees it, and
     // the defaultPrevented check below proves it did rather than the press
     // reaching nothing.
+    //
+    // With no interviewer in the room, ending shows the offline report by
+    // itself 300ms later and takes focus off the wait, so a slow machine
+    // checking focus below found it on the report. A stopped clock keeps the
+    // wait up.
+    await pauseClock(page);
     await page.click("#end");
     await page.waitForFunction(
       () => document.querySelector(".editor-panel").inert,
