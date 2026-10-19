@@ -395,20 +395,42 @@ describe("toolchain harnesses", { concurrency: true }, () => {
     },
   );
 
-  it(
-    "C Clone Graph harness accepts the numNeighbors field its starter names",
-    { skip: noCc },
-    async () => {
-      const dir = mkdtempSync(join(tmpdir(), "codetrial-c-"));
-      try {
-        const source = join(dir, "clonegraph.c");
-        const binary = join(dir, "clonegraph");
-        writeFileSync(
-          source,
-          generateHarness(
-            "c",
-            judges["clone-graph"],
-            `static struct Node* copies[101];
+  // A degree-three node distinguishes rotation from simple reversal.
+  const cloneGraphSpec = {
+    ...judges["clone-graph"],
+    cases: [
+      ...judges["clone-graph"].cases,
+      {
+        label: "three-neighbor star",
+        input: [[[2, 3, 4], [1], [1], [1]]],
+        expected: [[2, 3, 4], [1], [1], [1]],
+      },
+    ],
+  };
+
+  for (const [order, neighborIndex] of [
+    ["original neighbor order", "i"],
+    ["reversed neighbors", "s->numNeighbors - 1 - i"],
+    [
+      "reversed neighbors on odd nodes",
+      "s->val % 2 ? s->numNeighbors - 1 - i : i",
+    ],
+    ["rotated neighbors", "(i + 1) % s->numNeighbors"],
+  ]) {
+    it(
+      `C Clone Graph harness accepts numNeighbors with ${order}`,
+      { skip: noCc },
+      async () => {
+        const dir = mkdtempSync(join(tmpdir(), "codetrial-c-"));
+        try {
+          const source = join(dir, "clonegraph.c");
+          const binary = join(dir, "clonegraph");
+          writeFileSync(
+            source,
+            generateHarness(
+              "c",
+              cloneGraphSpec,
+              `static struct Node* copies[101];
 static struct Node* copyNode(struct Node* s) {
     if (!s) return NULL;
     if (copies[s->val]) return copies[s->val];
@@ -418,13 +440,43 @@ static struct Node* copyNode(struct Node* s) {
     copy->numNeighbors = s->numNeighbors;
     copy->neighbors = calloc(s->numNeighbors + 1, sizeof(*copy->neighbors));
     for (int i = 0; i < s->numNeighbors; i++)
-        copy->neighbors[i] = copyNode(s->neighbors[i]);
+        copy->neighbors[i] = copyNode(s->neighbors[${neighborIndex}]);
     return copy;
 }
 struct Node* replicateTopology(struct Node* s) {
     memset(copies, 0, sizeof(copies));
     return copyNode(s);
 }`,
+            ),
+          );
+          await run("cc", ["-std=c17", source, "-o", binary]);
+          assert.deepEqual(
+            parseCompilerResults(
+              (await run(binary, [], { encoding: "utf8" })).stdout,
+            ).results.map((result) => result.actual),
+            cloneGraphSpec.cases.map((testCase) => testCase.expected),
+          );
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      },
+    );
+  }
+
+  it(
+    "C Clone Graph harness rejects original nodes",
+    { skip: noCc },
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "codetrial-c-"));
+      try {
+        const source = join(dir, "clonegraph-original.c");
+        const binary = join(dir, "clonegraph-original");
+        writeFileSync(
+          source,
+          generateHarness(
+            "c",
+            cloneGraphSpec,
+            "struct Node* replicateTopology(struct Node* s) { return s; }",
           ),
         );
         await run("cc", ["-std=c17", source, "-o", binary]);
@@ -432,7 +484,11 @@ struct Node* replicateTopology(struct Node* s) {
           parseCompilerResults(
             (await run(binary, [], { encoding: "utf8" })).stdout,
           ).results.map((result) => result.actual),
-          judges["clone-graph"].cases.map((testCase) => testCase.expected),
+          cloneGraphSpec.cases.map((testCase) =>
+            testCase.input[0].length
+              ? "Returned graph must be a deep copy."
+              : [],
+          ),
         );
       } finally {
         rmSync(dir, { recursive: true, force: true });
