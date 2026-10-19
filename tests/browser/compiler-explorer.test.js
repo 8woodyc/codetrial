@@ -813,6 +813,215 @@ public:
   }
 
   it(
+    "C next-pointer tree harness checks every next pointer, up to 6000 nodes",
+    { skip: noCc },
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "codetrial-c-next-"));
+      const judge = judges["populating-next-right-pointers-in-each-node-ii"];
+      const completeTree = (label, size, value = (n) => n) => {
+        const levels = [];
+        for (let first = 1; first <= size; first *= 2) {
+          const count = Math.min(first * 2, size + 1) - first;
+          levels.push(
+            Array.from({ length: count }, (_, i) => value(first + i)),
+          );
+        }
+        const input = [Array.from({ length: size }, (_, i) => value(i + 1))];
+        return { label, input, expected: levels };
+      };
+      // 64 nodes fill the harness's first queue exactly, so they never need
+      // it to grow, and all of them hold the same value, so only a node's
+      // address tells a repeat from a sibling. A candidate case can be as
+      // large as the problem's 6000-node limit, past what a fixed 4096-entry
+      // queue holds.
+      const exactFit = completeTree("exact fit", 64, () => 1);
+      const spec = {
+        ...judge,
+        cases: [...judge.cases, exactFit, completeTree("full-size tree", 6000)],
+      };
+      // The bottom row's last node can point back to that row's first node
+      // instead of NULL, which printing the values alone hides, or take
+      // itself as a left child, which passes every next check while the
+      // tree never ends.
+      const linkRows = (lastNext, lastLeft) => `static struct Node* rows[6000];
+struct Node* linkRowNeighbors(struct Node* root) {
+    int head = 0, tail = 0;
+    if (root) rows[tail++] = root;
+    while (head < tail) {
+        int end = tail;
+        for (int i = head; i < end; i++) {
+            rows[i]->next = i + 1 < end ? rows[i + 1] : NULL;
+            if (rows[i]->left) rows[tail++] = rows[i]->left;
+            if (rows[i]->right) rows[tail++] = rows[i]->right;
+        }
+        if (tail == end) {
+            rows[end - 1]->next = ${lastNext};
+            rows[end - 1]->left = ${lastLeft};
+        }
+        head = end;
+    }
+    return root;
+}`;
+      const actuals = async (name, code, flags = []) => {
+        const source = join(dir, `${name}.c`);
+        const binary = join(dir, name);
+        writeFileSync(source, generateHarness("c", spec, code));
+        await run("cc", ["-std=c17", ...flags, source, "-o", binary]);
+        return parseCompilerResults(
+          (await run(binary, [], { encoding: "utf8", timeout: 10000 })).stdout,
+        ).results.map((result) =>
+          result.error === undefined ? result.actual : { error: result.error },
+        );
+      };
+      try {
+        assert.deepEqual(
+          await actuals("correct", linkRows("NULL", "NULL")),
+          spec.cases.map((testCase) => testCase.expected),
+        );
+        const mismatch = {
+          error: "next pointers do not match the tree level order.",
+        };
+        assert.deepEqual(
+          await actuals("ring", linkRows("rows[head]", "NULL")),
+          [mismatch, [], mismatch, mismatch, mismatch, mismatch, mismatch],
+        );
+        // Only the root's left child is wrong: its next points back at the
+        // root instead of across to its sibling. That is an upper level, a
+        // pointer that is not NULL, and in the exact fit a node with the
+        // sibling's value, so checking only the last pointer of each level,
+        // only whether a pointer is NULL, or only values would all miss it.
+        const linkAllRows = linkRows("NULL", "NULL").replace(
+          "linkRowNeighbors",
+          "linkAllRows",
+        );
+        const interior = `${linkAllRows}
+struct Node* linkRowNeighbors(struct Node* root) {
+    linkAllRows(root);
+    if (root && root->left && root->right) root->left->next = root;
+    return root;
+}`;
+        assert.deepEqual(
+          await actuals("interior", interior),
+          spec.cases.map((testCase) =>
+            testCase.expected[1]?.length === 2 ? mismatch : testCase.expected,
+          ),
+        );
+        const twice = { error: "Returned tree must not reach a node twice." };
+        // The root's right child is its left child again, a repeat inside the
+        // level being queued rather than one already walked.
+        const sharedChild = `${linkAllRows}
+struct Node* linkRowNeighbors(struct Node* root) {
+    linkAllRows(root);
+    if (root && root->left) root->right = root->left;
+    return root;
+}`;
+        assert.deepEqual(
+          await actuals("shared-child", sharedChild),
+          spec.cases.map((testCase) =>
+            testCase.expected.length > 1 ? twice : testCase.expected,
+          ),
+        );
+        // Every realloc in the harness is the queue's, so renaming it to one
+        // that always fails takes the full-size case down the grow failure,
+        // while the exact fit never asks to grow.
+        const failingRealloc = `void* failing_realloc(void* ptr, size_t size) {
+    (void)ptr;
+    (void)size;
+    return NULL;
+}
+`;
+        const noMemory = {
+          error: "Out of memory while checking next pointers.",
+        };
+        assert.deepEqual(
+          await actuals(
+            "no-memory",
+            failingRealloc + linkRows("NULL", "NULL"),
+            ["-Drealloc=failing_realloc"],
+          ),
+          [
+            ...judge.cases.map((testCase) => testCase.expected),
+            exactFit.expected,
+            noMemory,
+          ],
+        );
+        // A repeated child is refused before the queue would grow for it, so
+        // the exact fit reports the repeat rather than the failed grow.
+        assert.deepEqual(
+          await actuals(
+            "no-memory-self-child",
+            failingRealloc + linkRows("NULL", "rows[end - 1]"),
+            ["-Drealloc=failing_realloc"],
+          ),
+          [twice, [], twice, twice, twice, twice, noMemory],
+        );
+        // The bottom row's last node takes the root as its left child, a
+        // repeat of a level already walked. These repeats run with growth
+        // failing first, so a scan that missed one would report memory at 64
+        // nodes instead of growing the queue until the run is killed.
+        assert.deepEqual(
+          await actuals(
+            "back-to-root",
+            failingRealloc + linkRows("NULL", "root"),
+            ["-Drealloc=failing_realloc"],
+          ),
+          [twice, [], twice, twice, twice, twice, noMemory],
+        );
+        // With growth working, the full-size tree finds its repeat as well.
+        assert.deepEqual(
+          await actuals("self-child", linkRows("NULL", "rows[end - 1]")),
+          [twice, [], twice, twice, twice, twice, twice],
+        );
+        // The queue grows and then the level ends cannot, so the failure frees
+        // the queue at its new address and the old level ends.
+        const levelEndsFail = `#undef realloc
+void* realloc(void* ptr, size_t size);
+void* failing_realloc(void* ptr, size_t size) {
+    static int calls;
+    return ++calls % 2 ? realloc(ptr, size) : NULL;
+}
+`;
+        assert.deepEqual(
+          await actuals(
+            "level-ends-fail",
+            levelEndsFail + linkRows("NULL", "NULL"),
+            ["-Drealloc=failing_realloc"],
+          ),
+          [
+            ...judge.cases.map((testCase) => testCase.expected),
+            exactFit.expected,
+            noMemory,
+          ],
+        );
+        // In this problem only json_next_tree calls malloc (nextTree uses
+        // calloc), twice per non-empty case: the queue, then the level ends.
+        // Failing every odd call loses only the queue and every even call
+        // only the level ends, and each loss must be reported by itself; an
+        // empty tree never allocates.
+        for (const lost of [1, 0]) {
+          const failingMalloc = `#undef malloc
+void* malloc(size_t size);
+void* failing_malloc(size_t size) {
+    static int calls;
+    return ++calls % 2 == ${lost} ? NULL : malloc(size);
+}
+`;
+          assert.deepEqual(
+            await actuals(
+              `no-malloc-${lost}`,
+              failingMalloc + linkRows("NULL", "NULL"),
+              ["-Dmalloc=failing_malloc"],
+            ),
+            [noMemory, [], noMemory, noMemory, noMemory, noMemory, noMemory],
+          );
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it(
     "C Merge k Sorted Lists harness can produce passing Compiler Explorer JSON",
     { skip: noCc },
     async () => {
