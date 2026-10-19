@@ -148,8 +148,6 @@ test("an interview loads only selected grammars and Enter works during a switch"
       () =>
         document.querySelector("#editor-highlight .tok-string")?.textContent ===
         "/\\/*/",
-      null,
-      { timeout: 5000 },
     );
     assert.equal(
       await page.locator("#editor-highlight .tok-comment").count(),

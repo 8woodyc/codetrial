@@ -228,12 +228,11 @@ gate()
         check = support.job("check")
         self.assertIn("    needs: gates\n", check)
         self.assertIn("    if: ${{ !cancelled() }}\n", check)
-        command = re.search(r"^        run: (.+)$", check, re.M)
-        self.assertIsNotNone(command)
+        command = support.run_block(check)
         for state in ("success", "failure", "cancelled", "skipped", ""):
             with self.subTest(state=state):
                 self.assertEqual(
-                    self.run_status(command[1], RESULT=state) == 0,
+                    self.run_status(command, RESULT=state) == 0,
                     state == "success",
                 )
 

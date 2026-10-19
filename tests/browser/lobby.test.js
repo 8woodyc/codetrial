@@ -19,6 +19,7 @@ import assert from "node:assert/strict";
 import {
   functionBody,
   launchChromium,
+  reaches,
   read,
   startStaticServer,
 } from "./source.js";
@@ -186,19 +187,6 @@ const setLevel = (page, level, on) =>
     },
     [level, on],
   );
-
-/// Wait for the page to reach a state, then let the assertions report on it.
-///
-/// Swallowing the timeout is deliberate: a bare `waitForFunction` that never
-/// comes true fails as a thirty second timeout naming a predicate, and the
-/// assertion right after it fails in one line naming what was wrong. The wait
-/// is here to remove the race, not to be the check. Ten seconds because the
-/// work behind these is two stubbed fetches, so anything near it is a hang.
-async function settles(page, predicate) {
-  await page
-    .waitForFunction(predicate, null, { timeout: 10_000 })
-    .catch(() => {});
-}
 
 /// A page whose first recommendation has landed.
 async function lobby(page) {
@@ -446,7 +434,7 @@ lobbyTest(
 async function heldLobby(page) {
   const release = holdHistory();
   await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
-  await settles(
+  await reaches(
     page,
     () =>
       document.querySelector("#account-status").textContent !==
@@ -458,7 +446,7 @@ async function heldLobby(page) {
 /// The lobby has chosen: `settle` is what enables the button, so this is the
 /// one condition that means every derived thing on the page is in place.
 const awaitReady = (page) =>
-  settles(page, () => !document.querySelector("#start").disabled);
+  reaches(page, () => !document.querySelector("#start").disabled);
 
 const restore = (page) =>
   page.evaluate(() =>
@@ -842,7 +830,7 @@ lobbyTest(
   async (page) => {
     failing = new Set(["/api/reports"]);
     await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
-    await settles(
+    await reaches(
       page,
       () =>
         document.querySelector("#progress-summary").textContent ===
@@ -1109,7 +1097,7 @@ lobbyTest(
       mimeType: "application/pdf",
       buffer: pdfOf(pages),
     });
-    await settles(page, () =>
+    await reaches(page, () =>
       /11 pages/.test(
         document.querySelector("#grounding-jd-status").textContent,
       ),
@@ -1133,7 +1121,7 @@ lobbyTest(
       mimeType: "application/pdf",
       buffer: pdfOf([["Must know Rust"]]),
     });
-    await settles(page, () =>
+    await reaches(page, () =>
       /reader did not load/.test(
         document.querySelector("#grounding-jd-status").textContent,
       ),
@@ -1155,7 +1143,7 @@ lobbyTest(
       mimeType: "application/pdf",
       buffer: pdfOf([[]]),
     });
-    await settles(page, () =>
+    await reaches(page, () =>
       /selectable text/.test(
         document.querySelector("#grounding-resume-status").textContent,
       ),
@@ -1223,7 +1211,7 @@ lobbyTest(
       "#grounding-jd",
       groundingTxt("jd.txt", "Must know SQL"),
     );
-    await settles(
+    await reaches(
       page,
       () => document.querySelector("#grounding-choices label") !== null,
     );
@@ -1268,7 +1256,7 @@ lobbyTest(
       document.querySelector(`[data-problem="${problemId}"]`).click();
     }, MEDIUM[0]);
     release();
-    await settles(
+    await reaches(
       page,
       () => !document.querySelector("#practice-focus").hidden,
     );
@@ -2249,7 +2237,7 @@ lobbyTest(
     // it holds about the session is now wrong in every part.
     session = { signedIn: true, user: { login: "candidate" } };
     await restore(page);
-    await settles(
+    await reaches(
       page,
       () =>
         document
@@ -2287,7 +2275,7 @@ lobbyTest(
     // sentence under it still describe the replaced history is the bug here.
     reports = [missed(MEDIUM[0]), missed(MEDIUM[1])];
     await restore(page);
-    await settles(
+    await reaches(
       page,
       () =>
         !document.querySelector("#start").disabled &&
@@ -2603,7 +2591,7 @@ lobbyTest(
       "#grounding-jd",
       txt("second.txt", "Must know SQL"),
     );
-    await settles(page, () =>
+    await reaches(page, () =>
       document
         .querySelector("#grounding-choices label")
         ?.textContent.includes("SQL"),
@@ -2676,7 +2664,7 @@ lobbyTest(
 
     await page.fill("#github-login", "candidate");
     await page.click("#start");
-    await settles(page, () =>
+    await reaches(page, () =>
       document.querySelector("#grounding-error").textContent.includes("Agree"),
     );
     assert.equal(
@@ -2855,7 +2843,7 @@ lobbyTest(
       return dialog.accept();
     });
     await page.click("#delete-reports");
-    await settles(page, () => document.querySelector("#history").hidden);
+    await reaches(page, () => document.querySelector("#history").hidden);
     assert.equal(deleteRequests, 1);
     assert.deepEqual(reports, []);
     assert.equal(await page.locator("#history").isHidden(), true);
@@ -2916,7 +2904,7 @@ lobbyTest(
       return dialog.accept();
     });
     await first.click();
-    await settles(
+    await reaches(
       page,
       () => document.querySelector("#report-delete-status").textContent !== "",
     );
@@ -2992,7 +2980,7 @@ lobbyTest(
     page.once("dialog", (dialog) => dialog.accept());
     // Newest first, so the second row shown is "b" and "a" takes its place.
     await page.locator("#attempt-history [data-delete-report]").nth(1).click();
-    await settles(
+    await reaches(
       page,
       () => document.querySelector("#report-delete-status").textContent !== "",
     );
@@ -3034,7 +3022,7 @@ lobbyTest(
     failing.delete("/api/session");
     page.once("dialog", (dialog) => dialog.accept());
     await page.locator("#attempt-history [data-delete-report]").click();
-    await settles(
+    await reaches(
       page,
       () => document.querySelector("#report-delete-status").textContent !== "",
     );
@@ -3094,7 +3082,7 @@ lobbyTest(
     await lobby(page);
     page.once("dialog", (dialog) => dialog.accept());
     await page.locator("#attempt-history [data-delete-report]").click();
-    await settles(
+    await reaches(
       page,
       () => document.querySelector("#report-delete-status").textContent !== "",
     );
@@ -3140,7 +3128,7 @@ lobbyTest(
       }),
     ];
     await lobby(page);
-    await settles(page, () =>
+    await reaches(page, () =>
       document.querySelector("#progress-weaknesses > li"),
     );
 
@@ -3185,7 +3173,7 @@ lobbyTest(
     page.once("dialog", (dialog) => dialog.accept());
 
     await page.click("#delete-reports");
-    await settles(
+    await reaches(
       page,
       () => document.querySelector("#report-delete-status").textContent !== "",
     );
@@ -3222,7 +3210,7 @@ lobbyTest(
     page.once("dialog", (dialog) => dialog.accept());
 
     await page.click("#delete-reports");
-    await settles(
+    await reaches(
       page,
       () => document.querySelector("#report-delete-status").textContent !== "",
     );
@@ -3253,7 +3241,7 @@ lobbyTest(
     page.once("dialog", (dialog) => dialog.accept());
 
     await page.click("#delete-reports");
-    await settles(
+    await reaches(
       page,
       () => document.querySelector("#report-delete-status").textContent !== "",
     );
@@ -3289,7 +3277,7 @@ lobbyTest(
     page.once("dialog", (dialog) => dialog.accept());
 
     await page.click("#delete-reports");
-    await settles(
+    await reaches(
       page,
       () => document.querySelector("#report-delete-status").textContent !== "",
     );
@@ -3319,7 +3307,7 @@ lobbyTest(
     page.once("dialog", (dialog) => dialog.accept());
 
     await page.click("#delete-reports");
-    await settles(
+    await reaches(
       page,
       () => document.querySelector("#report-delete-status").textContent !== "",
     );
@@ -3360,7 +3348,7 @@ lobbyTest(
     page.once("dialog", (dialog) => dialog.accept());
 
     await page.click("#delete-reports");
-    await settles(
+    await reaches(
       page,
       () => document.querySelector("#report-delete-status").textContent !== "",
     );
@@ -3416,9 +3404,8 @@ lobbyTest(
     session = { signedIn: false, loginRequired: true };
     await lobby(page);
     await page.fill("#github-login", "@candidate");
-    const login = page.waitForRequest(
-      (request) => request.url().endsWith("/api/login"),
-      { timeout: 10_000 },
+    const login = page.waitForRequest((request) =>
+      request.url().endsWith("/api/login"),
     );
     await page.press("#github-login", "Enter");
     assert.deepEqual((await login).postDataJSON(), { login: "candidate" });
@@ -3426,8 +3413,6 @@ lobbyTest(
       () =>
         document.querySelector("#account-status").textContent ===
         "Signed in as candidate",
-      null,
-      { timeout: 10_000 },
     );
   },
 );
@@ -3441,9 +3426,8 @@ lobbyTest(
     try {
       await lobby(page);
       await page.fill("#github-login", "composing");
-      const login = page.waitForRequest(
-        (request) => request.url().endsWith("/api/login"),
-        { timeout: 10_000 },
+      const login = page.waitForRequest((request) =>
+        request.url().endsWith("/api/login"),
       );
       await page.evaluate(() =>
         document.querySelector("#github-login").dispatchEvent(
@@ -3464,8 +3448,6 @@ lobbyTest(
         () =>
           document.querySelector("#account-status").textContent ===
           "Signed in as candidate",
-        null,
-        { timeout: 10_000 },
       );
     } finally {
       release();
@@ -3482,9 +3464,8 @@ lobbyTest(
     try {
       await lobby(page);
       await page.fill("#github-login", "composing");
-      const login = page.waitForRequest(
-        (request) => request.url().endsWith("/api/login"),
-        { timeout: 10_000 },
+      const login = page.waitForRequest((request) =>
+        request.url().endsWith("/api/login"),
       );
       await page.evaluate(() => {
         const input = document.querySelector("#github-login");
@@ -3511,8 +3492,6 @@ lobbyTest(
         () =>
           document.querySelector("#account-status").textContent ===
           "Signed in as candidate",
-        null,
-        { timeout: 10_000 },
       );
     } finally {
       release();
@@ -3533,9 +3512,8 @@ lobbyTest(
     try {
       await lobby(page);
       await page.fill("#github-login", "candidate");
-      const login = page.waitForRequest(
-        (request) => request.url().endsWith("/api/login"),
-        { timeout: 10_000 },
+      const login = page.waitForRequest((request) =>
+        request.url().endsWith("/api/login"),
       );
       await page.press("#github-login", "Enter");
       await login;
@@ -3547,8 +3525,6 @@ lobbyTest(
         () =>
           document.querySelector("#account-status").textContent ===
           "Signed in as candidate",
-        null,
-        { timeout: 10_000 },
       );
       assert.equal(submitted.length, 1);
     } finally {
@@ -3578,9 +3554,8 @@ lobbyTest(
         };
       });
       await page.fill("#github-login", "candidate");
-      const login = page.waitForRequest(
-        (request) => request.url().endsWith("/api/login"),
-        { timeout: 10_000 },
+      const login = page.waitForRequest((request) =>
+        request.url().endsWith("/api/login"),
       );
       await page.click("#start");
       await login;
@@ -3593,7 +3568,7 @@ lobbyTest(
         "the header sent another login while Start was pending",
       );
       release();
-      await page.waitForURL(/\/interview/, { timeout: 10_000 });
+      await page.waitForURL(/\/interview/);
       assert.equal(
         submitted.length,
         1,
@@ -3633,9 +3608,8 @@ lobbyTest(
         };
       });
       await page.fill("#github-login", "candidate");
-      const login = page.waitForRequest(
-        (request) => request.url().endsWith("/api/login"),
-        { timeout: 10_000 },
+      const login = page.waitForRequest((request) =>
+        request.url().endsWith("/api/login"),
       );
       await page.press("#github-login", "Enter");
       await login;
@@ -3653,8 +3627,6 @@ lobbyTest(
         () =>
           document.querySelector("#account-status").textContent ===
           "Signed in as candidate",
-        null,
-        { timeout: 10_000 },
       );
       assert.equal(
         submitted.length,
@@ -3716,9 +3688,8 @@ lobbyTest(
     };
     try {
       await page.fill("#github-login", "candidate");
-      const account = page.waitForRequest(
-        (request) => request.url().endsWith("/api/session"),
-        { timeout: 10_000 },
+      const account = page.waitForRequest((request) =>
+        request.url().endsWith("/api/session"),
       );
       await page.press("#github-login", "Enter");
       await account;
@@ -3730,15 +3701,14 @@ lobbyTest(
         true,
         "a card click re-armed Start during the account refresh",
       );
-      const history = page.waitForRequest(
-        (request) => request.url().endsWith("/api/reports"),
-        { timeout: 10_000 },
+      const history = page.waitForRequest((request) =>
+        request.url().endsWith("/api/reports"),
       );
       releaseAccount();
       await history;
       await assertBusy();
       releaseReports();
-      await settles(page, () => !document.querySelector("#start").disabled);
+      await awaitReady(page);
       assert.equal(await page.locator("#start").isDisabled(), false);
       assert.equal(await page.locator("#random-problem").isDisabled(), false);
       assert.equal(await page.locator("#login-link").isHidden(), true);
@@ -3777,11 +3747,10 @@ lobbyTest("a failed GitHub login can be retried with Enter", async (page) => {
   const failure = page.waitForResponse(
     (response) =>
       response.url().endsWith("/api/login") && response.status() === 500,
-    { timeout: 10_000 },
   );
   await page.press("#github-login", "Enter");
   await failure;
-  await settles(
+  await reaches(
     page,
     () =>
       document.querySelector("#account-status").textContent ===
@@ -3793,9 +3762,8 @@ lobbyTest("a failed GitHub login can be retried with Enter", async (page) => {
     "a failed login left the button disabled",
   );
   failing.delete("/api/login");
-  const retry = page.waitForRequest(
-    (request) => request.url().endsWith("/api/login"),
-    { timeout: 10_000 },
+  const retry = page.waitForRequest((request) =>
+    request.url().endsWith("/api/login"),
   );
   await page.press("#github-login", "Enter");
   assert.deepEqual((await retry).postDataJSON(), { login: "candidate" });
@@ -3803,8 +3771,6 @@ lobbyTest("a failed GitHub login can be retried with Enter", async (page) => {
     () =>
       document.querySelector("#account-status").textContent ===
       "Signed in as candidate",
-    null,
-    { timeout: 10_000 },
   );
 });
 
@@ -3861,7 +3827,7 @@ for (const trigger of ["Enter", "button"]) {
       await page.fill("#github-login", "candidate");
       if (trigger === "Enter") await page.press("#github-login", "Enter");
       else await page.click("#login-link");
-      await settles(
+      await reaches(
         page,
         () =>
           !document.querySelector("#start").disabled &&
@@ -3900,7 +3866,7 @@ for (const trigger of ["Enter", "button"]) {
         "Built a parser",
       ]);
       await page.click("#start");
-      await page.waitForURL(/\/interview/, { timeout: 10_000 });
+      await page.waitForURL(/\/interview/);
       const query = new URL(page.url()).searchParams;
       assert.equal(query.get("problem"), MEDIUM[1]);
       assert.equal(query.get("duration"), "60");
@@ -3936,7 +3902,7 @@ lobbyTest(
     });
     await page.fill("#github-login", "candidate");
     await page.press("#github-login", "Enter");
-    await settles(
+    await reaches(
       page,
       () =>
         document.querySelector("#login-link").textContent ===
@@ -3959,13 +3925,12 @@ lobbyTest(
     );
     failing.delete("/api/session");
     reports = [savedAttempt(EASY[0])];
-    const account = page.waitForRequest(
-      (request) => request.url().endsWith("/api/session"),
-      { timeout: 10_000 },
+    const account = page.waitForRequest((request) =>
+      request.url().endsWith("/api/session"),
     );
     await page.click("#login-link");
     await account;
-    await settles(page, () => !document.querySelector("#start").disabled);
+    await awaitReady(page);
     assert.equal(
       await page.locator("#account-status").textContent(),
       "Signed in as candidate",
@@ -3984,7 +3949,7 @@ lobbyTest(
     // button must not retain the earlier GET-only retry label.
     failing.add("/api/session");
     await restore(page);
-    await settles(
+    await reaches(
       page,
       () =>
         document.querySelector("#account-status").textContent === "Signed out",
@@ -4008,7 +3973,7 @@ lobbyTest(
     );
     await page.fill("#github-login", "candidate");
     await page.press("#github-login", "Enter");
-    await settles(page, () =>
+    await reaches(page, () =>
       document
         .querySelector("#account-status")
         .textContent.includes("no signed-in session"),
@@ -4024,13 +3989,12 @@ lobbyTest(
       await page.locator("#start").textContent(),
       "Use GitHub to start",
     );
-    const retry = page.waitForRequest(
-      (request) => request.url().endsWith("/api/login"),
-      { timeout: 10_000 },
+    const retry = page.waitForRequest((request) =>
+      request.url().endsWith("/api/login"),
     );
     await page.click("#login-link");
     await retry;
-    await settles(
+    await reaches(
       page,
       () =>
         document.querySelector("#account-status").textContent ===
@@ -4059,7 +4023,7 @@ lobbyTest(
     failing.add("/api/reports");
     await page.fill("#github-login", "candidate");
     await page.press("#github-login", "Enter");
-    await settles(
+    await reaches(
       page,
       () =>
         !document.querySelector("#start").disabled &&
@@ -4111,7 +4075,7 @@ lobbyTest(
     );
     await page.fill("#github-login", "candidate");
     await page.press("#github-login", "Enter");
-    await settles(page, () => !document.querySelector("#start").disabled);
+    await awaitReady(page);
     const state = await snapshot(page);
     assert.equal(state.duration, "30");
     assert.deepEqual(state.durationsOff, ["45", "60"]);
@@ -4315,7 +4279,7 @@ lobbyTest(
     await page.fill("#github-login", "candidate");
     await page.press("#github-login", "Enter");
     await expireStalledRequest(page);
-    await settles(
+    await reaches(
       page,
       () =>
         document.querySelector("#login-link").textContent ===
@@ -4392,7 +4356,7 @@ for (const trigger of ["header", "Start"]) {
       if (trigger === "header") await page.press("#github-login", "Enter");
       else await page.click("#start");
       await expireStalledRequest(page);
-      await settles(
+      await reaches(
         page,
         () =>
           document.querySelector("#login-link").textContent ===
@@ -4422,7 +4386,7 @@ for (const trigger of ["header", "Start"]) {
           { times: 1 },
         );
         await page.click("#login-link");
-        await settles(
+        await reaches(
           page,
           () => !document.querySelector("#login-link").disabled,
         );
@@ -4434,7 +4398,7 @@ for (const trigger of ["header", "Start"]) {
         session = { signedIn: true, user: { login: "candidate" } };
       }
       await page.click("#login-link");
-      await settles(page, () => !document.querySelector("#start").disabled);
+      await awaitReady(page);
       assert.deepEqual(
         await page.evaluate(() =>
           window.lobbyRequests
@@ -4500,7 +4464,7 @@ lobbyTest(
     await page.fill("#github-login", "candidate");
     await page.press("#github-login", "Enter");
     await expireStalledRequest(page);
-    await settles(page, () => !document.querySelector("#login-link").disabled);
+    await reaches(page, () => !document.querySelector("#login-link").disabled);
     assert.equal(
       await page.locator("#account-status").textContent(),
       "Could not record GitHub username.",
@@ -4621,7 +4585,7 @@ lobbyTest(
         () => typeof window.releaseAccount === "function",
       );
       await page.evaluate(() => window.rejectLogin());
-      await settles(
+      await reaches(
         page,
         () =>
           document.querySelector("#login-link").textContent ===
