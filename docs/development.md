@@ -19,6 +19,39 @@ npx playwright install chromium   # the browser tests, the whole lobby flow
 cargo install cargo-audit         # the dependency advisory scan
 ```
 
+CI runs `scripts/test.sh rust`, `scripts/test.sh portable` and
+`scripts/test.sh browser` in parallel, with fail-fast disabled so a failure in
+one lane does not hide the others. Clippy and Rust tests share the Rust lane's
+build cache; formatting, audits, Python and shell checks run in the portable
+lane; Node browser tests have their own lane, except the face-detector suite,
+which needs the Rust binary and runs after its build. All lanes fetch and
+verify vendor assets; each restores the vendored-asset cache, and only the
+portable lane saves it, after its gates pass. Each lane has its own job
+timeout: 45 minutes for Rust, 20 for the others. The Rust and browser lanes
+clone only `HEAD`; the portable lane keeps full history for the commit-message
+check. The Rust lane deletes the runner's unused toolchains only when less than
+40 GB is free. Running `./scripts/test.sh` locally still runs every gate.
+
+The `check` status requires every lane to succeed and reports as soon as the
+lanes finish. Mutation testing has a status of its own, `mutation`, which on a
+pull request requires the plan and every shard to pass; shards may be skipped
+only when the plan found no mutants. Mutation planning checks the Rust diff
+before installing its tools, so a PR with no Rust changes starts no mutation
+shards and pays no mutation-tool setup cost. Rust diffs still use the complete
+diff-selected mutant set and the existing exclusions.
+
+Every skip the gate sees joins its `not checked by this run:` summary: a gate's
+own skip, a Node browser test's skip or todo, a missing formatter in
+`scripts/indent.sh`, and a skipped Python case. A Rust test that skips itself
+when sqlite3 or Playwright is missing is not in it, because `cargo test` hides
+a passing test's output. With `CI=true` the summary fails the run, and those
+Rust tests fail rather than skip. Optional tools still skip on a local run. Each Node browser test has a
+five-minute timeout, so a stalled test fails by name before its lane's job
+timeout. Local Node versions without that option still run the browser tests.
+Browser tests that wait out a timer jump the fake clock with
+`page.clock.fastForward` rather than `runFor`, which also steps every frame
+and interval in between and once made a single test take eighteen minutes.
+
 The gate picks its own compiler and Python, so running it directly builds with
 the same Clang `make` would. On Linux x86_64 with no `CXX` set, it uses the checksum-pinned
 Clang that `make` fetches into `target/clang`, fetching it just before the

@@ -16,8 +16,7 @@ SPEC = importlib.util.spec_from_file_location(
 support = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(support)
 
-ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = ROOT / ".github" / "workflows" / "check.yml"
+WORKFLOW = support.WORKFLOW
 write_executable = support.write_executable
 
 
@@ -52,23 +51,15 @@ binary.chmod(0o755)
 
 
 def install_steps():
-    lines = WORKFLOW.read_text().splitlines()
+    """The install script of every job that installs cargo-mutants."""
+    workflow = WORKFLOW.read_text()
+    jobs = support.section(workflow, "\njobs:\n", "\0", "jobs")
     steps = {}
-    job = None
-    for index, line in enumerate(lines):
-        match = re.fullmatch(r"  ([\w-]+):", line)
-        if match:
-            job = match[1]
-        if line != "      - name: Install cargo-mutants":
-            continue
-        if lines[index + 1] != "        run: |":
-            raise AssertionError("cargo-mutants installation is no longer a run block")
-        body = []
-        for command in lines[index + 2 :]:
-            if command and not command.startswith("          "):
-                break
-            body.append(command[10:])
-        steps[job] = "\n".join(body)
+    for job in re.findall(r"^  ([\w-]+):$", jobs, re.M):
+        body = support.job(job, workflow)
+        if "      - name: Install cargo-mutants\n" in body:
+            step = support.step(body, "Install cargo-mutants")
+            steps[job] = support.run_block(step)
     return steps
 
 

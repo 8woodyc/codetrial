@@ -132,14 +132,21 @@ def main():
     unexpected = sorted(
         (case for result in results for case in result.unexpectedSuccesses), key=str
     )
-    skipped = sum(len(result.skipped) for result in results)
+    skips = sorted(
+        (entry for result in results for entry in result.skipped),
+        key=lambda entry: str(entry[0]),
+    )
 
     for case, trace in failures:
         print(f"\n{'=' * 70}\nFAIL: {case}\n{'-' * 70}\n{trace}", file=sys.stderr)
     for case in unexpected:
         print(f"\n{'=' * 70}\nUNEXPECTED SUCCESS: {case}", file=sys.stderr)
+    # scripts/test.sh reads these lines into its summary of what was not
+    # checked, and fails CI on them.
+    for case, reason in skips:
+        print(f"SKIP: {case}: {reason}", file=sys.stderr)
 
-    detail = f" ({skipped} skipped)" if skipped else ""
+    detail = f" ({len(skips)} skipped)" if skips else ""
     print(
         f"Ran {len(cases)} tests in {elapsed:.3f}s across {arguments.jobs} jobs{detail}"
     )

@@ -24,12 +24,15 @@ It is not offline. The `fetch-vendor` gate downloads missing assets named by a
 `actionlint` publishes itself as a container, so that lane may reach for docker.
 Both are checksum-pinned or version-pinned; neither needs a credential.
 
-A lane whose tool is absent skips instead of failing. Skips made directly by
-`scripts/test.sh` appear under its final `not checked by this run:` summary.
-Formatter skips do not: `scripts/indent.sh` prints them inline while the
-`indent` gate keeps running. Read both the final summary and the formatter
-output before claiming coverage; never treat the skip set or its size as fixed.
-The drift checks always run. That skipping is why a green local run is weaker
+A lane whose tool is absent skips instead of failing. Every skip the gate can
+see, its own, a formatter's in `scripts/indent.sh`, a Node browser test's and
+a Python case's, appears under the final `not checked by this run:` summary.
+Read it before claiming coverage; never treat the skip set or its size as
+fixed. It cannot list a Rust test that skips itself, such as the retention test
+without sqlite3: `cargo test` keeps a passing test's output to itself, so
+locally that skip shows nowhere. With `CI=true` the summary fails the run, and
+those Rust tests fail instead of skipping; CI installs every tool, so there a
+skip means a check stopped running. The drift checks always run. That skipping is why a green local run is weaker
 evidence than a green CI run, and so is what this script leaves out: CI also
 holds a pull request's own commit messages to the rules, mutation-tests the diff
 in its own job, and builds release binaries for three targets.

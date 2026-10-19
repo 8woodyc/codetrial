@@ -61,6 +61,8 @@ web=$(list '*.html' '*.js' '*.mjs' '*.cjs' \
     '.github/ISSUE_TEMPLATE/*.yml' '.github/ISSUE_TEMPLATE/*.yaml')
 prettier=node_modules/.bin/prettier
 
+# scripts/test.sh reads this line into its summary of what was not checked, and
+# fails CI on it, so keep its shape.
 have()
 {
     command -v "$1" > /dev/null 2>&1 && return 0
