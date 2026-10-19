@@ -1,5 +1,6 @@
 """Run the workflow's tool guards against cold and restored installations."""
 
+import importlib.util
 import os
 import re
 import shlex
@@ -9,9 +10,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
+SPEC = importlib.util.spec_from_file_location(
+    "support", Path(__file__).with_name("support.py")
+)
+support = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(support)
 
-ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = ROOT / ".github" / "workflows" / "check.yml"
+WORKFLOW = support.WORKFLOW
+write_executable = support.write_executable
+
 
 # Cargo forwards the subcommand name to its plugin. The plugin rejects a bare
 # --version, which is why a healthy restored binary used to be reinstalled.
@@ -44,23 +51,15 @@ binary.chmod(0o755)
 
 
 def install_steps():
-    lines = WORKFLOW.read_text().splitlines()
+    """The install script of every job that installs cargo-mutants."""
+    workflow = WORKFLOW.read_text()
+    jobs = support.section(workflow, "\njobs:\n", "\0", "jobs")
     steps = {}
-    job = None
-    for index, line in enumerate(lines):
-        match = re.fullmatch(r"  ([\w-]+):", line)
-        if match:
-            job = match[1]
-        if line != "      - name: Install cargo-mutants":
-            continue
-        if lines[index + 1] != "        run: |":
-            raise AssertionError("cargo-mutants installation is no longer a run block")
-        body = []
-        for command in lines[index + 2 :]:
-            if command and not command.startswith("          "):
-                break
-            body.append(command[10:])
-        steps[job] = "\n".join(body)
+    for job in re.findall(r"^  ([\w-]+):$", jobs, re.M):
+        body = support.job(job, workflow)
+        if "      - name: Install cargo-mutants\n" in body:
+            step = support.step(body, "Install cargo-mutants")
+            steps[job] = support.run_block(step)
     return steps
 
 
@@ -81,16 +80,17 @@ class MutantsInstallTests(unittest.TestCase):
                     sandbox = Path(directory)
                     binary = sandbox / "cargo-mutants"
                     if cached is not None:
-                        binary.write_text(PLUGIN.format(version=cached, status=status))
-                        binary.chmod(0o755)
+                        write_executable(
+                            binary, PLUGIN.format(version=cached, status=status)
+                        )
                     cargo = sandbox / "cargo"
                     fake_script = sandbox / "fake_cargo.py"
                     fake_script.write_text(FAKE_CARGO)
-                    cargo.write_text(
+                    write_executable(
+                        cargo,
                         f"#!/bin/sh\nexec {shlex.quote(sys.executable)} "
-                        f'{shlex.quote(str(fake_script))} "$@"\n'
+                        f'{shlex.quote(str(fake_script))} "$@"\n',
                     )
-                    cargo.chmod(0o755)
                     log = sandbox / "installs"
                     env = os.environ | {
                         "PATH": f"{sandbox}{os.pathsep}{os.environ['PATH']}",

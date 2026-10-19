@@ -781,8 +781,14 @@ async fn browser_check_accepts_running_rust_server_offline_interview() {
     // Exit 3 is browser-check.sh saying Playwright is not installed. Skipped
     // rather than failed, matching tests/browser/face-detector.test.js: the
     // suite has to stay runnable without an 800 MB download. CI installs
-    // Chromium, so CI never takes this arm.
+    // Chromium, so this arm fails there rather than hide the lost check.
     if output.status.code() == Some(3) {
+        assert_ne!(
+            std::env::var("CI").as_deref(),
+            Ok("true"),
+            "Playwright is not installed, and CI must run this test: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
         eprintln!(
             "skipping offline browser check: {}",
             String::from_utf8_lossy(&output.stderr).trim()

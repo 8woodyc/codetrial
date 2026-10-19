@@ -369,7 +369,10 @@ test("the report is a modal dialog with one primary action", async (t) => {
   try {
     await closeSetupCheck(page);
     await page.locator("#end").click();
-    await page.locator("#force-report").click();
+    // With no interviewer in the room, ending shows the offline report by
+    // itself 300ms later and hides the ending overlay. Clicking "Show offline
+    // summary" raced that, and a click that landed late waited out its timeout
+    // on a button that was gone.
     await page.locator("#report-modal #done").waitFor();
     const state = await page.evaluate(() => {
       const report = document.querySelector("#report-modal");

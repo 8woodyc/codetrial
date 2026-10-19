@@ -2643,6 +2643,12 @@ mod failure {
                 .map(|out| !out.status.success())
                 .unwrap_or(true)
             {
+                // CI installs sqlite3, so a skip there hides a lost test.
+                assert_ne!(
+                    std::env::var("CI").as_deref(),
+                    Ok("true"),
+                    "sqlite3 is not installed, and CI must run this test"
+                );
                 eprintln!("skipping: sqlite3 is not installed");
                 return;
             }

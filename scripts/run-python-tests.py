@@ -30,7 +30,11 @@ touches. All four suites build their sandbox with `tempfile.TemporaryDirectory`
 and hand `subprocess` a *copied* environment (`os.environ | {...}`), so no case
 can observe another's. A suite that mutated `os.environ`, called `os.chdir`, or
 shared a fixture directory between cases would race here and must keep running
-under plain `unittest` instead.
+under plain `unittest` instead. A case that writes a stub and then runs it must
+not write it from this process: another thread's fork inherits the open file
+until it execs, and running the stub then fails with "Text file busy". The
+suites write stubs through `write_executable` in `tests/support.py`, which
+copies them into place with `cp`.
 
 Failures are reported after the run rather than as they happen, sorted by test
 id, because the pool finishes in whatever order the kernel schedules and a
@@ -128,14 +132,21 @@ def main():
     unexpected = sorted(
         (case for result in results for case in result.unexpectedSuccesses), key=str
     )
-    skipped = sum(len(result.skipped) for result in results)
+    skips = sorted(
+        (entry for result in results for entry in result.skipped),
+        key=lambda entry: str(entry[0]),
+    )
 
     for case, trace in failures:
         print(f"\n{'=' * 70}\nFAIL: {case}\n{'-' * 70}\n{trace}", file=sys.stderr)
     for case in unexpected:
         print(f"\n{'=' * 70}\nUNEXPECTED SUCCESS: {case}", file=sys.stderr)
+    # scripts/test.sh reads these lines into its summary of what was not
+    # checked, and fails CI on them.
+    for case, reason in skips:
+        print(f"SKIP: {case}: {reason}", file=sys.stderr)
 
-    detail = f" ({skipped} skipped)" if skipped else ""
+    detail = f" ({len(skips)} skipped)" if skips else ""
     print(
         f"Ran {len(cases)} tests in {elapsed:.3f}s across {arguments.jobs} jobs{detail}"
     )

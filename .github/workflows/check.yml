@@ -1,14 +1,5 @@
-# The gate that scripts/test.sh already describes, run where nobody can forget
-# it.
-#
-# The gates stay in one job, because they share a cargo build and a vendor tree
-# and splitting them would re-download 24 MB of wasm to save seconds. Mutation
-# is the exception and always was: it is the only step whose cost tracks the
-# size of the diff rather than the size of the repo, and on a large one it runs
-# an order of magnitude longer than everything else combined. Serialised behind
-# the gates it hid their result for an hour and reported nothing while it
-# worked. It now runs beside them, split into shards that finish in a quarter of
-# the time and say where they are.
+# Rust compilation shares one target directory; independent gates run beside it.
+# All lanes use scripts/test.sh, whose default still runs the complete gate.
 name: check
 
 on:
@@ -47,10 +38,10 @@ env:
   CARGO_PROFILE_TEST_DEBUG: line-tables-only
   RUSTFLAGS: -Clink-arg=-fuse-ld=mold
 
-  # One source for the pin. It was written twice, in the cache key and in the
-  # install, and the guard below skips the install whenever a cached binary
-  # exists: bumping only the install line would leave the old key matching, the
-  # old binary restored, and CI auditing with a version nobody asked for.
+  # One source for each pin. It was written twice, in a cache key and in the
+  # install, and a guard skips the install whenever a cached binary exists:
+  # bumping only the install line would leave the old key matching, the old
+  # binary restored, and CI running a version nobody asked for.
   CARGO_AUDIT_VERSION: 0.22.2
   CARGO_MUTANTS_VERSION: 27.1.0
 
@@ -68,20 +59,37 @@ env:
   ACTIONLINT_VERSION: 1.7.12
 
 jobs:
-  check:
+  gates:
+    name: gates (${{ matrix.lane }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # What each lane installs, so a gate never skips for a missing tool.
+        # sqlite3 is for a Rust test of the retention script; shellcheck and
+        # shfmt are the shell gates' optional tools. Only the Rust lane links,
+        # so only it installs mold for the workflow's RUSTFLAGS.
+        #
+        # `timeout` is each lane's wedge detector: against the six-hour default
+        # it catches a job that has stopped making progress, which is all it is
+        # for. The browser lane gets far less than the cargo build, because
+        # `--test-timeout` bounds one test, not a file whose top level never
+        # settles.
+        include:
+          - lane: rust
+            timeout: 45
+            packages: libglib2.0-dev mold sqlite3
+            components: clippy
+          - lane: portable
+            timeout: 20
+            packages: shellcheck shfmt
+            components: rustfmt
+          - lane: browser
+            timeout: 20
     # Pinned rather than `ubuntu-latest`: that label moves to a new image on
     # GitHub's schedule, which turns an unrelated morning into a debugging
     # session. Bumping this is a commit somebody chose to make.
     runs-on: ubuntu-24.04
-    # The browser gate starts a server and polls it for twenty seconds before
-    # giving up, and cargo builds the LiveKit SDK from source. Both are minutes,
-    # neither is an hour: the default six-hour ceiling only ever gets reached by
-    # something wedged.
-    #
-    # Back to 45 now that mutation has its own job. This is a wedge detector
-    # rather than a budget: against the six-hour default it catches a job that
-    # has stopped making progress, which is all it is for.
-    timeout-minutes: 45
+    timeout-minutes: ${{ matrix.timeout }}
     steps:
       # A pull request follows its head branch, so one opened from a fork's
       # main takes in every later push there, and the contributor cannot start
@@ -100,12 +108,12 @@ jobs:
           echo "Push the commits to a topic branch and open a new pull request from it." >&2
           exit 1
 
-      # Full history, because the mutation step below diffs against the base
-      # branch and a shallow clone has no merge base to diff from. 52 commits
-      # and 26 MB: the fetch does not show up next to the cargo build.
+      # The commit-message check needs every commit in the pull request. The
+      # other lanes read only HEAD, which build.rs records, so they skip the
+      # history.
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          fetch-depth: ${{ matrix.lane != 'portable' && 1 || 0 }}
 
       # The commit-msg hook binds whoever installed it. This binds everyone
       # else: a rebase, an amend, `--no-verify`, or a subject typed into the
@@ -122,7 +130,7 @@ jobs:
       # First among the steps that read the tree, because it costs a second and
       # the rest of this job costs minutes.
       - name: Check the commit messages
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && matrix.lane == 'portable'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
@@ -137,56 +145,35 @@ jobs:
           fi
           git rev-list --no-merges "$BASE_SHA..HEAD" | ./scripts/check-commit-log.sh
 
-      # This job ran out of disk on main before it ran out of disk here: the
-      # LiveKit SDK and libwebrtc build to a target/ measured in gigabytes, the
-      # cache restores another copy of the registry beside it, Chromium and the
-      # vendored wasm add their own, and `cargo install` builds a second crate
-      # graph in a temp dir of its own. The image ships tens of gigabytes of
-      # toolchains this repository never asks for, so the space is there to be
-      # had without giving anything up.
-      #
-      # `df` after, so the next failure of this kind reports what was actually
-      # available rather than leaving it to be guessed.
       - name: Reclaim runner disk
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /usr/local/share/powershell /usr/share/swift /usr/local/.ghcup \
-            "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
-          df -h /
+        if: matrix.lane == 'rust'
+        uses: ./.github/actions/reclaim-disk
 
-      # shellcheck and shfmt ride along on an apt call this job already makes.
-      # The runner image ships shellcheck today, but both gates skip themselves
-      # when the tool is absent, and a gate that stops running quietly is the
-      # thing it guards against. shfmt takes its style from .editorconfig, so
-      # installing it here is the whole configuration.
-      - name: Install native build dependency
-        run: sudo apt-get update && sudo apt-get install -y libglib2.0-dev mold shellcheck shfmt
+      - name: Install system packages
+        if: matrix.packages
+        env:
+          PACKAGES: ${{ matrix.packages }}
+        run: |
+          sudo apt-get update
+          # shellcheck disable=SC2086 # one word per package
+          sudo apt-get install -y $PACKAGES
       - name: Install WebRTC C++ compiler
+        if: matrix.lane == 'rust'
         uses: ./.github/actions/webrtc-clang
 
       # The runner image ships a stable toolchain, but not necessarily one new
       # enough for edition 2024, and clippy and rustfmt are gates rather than
-      # extras here.
-      #
-      # The version is hashed into the cargo cache key below. Without it a
-      # toolchain bump inherits a target/ full of objects the new rustc will
-      # rebuild anyway, and the cache carries the dead weight until it is
-      # evicted.
+      # extras here. The browser lane runs no cargo at all.
       - name: Install Rust
-        id: rust
+        if: matrix.components
+        env:
+          COMPONENTS: ${{ matrix.components }}
         run: |
           rustup update stable
           rustup default stable
-          rustup component add clippy rustfmt
-          echo "id=$(rustc -V | sha256sum | cut -c1-12)" >>"$GITHUB_OUTPUT"
+          # shellcheck disable=SC2086 # one word per component
+          rustup component add $COMPONENTS
 
-      # `registry/src` is deliberately absent: it is unpacked from
-      # `registry/cache` on demand, so caching both stores every dependency
-      # twice.
-      #
-      # Keyed on the lockfile, so a dependency bump rebuilds and a source edit
-      # does not. The restore-keys line lets that bump start from the previous
-      # tree instead of from nothing.
       # Restore and save are separate steps on purpose. `actions/cache` saves
       # from a post-job step that is skipped unless the job succeeded, so a run
       # that built the whole dependency graph and then failed one test threw the
@@ -195,21 +182,10 @@ jobs:
       # runs failed on disk and were superseded by pushes, so every run in that
       # window restored a five-day-old target/ and rebuilt the difference, which
       # is most of why the gates took twelve minutes.
-      #
-      # Keyed on the lockfile, so a dependency bump rebuilds and a source edit
-      # does not. The restore-keys line lets that bump start from the previous
-      # tree instead of from nothing.
       - name: Restore cargo cache
+        if: matrix.lane == 'rust'
         id: cargo-cache
-        uses: actions/cache/restore@v6
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: cargo-${{ runner.os }}-${{ steps.rust.outputs.id }}-${{ hashFiles('Cargo.lock', '.github/workflows/check.yml') }}
-          restore-keys: cargo-${{ runner.os }}-${{ steps.rust.outputs.id }}-
+        uses: ./.github/actions/restore-cargo-cache
 
       # Keyed on the whole tree, not on SHA256SUMS alone. The cached path holds
       # the committed vendor files as well as the fetched ones, so a key that
@@ -222,8 +198,12 @@ jobs:
       # At restore time the directory holds only checked-out files, so the key
       # is a function of the commit. No restore-keys: a stale entry here is
       # 24 MB of bytes that fail their hash.
-      - name: Cache vendored bytes
-        uses: actions/cache@v6
+      #
+      # Every lane fetches and verifies these bytes; only the portable lane
+      # saves them, below, so three lanes do not race to write one key.
+      - name: Restore vendored bytes
+        id: vendor
+        uses: actions/cache/restore@v6
         with:
           path: web/vendor
           key: vendor-${{ hashFiles('web/vendor/**') }}
@@ -241,8 +221,12 @@ jobs:
       # ranges, so an install resolves them fresh on every run and the gate that
       # passed yesterday is not the gate running today. The exact pins in
       # package.json only cover the four direct dependencies.
-      - name: Cache Chromium
-        uses: actions/cache@v6
+      #
+      # Both browser-driving lanes restore it; the browser lane saves it, below.
+      - name: Restore Chromium
+        if: matrix.lane != 'portable'
+        id: chromium
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
@@ -255,31 +239,27 @@ jobs:
       # Left as one command on a cache hit too: it then only installs the system
       # libraries, which are not in the cached directory.
       - name: Install Chromium
+        if: matrix.lane != 'portable'
         run: npx playwright install --with-deps chromium
 
       # The gate skips this audit when the binary is missing, which is right for
       # a contributor's laptop and wrong for CI: a silent skip here means the
       # dependency surface stops being checked and nothing says so. Installed
       # ahead of the gate so the skip branch is never the one CI takes.
-      - name: Cache cargo-audit
-        uses: actions/cache@v6
-        with:
-          path: ~/.cargo/bin/cargo-audit
-          key: cargo-audit-${{ env.CARGO_AUDIT_VERSION }}-${{ runner.os }}
-
-      # Guarded rather than bare: `cargo install` refuses when the binary is
-      # already in place and `~/.cargo/.crates.toml` is not, which is exactly
-      # what a cache hit restores.
       #
-      # The guard asks the binary its version rather than merely whether one
-      # exists, so a restored binary that does not match the pin is replaced
-      # instead of silently used. With the version in the cache key that should
-      # not happen; this is what makes it fail loudly rather than quietly if it
-      # ever does.
+      # The upstream release binary, checked against the digest its release
+      # records, rather than `cargo install`: that compiled the crate graph for
+      # minutes on every cache miss. musl, so the binary does not depend on the
+      # runner's glibc. The version check proves the pin is what installed.
       - name: Install cargo-audit
+        if: matrix.lane == 'portable'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          cargo-audit --version 2>/dev/null | grep -qF " $CARGO_AUDIT_VERSION" \
-            || cargo install cargo-audit --locked --version "$CARGO_AUDIT_VERSION" --force
+          name="cargo-audit-x86_64-unknown-linux-musl-v$CARGO_AUDIT_VERSION"
+          ./scripts/install-release-binary.sh rustsec/rustsec \
+            "cargo-audit/v$CARGO_AUDIT_VERSION" "$name.tgz" "$name/cargo-audit"
+          cargo audit --version | grep -qxF "cargo-audit-audit $CARGO_AUDIT_VERSION"
 
       # The Python here generates the problem bank and drives two integration
       # harnesses, and `ruff check` is its only linter. The gate skips when the
@@ -287,6 +267,7 @@ jobs:
       # the image and installs into its own environment, so this does not fight
       # the runner's externally-managed Python.
       - name: Install ruff
+        if: matrix.lane == 'portable'
         run: pipx install "ruff==$RUFF_VERSION"
 
       # commentflow settles comment width, which no other formatter here does:
@@ -302,6 +283,7 @@ jobs:
       # mode is a diff in the indent check rather than a wrong binary running
       # against the tree, and that diff is what surfaces it.
       - name: Install commentflow
+        if: matrix.lane == 'portable'
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
@@ -312,6 +294,7 @@ jobs:
       # above: this one judges the workflow, so a linter that moves on its own
       # turns an unrelated push red.
       - name: Install actionlint
+        if: matrix.lane == 'portable'
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
@@ -320,13 +303,31 @@ jobs:
           "actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" actionlint
 
       - name: Run gates
-        run: ./scripts/test.sh
+        run: ./scripts/test.sh "${{ matrix.lane }}"
+
+      # After the gates pass, so the bytes saved are bytes verify-vendor
+      # accepted. Under the restore step's key: hashing the tree now would also
+      # hash what the fetch added, and no later restore would ask for that key.
+      - name: Save vendored bytes
+        if: matrix.lane == 'portable' && steps.vendor.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: web/vendor
+          key: ${{ steps.vendor.outputs.cache-primary-key }}
+      - name: Save Chromium
+        if: matrix.lane == 'browser' && steps.chromium.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ steps.chromium.outputs.cache-primary-key }}
 
       # The release job makes the same comparison, but only after a merge: a
       # `build.rs` that stops recording the commit would pass every pull
-      # request and turn the publishing leg red instead. `cargo test` above
-      # has already built this binary from the same checkout.
+      # request and turn the publishing leg red instead. Only after the gates
+      # pass: a failed build leaves the binary the cache restored, and its
+      # version would name some earlier commit.
       - name: Prove the build names its commit
+        if: matrix.lane == 'rust'
         run: |
           version=$(target/debug/codetrial --version)
           head=$(git rev-parse HEAD)
@@ -345,6 +346,7 @@ jobs:
       # on that. Chromium is installed above, so a skip here means the install
       # step silently did nothing and is worth chasing.
       - name: Run the browser interview check
+        if: matrix.lane == 'rust'
         run: cargo test --locked --test web -- --ignored browser_check_accepts_running_rust_server_offline_interview
 
       # Last, and not conditional on the gates passing. An exact key hit has
@@ -352,7 +354,7 @@ jobs:
       # the gates decided about the code. `cancelled()` is excluded because a
       # superseded run is killed mid-step and has nothing coherent to save.
       - name: Save cargo cache
-        if: ${{ !cancelled() && steps.cargo-cache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && matrix.lane == 'rust' && steps.cargo-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
           path: |
@@ -360,7 +362,42 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: cargo-${{ runner.os }}-${{ steps.rust.outputs.id }}-${{ hashFiles('Cargo.lock', '.github/workflows/check.yml') }}
+          key: ${{ steps.cargo-cache.outputs.key }}
+
+  # The fast answer: every gate lane passed. Mutation is answered separately
+  # below, so a pull request is not held behind shards that can run for most of
+  # an hour. `!cancelled()` rather than `always()`: a run superseded by a newer
+  # push has nothing to report, while a lane that failed or timed out still
+  # reaches this job and fails it.
+  check:
+    needs: gates
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every gate lane
+        env:
+          RESULT: ${{ needs.gates.result }}
+        run: test "$RESULT" = success
+
+  # One status for mutation testing, failing closed. Planning only runs on pull
+  # requests, and the shards only after a plan that found mutants, so a skipped
+  # shard job after a successful plan means the plan counted none.
+  mutation:
+    needs: [plan-mutants, mutants]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require mutation planning and every shard
+        env:
+          PLAN: ${{ needs.plan-mutants.result }}
+          MUTANTS: ${{ needs.mutants.result }}
+        run: |
+          case "$MUTANTS/$PLAN" in
+            success/success | skipped/success | skipped/skipped) ;;
+            *) echo "mutants: $MUTANTS (plan: $PLAN)" >&2; exit 1 ;;
+          esac
 
   # How many shards the diff is worth, decided before any of them start.
   #
@@ -369,11 +406,11 @@ jobs:
   # one runner testing eight. `--list` parses the tree without building it, one
   # second here, so the count is cheap to ask for and the width can follow it.
   #
-  # One shard per 25 mutants, capped at four. The cap is not about arithmetic:
+  # One shard per 25 mutants, capped. The cap is not about arithmetic:
   # past that the setup cost of another runner stops paying for itself against
   # the mutants it would take.
   #
-  # A pull request from a fork's main is refused in `check`, and this job does
+  # A pull request from a fork's main is refused in `gates`, and this job does
   # not wait on that one, so it repeats the condition rather than plan and fan
   # out shards for a pull request that has already failed.
   plan-mutants:
@@ -397,12 +434,28 @@ jobs:
         with:
           fetch-depth: 0
 
+      # A workflow, browser or documentation change has no Rust mutants. Detect
+      # that before installing the toolchain and the mutation tool.
+      - name: Read the Rust diff
+        id: diff
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git diff "origin/$BASE_REF...HEAD" -- '*.rs' >"$RUNNER_TEMP/pr.diff"
+          if [ -s "$RUNNER_TEMP/pr.diff" ]; then
+            echo "changed=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >>"$GITHUB_OUTPUT"
+          fi
+
       - name: Install Rust
+        if: steps.diff.outputs.changed == 'true'
         run: |
           rustup update stable
           rustup default stable
 
       - name: Cache cargo-mutants
+        if: steps.diff.outputs.changed == 'true'
         uses: actions/cache@v6
         with:
           path: ~/.cargo/bin/cargo-mutants
@@ -411,6 +464,7 @@ jobs:
       # Cargo forwards `mutants` as the plugin's first argument. Calling the
       # binary with only --version rejects the flag and reinstalls every hit.
       - name: Install cargo-mutants
+        if: steps.diff.outputs.changed == 'true'
         run: |
           if ! version=$(cargo mutants --version 2>/dev/null) \
             || [ "$version" != "cargo-mutants $CARGO_MUTANTS_VERSION" ]; then
@@ -427,9 +481,11 @@ jobs:
           # mutation-tested nothing. The list goes to a file first so "cargo
           # said zero" and "cargo failed" cannot look alike.
           set -o pipefail
-          git diff "origin/${{ github.base_ref }}...HEAD" -- '*.rs' >"$RUNNER_TEMP/pr.diff"
-          cargo mutants --list --in-diff "$RUNNER_TEMP/pr.diff" >"$RUNNER_TEMP/list.txt"
-          count=$(wc -l <"$RUNNER_TEMP/list.txt" | tr -d ' ')
+          count=0
+          if [ -s "$RUNNER_TEMP/pr.diff" ]; then
+            cargo mutants --list --in-diff "$RUNNER_TEMP/pr.diff" >"$RUNNER_TEMP/list.txt"
+            count=$(wc -l <"$RUNNER_TEMP/list.txt" | tr -d ' ')
+          fi
           width=$(( (count + 24) / 25 ))
           [ "$width" -lt 1 ] && width=1
 
@@ -496,23 +552,17 @@ jobs:
           fetch-depth: 0
 
       - name: Reclaim runner disk
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /usr/local/share/powershell /usr/share/swift /usr/local/.ghcup \
-            "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
-          df -h /
+        uses: ./.github/actions/reclaim-disk
 
       - name: Install native build dependency
-        run: sudo apt-get update && sudo apt-get install -y libglib2.0-dev mold
+        run: sudo apt-get update && sudo apt-get install -y libglib2.0-dev mold sqlite3
       - name: Install WebRTC C++ compiler
         uses: ./.github/actions/webrtc-clang
 
       - name: Install Rust
-        id: rust
         run: |
           rustup update stable
           rustup default stable
-          echo "id=$(rustc -V | sha256sum | cut -c1-12)" >>"$GITHUB_OUTPUT"
 
       # Restore, never save. The gates job owns this cache; four shards writing
       # a 1 GB entry under one key would be four uploads for the copy that
@@ -520,15 +570,7 @@ jobs:
       # keeps each shard's baseline build incremental rather than cold, which is
       # the whole reason `--in-place` is worth using.
       - name: Restore cargo cache
-        uses: actions/cache/restore@v6
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: cargo-${{ runner.os }}-${{ steps.rust.outputs.id }}-${{ hashFiles('Cargo.lock', '.github/workflows/check.yml') }}
-          restore-keys: cargo-${{ runner.os }}-${{ steps.rust.outputs.id }}-
+        uses: ./.github/actions/restore-cargo-cache
 
       # Needed even though no browser runs here: a Rust test serves the
       # fetched MediaPipe binaries and asserts their content types, and
@@ -674,7 +716,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: release-${{ matrix.target }}${{ matrix.image && format('-{0}', matrix.image) || '' }}
-      # The same entry the check job saves, on the same key. Without it all
+      # The same entry the gates job saves, on the same key. Without it all
       # three platform legs re-download 24 MB that one job already fetched and
       # stored on this commit, and the fetch script no-ops on a hit.
       - name: Restore vendored bytes

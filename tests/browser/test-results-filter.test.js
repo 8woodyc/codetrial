@@ -33,13 +33,14 @@ const correct = `function matchDisputedCharge(nums, target) {
   }
 }`;
 
-async function openInterview(t) {
+async function openInterview(t, { clock = false } = {}) {
   if (!browser) {
     t.skip("playwright chromium unavailable");
     return null;
   }
   const page = await browser.newPage();
   t.after(() => page.close());
+  if (clock) await page.clock.install();
   await page.goto(`${base}/interview.html?problem=chargeback-pair-match`);
   await page.waitForFunction(
     () => document.querySelector("#candidate-case-input").placeholder !== "",
@@ -153,7 +154,7 @@ test("both run shortcuts work after toggling the filter with the keyboard", asyn
 });
 
 test("new runs hide stale results and retain the filter through success and errors", async (t) => {
-  const page = await openInterview(t);
+  const page = await openInterview(t, { clock: true });
   if (!page) return;
   const toggle = page.getByRole("checkbox", { name: "Hide passed tests" });
   const content = page.locator("#results-content");
@@ -167,6 +168,10 @@ test("new runs hide stale results and retain the filter through success and erro
   await page.waitForFunction(
     () => typeof globalThis.releaseTestRun === "function",
   );
+  // The runner's five-second loop timeout is already counting while the run
+  // is held. Stop the page's clock so a slow machine checking the running
+  // state below cannot time the held run out and hide the filter.
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
   assert.equal(await toggle.isVisible(), false);
   assert.match(await content.textContent(), /Running test cases/);
   assert.equal(await content.locator("li").count(), 0);
@@ -174,6 +179,7 @@ test("new runs hide stale results and retain the filter through success and erro
     globalThis.holdTestRun = false;
     globalThis.releaseTestRun();
   });
+  await page.clock.resume();
   await waitForRun(page);
   assert.equal(await toggle.isChecked(), true);
   assert.equal(await content.locator("li").count(), 0);

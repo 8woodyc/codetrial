@@ -5,6 +5,18 @@
 # after it: you learned the tree was incomplete and nothing else.
 set -u
 
+# One gate list for local runs and CI's parallel lanes. A gate names its lane
+# where it is declared; one that names none is portable, so a new gate cannot
+# escape CI.
+lane=${1:-all}
+case "$lane" in
+    all | rust | portable | browser) ;;
+    *)
+        echo "usage: ${0##*/} [all | rust | portable | browser]" >&2
+        exit 2
+        ;;
+esac
+
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
 # The Python under scripts/ and tests/ needs 3.9: dict union and
@@ -49,10 +61,46 @@ skip()
   $1"
 }
 
+# Run a command that reports its own skips on stderr, and add each one the sed
+# script $2 extracts to this run's summary under label $1. Its stderr is shown
+# once the command finishes.
+with_reported_skips()
+{
+    label=$1
+    pattern=$2
+    shift 2
+    log=$(mktemp)
+    "$@" 2> "$log"
+    status=$?
+    cat "$log" >&2
+    while IFS= read -r reason; do
+        [ -n "$reason" ] || continue
+        skipped="$skipped
+  $label, $reason"
+    done << REASONS
+$(sed -n "$pattern" "$log")
+REASONS
+    rm -f "$log"
+    return "$status"
+}
+
+# Whether this run includes lane $1. `any` is a gate every lane needs.
+in_lane()
+{
+    [ "$1" = any ] || [ "$lane" = all ] || [ "$lane" = "$1" ]
+}
+
+# gate [--lane LANE] NAME COMMAND...
 gate()
 {
+    want=portable
+    if [ "$1" = --lane ]; then
+        want=$2
+        shift 2
+    fi
     name=$1
     shift
+    in_lane "$want" || return 0
     if "$@"; then
         return 0
     fi
@@ -63,11 +111,24 @@ gate()
 # glob is a green gate reporting zero tests. Renaming the suffix or moving the
 # directory would have silently dropped the whole browser suite from `make
 # check`, which is the failure this file was rewritten to prevent.
+#
+# $1 picks a tier. `server` is the suite that starts the Rust server, so it runs
+# after the build; `static` is every other suite.
 browser_tests()
 {
-    set -- "$ROOT"/tests/browser/*.test.js
-    if [ ! -e "$1" ]; then
-        echo "no browser tests matched $ROOT/tests/browser/*.test.js" >&2
+    tier=$1
+    shift
+    server_suite=$ROOT/tests/browser/face-detector.test.js
+    for test_file in "$ROOT"/tests/browser/*.test.js; do
+        [ -e "$test_file" ] || continue
+        if [ "$test_file" = "$server_suite" ]; then
+            [ "$tier" = server ] && set -- "$@" "$test_file"
+        else
+            [ "$tier" = static ] && set -- "$@" "$test_file"
+        fi
+    done
+    if [ "$#" -eq 0 ]; then
+        echo "no $tier browser tests matched $ROOT/tests/browser/*.test.js" >&2
         return 1
     fi
 
@@ -92,6 +153,14 @@ browser_tests()
     # a second file: `tee` loses it in POSIX sh and asking node for a file does
     # not.
     tap=$(mktemp)
+
+    # No healthy test takes half a minute, and a caption test that stepped a
+    # fake clock frame by frame once took eighteen. Fail a stalled test by name
+    # well inside the browser lane's 20-minute job ceiling, with headroom for a
+    # loaded runner. Node 18 remains supported locally and lacks this option.
+    if [ "${CI:-}" = true ] || node --test-timeout=300000 --version > /dev/null 2>&1; then
+        set -- --test-timeout=300000 "$@"
+    fi
     node --test \
         --test-reporter=spec --test-reporter-destination=stdout \
         --test-reporter=tap --test-reporter-destination="$tap" "$@"
@@ -264,8 +333,8 @@ mutants_exclusions()
     return 1
 }
 
-gate fetch-vendor "$ROOT/scripts/fetch-vendor.sh"
-gate verify-vendor "$ROOT/scripts/verify-vendor.sh"
+gate --lane any fetch-vendor "$ROOT/scripts/fetch-vendor.sh"
+gate --lane any verify-vendor "$ROOT/scripts/verify-vendor.sh"
 gate mutants-exclusions mutants_exclusions
 
 # `--locked` on the two that resolve dependencies: Cargo.lock is committed, and
@@ -277,9 +346,12 @@ gate fmt cargo fmt --check --manifest-path "$ROOT/Cargo.toml"
 # Comment reflow and shell formatting, checked against a copy of the tree so a
 # gate never rewrites what it is judging. Both tools are optional locally and
 # installed in CI, so the check skips a lane rather than failing on a missing
-# tool; overlapping with the fmt gate above costs nothing and reads better when
-# it is `cargo fmt` alone that drifted.
-gate indent "$ROOT/scripts/indent.sh" --check
+# tool, and the skip joins this run's summary; overlapping with the fmt gate
+# above costs nothing and reads better when it is `cargo fmt` alone that
+# drifted.
+gate indent with_reported_skips formatting \
+    's/^indent\.sh: \(.* not installed\), skipping that lane.*/\1/p' \
+    "$ROOT/scripts/indent.sh" --check
 
 # webrtc-sys needs Clang 21+ on Linux, and without one clippy and cargo-test
 # fail on a build script rather than on anything this tree did. The Makefile's
@@ -287,14 +359,18 @@ gate indent "$ROOT/scripts/indent.sh" --check
 # wins, and the pinned one is a no-op once it is on disk. Here rather than at
 # the top, so the gates above it report before a first run's download, and a
 # fetch that fails leaves CXX unset for the build to say why.
-if [ -z "${CXX:-}" ] && [ "$(uname -sm)" = "Linux x86_64" ] \
+if in_lane rust && [ -z "${CXX:-}" ] && [ "$(uname -sm)" = "Linux x86_64" ] \
     && sh "$ROOT/scripts/fetch-clang.sh" "$ROOT/target/clang" > /dev/null; then
     CXX=$ROOT/target/clang/bin/clang++
     export CXX
 fi
-gate clippy cargo clippy --locked --all-targets --manifest-path "$ROOT/Cargo.toml" -- -D warnings
+gate --lane rust clippy cargo clippy --locked --all-targets --manifest-path "$ROOT/Cargo.toml" -- -D warnings
 gate release-msrv release_msrv_matches
-gate cargo-test cargo test --locked --manifest-path "$ROOT/Cargo.toml"
+gate --lane rust cargo-test cargo test --locked --manifest-path "$ROOT/Cargo.toml"
+
+# These tests start the Rust server; running them before its build silently
+# skips.
+gate --lane rust browser-server-tests browser_tests server
 
 gate gen-problems "$PYTHON" "$ROOT/scripts/gen-problems.py" --check
 
@@ -304,7 +380,8 @@ gate gen-problems "$PYTHON" "$ROOT/scripts/gen-problems.py" --check
 # in a copy that drifts. Still one gate per suite, so a failure names which one.
 unittest_gate()
 {
-    "$PYTHON" "$ROOT/scripts/run-python-tests.py" "$@"
+    with_reported_skips "python tests" 's/^SKIP: //p' \
+        "$PYTHON" "$ROOT/scripts/run-python-tests.py" "$@"
 }
 
 gate gen-problems-tests unittest_gate "$ROOT/tests/test_gen_problems.py"
@@ -317,9 +394,11 @@ gate study-plan-guards "$PYTHON" "$ROOT/scripts/check-study-plan-guards.py"
 gate calibration-fixtures "$PYTHON" "$ROOT/scripts/gen-calibration-fixtures.py" --check
 gate calibration-tests unittest_gate "$ROOT/tests/test_calibrate_framework.py"
 gate gemini-usage-tests unittest_gate "$ROOT/tests/test_analyze_gemini_usage.py"
+gate test-gate-tests unittest_gate "$ROOT/tests/test_test_gate.py"
+gate mutants-plan-tests unittest_gate "$ROOT/tests/test_mutants_plan.py"
 gate mutants-install-tests unittest_gate "$ROOT/tests/test_mutants_install.py"
 gate latency-tests unittest_gate "$ROOT/tests/test_analyze_latency.py"
-gate browser-tests browser_tests
+gate --lane browser browser-tests browser_tests static
 gate eslint eslint_gate
 gate cargo-audit cargo_audit_gate
 gate actionlint actionlint_gate
@@ -400,6 +479,9 @@ gate report-parity-fixtures env REPORT_PARITY_CHECK_VALIDATE_FIXTURES_ONLY=1 sh 
     echo "" >&2
     echo "not checked by this run:$skipped" >&2
     echo "" >&2
+    if [ "${CI:-}" = true ]; then
+        failed="$failed skipped-gates"
+    fi
 }
 
 [ -z "$failed" ] || {

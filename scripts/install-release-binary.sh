@@ -3,12 +3,12 @@
 # Install one binary out of a GitHub release, checked against the digest the
 # release records.
 #
-# Two workflow steps install a tool this way and the part that matters is the
-# same in both: an asset the API records no digest for is an asset this cannot
-# check, and a download nothing verified is not worth installing. Written into
-# each step, that rule was two copies of a safety check, where a later fix to
-# one leaves the other as it was -- the shape of bug the workflow linter those
-# steps install exists to catch elsewhere.
+# Several workflow steps install a tool this way and the part that matters is
+# the same in each: an asset the API records no digest for is an asset this
+# cannot check, and a download nothing verified is not worth installing. Written
+# into each step, that rule was a copy of a safety check per step, where a later
+# fix to one leaves the others as they were -- the shape of bug the workflow
+# linter those steps install exists to catch elsewhere.
 #
 # The digest is read from the API rather than pinned here. A hash written into
 # this file has to be recomputed by hand on every upstream republish, and it
@@ -45,11 +45,15 @@ if [ -z "$digest" ] || [ -z "$url" ]; then
     exit 1
 fi
 
-# Named by mktemp rather than after the asset: two of these run in one job, and
-# a fixed name in /tmp is a collision waiting for a third.
+# Named by mktemp rather than after the asset: several of these run in one job,
+# and a fixed name in /tmp is a collision waiting to happen.
 archive=$(mktemp)
 trap 'rm -f "$archive"' EXIT
 
 curl -fsSL -o "$archive" "$url"
 echo "${digest#sha256:}  $archive" | sha256sum -c -
-sudo tar -xzf "$archive" -C /usr/local/bin "$binary"
+
+# BINARY is its path inside the archive. One that sits in a directory still
+# lands in /usr/local/bin by its own name.
+depth=$(printf '%s' "$binary" | tr -cd / | wc -c)
+sudo tar -xzf "$archive" -C /usr/local/bin --strip-components="$depth" "$binary"

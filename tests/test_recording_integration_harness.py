@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Provider-free contract tests for the recording lifecycle harness."""
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -9,6 +10,12 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+
+SPEC = importlib.util.spec_from_file_location(
+    "support", Path(__file__).with_name("support.py")
+)
+support = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(support)
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "recording-integration.sh"
@@ -49,9 +56,7 @@ DELIVERED = {
 
 class RecordingHarnessTests(unittest.TestCase):
     def executable(self, directory: Path, name: str, text: str) -> None:
-        path = directory / name
-        path.write_text(text)
-        path.chmod(0o755)
+        support.write_executable(directory / name, text)
 
     def run_harness(
         self,

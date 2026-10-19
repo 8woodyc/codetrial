@@ -1,0 +1,44 @@
+name: Restore cargo cache
+description: Restore the build tree the check workflow's Rust lane saves.
+
+# One definition of the key for every job that reads this cache: the Rust lane,
+# which also saves it under `outputs.key`, the mutation shards and the avatar
+# check. Needs the toolchain installed first, since its version is in the key.
+#
+# `registry/src` is deliberately absent: it is unpacked from `registry/cache` on
+# demand, so caching both stores every dependency twice.
+#
+# Keyed on the lockfile, so a dependency bump rebuilds and a source edit does
+# not, and on the check workflow, whose build flags are part of every object in
+# target/: a cache saved under old flags would otherwise be restored forever and
+# rebuilt from scratch every run. The restore key lets either bump start from
+# the previous tree instead of from nothing. The rustc version is in both, so a
+# toolchain bump does not inherit objects the new compiler rebuilds anyway.
+outputs:
+  key:
+    description: The exact key, for the step that saves the tree.
+    value: ${{ steps.key.outputs.key }}
+  cache-hit:
+    description: Whether the exact key was restored.
+    value: ${{ steps.restore.outputs.cache-hit }}
+runs:
+  using: composite
+  steps:
+    - id: key
+      shell: sh
+      env:
+        INPUTS: ${{ hashFiles('Cargo.lock', '.github/workflows/check.yml') }}
+      run: |
+        prefix="cargo-$RUNNER_OS-$(rustc -V | sha256sum | cut -c1-12)-"
+        echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+        echo "key=$prefix$INPUTS" >> "$GITHUB_OUTPUT"
+    - id: restore
+      uses: actions/cache/restore@v6
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+          target
+        key: ${{ steps.key.outputs.key }}
+        restore-keys: ${{ steps.key.outputs.prefix }}
