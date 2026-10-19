@@ -80,6 +80,15 @@ const caretState = (page) =>
     };
   });
 
+// Reveals a final Jim caption on the page's fake clock: eight characters every
+// 300ms, one jump per tick. `runFor` would also step every frame and interval
+// in between, which once made one caption test take eighteen minutes.
+async function revealCaption(page, text) {
+  for (let tick = 0; tick < Math.ceil(text.length / 8); tick += 1) {
+    await page.clock.fastForward(300);
+  }
+}
+
 const setCode = (page, value, start = value.length, end = start) =>
   page.evaluate(
     async ({ value, start, end }) => {
@@ -730,8 +739,9 @@ test("Jim captions survive editor navigation and language switches", async (t) =
         { final: true },
       );
     }, text);
-    await page.clock.runFor(300 * Math.ceil(text.length / 8));
-    await page.clock.runFor(13000);
+    await revealCaption(page, text);
+    // One jump past the 12s idle timeout fires it once.
+    await page.clock.fastForward(13000);
     await assertJim("a completed Jim caption must outlive the idle timeout");
 
     await page.evaluate(() => {
@@ -976,7 +986,7 @@ test("a new Jim turn starts at the top of the caption bar", async (t) => {
       },
       { text, id },
     );
-    await page.clock.runFor(300 * Math.ceil(text.length / 8));
+    await revealCaption(page, text);
   };
 
   const scrollDown = async () => {
