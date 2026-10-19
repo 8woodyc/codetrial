@@ -954,7 +954,14 @@ test("ending before a requested C judge loads keeps Python", async (t) => {
   if (!browser) return t.skip("playwright chromium unavailable");
   await withHeldRequestedC(async (page, releaseJudge) => {
     await page.evaluate(() => document.querySelector("#end").click());
-    await page.locator("#ending-overlay").waitFor({ state: "visible" });
+    // With no interviewer in the room, the offline report replaces the
+    // ending overlay 300ms after End, so a slow machine could miss the
+    // overlay. Either one says the interview ended before the judge loaded.
+    await page.waitForFunction(
+      () =>
+        !document.querySelector("#ending-overlay").hidden ||
+        !document.querySelector("#report-modal").hidden,
+    );
     releaseJudge();
     await candidateCasesReady(page);
     assert.match(
