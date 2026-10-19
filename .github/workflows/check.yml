@@ -378,7 +378,11 @@ jobs:
       - name: Require every gate lane
         env:
           RESULT: ${{ needs.gates.result }}
-        run: test "$RESULT" = success
+        run: |
+          if [ "$RESULT" != success ]; then
+            echo "::error::gate lanes: $RESULT. This job only collects them; the failed gates lane has the cause."
+            exit 1
+          fi
 
   # One status for mutation testing, failing closed. Planning only runs on pull
   # requests, and the shards only after a plan that found mutants, so a skipped
@@ -396,7 +400,7 @@ jobs:
         run: |
           case "$MUTANTS/$PLAN" in
             success/success | skipped/success | skipped/skipped) ;;
-            *) echo "mutants: $MUTANTS (plan: $PLAN)" >&2; exit 1 ;;
+            *) echo "::error::mutants: $MUTANTS (plan: $PLAN)"; exit 1 ;;
           esac
 
   # How many shards the diff is worth, decided before any of them start.
