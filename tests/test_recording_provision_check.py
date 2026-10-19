@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Contract tests for the credentialed recording provisioning checker."""
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -10,6 +11,12 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+
+SPEC = importlib.util.spec_from_file_location(
+    "support", Path(__file__).with_name("support.py")
+)
+support = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(support)
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "recording-provision-check.sh"
@@ -343,9 +350,7 @@ class RefusalAssertions(unittest.TestCase):
 
 class ProvisionCheckTests(RefusalAssertions):
     def write_executable(self, directory: Path, name: str, contents: str) -> None:
-        path = directory / name
-        path.write_text(contents)
-        path.chmod(0o755)
+        support.write_executable(directory / name, contents)
 
     def run_check(
         self,

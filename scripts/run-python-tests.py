@@ -30,7 +30,11 @@ touches. All four suites build their sandbox with `tempfile.TemporaryDirectory`
 and hand `subprocess` a *copied* environment (`os.environ | {...}`), so no case
 can observe another's. A suite that mutated `os.environ`, called `os.chdir`, or
 shared a fixture directory between cases would race here and must keep running
-under plain `unittest` instead.
+under plain `unittest` instead. A case that writes a stub and then runs it must
+not write it from this process: another thread's fork inherits the open file
+until it execs, and running the stub then fails with "Text file busy". The
+suites write stubs through `write_executable` in `tests/support.py`, which
+copies them into place with `cp`.
 
 Failures are reported after the run rather than as they happen, sorted by test
 id, because the pool finishes in whatever order the kernel schedules and a
