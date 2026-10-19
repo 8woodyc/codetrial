@@ -362,10 +362,10 @@ export function applyOp(board, op) {
 
 /// Paints a whole board, background included.
 ///
-/// Every change redraws everything. At the stroke ceiling above that is a few
-/// hundred short paths, which a browser does in a frame; the alternative,
-/// painting only what changed, has to answer what "changed" means after an
-/// undo, and answers it with a second copy of the board.
+/// For a board painted once, as the replay paints one, and for the layer
+/// below whenever it has to start over. A board being drawn on goes through
+/// `createBoardPainter` instead: this costs every point on the board, and a
+/// pointer move repaints the board.
 export function drawBoard(
   context,
   strokes,
@@ -375,6 +375,76 @@ export function drawBoard(
   context.save();
   context.fillStyle = BOARD_BACKGROUND;
   context.fillRect(0, 0, width, height);
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  for (const stroke of strokes) drawStroke(context, stroke);
+  context.restore();
+}
+
+/// Paints the board a candidate is drawing on, at the cost of what changed.
+///
+/// Repainting every stroke on every pointer move made a move cost the whole
+/// drawing: in Chromium a board at the stroke ceiling took 34ms a move, two
+/// frames, and 150ms with the CPU slowed fourfold, so the ink trailed the pen
+/// on exactly the boards where the candidate had written the most. The
+/// finished strokes are kept on a layer instead, and a move copies the layer
+/// and draws only the stroke under the pointer.
+///
+/// The layer is checked against the board on every paint rather than told
+/// about edits. It remembers which strokes it holds, by identity, and is
+/// reused only while those are still the board's first strokes in order: a
+/// stroke that ends or a redo extends them and is drawn onto the layer alone,
+/// while an undo or a clear breaks them and the layer is repainted from the
+/// board. Identity rather than a count, because an undo followed by a new
+/// stroke before the next paint leaves the board as long as it was with a
+/// different stroke at the end, and so does a different board handed to the
+/// same painter. No edit path can leave the layer stale by forgetting to say
+/// what it did, which is what keeps it a cache of the board rather than a
+/// second copy of it.
+///
+/// `createLayer(width, height)` returns a canvas the size of the board; it is
+/// a parameter so this module stays free of the DOM.
+export function createBoardPainter(createLayer) {
+  let layer = null;
+  let layerContext = null;
+  /// The strokes on the layer, oldest first; null until it is first painted.
+  let painted = null;
+
+  return {
+    /// `drawing` is whether the last stroke is still under the pointer. It is
+    /// painted over the layer and kept off it until it ends, since every move
+    /// changes it.
+    paint(context, strokes, drawing) {
+      const finished = Math.max(
+        0,
+        drawing ? strokes.length - 1 : strokes.length,
+      );
+      if (!layer) {
+        layer = createLayer(BOARD_WIDTH, BOARD_HEIGHT);
+        layerContext = layer.getContext("2d");
+      }
+      const reusable =
+        painted !== null &&
+        painted.length <= finished &&
+        painted.every((stroke, index) => stroke === strokes[index]);
+      if (reusable) {
+        drawStrokes(layerContext, strokes.slice(painted.length, finished));
+      } else {
+        drawBoard(layerContext, strokes.slice(0, finished));
+      }
+      painted = strokes.slice(0, finished);
+      context.drawImage(layer, 0, 0);
+      if (finished < strokes.length)
+        drawStrokes(context, strokes.slice(finished));
+    },
+  };
+}
+
+/// Strokes over whatever is already painted, in the caps and joins
+/// `drawBoard` uses, so a stroke looks the same however it reached the canvas.
+function drawStrokes(context, strokes) {
+  if (strokes.length === 0) return;
+  context.save();
   context.lineCap = "round";
   context.lineJoin = "round";
   for (const stroke of strokes) drawStroke(context, stroke);

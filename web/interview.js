@@ -21,15 +21,14 @@ import { tokenize } from "./tokenizer.js";
 import { editorOptionsFromParams } from "./editor-options.js";
 import { attachSplitter } from "./splitter.js";
 import {
-  BOARD_HEIGHT,
   BOARD_WIDTH,
   ERASER_WIDTH,
   ERASER_WIDTHS,
   PEN_COLORS,
   boardPoint,
   createBoard,
+  createBoardPainter,
   createPointerGate,
-  drawBoard,
 } from "./whiteboard.js";
 import {
   indentNewline,
@@ -338,6 +337,14 @@ const board = {
   model: null,
   pointers: createPointerGate(),
   context: null,
+  /// Keeps the finished strokes on a layer of their own, so a pointer move
+  /// repaints the stroke being drawn rather than the whole board.
+  painter: createBoardPainter((width, height) => {
+    const layer = document.createElement("canvas");
+    layer.width = width;
+    layer.height = height;
+    return layer;
+  }),
   color: PEN_COLORS[0].color,
   tool: "pen",
   eraserWidth: ERASER_WIDTH,
@@ -4173,7 +4180,11 @@ function applyBoardEdit(changed) {
 }
 
 function paintBoard() {
-  drawBoard(board.context, board.model.strokes(), BOARD_WIDTH, BOARD_HEIGHT);
+  board.painter.paint(
+    board.context,
+    board.model.strokes(),
+    board.model.isDrawing(),
+  );
   const locked = boardLocked();
   nodes.boardUndo.disabled = locked || !board.model.canUndo();
   nodes.boardRedo.disabled = locked || !board.model.canRedo();
