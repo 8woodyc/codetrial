@@ -52,6 +52,12 @@ Browser tests that wait out a timer jump the fake clock with
 `page.clock.fastForward` rather than `runFor`, which also steps every frame
 and interval in between and once made a single test take eighteen minutes.
 
+The scheduled avatar check restores the same Cargo, vendored-asset and Chromium
+caches as the main checks. Its Rust profile and linker flags match so dependency
+artifacts can be reused; it only restores these caches rather than saving a
+second copy for the weekly job. Chromium's system dependencies are still
+installed on every fresh runner.
+
 The gate picks its own compiler and Python, so running it directly builds with
 the same Clang `make` would. On Linux x86_64 with no `CXX` set, it uses the checksum-pinned
 Clang that `make` fetches into `target/clang`, fetching it just before the

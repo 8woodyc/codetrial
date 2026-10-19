@@ -316,6 +316,37 @@ gate()
             ],
         )
 
+    def test_avatar_reuses_compatible_check_caches_without_saving_them(self):
+        check = support.WORKFLOW.read_text()
+        avatar = (ROOT / ".github/workflows/avatar.yml").read_text()
+
+        def environment(workflow):
+            block = support.section(workflow, "\nenv:\n", "\njobs:\n", "env")
+            return dict(re.findall(r"^  ([A-Z_]+): (.+)$", block, re.M))
+
+        check_env, avatar_env = environment(check), environment(avatar)
+        for name in (
+            "CARGO_PROFILE_DEV_DEBUG",
+            "CARGO_PROFILE_TEST_DEBUG",
+            "RUSTFLAGS",
+        ):
+            self.assertEqual(avatar_env[name], check_env[name], name)
+        self.assertEqual(
+            avatar_env["CARGO_INCREMENTAL"], check_env.get("CARGO_INCREMENTAL", "1")
+        )
+
+        def cache_inputs(workflow, name):
+            block = support.step(workflow, name)
+            return support.section(block, "        with:\n", "\n      #", name).strip()
+
+        cargo = "uses: ./.github/actions/restore-cargo-cache"
+        for workflow in (check, avatar):
+            self.assertIn(cargo, support.step(workflow, "Restore cargo cache"))
+        for name in ("Restore vendored bytes", "Restore Chromium"):
+            self.assertEqual(cache_inputs(check, name), cache_inputs(avatar, name))
+        self.assertNotIn("actions/cache/save", avatar)
+        self.assertNotIn("uses: actions/cache@", avatar)
+
     def test_only_the_rust_lane_fetches_clang(self):
         if os.uname().sysname != "Linux" or os.uname().machine != "x86_64":
             self.skipTest("the pinned Clang is only fetched on Linux x86_64")
