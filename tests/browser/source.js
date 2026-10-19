@@ -303,6 +303,22 @@ export async function pauseClock(page) {
   }
 }
 
+/// Waits for the page to reach a state and says whether it did, so the
+/// assertion after it fails in one line naming what was wrong instead of as a
+/// timeout naming a predicate. The wait removes the race; it is not the check.
+/// No shorter cap than Playwright's default: on a loaded runner the wait alone
+/// can take seconds before it first reads the page. Only a timeout means "not
+/// reached"; a predicate that throws or a page that closed is reported as is.
+export function reaches(page, predicate, arg) {
+  return page.waitForFunction(predicate, arg).then(
+    () => true,
+    (error) => {
+      if (error.name === "TimeoutError") return false;
+      throw error;
+    },
+  );
+}
+
 export function captures(source, pattern) {
   return [...source.matchAll(pattern)].map((match) => match[1]);
 }

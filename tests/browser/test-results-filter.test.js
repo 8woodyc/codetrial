@@ -128,8 +128,11 @@ test("the checkbox hides only passes without running tests or losing focus", asy
 });
 
 test("both run shortcuts work after toggling the filter with the keyboard", async (t) => {
-  const page = await openInterview(t);
+  const page = await openInterview(t, { clock: true });
   if (!page) return;
+  // The shortcuts are under test, not the five-second loop timeout, which a
+  // loaded machine's judge outran and failed the run.
+  await pauseClock(page);
   await run(page, partial);
   const toggle = page.getByRole("checkbox", { name: "Hide passed tests" });
   for (const chord of ["Control+Enter", "Meta+Enter"]) {
@@ -144,7 +147,6 @@ test("both run shortcuts work after toggling the filter with the keyboard", asyn
     await page.waitForFunction(
       (expected) => globalThis.testRuns === expected,
       runs + 1,
-      { timeout: 5000 },
     );
     await waitForRun(page);
     assert.match(

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_RUNTIME_CONFIG,
   launchChromium,
+  reaches,
   startStaticServer,
 } from "./source.js";
 
@@ -33,25 +34,16 @@ test("a short interview can scroll to the bottom of Jim's stage", async (t) => {
     assert.ok(bottom.y + bottom.height > 160, "the stage needs scrolling");
     await page.mouse.move(1275, 80);
     await page.mouse.wheel(0, Math.ceil(bottom.y + bottom.height - 150));
-    const reachable = await page
-      .waitForFunction(
-        () => {
-          const captions = document.querySelector("#captions-bar");
-          const box = captions.getBoundingClientRect();
-          return (
-            box.bottom <= innerHeight &&
-            document
-              .elementFromPoint(box.left + box.width / 2, box.bottom - 4)
-              ?.closest("#captions-bar") === captions
-          );
-        },
-        null,
-        { timeout: 2000 },
-      )
-      .then(
-        () => true,
-        () => false,
+    const reachable = await reaches(page, () => {
+      const captions = document.querySelector("#captions-bar");
+      const box = captions.getBoundingClientRect();
+      return (
+        box.bottom <= innerHeight &&
+        document
+          .elementFromPoint(box.left + box.width / 2, box.bottom - 4)
+          ?.closest("#captions-bar") === captions
       );
+    });
     assert.ok(
       reachable,
       "the fixed stage stays clipped while the page scrolls",
@@ -94,8 +86,6 @@ test("Jim's stage follows changing captions", async (t) => {
       () =>
         getComputedStyle(document.querySelector("#jim-stage")).position ===
         "absolute",
-      null,
-      { timeout: 2000 },
     );
     await page.evaluate(() => {
       document.querySelector("#captions-text").textContent = "Listening...";
@@ -225,21 +215,16 @@ test("caption changes after panel scrolling keep Jim's top reachable", async (t)
       () => document.querySelector("#captions-bar").scrollHeight > 100,
     );
     await waitForStageLayout(page);
-    const reachable = await page
-      .waitForFunction(
-        (top) => {
-          const stage = document
-            .querySelector("#jim-stage")
-            .getBoundingClientRect();
-          return stage.top + scrollY >= top;
-        },
-        top.y,
-        { timeout: 2000 },
-      )
-      .then(
-        () => true,
-        () => false,
-      );
+    const reachable = await reaches(
+      page,
+      (top) => {
+        const stage = document
+          .querySelector("#jim-stage")
+          .getBoundingClientRect();
+        return stage.top + scrollY >= top;
+      },
+      top.y,
+    );
     assert.ok(
       reachable,
       "panel scrolling moves the stage above the document's reachable top",
@@ -294,29 +279,17 @@ test("a short interview viewport can scroll to the test results", async (t) => {
         document.querySelector(".editor-panel").scrollTop > 0,
     );
     await page.mouse.wheel(0, 2000);
-    const reachable = await page
-      .waitForFunction(
-        () => {
-          const button = document.querySelector("#results-toggle");
-          const box = button.getBoundingClientRect();
-          return (
-            box.top >= 0 &&
-            box.bottom <= innerHeight &&
-            document
-              .elementFromPoint(
-                box.left + box.width / 2,
-                box.top + box.height / 2,
-              )
-              ?.closest("#results-toggle") === button
-          );
-        },
-        null,
-        { timeout: 2000 },
-      )
-      .then(
-        () => true,
-        () => false,
+    const reachable = await reaches(page, () => {
+      const button = document.querySelector("#results-toggle");
+      const box = button.getBoundingClientRect();
+      return (
+        box.top >= 0 &&
+        box.bottom <= innerHeight &&
+        document
+          .elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+          ?.closest("#results-toggle") === button
       );
+    });
     assert.ok(reachable, "the results button is clipped instead of scrollable");
     await page.locator("#results-toggle").click();
   } finally {
@@ -346,26 +319,15 @@ test("a narrow interview can scroll horizontally to an enlarged input", async (t
     const box = await page.locator("#candidate-case-expected").boundingBox();
     await page.mouse.move(240, box.y + box.height / 2);
     await page.mouse.wheel(2000, 0);
-    const reachable = await page
-      .waitForFunction(
-        () => {
-          const input = document.querySelector("#candidate-case-expected");
-          const box = input.getBoundingClientRect();
-          return (
-            box.right <= innerWidth &&
-            document.elementFromPoint(
-              box.right - 4,
-              box.top + box.height / 2,
-            ) === input
-          );
-        },
-        null,
-        { timeout: 2000 },
-      )
-      .then(
-        () => true,
-        () => false,
+    const reachable = await reaches(page, () => {
+      const input = document.querySelector("#candidate-case-expected");
+      const box = input.getBoundingClientRect();
+      return (
+        box.right <= innerWidth &&
+        document.elementFromPoint(box.right - 4, box.top + box.height / 2) ===
+          input
       );
+    });
     assert.ok(reachable, "the input's right edge is clipped");
   } finally {
     await page.close();
