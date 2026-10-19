@@ -1,4 +1,4 @@
-import { reportTopics } from "./lib.js";
+import { reportContractStatus, reportTopics } from "./lib.js";
 
 export function availableTopics(problems) {
   return [...new Set(problems.flatMap((problem) => problem.topics ?? []))].sort(
@@ -25,7 +25,8 @@ export function recentPerformance(reports, limit = 8) {
       (entry) =>
         Number.isFinite(entry.at) &&
         !entry.report?.incomplete &&
-        ASSESSED.has(entry.report?.decision),
+        ASSESSED.has(entry.report?.decision) &&
+        reportContractStatus(entry.report) !== "unsupported",
     )
     .sort((left, right) => right.at - left.at)
     .slice(0, limit);
@@ -57,6 +58,9 @@ export function recentPerformance(reports, limit = 8) {
 
   return {
     attempts: attempts.length,
+    legacyAttempts: attempts.filter(
+      (entry) => reportContractStatus(entry.report) === "legacy",
+    ).length,
     passes,
     misses: attempts.length - passes,
     passRate: Math.round((passes / attempts.length) * 100),

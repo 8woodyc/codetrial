@@ -874,6 +874,17 @@ function reportContract(raw) {
   return { interviewContract, unsupported };
 }
 
+/// Classify saved provenance without sanitizing the report or assigning a rubric
+/// to legacy entries; unsupported claims match the sanitizer's incomplete path.
+export function reportContractStatus(raw) {
+  const { interviewContract, unsupported } = reportContract(raw);
+  return unsupported
+    ? "unsupported"
+    : interviewContract
+      ? "supported"
+      : "legacy";
+}
+
 /// The framework evidence rows, bounded and ordered.
 ///
 /// Its own function because it is the one part of a report that carries fields
@@ -1113,6 +1124,11 @@ function reportInterviewerStyle(value) {
 export function sanitizeReport(raw) {
   const { interviewContract, unsupported: unsupportedContract } =
     reportContract(raw);
+  // Absent stays absent. A stored null reads back as a malformed claim, so
+  // writing one for a report that never had a contract would turn a legacy
+  // report into an unsupported one on its next read.
+  const contractField =
+    raw?.interviewContract === undefined ? {} : { interviewContract };
   // Only what the report actually recorded. Defaulting this to "scored" put a
   // mode on every new report and made the header announce a distinction that no
   // longer exists; a report written before the split still says what it was.
@@ -1304,7 +1320,7 @@ export function sanitizeReport(raw) {
   // again on the way out of storage would just move the fabrication later.
   if (raw?.incomplete || unsupportedContract) {
     return {
-      interviewContract,
+      ...contractField,
       mode,
       interviewLoop: recordedLoop,
       interviewMode: recordedMode,
@@ -1331,7 +1347,7 @@ export function sanitizeReport(raw) {
     };
   }
   return {
-    interviewContract,
+    ...contractField,
     mode,
     interviewLoop: recordedLoop,
     interviewMode: recordedMode,
