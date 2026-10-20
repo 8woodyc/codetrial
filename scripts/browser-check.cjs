@@ -59,6 +59,7 @@ const PROBLEM_IDS = {
   copyRandomList: "copy-list-with-random-pointer",
   rotateList: "rotate-list",
   invertTree: "invert-binary-tree",
+  flattenTree: "flatten-binary-tree-to-linked-list",
   buildTree: "construct-binary-tree-from-preorder-and-inorder-traversal",
   connectTreeLevels: "populating-next-right-pointers-in-each-node-ii",
   lowestCommonAncestor: "lowest-common-ancestor-of-a-binary-tree",
@@ -1593,6 +1594,137 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
 }
 `);
       await runAndExpectPassing(PROBLEM_IDS.invertTree);
+
+      // A flatten that leaves its last thread in place returns a chain that
+      // links back to the root. Both browser runners used to walk it until the
+      // worker timed out with "check for an infinite loop".
+      await page.goto(interviewUrl(PROBLEM_IDS.flattenTree), {
+        waitUntil: "domcontentloaded",
+      });
+      await clearMediaGate(page);
+      await page
+        .getByRole("heading", {
+          name: scenarioTitle(PROBLEM_IDS.flattenTree),
+          level: 1,
+        })
+        .waitFor();
+      await page.getByText("Offline", { exact: true }).waitFor();
+      const treeReachedTwice = page.locator("#results-body").filter({
+        hasText: "Returned tree must not reach a node twice.",
+      });
+      // A child on both sides of the root is a second parent rather than a
+      // cycle, so only a check keyed on the node refuses it. Two distinct
+      // children holding the root's value must still print, so the check is
+      // not keyed on val. The case rooted at 5 then prints [5,5,5].
+      async function expectTwinChildren(shared, code, timeout) {
+        await page.getByLabel("Code editor").fill(code);
+        await page.getByRole("button", { name: /Run tests/ }).click();
+        await page
+          .getByRole("button", { name: "Run tests" })
+          .waitFor({ timeout });
+        if (shared) {
+          await page
+            .getByText(
+              `Test results · 1/${scenario(PROBLEM_IDS.flattenTree).caseCount}`,
+            )
+            .waitFor({ timeout });
+          await treeReachedTwice.waitFor({ timeout });
+          return;
+        }
+        await page
+          .locator("#results-body")
+          .filter({ hasText: "got [5,5,5]" })
+          .waitFor({ timeout });
+        assert.equal(await treeReachedTwice.count(), 0);
+      }
+      await selectLanguage(page, "JavaScript");
+      await page.getByLabel("Code editor").fill(`function linearizeMenu(root) {
+  let last = null;
+  for (let cur = root; cur; cur = cur.right) {
+    if (cur.left) {
+      let pre = cur.left;
+      while (pre.right) pre = pre.right;
+      pre.right = cur.right;
+      cur.right = cur.left;
+      cur.left = null;
+    }
+    last = cur;
+  }
+  if (last && last !== root) last.right = root;
+}
+`);
+      await page.getByRole("button", { name: /Run tests/ }).click();
+      await page.getByRole("button", { name: "Run tests" }).waitFor();
+      await treeReachedTwice.waitFor();
+      await page
+        .getByText(
+          `Test results · 2/${scenario(PROBLEM_IDS.flattenTree).caseCount}`,
+        )
+        .waitFor();
+      await expectTwinChildren(
+        true,
+        `function linearizeMenu(root) {
+  if (!root) return;
+  root.left = new TreeNode(root.val);
+  root.right = root.left;
+}
+`,
+      );
+      await expectTwinChildren(
+        false,
+        `function linearizeMenu(root) {
+  if (!root) return;
+  root.left = new TreeNode(root.val);
+  root.right = new TreeNode(root.val);
+}
+`,
+      );
+      await selectLanguage(page, "Python");
+      await page.getByLabel("Code editor").fill(`class Solution:
+    def linearizeMenu(self, root):
+        cur, last = root, None
+        while cur:
+            if cur.left:
+                pre = cur.left
+                while pre.right:
+                    pre = pre.right
+                pre.right = cur.right
+                cur.right = cur.left
+                cur.left = None
+            last, cur = cur, cur.right
+        if last and last is not root:
+            last.right = root
+`);
+      await page.getByRole("button", { name: /Run tests/ }).click();
+      await page
+        .getByRole("button", { name: "Run tests" })
+        .waitFor({ timeout: 120000 });
+      await treeReachedTwice.waitFor({ timeout: 120000 });
+      await page
+        .getByText(
+          `Test results · 2/${scenario(PROBLEM_IDS.flattenTree).caseCount}`,
+        )
+        .waitFor({ timeout: 120000 });
+      await expectTwinChildren(
+        true,
+        `class Solution:
+    def linearizeMenu(self, root):
+        if root:
+            root.left = TreeNode(root.val)
+            root.right = root.left
+`,
+        120000,
+      );
+      await expectTwinChildren(
+        false,
+        `class Solution:
+    def linearizeMenu(self, root):
+        if root:
+            root.left = TreeNode(root.val)
+            root.right = TreeNode(root.val)
+`,
+        120000,
+      );
 
       await page.goto(interviewUrl(PROBLEM_IDS.buildTree), {
         waitUntil: "domcontentloaded",

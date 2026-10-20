@@ -647,14 +647,19 @@ const JS_RUNNER_SOURCE = `
       };
       const treeFromArray = treeBuilder(TreeNode);
       const nextTreeFromArray = treeBuilder(NextNode);
+      // A node reached twice is a cycle or a shared subtree. The walk below
+      // would follow a cycle until the worker timed out, blaming the
+      // candidate's loop for the serializer's.
       const treeToArray = (root) => {
-        const values = [], queue = [root];
+        const values = [], queue = [root], seen = new Set();
         while (queue.length) {
           const node = queue.shift();
           if (!node) {
             values.push(null);
             continue;
           }
+          if (seen.has(node)) throw new TypeError("Returned tree must not reach a node twice.");
+          seen.add(node);
           values.push(node.val);
           queue.push(node.left || null, node.right || null);
         }
@@ -969,10 +974,14 @@ def _tree_from_array(values, node_type=TreeNode):
 def _tree_to_array(root):
     values = []
     queue = [root]
+    seen = set()
     for node in queue:
         if node is None:
             values.append(None)
             continue
+        if id(node) in seen:
+            raise TypeError("Returned tree must not reach a node twice.")
+        seen.add(id(node))
         values.append(node.val)
         queue.extend([node.left, node.right])
     while values and values[-1] is None:
