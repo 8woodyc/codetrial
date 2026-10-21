@@ -73,6 +73,8 @@ export function parseCandidateCase(spec, input) {
     const required = spec.argTypes?.[index] ?? type;
     if (!candidateTypeMatches(args[index], required)) {
       const name = names[index] ? ` (${names[index]})` : "";
+      if (candidateTypeMatches(args[index], required, Number.isInteger))
+        throw new Error(`Parameter ${index + 1}${name} holds ${OUT_OF_INT32}.`);
       throw new Error(`Parameter ${index + 1}${name} must match ${required}.`);
     }
   }
@@ -120,7 +122,19 @@ function reachableTreeValues(values) {
   return reachable;
 }
 
-function candidateTypeMatches(value, type) {
+/// The C, C++ and Java harnesses write every `integer` into an `int`: past
+/// this range C wraps it, C++ wraps it or refuses to compile, and javac
+/// refuses the whole run.
+const OUT_OF_INT32 = "an integer outside -2147483648 to 2147483647";
+
+function isInt32(value) {
+  return Number.isInteger(value) && value >= -(2 ** 31) && value < 2 ** 31;
+}
+
+/// A caller that refuses a case asks again with `Number.isInteger` as
+/// `isInteger`: a value that passes then is wrong only by its range, and the
+/// refusal says so rather than naming a type the value already has.
+function candidateTypeMatches(value, type, isInteger = isInt32) {
   // Refuse rather than admit: a judge whose type is not a name is a judge this
   // cannot speak for, and `type.endsWith` below would throw on it anyway.
   if (typeof type !== "string") return false;
@@ -131,32 +145,34 @@ function candidateTypeMatches(value, type) {
   if (type.endsWith("[]"))
     return (
       Array.isArray(value) &&
-      value.every((item) => candidateTypeMatches(item, type.slice(0, -2)))
+      value.every((item) =>
+        candidateTypeMatches(item, type.slice(0, -2), isInteger),
+      )
     );
   const list = /^list<(.*)>$/.exec(type);
   if (list)
     return (
       Array.isArray(value) &&
-      value.every((item) => candidateTypeMatches(item, list[1]))
+      value.every((item) => candidateTypeMatches(item, list[1], isInteger))
     );
-  if (type === "integer") return Number.isInteger(value);
+  if (type === "integer") return isInteger(value);
   if (type === "double" || type === "number") return Number.isFinite(value);
   if (type === "string") return typeof value === "string";
   if (type === "boolean") return typeof value === "boolean";
   if (type === "character")
     return typeof value === "string" && [...value].length === 1;
   if (["linkedList", "ListNode"].includes(type))
-    return Array.isArray(value) && value.every(Number.isInteger);
+    return Array.isArray(value) && value.every(isInteger);
   if (["binaryTree", "nextTree", "TreeNode"].includes(type)) {
     return (
       Array.isArray(value) &&
-      value.every((item) => item === null || Number.isInteger(item))
+      value.every((item) => item === null || isInteger(item))
     );
   }
   if (type === "linkedListArray")
     return (
       Array.isArray(value) &&
-      value.every((item) => candidateTypeMatches(item, "linkedList"))
+      value.every((item) => candidateTypeMatches(item, "linkedList", isInteger))
     );
   if (type === "randomList") {
     return (
@@ -165,7 +181,7 @@ function candidateTypeMatches(value, type) {
         (item) =>
           Array.isArray(item) &&
           item.length === 2 &&
-          Number.isInteger(item[0]) &&
+          isInteger(item[0]) &&
           (item[1] === null ||
             (Number.isInteger(item[1]) &&
               item[1] >= 0 &&
@@ -258,13 +274,17 @@ function parseClassCandidateCase(spec, input) {
         `Operation ${operation} does not accept ${args.length} arguments.`,
       );
     }
-    if (
-      !sameArity.some((types) =>
+    const matches = (isInteger) =>
+      sameArity.some((types) =>
         types.every((type, argument) =>
-          candidateTypeMatches(args[argument], type),
+          candidateTypeMatches(args[argument], type, isInteger),
         ),
-      )
-    ) {
+      );
+    if (!matches(isInt32)) {
+      if (matches(Number.isInteger))
+        throw new Error(
+          `Arguments for operation ${operation} hold ${OUT_OF_INT32}.`,
+        );
       throw new Error(
         `Arguments for operation ${operation} do not match its parameter types.`,
       );
