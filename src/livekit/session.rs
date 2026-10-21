@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use ::livekit::data_stream::api::StreamTextOptions;
-use ::livekit::prelude::Room;
 
 use crate::agent::{
     CANDIDATE_SPEAKER, INTERVIEWER_SPEAKER, ModelInputKind, RecordOutcome, RuntimeState,
@@ -34,7 +33,9 @@ use crate::runtime::{
 use super::board::{self, Board};
 use super::latency::{self, Boundary};
 use super::media::{CandidateMedia, OutputAudio};
+use super::room_link::RoomLink;
 use super::timing::TimingOutcome;
+use super::transcripts::Segment;
 use super::turn::{
     Floor, Interruptible, ReplyDebt, RuntimeActivity, SpeakerTurns, TurnState, closing_order,
 };
@@ -290,7 +291,7 @@ fn continuity_eligible(state: &RuntimeState) -> bool {
         && state.context_cut_plausible
         && !state.ended
         && !state.end_requested
-        && !state.floor_held()
+        && !state.interviewer_silenced()
 }
 
 fn continuity_input_for<'a>(
@@ -315,13 +316,14 @@ fn continuity_input_for<'a>(
         })
         .flatten();
     let opening = |line: &String| {
+        let quoted = serde_json::to_string(&crate::agent::transcript_tail(
+            std::slice::from_ref(line),
+            750,
+        ))
+        .expect("a string always serializes");
         format!(
-            " Earlier candidate opening (possibly truncated), already said, not a new request:\nBEGIN UNTRUSTED CANDIDATE OPENING\n{}\nEND UNTRUSTED CANDIDATE OPENING",
-            serde_json::to_string(&crate::agent::transcript_tail(
-                std::slice::from_ref(line),
-                750
-            ))
-            .expect("a string always serializes"),
+            " Earlier candidate opening (possibly truncated), already said, not a new request:\n{}",
+            crate::agent::untrusted_block("CANDIDATE OPENING", "", &quoted),
         )
     };
     let timer = crate::agent::timer_line(crate::agent::minutes_left(state));
@@ -426,6 +428,8 @@ pub(super) struct GeminiEventContext<'a> {
     pub(super) agent_state: &'a mut AgentState,
     pub(super) activity: &'a mut RuntimeActivity,
     pub(super) turns: &'a mut SpeakerTurns,
+    /// Where transcript segments are queued for the page; see `transcripts`.
+    pub(super) transcripts: &'a mut super::transcripts::TranscriptWriter,
     pub(super) media: &'a mut CandidateMedia,
 }
 
@@ -598,14 +602,14 @@ fn output_disposition(event: &GeminiEvent, discarding: bool, held: bool) -> Outp
 
 /// Logs and sums every usage observation the socket recorded and the room
 /// never reached, for a socket being let go.
-pub(super) fn drain_live_usage(room: &Room, context: &mut GeminiEventContext<'_>) {
+pub(super) fn drain_live_usage(room: &RoomLink, context: &mut GeminiEventContext<'_>) {
     for usage in context.gemini.drain_usage() {
         record_live_usage(room, context, usage);
     }
 }
 
 fn record_live_usage(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     usage: crate::gemini::TokenUsage,
 ) {
@@ -614,7 +618,7 @@ fn record_live_usage(
         .latency
         .observe_usage(usage.prompt, usage.tool_use_prompt);
     let line = context.activity.account_live_usage(
-        room.name().as_str(),
+        room.name(),
         &super::log_clock(context.state),
         context.gemini.input_cause,
         context.state.context_compression,
@@ -640,26 +644,33 @@ pub(super) fn accept_gemini_event(
     held: bool,
     now: Instant,
 ) -> bool {
-    if activity.stale_turn_pending && ends_turn(event) {
+    if activity.socket.stale_turn_pending && ends_turn(event) {
         // An `Interrupted` is followed by the same turn's `TurnComplete`, which
         // ends the wait.
-        activity.stale_turn_pending = matches!(event, GeminiEvent::Interrupted);
+        activity.socket.stale_turn_pending = matches!(event, GeminiEvent::Interrupted);
         return false;
     }
     if matches!(event, GeminiEvent::Interrupted) {
-        activity.interrupted_turn_pending = true;
+        activity.socket.interrupted_turn_pending = true;
         activity.turn_completed_at = None;
-    } else if answers_prompt(event) && !activity.discarding_output && !held {
-        activity.interrupted_turn_pending = false;
-        activity.stale_turn_pending = false;
+    } else if answers_prompt(event) && !activity.socket.discarding_output && !held {
+        // Not under a hold, even for a tool call, which is still delivered then
+        // and counted as output below. The generation a hold cut off can keep
+        // calling tools, and those calls are no sign that a newer turn began;
+        // disarming on them handed its late ending the resume prompt. The cost
+        // falls on a newer turn under a hold that only calls tools: its ending
+        // is swallowed, and `generating` stays set until the stall check clears
+        // it.
+        activity.socket.interrupted_turn_pending = false;
+        activity.socket.stale_turn_pending = false;
     }
     if matches!(event, GeminiEvent::TurnComplete)
-        && std::mem::take(&mut activity.interrupted_turn_pending)
+        && std::mem::take(&mut activity.socket.interrupted_turn_pending)
     {
         activity.end_discard(false);
         return false;
     }
-    match output_disposition(event, activity.discarding_output, held) {
+    match output_disposition(event, activity.socket.discarding_output, held) {
         OutputDisposition::Drop => false,
         OutputDisposition::EndsTheDiscard => {
             activity.end_discard(
@@ -670,7 +681,7 @@ pub(super) fn accept_gemini_event(
         OutputDisposition::Deliver => {
             // Old tool calls still need responses, but their generation cannot
             // answer the resume prompt or refresh its progress clock.
-            if !activity.discarding_output {
+            if !activity.socket.discarding_output {
                 if answers_prompt(event) {
                     activity.note_output(now);
                     match event {
@@ -736,7 +747,7 @@ fn observe_latency_event(
 ) -> Option<serde_json::Value> {
     // Audio is stamped where it is accepted; tools from a locally cut
     // generation still need answers but cannot start a new measured reply.
-    if activity.discarding_output || held {
+    if activity.socket.discarding_output || held {
         return None;
     }
     match event {
@@ -786,7 +797,7 @@ fn accept_event_noting_silence(
 /// undo have no step in common, and reading either one used to mean scrolling
 /// past the other five.
 pub(super) async fn handle_gemini_event(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     event: GeminiEvent,
     interruptible: Interruptible,
@@ -805,7 +816,7 @@ pub(super) async fn handle_gemini_event(
             now,
             context.media.audio.is_some(),
         ) {
-            if !context.state.floor_held() {
+            if !context.state.interviewer_silenced() {
                 if active {
                     context.activity.latency.voice_start();
                 } else {
@@ -837,11 +848,12 @@ pub(super) async fn handle_gemini_event(
     if matches!(event, GeminiEvent::TurnComplete) {
         context
             .activity
+            .tokens
             .observe_turn_complete(context.state.context_compression);
         context.activity.sync_cut_plausible(context.state);
     }
-    let held = context.state.floor_held();
-    let discarding = context.activity.discarding_output;
+    let held = context.state.interviewer_silenced();
+    let discarding = context.activity.socket.discarding_output;
     let (accepted, interruption_debt, silent_owed) =
         accept_event_noting_silence(&event, context.activity, held, Instant::now());
     let handled = if accepted {
@@ -873,7 +885,10 @@ pub(super) async fn handle_gemini_event(
         }
         match event {
             GeminiEvent::ToolCall(calls) => on_tool_calls(room, context, calls).await,
-            GeminiEvent::OutputTranscript(text) => on_output_transcript(room, context, &text).await,
+            GeminiEvent::OutputTranscript(text) => {
+                on_output_transcript(room, context, &text);
+                Ok(())
+            }
             GeminiEvent::InputTranscript(text) => {
                 on_input_transcript(room, context, &text, interruptible).await
             }
@@ -945,7 +960,7 @@ pub(super) async fn handle_gemini_event(
         && !context.state.end_requested
         && !context.state.ended
         && !context.state.paused
-        && !context.state.floor_held()
+        && !context.state.interviewer_silenced()
         && !context.activity.incoming_speech_active(now)
     {
         let prompt = crate::agent::with_timer(
@@ -991,7 +1006,7 @@ fn observe_voice_activity(
     if observed {
         activity.note_candidate_voice_activity(active, now);
     }
-    if !state.floor_held() && !activity.discarding_output {
+    if !state.interviewer_silenced() && !activity.socket.discarding_output {
         if active {
             activity.turn_timing.note_activity_start(now);
         } else {
@@ -1013,7 +1028,7 @@ pub(super) fn settle_hold_at_turn_end(state: &mut RuntimeState, activity: &mut R
 /// Answers every call in the batch in one message, and republishes the
 /// checklist once when any of them moved it.
 async fn on_tool_calls(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     calls: Vec<GeminiFunctionCall>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -1030,7 +1045,7 @@ async fn on_tool_calls(
     {
         context.board.settle_for_read(context.state).await;
     }
-    let timed = !context.state.floor_held() && !context.activity.discarding_output;
+    let timed = !context.state.interviewer_silenced() && !context.activity.socket.discarding_output;
     let reviewed_revision = context.activity.substantive_revision_at_last_review;
     let tool_started = Instant::now();
     let answers = execute_timed_tool_batch(
@@ -1078,7 +1093,7 @@ async fn on_tool_calls(
 
     // Gemini resumes the moment the responses land, so serializing them again
     // for the lines below waits until after the send.
-    if !context.activity.discarding_output && !context.state.floor_held() {
+    if !context.activity.socket.discarding_output && !context.state.interviewer_silenced() {
         let batch_ms = crate::agent::saturating_ms(tool_started.elapsed());
         let mut timing =
             context
@@ -1203,33 +1218,32 @@ pub(super) fn tool_ack_fits(
     calls: &[GeminiFunctionCall],
     now: Instant,
 ) -> bool {
-    !state.floor_held()
+    !state.interviewer_silenced()
         && output_audio.idle_at(now)
         && !calls.iter().any(|call| call.name == TOOL_END_INTERVIEW)
 }
 
 /// What the interviewer said, as it is said.
-async fn on_output_transcript(
-    room: &Room,
-    context: &mut GeminiEventContext<'_>,
-    text: &str,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn on_output_transcript(room: &RoomLink, context: &mut GeminiEventContext<'_>, text: &str) {
     // `text` is passed whole, not the trimmed form: fragments have to be
     // concatenated exactly as received. The trimmed view only decides whether
     // this event carried anything at all.
     if transcript_text(text).is_some() {
         let turn = &mut context.turns.interviewer;
-        let whole = turn
-            .record(&mut context.state.transcript, INTERVIEWER_SPEAKER, text)
-            .to_string();
-        publish_transcript(room, &whole, turn.segment_id("interviewer"), false, None).await?;
+        let text = turn.record(&mut context.state.transcript, INTERVIEWER_SPEAKER, text);
+        let segment = Segment {
+            id: turn.segment_id("interviewer"),
+            text,
+            final_segment: false,
+            identity: None,
+        };
+        context.transcripts.publish(room, segment);
     }
-    Ok(())
 }
 
 /// What the candidate said, and the playout it cuts short.
 async fn on_input_transcript(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     text: &str,
     interruptible: Interruptible,
@@ -1246,7 +1260,7 @@ async fn on_input_transcript(
         context
             .activity
             .note_candidate_finished(Instant::now(), context.output_audio.is_playing());
-        if context.state.floor_held() {
+        if context.state.interviewer_silenced() {
             context.activity.turn_timing.reset();
         }
 
@@ -1256,11 +1270,11 @@ async fn on_input_transcript(
         if context.agent_state.current() == AGENT_STATE_THINKING {
             set_agent_state(room, context.agent_state, AGENT_STATE_LISTENING);
         }
-        let whole = context
-            .turns
-            .candidate
-            .record(&mut context.state.transcript, CANDIDATE_SPEAKER, text)
-            .to_string();
+        let whole =
+            context
+                .turns
+                .candidate
+                .record(&mut context.state.transcript, CANDIDATE_SPEAKER, text);
         let was_thinking = context.state.thinking_hold.is_active();
         let was_requested = context.state.thinking_hold.is_requested();
         if interruptible == Interruptible::Yes {
@@ -1271,14 +1285,14 @@ async fn on_input_transcript(
                 crate::current_epoch_millis(),
             );
         }
-        if !context.state.floor_held() {
+        if !context.state.interviewer_silenced() {
             context
                 .activity
                 .note_latency_transcript(transcript_received_at);
         }
         if !was_thinking && context.state.thinking_hold.is_active() {
             finish_turn_timing(
-                room.name().as_str(),
+                room.name(),
                 context.activity,
                 &log_clock(context.state),
                 TimingOutcome::Held,
@@ -1313,14 +1327,13 @@ async fn on_input_transcript(
                 }
             }
         }
-        publish_transcript(
-            room,
-            &whole,
-            context.turns.candidate.segment_id("candidate"),
-            false,
-            Some(identity),
-        )
-        .await?;
+        let segment = Segment {
+            id: context.turns.candidate.segment_id("candidate"),
+            text: whole,
+            final_segment: false,
+            identity: Some(identity.to_string()),
+        };
+        context.transcripts.publish(room, segment);
     }
     Ok(())
 }
@@ -1355,7 +1368,7 @@ pub(super) fn log_turn_timing(
 
 /// A chunk of the interviewer's voice, queued for the room.
 async fn on_generated_audio(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     bytes: &[u8],
     mime_type: &str,
@@ -1375,14 +1388,14 @@ async fn on_generated_audio(
     // reply behind it.
     if context.output_audio.prepare_reply(bytes, mime_type) {
         drop_stale_playout(room, context, interruptible).await?;
-        if !context.activity.discarding_output {
+        if !context.activity.socket.discarding_output {
             context
                 .activity
                 .latency
                 .output(received_at(context.gemini), false);
         }
         let accepted_at = Instant::now();
-        if !context.activity.discarding_output
+        if !context.activity.socket.discarding_output
             && context.output_audio.fills_frame(bytes)
             && let Some(mut record) = context.activity.latency.audio(accepted_at)
         {
@@ -1418,7 +1431,7 @@ async fn on_generated_audio(
         .note_audio(Instant::now(), captured)
     {
         log_turn_timing(
-            room.name().as_str(),
+            room.name(),
             context.activity,
             &log_clock(context.state),
             summary,
@@ -1464,7 +1477,7 @@ fn speech_release_briefing(state: &RuntimeState, withdrawn: bool) -> String {
 /// resumed interview gets its own line and owes nothing for it here.
 fn drop_output(state: &mut RuntimeState, activity: &mut RuntimeActivity) {
     if state.thinking_hold.is_active() {
-        activity.discarding_output = true;
+        activity.socket.discarding_output = true;
         state.thinking_unheard_reply = true;
     }
 }
@@ -1475,33 +1488,35 @@ pub(super) fn thinking_state_message(thinking: bool) -> serde_json::Value {
     serde_json::json!({"type": "thinking_state", "thinking": thinking})
 }
 
-/// Tells the page what `take_thinking_notice` holds, if anything. Not `?`: a
-/// page left showing the wrong button is corrected by the next click, and is no
-/// reason to end the interview.
-pub(super) async fn flush_thinking_notice(room: &Room, state: &mut RuntimeState) {
-    if let Some(thinking) = state.take_thinking_notice()
-        && let Err(error) = publish_thinking_state(room, thinking).await
-    {
-        eprintln!("publishing thinking state failed ({error}); continuing the interview");
+/// Tells the page what `take_thinking_notice` holds, if anything. A page left
+/// showing the wrong button is corrected by the next click.
+pub(super) async fn flush_thinking_notice(room: &RoomLink, state: &mut RuntimeState) {
+    if let Some(thinking) = state.take_thinking_notice() {
+        publish_control(
+            room,
+            &thinking_state_message(thinking),
+            "the thinking state",
+        )
+        .await;
     }
 }
 
-async fn publish_thinking_state(
-    room: &Room,
-    thinking: bool,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    room.local_participant()
-        .publish_data(browser_packet(
-            TOPIC_CONTROL,
-            &thinking_state_message(thinking),
-        )?)
-        .await?;
-    Ok(())
+/// A control message the page shows and the interview does not depend on,
+/// sent best effort. The state it describes is already in effect, and a failed
+/// publish used to end the room loop and with it the report.
+pub(super) async fn publish_control(room: &RoomLink, notice: &serde_json::Value, what: &str) {
+    let sent = match browser_packet(TOPIC_CONTROL, notice) {
+        Ok(packet) => room.publish_data(packet).await,
+        Err(error) => Err(error.into()),
+    };
+    if let Err(error) = sent {
+        eprintln!("publishing {what} failed ({error}); continuing the interview");
+    }
 }
 
 /// Gemini finished the turn. The room has not: the queue is still draining.
 async fn on_turn_complete(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // The reply's last chunk rarely ends on a frame. Its tail goes out padded,
@@ -1511,7 +1526,7 @@ async fn on_turn_complete(
         on_generated_audio(room, context, &padding, "audio/pcm", Interruptible::No).await?;
     }
     finish_turn_timing(
-        room.name().as_str(),
+        room.name(),
         context.activity,
         &log_clock(context.state),
         TimingOutcome::NoAudio,
@@ -1541,7 +1556,7 @@ async fn on_turn_complete(
 
     // Gemini finishing its turn also means the candidate utterance it answered
     // is over, so both sides close here.
-    close_turns(room, context).await?;
+    close_turns(room, context);
     context
         .activity
         .settle_completed_turn(context.output_audio.is_playing());
@@ -1578,7 +1593,7 @@ fn settle_interruption_debt(
 
 /// Gemini cut its own turn, because it heard the candidate start one.
 async fn on_interruption(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     interruptible: Interruptible,
     owed: Option<ReplyDebt>,
@@ -1620,7 +1635,7 @@ async fn on_interruption(
         return on_turn_complete(room, context).await;
     };
     finish_turn_timing(
-        room.name().as_str(),
+        room.name(),
         context.activity,
         &log_clock(context.state),
         TimingOutcome::Interrupted,
@@ -1647,7 +1662,7 @@ async fn on_interruption(
     // says appends to the abandoned turn under its segment id, so the panel
     // would glue two separate utterances into one row and the report prompt
     // would read them as one line.
-    close_turns(room, context).await?;
+    close_turns(room, context);
 
     set_agent_state(room, context.agent_state, AGENT_STATE_LISTENING);
     Ok(())
@@ -1672,14 +1687,14 @@ impl AgentState {
     }
 }
 
-pub(super) fn set_agent_state(room: &Room, state: &mut AgentState, next: &'static str) {
+pub(super) fn set_agent_state(room: &RoomLink, state: &mut AgentState, next: &'static str) {
     if state.current == next {
         return;
     }
     state.current = next;
     let writer = state.writer.get_or_insert_with(|| {
         let (writer, mut latest) = tokio::sync::watch::channel("");
-        let participant = room.local_participant();
+        let participant = room.participant();
         tokio::spawn(async move {
             // Ends with the interview, when its state is dropped.
             while latest.changed().await.is_ok() {
@@ -1697,6 +1712,29 @@ pub(super) fn set_agent_state(room: &Room, state: &mut AgentState, next: &'stati
     writer.send_replace(next);
 }
 
+/// Takes back a state the page is showing whose condition has gone. Each path
+/// that moves the floor publishes its own state, twelve of them by hand, and
+/// the room loop runs this once per step after them, the way it flushes the
+/// thinking notice, so a path that forgets cannot leave the page wrong past
+/// the step that caused it. Never sets `speaking` or `thinking` itself: those
+/// start with the audio and the watch tick that see them begin, and only
+/// their end is checked here.
+pub(super) fn correct_agent_state(
+    room: &RoomLink,
+    shown: &mut AgentState,
+    activity: &RuntimeActivity,
+    audio_playing: bool,
+) {
+    let stale = match shown.current() {
+        AGENT_STATE_SPEAKING => activity.floor == Floor::Listening && !audio_playing,
+        AGENT_STATE_THINKING => !activity.reply_unfinished(),
+        _ => false,
+    };
+    if stale {
+        set_agent_state(room, shown, AGENT_STATE_LISTENING);
+    }
+}
+
 /// How long Gemini waits through the candidate's silence before taking the
 /// turn, so the page can draw the countdown to it. An attribute rather than a
 /// message: it is fixed for the interview, and a page that joins or reloads
@@ -1707,11 +1745,11 @@ pub(super) const TURN_WINDOW_ATTRIBUTE: &str = "codetrial.silence_ms";
 /// The agent's first attributes, listening and the turn window, in the one
 /// round trip the room pays before it waits for the candidate.
 pub(super) async fn publish_opening_attributes(
-    room: &Room,
+    room: &RoomLink,
     current: &mut AgentState,
     silence_ms: u32,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let participant = room.local_participant();
+    let participant = room.participant();
     let attributes = agent_state_attributes(participant.attributes(), AGENT_STATE_LISTENING);
     participant
         .set_attributes(turn_window_attributes(attributes, silence_ms))
@@ -1782,7 +1820,7 @@ fn has_tool_continuity(name: &str) -> bool {
 pub(super) fn editor_review_allowed(state: &RuntimeState) -> bool {
     !state.ended
         && !state.end_requested
-        && !state.floor_held()
+        && !state.interviewer_silenced()
         && !state.behavioral_round_started
         && !state.interview_mode.is_whiteboard()
         && state.evidence_ledger.code.parser_observation
@@ -2033,9 +2071,14 @@ fn editor_read_body(state: &RuntimeState, from_line: Option<usize>) -> String {
     if !collapse_saves_enough(line_bytes(&lines), preface.len()) {
         return read(1);
     }
+    // The preface ends on its own line break, which the block supplies.
     let prefix = format!(
-        "Default editor read: only identical consecutive leading comments or blank lines are collapsed; every distinct note is shown. Original line numbers are preserved.\nBEGIN UNTRUSTED EDITOR PREFACE ({})\n{preface}END UNTRUSTED EDITOR PREFACE\n",
-        state.language,
+        "Default editor read: only identical consecutive leading comments or blank lines are collapsed; every distinct note is shown. Original line numbers are preserved.\n{}\n",
+        crate::agent::untrusted_block(
+            "EDITOR PREFACE",
+            &format!(" ({})", state.language),
+            preface.strip_suffix('\n').unwrap_or(&preface),
+        ),
     );
     let numbered_code = crate::agent::numbered_from_with_limit(
         &state.code,
@@ -2335,7 +2378,7 @@ pub(super) fn framework_progress_unpublished(state: &RuntimeState) -> Option<Vec
 /// Called where evidence can change, after tool calls and data packets, and
 /// on the watch tick for a judgment collected, a rejoined page or a retry; not
 /// on every turn of the room loop, which runs for every audio frame.
-pub(super) async fn flush_framework_progress(room: &Room, state: &mut RuntimeState) {
+pub(super) async fn flush_framework_progress(room: &RoomLink, state: &mut RuntimeState) {
     let Some(phases) = framework_progress_unpublished(state) else {
         return;
     };
@@ -2354,41 +2397,24 @@ pub(super) async fn flush_framework_progress(room: &Room, state: &mut RuntimeSta
 /// has already banked is not a secret. The summary, confidence and source stay
 /// server-side, because those are the reading rather than the fact.
 async fn publish_framework_progress(
-    room: &Room,
+    room: &RoomLink,
     phases: &[&'static str],
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    room.local_participant()
-        .publish_data(browser_packet(
-            TOPIC_CONTROL,
-            &serde_json::json!({
-                "type": "framework_state",
-                "phases": phases,
-            }),
-        )?)
-        .await?;
-    Ok(())
-}
-
-async fn publish_transcript(
-    room: &Room,
-    text: &str,
-    segment_id: String,
-    final_segment: bool,
-    sender_identity: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    room.local_participant()
-        .send_text(
-            text,
-            transcript_stream_options(segment_id, final_segment, sender_identity),
-        )
-        .await?;
+    room.publish_data(browser_packet(
+        TOPIC_CONTROL,
+        &serde_json::json!({
+            "type": "framework_state",
+            "phases": phases,
+        }),
+    )?)
+    .await?;
     Ok(())
 }
 
 /// `lk.segment_id` is what lets the browser patch one row per turn instead of
 /// reassembling sentences from timestamps, and `lk.transcription_final` says
 /// whether the turn is still being spoken.
-fn transcript_stream_options(
+pub(super) fn transcript_stream_options(
     segment_id: String,
     final_segment: bool,
     sender_identity: Option<&str>,
@@ -2420,7 +2446,7 @@ pub(super) fn goodbye_heard(activity: &RuntimeActivity, audio_playing: bool) -> 
 }
 
 pub(super) async fn send_wrap_up_and_wait(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     reason: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -2479,7 +2505,7 @@ pub(super) async fn send_wrap_up_and_wait(
 /// sides before setting this floor, and closing again would split one utterance
 /// across two transcript segments.
 async fn drop_stale_playout(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     interruptible: Interruptible,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -2501,10 +2527,23 @@ async fn drop_stale_playout(
 /// generation that had stalled arms no discard, as at a pause, but its late
 /// ending is still kept from settling what the hold's release asks for.
 pub(super) fn cut_off_for_hold(activity: &mut RuntimeActivity, output_audio: &mut OutputAudio) {
-    activity.discarding_output |= pause_leaves_output_in_flight(activity, Instant::now());
-    activity.stale_turn_pending |= activity.generating && !activity.discarding_output;
+    cut_off_generation(activity, output_audio, Boundary::Held, Instant::now());
+}
+
+/// What a pause and a hold both do to the interviewer's turn: arm a discard
+/// for a generation still producing it, or a stale wait for one that stalled,
+/// then cut what is queued and close the latency measurement at `boundary`.
+/// One place, so the two cannot drift apart on which ending they swallow.
+pub(super) fn cut_off_generation(
+    activity: &mut RuntimeActivity,
+    output_audio: &mut OutputAudio,
+    boundary: Boundary,
+    now: Instant,
+) {
+    activity.socket.discarding_output |= pause_leaves_output_in_flight(activity, now);
+    activity.socket.stale_turn_pending |= activity.generating && !activity.socket.discarding_output;
     cut_off_turn(activity, output_audio);
-    activity.latency.close(Boundary::Held, Instant::now());
+    activity.latency.close(boundary, now);
 }
 
 /// The decision and its effect, with no room in sight so a test can reach it.
@@ -2545,7 +2584,7 @@ pub(super) fn cut_off_turn(
     activity.last_output_at = None;
 
     // The generation this was waiting for died with the turn.
-    activity.tool_response_outstanding = false;
+    activity.socket.tool_response_outstanding = false;
     unplayed
 }
 
@@ -2606,53 +2645,68 @@ fn take_stale_playout(
 
 /// Republishes each open turn once as final, so the browser can stop showing
 /// it as in-progress, then opens fresh segment ids for the next turn.
-pub(super) async fn close_turns(
-    room: &Room,
-    context: &mut GeminiEventContext<'_>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let candidate_identity = context.media.identity.clone();
+///
+/// Both turns are counted in the ledger before either is published. The count
+/// is what the report reads; the publish only tells the panel, and a failed
+/// one used to leave the other speaker's closed turn uncounted.
+pub(super) fn close_turns(room: &RoomLink, context: &mut GeminiEventContext<'_>) {
+    let closing = close_both_turns(
+        context.turns,
+        &mut context.state.evidence_ledger,
+        crate::current_epoch_millis(),
+        context.media.identity.as_deref(),
+    );
+    for segment in closing {
+        context.transcripts.publish(room, segment);
+    }
+}
 
+/// The room-free half of `close_turns`: finishes each open turn, counts it in
+/// the ledger, and returns its final segment, in publishing order. Only the
+/// candidate's own speech is attributed to them; the interviewer publishes as
+/// the agent participant.
+pub(super) fn close_both_turns(
+    turns: &mut SpeakerTurns,
+    ledger: &mut crate::agent::EvidenceLedger,
+    receipt_timestamp_ms: u64,
+    candidate_identity: Option<&str>,
+) -> Vec<Segment> {
     let order = closing_order(
-        context.turns.interviewer.transcript_line(),
-        context.turns.candidate.transcript_line(),
+        turns.interviewer.transcript_line(),
+        turns.candidate.transcript_line(),
     );
     let mut closing = [
         (
             "interviewer",
-            close_turn(&mut context.turns.interviewer, "interviewer"),
+            close_turn(&mut turns.interviewer, "interviewer"),
         ),
-        (
-            "candidate",
-            close_turn(&mut context.turns.candidate, "candidate"),
-        ),
+        ("candidate", close_turn(&mut turns.candidate, "candidate")),
     ];
-    let receipt_timestamp_ms = crate::current_epoch_millis();
+    let mut out = Vec::with_capacity(2);
     for speaker in order {
-        let Some((whole, segment_id)) = closing
+        let Some((text, id)) = closing
             .iter_mut()
             .find(|(name, _)| *name == speaker)
             .and_then(|(_, closed)| closed.take())
         else {
             continue;
         };
-        context
-            .state
-            .evidence_ledger
-            .record_conversation_turn(receipt_timestamp_ms, speaker);
-
-        // Only the candidate's own speech is attributed to them; the
-        // interviewer publishes as the agent participant.
-        let identity = (speaker == "candidate")
-            .then_some(candidate_identity.as_deref())
-            .flatten();
-        publish_transcript(room, &whole, segment_id, true, identity).await?;
+        ledger.record_conversation_turn(receipt_timestamp_ms, speaker);
+        out.push(Segment {
+            id,
+            text,
+            final_segment: true,
+            identity: (speaker == "candidate")
+                .then_some(candidate_identity)
+                .flatten()
+                .map(str::to_string),
+        });
     }
-    Ok(())
+    out
 }
 
 /// Ends the turn and hands back what has to be published as final, or `None`
-/// when the speaker had nothing open. Split out so the borrow ends before the
-/// publish await.
+/// when the speaker had nothing open.
 fn close_turn(turn: &mut SpeakerTurn, speaker: &str) -> Option<(String, String)> {
     if !turn.is_open() {
         return None;
@@ -2682,6 +2736,7 @@ impl TurnState {
             agent_state: &mut self.agent_state,
             activity: &mut self.activity,
             turns: &mut self.turns,
+            transcripts: &mut self.transcripts,
             media,
         }
     }

@@ -36,6 +36,7 @@ mod value;
 #[path = "../tests/unit/agent/evidence.rs"]
 mod evidence_tests;
 
+pub use events::ParseBudget;
 pub use events::apply_data_event;
 pub(crate) use events::apply_data_event_at;
 pub(crate) use events::apply_server_event_at;
@@ -76,7 +77,7 @@ pub(crate) use prompts::{
     behavioral_round_start, editor_tool_continuity, end_interview_refusal, evidenced_among,
     latest_candidate_continuity, numbered_bounded_line, numbered_from_with_limit,
     pending_candidate_line, read_editor_text_from_numbered, report_transcript_lines,
-    tool_editor_review,
+    tool_editor_review, untrusted_block,
 };
 pub(crate) use report::{
     MAX_ERROR_CHARS, Sanitized, sanitize_example_drawing_candidate, sanitize_report_candidate,
@@ -669,7 +670,19 @@ impl SpeakerTurn {
         // may split mid-word, so inserting a separator turns "Hey, I'm" + ",
         // so" into "Hey, I'm , so" and "Hel" + "lo" into "Hel lo". Only the
         // assembled turn is cleaned.
-        self.text.push_str(fragment);
+        //
+        // A turn is one transcript line, and every prompt that quotes the
+        // transcript relies on each line opening with its speaker. A break
+        // inside the recognized text would start a line with whatever the
+        // candidate said, which is how a spoken fence marker would close an
+        // untrusted block, so breaks become spaces as each fragment arrives.
+        self.text.extend(fragment.chars().map(|character| {
+            if value::breaks_a_prompt_line(character) {
+                ' '
+            } else {
+                character
+            }
+        }));
         let spoken = spoken_text(&self.text);
 
         // A turn that is nothing but artifact has not said anything yet.
@@ -838,6 +851,8 @@ pub struct RuntimeState {
     /// The last buffer parsed and its tree, so the next update does not parse
     /// it again. Runtime-only for the same reason as the baselines above.
     pub parse_cache: ParseCache,
+    /// The byte rate editor parsing is held to; see `ParseBudget`.
+    pub parse_budget: ParseBudget,
     /// Whether the candidate has typed, as opposed to the browser having
     /// published a template. See `apply_code_update`.
     pub code_edited: bool,
@@ -1091,6 +1106,7 @@ impl Default for RuntimeState {
             code: String::new(),
             last_parseable_code: std::collections::BTreeMap::new(),
             parse_cache: ParseCache::default(),
+            parse_budget: ParseBudget::default(),
             code_edited: false,
             code_templates: std::collections::BTreeMap::new(),
             language: "python".to_string(),

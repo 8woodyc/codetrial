@@ -82,7 +82,7 @@ pub fn sanitize_test_run(payload: &serde_json::Value) -> serde_json::Value {
             value
                 .chars()
                 .map(|c| {
-                    if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') {
+                    if super::value::breaks_a_prompt_line(c) {
                         ' '
                     } else {
                         c

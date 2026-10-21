@@ -130,10 +130,10 @@ fn the_page_is_told_each_declared_change_once() {
     assert_eq!(state.take_thinking_notice(), None);
     state.announce_thinking();
     assert_eq!(state.take_thinking_notice(), Some(true));
-    assert!(state.floor_held());
+    assert!(state.interviewer_silenced());
     assert!(state.end_thinking(3));
     assert_eq!(state.take_thinking_notice(), Some(false));
-    assert!(!state.floor_held());
+    assert!(!state.interviewer_silenced());
     assert!(!state.end_thinking(4));
     assert_eq!(state.take_thinking_notice(), None);
     assert!(!state.withdraw_thinking_request());

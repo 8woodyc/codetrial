@@ -86,9 +86,13 @@ mod tests;
 /// run's failure text, and then re-derived three more times without it.
 pub(crate) fn bounded_model_text(text: &str, max_chars: usize) -> String {
     text.chars()
-        .filter(|character| {
-            !character.is_control() && !matches!(character, '\u{2028}' | '\u{2029}')
-        })
+        .filter(|character| !breaks_a_prompt_line(*character))
         .take(max_chars)
         .collect()
+}
+
+/// Whether `character` could start a new line in what the model reads; see
+/// `bounded_model_text` for why the control set alone is not enough.
+pub(crate) fn breaks_a_prompt_line(character: char) -> bool {
+    character.is_control() || matches!(character, '\u{2028}' | '\u{2029}')
 }

@@ -145,7 +145,7 @@ fn a_pause_is_read_only_when_the_room_is_actually_idle() {
         (
             "a generation is already owed on this socket",
             |activity, _| {
-                activity.tool_response_outstanding = true;
+                activity.socket.tool_response_outstanding = true;
             },
         ),
         (
@@ -352,13 +352,13 @@ fn a_tool_continuation_stays_owed_after_prompt_output() {
     let mut activity = RuntimeActivity::new(start);
     activity.mark_prompted(start, None, false);
     activity.note_output(Instant::now());
-    activity.tool_response_outstanding = true;
+    activity.socket.tool_response_outstanding = true;
 
     assert!(activity.prompted_at.is_none());
     assert!(activity.awaiting_reply_since.is_none());
     assert!(activity.owes_reply());
 
-    activity.tool_response_outstanding = false;
+    activity.socket.tool_response_outstanding = false;
     activity.mark_listening();
     assert!(!activity.owes_reply());
 }
@@ -526,9 +526,9 @@ fn complete_turn(
     observations: &[u64],
 ) {
     for prompt in observations {
-        activity.observe_prompt_tokens(pair, *prompt);
+        activity.tokens.observe_prompt_tokens(pair, *prompt);
     }
-    activity.observe_turn_complete(pair);
+    activity.tokens.observe_turn_complete(pair);
 }
 
 #[test]
@@ -537,14 +537,14 @@ fn context_refresh_tracks_a_significant_prompt_drop_and_ignores_missing_counts()
     let mut activity = RuntimeActivity::new(Instant::now());
     complete_turn(&mut activity, pair, &[20_000]);
     complete_turn(&mut activity, pair, &[0]);
-    assert_eq!(activity.peak_prompt_tokens, 20_000);
-    assert!(!activity.context_refresh_pending);
+    assert_eq!(activity.tokens.peak_prompt_tokens, 20_000);
+    assert!(!activity.tokens.context_refresh_pending);
     complete_turn(&mut activity, pair, &[19_000]);
-    assert!(!activity.context_refresh_pending);
+    assert!(!activity.tokens.context_refresh_pending);
     complete_turn(&mut activity, pair, &[8_000]);
-    assert!(activity.context_refresh_pending);
+    assert!(activity.tokens.context_refresh_pending);
     complete_turn(&mut activity, pair, &[9_000]);
-    assert!(activity.context_refresh_pending);
+    assert!(activity.tokens.context_refresh_pending);
 }
 
 /// The input of the turn that was cut can make up most of the cut. A context
@@ -555,21 +555,21 @@ fn a_cut_hidden_by_new_input_is_still_seen_at_the_trigger() {
     let mut activity = RuntimeActivity::new(Instant::now());
     complete_turn(&mut activity, pair, &[20_100]);
     complete_turn(&mut activity, pair, &[19_500]);
-    assert!(activity.context_refresh_pending);
+    assert!(activity.tokens.context_refresh_pending);
 
     // At the trigger, a context that did not shrink was not cut.
     let pair = window(20_000, 8_000);
     let mut activity = RuntimeActivity::new(Instant::now());
     complete_turn(&mut activity, pair, &[20_100]);
     complete_turn(&mut activity, pair, &[20_100]);
-    assert!(!activity.context_refresh_pending);
+    assert!(!activity.tokens.context_refresh_pending);
 
     // Below the trigger the same small drop is noise.
     let pair = window(20_000, 8_000);
     let mut activity = RuntimeActivity::new(Instant::now());
     complete_turn(&mut activity, pair, &[18_000]);
     complete_turn(&mut activity, pair, &[17_500]);
-    assert!(!activity.context_refresh_pending);
+    assert!(!activity.tokens.context_refresh_pending);
 }
 
 #[test]
@@ -577,7 +577,7 @@ fn context_refresh_waits_for_candidate_output_tools_and_owed_replies() {
     let now = Instant::now();
     let mut activity = RuntimeActivity::new(now);
     assert!(!activity.can_refresh_context(false, false, false, now));
-    activity.context_refresh_pending = true;
+    activity.tokens.context_refresh_pending = true;
     assert!(activity.can_refresh_context(false, false, false, now));
     assert!(!activity.can_refresh_context(true, false, false, now));
     assert!(!activity.can_refresh_context(false, true, false, now));
@@ -585,9 +585,9 @@ fn context_refresh_waits_for_candidate_output_tools_and_owed_replies() {
     activity.generating = true;
     assert!(!activity.can_refresh_context(false, false, false, now));
     activity.generating = false;
-    activity.tool_response_outstanding = true;
+    activity.socket.tool_response_outstanding = true;
     assert!(!activity.can_refresh_context(false, false, false, now));
-    activity.tool_response_outstanding = false;
+    activity.socket.tool_response_outstanding = false;
     activity.floor = Floor::Speaking;
     assert!(!activity.can_refresh_context(false, false, false, now));
     activity.floor = Floor::Listening;
@@ -605,7 +605,7 @@ fn context_refresh_waits_for_candidate_output_tools_and_owed_replies() {
 fn context_refresh_waits_for_the_microphone_to_go_quiet() {
     let now = Instant::now();
     let mut activity = RuntimeActivity::new(Instant::now());
-    activity.context_refresh_pending = true;
+    activity.tokens.context_refresh_pending = true;
     activity.candidate_voice_at = Some(now);
     assert!(!activity.can_refresh_context(false, false, false, now));
     assert!(!activity.can_refresh_context(
@@ -623,13 +623,13 @@ fn context_refresh_is_opt_in_and_tracks_small_configured_windows() {
     let mut activity = RuntimeActivity::new(Instant::now());
     complete_turn(&mut activity, pair, &[20_000]);
     complete_turn(&mut activity, pair, &[8_000]);
-    assert_eq!(activity.peak_prompt_tokens, 0);
-    assert!(!activity.context_refresh_pending);
+    assert_eq!(activity.tokens.peak_prompt_tokens, 0);
+    assert!(!activity.tokens.context_refresh_pending);
     let pair = window(9_000, 8_000);
     let mut activity = RuntimeActivity::new(Instant::now());
     complete_turn(&mut activity, pair, &[8_900]);
     complete_turn(&mut activity, pair, &[8_300]);
-    assert!(activity.context_refresh_pending);
+    assert!(activity.tokens.context_refresh_pending);
 }
 
 /// A turn's usage may arrive on a frame of its own, before the one that
@@ -640,17 +640,17 @@ fn usage_on_a_separate_frame_is_judged_at_completion() {
     let pair = window(30_000, 8_000);
     let mut activity = RuntimeActivity::new(Instant::now());
     complete_turn(&mut activity, pair, &[20_000]);
-    activity.observe_prompt_tokens(pair, 8_000);
-    assert!(!activity.context_refresh_pending);
-    activity.observe_turn_complete(pair);
-    assert!(activity.context_refresh_pending);
+    activity.tokens.observe_prompt_tokens(pair, 8_000);
+    assert!(!activity.tokens.context_refresh_pending);
+    activity.tokens.observe_turn_complete(pair);
+    assert!(activity.tokens.context_refresh_pending);
 
     // A periodic count higher than the completed one is the reference.
     let pair = window(30_000, 8_000);
     let mut activity = RuntimeActivity::new(Instant::now());
     complete_turn(&mut activity, pair, &[5_000]);
     complete_turn(&mut activity, pair, &[21_000, 9_000]);
-    assert!(activity.context_refresh_pending);
+    assert!(activity.tokens.context_refresh_pending);
 }
 
 #[test]
@@ -658,11 +658,11 @@ fn a_cold_replacement_forgets_the_old_context() {
     let pair = window(20_000, 8_000);
     let mut activity = RuntimeActivity::new(Instant::now());
     complete_turn(&mut activity, pair, &[19_000]);
-    activity.context_refresh_pending = true;
+    activity.tokens.context_refresh_pending = true;
     activity.reset_context_observations(false);
-    assert!(!activity.context_refresh_pending);
+    assert!(!activity.tokens.context_refresh_pending);
     complete_turn(&mut activity, pair, &[6_000]);
-    assert!(!activity.context_refresh_pending);
+    assert!(!activity.tokens.context_refresh_pending);
 }
 
 /// A resumed socket still holds the provider's context, so a cut in its first
@@ -672,13 +672,13 @@ fn a_resumed_replacement_keeps_the_baseline() {
     let pair = window(30_000, 8_000);
     let mut activity = RuntimeActivity::new(Instant::now());
     complete_turn(&mut activity, pair, &[19_000]);
-    activity.observe_prompt_tokens(pair, 19_500);
-    activity.context_refresh_pending = true;
+    activity.tokens.observe_prompt_tokens(pair, 19_500);
+    activity.tokens.context_refresh_pending = true;
     activity.reset_context_observations(true);
-    assert!(!activity.context_refresh_pending);
-    assert_eq!(activity.latest_prompt_tokens, None);
+    assert!(!activity.tokens.context_refresh_pending);
+    assert_eq!(activity.tokens.latest_prompt_tokens, None);
     complete_turn(&mut activity, pair, &[6_000]);
-    assert!(activity.context_refresh_pending);
+    assert!(activity.tokens.context_refresh_pending);
 }
 
 #[test]
@@ -710,8 +710,8 @@ fn usage_is_summed_numbered_and_labelled_by_what_asked_for_it() {
     assert_eq!(activity.live_usage.response, 10);
     assert_eq!(activity.live_usage.samples, 2);
     // The compression watch saw both.
-    assert_eq!(activity.peak_prompt_tokens, 250);
-    assert_eq!(activity.latest_prompt_tokens, Some(250));
+    assert_eq!(activity.tokens.peak_prompt_tokens, 250);
+    assert_eq!(activity.tokens.latest_prompt_tokens, Some(250));
 }
 
 #[test]
@@ -727,7 +727,7 @@ fn an_interview_names_its_session_from_the_start() {
 fn a_checkpoint_is_due_only_while_the_interview_runs() {
     let now = Instant::now();
     let mut activity = RuntimeActivity::new(now);
-    activity.context_refresh_pending = true;
+    activity.tokens.context_refresh_pending = true;
     let running = RuntimeState::default();
     assert!(activity.checkpoint_due(&running, false, false, now));
     for state in [
@@ -819,7 +819,7 @@ fn tentative_spoken_holds_leave_no_declared_gaps_or_reply_over_continued_speech(
     assert_eq!(state.take_thinking_notice(), None);
     assert!(state.thinking_hold.is_active());
     assert_eq!(state.evidence_ledger.lifecycle.transitions, 0);
-    activity.discarding_output = true;
+    activity.socket.discarding_output = true;
     activity.observe_thinking_fragment(
         &mut state,
         "Let me think about the edge cases",
@@ -830,7 +830,7 @@ fn tentative_spoken_holds_leave_no_declared_gaps_or_reply_over_continued_speech(
     assert!(!state.thinking_hold.is_active());
     assert_eq!(state.evidence_ledger.lifecycle.transitions, 0);
     // Gemini may already be answering, into a discard that drops the answer.
-    assert!(activity.reply_after_thinking_discard);
+    assert!(activity.socket.reply_after_thinking_discard);
     assert!(
         !activity.claim_thinking_reply(&state),
         "not while discarding"
@@ -850,7 +850,7 @@ fn an_answer_dropped_under_a_hold_that_speech_ended_is_asked_for_again() {
         ..RuntimeState::default()
     };
     let mut activity = RuntimeActivity::new(Instant::now());
-    activity.discarding_output = true;
+    activity.socket.discarding_output = true;
     activity.observe_thinking_fragment(&mut state, "I'd use two pointers", Instant::now(), 1);
     assert!(!state.thinking_hold.is_active());
 
@@ -954,10 +954,13 @@ fn abandoning_a_request_mid_discard_owes_the_dropped_reply_and_confirming_does_n
             ..RuntimeState::default()
         };
         let mut activity = RuntimeActivity::new(Instant::now());
-        activity.discarding_output = true;
-        activity.reply_after_thinking_discard = !owed;
+        activity.socket.discarding_output = true;
+        activity.socket.reply_after_thinking_discard = !owed;
         apply_control(&mut activity, &mut state, &payload);
-        assert_eq!(activity.reply_after_thinking_discard, owed, "{payload}");
+        assert_eq!(
+            activity.socket.reply_after_thinking_discard, owed,
+            "{payload}"
+        );
     }
 }
 
@@ -1007,10 +1010,10 @@ fn a_compound_request_confirms_one_hold_and_supersedes_tentative_reply_debt() {
         activity.observe_thinking_fragment(&mut state, text, Instant::now(), 100);
     }
     assert!(state.thinking_hold.is_active());
-    activity.reply_after_thinking_discard = true;
+    activity.socket.reply_after_thinking_discard = true;
     activity.confirm_thinking_request(&mut state, Instant::now(), 101);
     assert_eq!(state.take_thinking_notice(), Some(true));
-    assert!(!activity.reply_after_thinking_discard);
+    assert!(!activity.socket.reply_after_thinking_discard);
     assert_eq!(state.evidence_ledger.lifecycle.transitions, 1);
 }
 
@@ -1171,7 +1174,7 @@ fn the_check_in_carries_what_the_hold_left_owed() {
 fn continuing_while_a_held_reply_is_discarded_owes_one_reply_after_its_boundary() {
     let state = RuntimeState::default();
     let mut activity = RuntimeActivity::new(Instant::now());
-    activity.discarding_output = true;
+    activity.socket.discarding_output = true;
     activity.defer_thinking_reply("The five-minute warning is due. The candidate is ready.");
     assert!(activity.owes_reply());
     assert!(!activity.claim_thinking_reply(&state));
@@ -1184,7 +1187,7 @@ fn continuing_while_a_held_reply_is_discarded_owes_one_reply_after_its_boundary(
         false,
         Instant::now()
     ));
-    assert!(!activity.discarding_output);
+    assert!(!activity.socket.discarding_output);
     assert!(activity.owes_reply());
     assert!(activity.claim_thinking_reply(&state));
     assert!(!activity.claim_thinking_reply(&state));
@@ -1225,11 +1228,11 @@ fn a_tentative_hold_does_not_repeat_an_already_answered_system_prompt() {
     activity.mark_prompted(Instant::now(), Some("old five-minute warning"), false);
     activity.note_output(Instant::now());
     activity.note_turn_boundary(Instant::now());
-    activity.discarding_output = true;
+    activity.socket.discarding_output = true;
     activity.observe_thinking_fragment(&mut state, "Wait", Instant::now(), 100);
     let payload = serde_json::json!({"type":"yield_turn"});
     apply_control(&mut activity, &mut state, &payload);
-    activity.discarding_output = false;
+    activity.socket.discarding_output = false;
     assert!(activity.claim_thinking_reply(&state));
     assert!(!activity.owes_prompt());
     let prompt = activity.thinking_reply_prompt();
@@ -1346,9 +1349,9 @@ fn a_reply_owed_after_a_discard_waits_for_the_floor_and_is_dropped_by_the_ending
             ..RuntimeState::default()
         },
     ] {
-        activity.reply_after_thinking_discard = true;
+        activity.socket.reply_after_thinking_discard = true;
         assert!(!activity.claim_thinking_reply(&held));
-        assert!(activity.reply_after_thinking_discard, "still owed");
+        assert!(activity.socket.reply_after_thinking_discard, "still owed");
     }
     assert!(activity.claim_thinking_reply(&RuntimeState::default()));
 }
@@ -1381,14 +1384,14 @@ fn the_watch_tick_declares_a_stale_request_and_drops_its_tentative_debt() {
         ..RuntimeState::default()
     };
     let mut activity = RuntimeActivity::new(asked);
-    activity.reply_after_thinking_discard = true;
+    activity.socket.reply_after_thinking_discard = true;
     let settled = asked + crate::agent::THINKING_REQUEST_SETTLE;
     activity.settle_stale_request(&mut state, settled - Duration::from_millis(1), 1);
     assert!(state.thinking_hold.is_requested());
-    assert!(activity.reply_after_thinking_discard);
+    assert!(activity.socket.reply_after_thinking_discard);
     activity.settle_stale_request(&mut state, settled, 2);
     assert!(state.thinking_hold.is_declared());
-    assert!(!activity.reply_after_thinking_discard);
+    assert!(!activity.socket.reply_after_thinking_discard);
 }
 
 #[test]
@@ -1469,7 +1472,7 @@ fn a_completed_turn_waits_on_the_queue_only_while_audio_plays() {
         activity.floor = Floor::Speaking;
         activity.settle_completed_turn(playing);
         assert_eq!(activity.floor, floor, "playing={playing}");
-        assert!(!activity.tool_response_outstanding);
+        assert!(!activity.socket.tool_response_outstanding);
     }
 }
 
@@ -1727,14 +1730,14 @@ fn tool_generation_sums_do_not_schedule_a_false_checkpoint() {
         ..Default::default()
     };
     activity.account_live_usage("tool-probe", "0:00.000", Some("tool"), pair, usage);
-    activity.observe_turn_complete(pair);
+    activity.tokens.observe_turn_complete(pair);
     assert_eq!(activity.live_usage.prompt, 12_494);
-    assert_eq!(activity.peak_prompt_tokens, 4210);
+    assert_eq!(activity.tokens.peak_prompt_tokens, 4210);
     complete_turn(&mut activity, pair, &[8337]);
-    assert!(!activity.context_refresh_pending);
+    assert!(!activity.tokens.context_refresh_pending);
     complete_turn(&mut activity, pair, &[19_000]);
     complete_turn(&mut activity, pair, &[8_000]);
-    assert!(activity.context_refresh_pending);
+    assert!(activity.tokens.context_refresh_pending);
 }
 
 #[test]
@@ -1754,14 +1757,14 @@ fn a_tool_response_marks_usage_even_when_the_input_cause_changes() {
             ..Default::default()
         },
     );
-    activity.observe_turn_complete(pair);
+    activity.tokens.observe_turn_complete(pair);
     complete_turn(&mut activity, pair, &[8337]);
-    assert!(!activity.context_refresh_pending);
+    assert!(!activity.tokens.context_refresh_pending);
     activity.note_tool_response(Instant::now());
     activity.reset_context_observations(true);
     complete_turn(&mut activity, pair, &[20_000]);
     complete_turn(&mut activity, pair, &[8_000]);
-    assert!(activity.context_refresh_pending);
+    assert!(activity.tokens.context_refresh_pending);
 }
 
 #[test]
@@ -1780,9 +1783,9 @@ fn tool_cause_alone_marks_an_aggregate_usage_observation() {
             ..Default::default()
         },
     );
-    activity.observe_turn_complete(pair);
+    activity.tokens.observe_turn_complete(pair);
     complete_turn(&mut activity, pair, &[8337]);
-    assert!(!activity.context_refresh_pending);
+    assert!(!activity.tokens.context_refresh_pending);
     assert_eq!(activity.live_usage.prompt, 12_494);
 }
 
@@ -1793,11 +1796,11 @@ fn a_tool_total_below_the_previous_single_prompt_can_prove_a_cut() {
     complete_turn(&mut activity, pair, &[31_352]);
     activity.note_tool_response(Instant::now());
     complete_turn(&mut activity, pair, &[27_251]);
-    assert!(activity.context_refresh_pending);
+    assert!(activity.tokens.context_refresh_pending);
 
-    activity.context_refresh_pending = false;
+    activity.tokens.context_refresh_pending = false;
     complete_turn(&mut activity, pair, &[13_700]);
-    assert!(!activity.context_refresh_pending);
+    assert!(!activity.tokens.context_refresh_pending);
 }
 
 #[test]
@@ -1805,11 +1808,11 @@ fn usage_before_a_tool_call_does_not_poison_the_comparable_peak() {
     let pair = window(20_000, 8_000);
     let mut activity = RuntimeActivity::new(Instant::now());
     complete_turn(&mut activity, pair, &[4210]);
-    activity.observe_prompt_tokens(pair, 12_494);
+    activity.tokens.observe_prompt_tokens(pair, 12_494);
     activity.note_tool_response(Instant::now());
     complete_turn(&mut activity, pair, &[12_500]);
     complete_turn(&mut activity, pair, &[8337]);
-    assert!(!activity.context_refresh_pending);
+    assert!(!activity.tokens.context_refresh_pending);
 }
 
 #[test]
@@ -1818,12 +1821,12 @@ fn a_tool_cut_comparison_waits_for_all_usage_observations() {
     let mut activity = RuntimeActivity::new(Instant::now());
     complete_turn(&mut activity, pair, &[31_352]);
     activity.note_tool_response(Instant::now());
-    activity.observe_prompt_tokens(pair, 5000);
-    assert!(!activity.context_refresh_pending);
+    activity.tokens.observe_prompt_tokens(pair, 5000);
+    assert!(!activity.tokens.context_refresh_pending);
     complete_turn(&mut activity, pair, &[40_000]);
-    assert!(!activity.context_refresh_pending);
+    assert!(!activity.tokens.context_refresh_pending);
     complete_turn(&mut activity, pair, &[32_000]);
-    assert!(!activity.context_refresh_pending);
+    assert!(!activity.tokens.context_refresh_pending);
 }
 
 #[test]
@@ -1835,7 +1838,7 @@ fn only_a_resumed_socket_retains_the_tool_cut_reference() {
         activity.reset_context_observations(resumed);
         activity.note_tool_response(Instant::now());
         complete_turn(&mut activity, pair, &[27_251]);
-        assert_eq!(activity.context_refresh_pending, resumed);
+        assert_eq!(activity.tokens.context_refresh_pending, resumed);
     }
 }
 
@@ -1849,7 +1852,7 @@ fn provider_activity_holds_prompts_until_speech_ends_after_prior_transcription()
     activity.note_candidate_voice_activity(true, now);
     let end = now + Duration::from_secs(82);
     assert!(activity.watch_prompt(&mut state, end).is_none());
-    activity.context_refresh_pending = true;
+    activity.tokens.context_refresh_pending = true;
     assert!(!activity.can_refresh_context(false, false, false, end));
     assert!(!activity.interim_review_due(&state, end));
     activity.note_candidate_voice_activity(false, end);
@@ -2351,42 +2354,42 @@ fn continuity_is_due_only_while_a_context_cut_is_plausible() {
         target_tokens: 12_000,
     });
     let mut activity = RuntimeActivity::new(Instant::now());
-    assert!(!activity.context_cut_plausible(None));
-    assert!(activity.context_cut_plausible(compression));
+    assert!(!activity.tokens.context_cut_plausible(None));
+    assert!(activity.tokens.context_cut_plausible(compression));
 
-    activity.observe_prompt_tokens(compression, 12_500);
-    activity.observe_turn_complete(compression);
-    assert!(!activity.context_cut_plausible(compression));
+    activity.tokens.observe_prompt_tokens(compression, 12_500);
+    activity.tokens.observe_turn_complete(compression);
+    assert!(!activity.tokens.context_cut_plausible(compression));
 
-    activity.observe_prompt_tokens(compression, 17_999);
-    activity.observe_turn_complete(compression);
-    assert!(!activity.context_cut_plausible(compression));
+    activity.tokens.observe_prompt_tokens(compression, 17_999);
+    activity.tokens.observe_turn_complete(compression);
+    assert!(!activity.tokens.context_cut_plausible(compression));
 
-    activity.observe_prompt_tokens(compression, 18_000);
-    activity.observe_turn_complete(compression);
-    assert!(activity.context_cut_plausible(compression));
+    activity.tokens.observe_prompt_tokens(compression, 18_000);
+    activity.tokens.observe_turn_complete(compression);
+    assert!(activity.tokens.context_cut_plausible(compression));
 
-    activity.observe_prompt_tokens(compression, 12_100);
-    activity.observe_turn_complete(compression);
-    assert!(activity.context_refresh_pending);
-    assert!(activity.context_cut_plausible(compression));
-    activity.context_refresh_pending = false;
-    assert!(!activity.context_cut_plausible(compression));
+    activity.tokens.observe_prompt_tokens(compression, 12_100);
+    activity.tokens.observe_turn_complete(compression);
+    assert!(activity.tokens.context_refresh_pending);
+    assert!(activity.tokens.context_cut_plausible(compression));
+    activity.tokens.context_refresh_pending = false;
+    assert!(!activity.tokens.context_cut_plausible(compression));
 
     // Growth through a tool turn keeps no comparable count, but it can still
     // bring the context back toward the trigger.
-    activity.observe_prompt_tokens(compression, 13_000);
-    activity.observe_turn_complete(compression);
+    activity.tokens.observe_prompt_tokens(compression, 13_000);
+    activity.tokens.observe_turn_complete(compression);
     activity.note_tool_response(Instant::now());
-    activity.observe_prompt_tokens(compression, 19_000);
-    activity.observe_turn_complete(compression);
-    assert!(!activity.context_refresh_pending);
-    assert!(activity.context_cut_plausible(compression));
+    activity.tokens.observe_prompt_tokens(compression, 19_000);
+    activity.tokens.observe_turn_complete(compression);
+    assert!(!activity.tokens.context_refresh_pending);
+    assert!(activity.tokens.context_cut_plausible(compression));
 
     // The next comparable count replaces the bound.
-    activity.observe_prompt_tokens(compression, 13_500);
-    activity.observe_turn_complete(compression);
-    assert!(!activity.context_cut_plausible(compression));
+    activity.tokens.observe_prompt_tokens(compression, 13_500);
+    activity.tokens.observe_turn_complete(compression);
+    assert!(!activity.tokens.context_cut_plausible(compression));
 }
 
 /// Voiced frames owe the unfinished reply a wait only while the provider also
@@ -2441,8 +2444,12 @@ fn review_settling_silent_delivery_and_cut_sync_hold_at_their_edges() {
         trigger_tokens: 24_000,
         target_tokens: 12_000,
     });
-    activity.observe_prompt_tokens(state.context_compression, 12_500);
-    activity.observe_turn_complete(state.context_compression);
+    activity
+        .tokens
+        .observe_prompt_tokens(state.context_compression, 12_500);
+    activity
+        .tokens
+        .observe_turn_complete(state.context_compression);
     activity.sync_cut_plausible(&mut state);
     assert!(!state.context_cut_plausible);
 }
@@ -2535,7 +2542,7 @@ fn only_a_tool_only_answer_to_a_waiting_candidate_is_unvoiced() {
     let mut cut = RuntimeActivity::new(start);
     cut.note_candidate_finished(start, false);
     cut.note_output(start);
-    cut.discarding_output = true;
+    cut.socket.discarding_output = true;
     assert!(
         !cut.answered_without_speaking(),
         "a cut generation is not an answer"
@@ -2825,9 +2832,9 @@ fn a_tool_acknowledgement_plays_once_per_wait() {
 
     activity.clear_candidate_reply_wait();
     activity.note_candidate_finished(at(5_000), false);
-    activity.discarding_output = true;
+    activity.socket.discarding_output = true;
     assert!(!activity.take_tool_ack(at(5_010)), "a discarded generation");
-    activity.discarding_output = false;
+    activity.socket.discarding_output = false;
 
     // Never over the candidate speaking again.
     activity.note_candidate_voice_activity(true, at(5_020));

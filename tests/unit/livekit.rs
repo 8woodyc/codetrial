@@ -3,6 +3,10 @@
 //! unit
 //! test and not an integration test: private items are in scope.
 
+use super::packets::{
+    HoldEffects, begin_button_hold, owes_failed_reply, reduce_data_packet, settle_hold,
+    test_run_line,
+};
 use super::session::accept_gemini_event;
 use super::*;
 use crate::agent::ThinkingHold;
@@ -438,7 +442,7 @@ fn a_pending_reply_is_what_the_advisory_reads_as_in_flight() {
             activity.floor,
             false,
             activity.reply_in_flight(),
-            activity.tool_response_outstanding,
+            activity.socket.tool_response_outstanding,
         ),
         "a settled floor is not enough while a reply is owed"
     );
@@ -450,7 +454,7 @@ fn a_pending_reply_is_what_the_advisory_reads_as_in_flight() {
     assert!(deferred.take_if_due(
         activity.floor,
         output_audio.is_playing(),
-        activity.tool_response_outstanding,
+        activity.socket.tool_response_outstanding,
     ));
 }
 
@@ -1300,7 +1304,7 @@ fn the_browser_escape_hatch_outlasts_the_report_deadline() {
 /// standing in for it, and a report goes out only through the receipt wait.
 #[test]
 fn the_ending_leaves_only_after_the_report_delivery_settles() {
-    let source = include_str!("../../src/livekit.rs");
+    let source = include_str!("../../src/livekit/packets.rs");
     // To the next item at column zero, as the source tests above read a body.
     let ending = source
         .split("async fn apply_data_packet(")
@@ -1606,7 +1610,7 @@ fn the_interviewers_close_waits_for_a_room_that_can_hear_it() {
         "the report has already gone"
     );
 
-    activity.tool_response_outstanding = true;
+    activity.socket.tool_response_outstanding = true;
     assert!(
         !ready_to_close(&asked, &activity),
         "the acknowledgement Gemini owes would be mistaken for the closing"
@@ -1620,14 +1624,14 @@ fn replacing_a_socket_drops_its_pending_close_request() {
         ..RuntimeState::default()
     };
     let mut activity = RuntimeActivity::new(Instant::now());
-    activity.discarding_output = true;
-    activity.tool_response_outstanding = true;
+    activity.socket.discarding_output = true;
+    activity.socket.tool_response_outstanding = true;
 
     clear_abandoned_socket_work(&mut state, &mut activity);
 
     assert!(!state.end_requested);
-    assert!(!activity.discarding_output);
-    assert!(!activity.tool_response_outstanding);
+    assert!(!activity.socket.discarding_output);
+    assert!(!activity.socket.tool_response_outstanding);
 }
 
 /// The first open of an interview must ride out a 503 on the key it selected.
@@ -2370,7 +2374,7 @@ async fn replacement_sockets_receive_local_progress_before_continuing() {
     let mut tool_activity = RuntimeActivity::new(Instant::now());
     tool_activity.mark_prompted(Instant::now(), None, false);
     tool_activity.note_output(Instant::now());
-    tool_activity.tool_response_outstanding = true;
+    tool_activity.socket.tool_response_outstanding = true;
     let tool_continuation = Resumed {
         owed: tool_activity.owes_reply(),
     };
@@ -2578,7 +2582,7 @@ fn a_replaced_socket_reports_the_reply_it_owed_before_clearing_it() {
         ),
         (
             "tool continuation",
-            |activity, _| activity.tool_response_outstanding = true,
+            |activity, _| activity.socket.tool_response_outstanding = true,
             true,
             "candidate=false prompt=none tool=true generating=false",
         ),
@@ -2844,7 +2848,7 @@ async fn fake_resumed_socket() -> (
 /// The same fake, resumed from `handle` or opened cold without one. It never
 /// sends a model event, which is the silent socket the reply watchdog exists
 /// for: setup succeeds, and nothing ever answers.
-async fn fake_socket(
+pub(super) async fn fake_socket(
     handle: Option<&str>,
 ) -> (
     GeminiLiveSession,
@@ -3430,7 +3434,7 @@ async fn replace_after_stall(
             activity.floor,
             output_audio.is_playing(),
             activity.reply_in_flight(),
-            activity.tool_response_outstanding,
+            activity.socket.tool_response_outstanding,
         ));
     }
 
@@ -3558,12 +3562,12 @@ fn a_held_go_away_is_taken_only_once_the_room_has_settled() {
         !restart.take_if_settled(&activity, true, Instant::now()),
         "audio still playing"
     );
-    activity.tool_response_outstanding = true;
+    activity.socket.tool_response_outstanding = true;
     assert!(
         !restart.take_if_settled(&activity, false, Instant::now()),
         "a tool reply owed"
     );
-    activity.tool_response_outstanding = false;
+    activity.socket.tool_response_outstanding = false;
     activity.floor = Floor::Speaking;
     assert!(
         !restart.take_if_settled(&activity, false, Instant::now()),
@@ -3621,7 +3625,7 @@ fn a_stalled_tool_continuation_releases_a_held_go_away() {
         activity.floor,
         false,
         false,
-        activity.tool_response_outstanding
+        activity.socket.tool_response_outstanding
     ));
     assert!(
         !activity
@@ -3630,7 +3634,7 @@ fn a_stalled_tool_continuation_releases_a_held_go_away() {
     );
     let stalls = activity.settle_stalls(start + PROMPT_STALL, false);
     assert!(stalls.spend_restart);
-    assert!(!activity.tool_response_outstanding);
+    assert!(!activity.socket.tool_response_outstanding);
     assert!(activity.owes_prompt(), "the continuation is still owed");
     assert!(restart.take_if_settled(&activity, false, Instant::now()));
 }
@@ -3671,16 +3675,16 @@ fn a_continuation_under_way_does_not_stall() {
         activity.note_output(at);
         assert!(!activity.settle_stalls(at, false).spend_restart);
     }
-    assert!(activity.tool_response_outstanding);
+    assert!(activity.socket.tool_response_outstanding);
 
     let silent = at + PROMPT_STALL;
     assert!(
         !activity.settle_stalls(silent, true).spend_restart,
         "its audio still plays"
     );
-    assert!(activity.tool_response_outstanding);
+    assert!(activity.socket.tool_response_outstanding);
     assert!(activity.settle_stalls(silent, false).spend_restart);
-    assert!(!activity.tool_response_outstanding);
+    assert!(!activity.socket.tool_response_outstanding);
 }
 
 /// The stall release leaves the floor alone while earlier audio still plays:
@@ -3712,7 +3716,7 @@ fn a_discarded_turn_ending_preserves_work_sent_after_resume() {
         for candidate_spoke in [false, true] {
             let start = Instant::now();
             let mut activity = RuntimeActivity::new(start);
-            activity.discarding_output = true;
+            activity.socket.discarding_output = true;
             activity.mark_prompted(start, Some("resume"), false);
             if candidate_spoke {
                 activity.note_candidate_finished(start, false);
@@ -3723,7 +3727,7 @@ fn a_discarded_turn_ending_preserves_work_sent_after_resume() {
                 false,
                 Instant::now()
             ));
-            assert!(!activity.discarding_output);
+            assert!(!activity.socket.discarding_output);
             assert!(activity.owes_reply());
             assert_eq!(activity.reply_in_flight(), candidate_spoke);
             assert_eq!(activity.owes_prompt(), !candidate_spoke);
@@ -3956,7 +3960,7 @@ fn a_thinking_hold_cancels_a_model_requested_close_after_its_audio_was_cut() {
         ..RuntimeState::default()
     };
     let mut activity = RuntimeActivity::new(Instant::now());
-    activity.tool_response_outstanding = true;
+    activity.socket.tool_response_outstanding = true;
     crate::agent::apply_data_event(
         &mut state,
         crate::runtime::TOPIC_CONTROL,
@@ -3965,7 +3969,7 @@ fn a_thinking_hold_cancels_a_model_requested_close_after_its_audio_was_cut() {
     );
     let (mut output_audio, _frames) = test_output_audio();
     cut_off_turn(&mut activity, &mut output_audio);
-    assert!(!activity.tool_response_outstanding);
+    assert!(!activity.socket.tool_response_outstanding);
     assert!(!ready_to_close(&state, &activity));
     crate::agent::apply_data_event(
         &mut state,
@@ -4035,7 +4039,7 @@ async fn choosing_thinking_ends_the_audio_stream_and_ignores_the_transcript_it_r
         1_300,
     );
     assert_eq!(state.take_thinking_notice(), None);
-    assert!(state.thinking_hold.is_active());
+    assert!(state.thinking_hold.is_declared());
 }
 
 /// `settle_hold` against `turn`, clicked now, at the default grace.
@@ -4060,12 +4064,13 @@ async fn settle(
 }
 
 /// A `TurnState` for `settle_hold`, which reads the room loop's whole context.
-fn hold_turn(state: RuntimeState) -> TurnState {
+pub(super) fn hold_turn(state: RuntimeState) -> TurnState {
     TurnState {
         state,
         agent_state: Default::default(),
         activity: RuntimeActivity::new(Instant::now()),
         turns: SpeakerTurns::default(),
+        transcripts: Default::default(),
     }
 }
 
@@ -4108,7 +4113,7 @@ async fn drawing_yields_finish_audio_and_ask_once_with_or_without_speech() {
                 reply.is_none(),
                 "the spoken turn carries the drawing context"
             );
-            assert!(turn.activity.thinking_reply_fallback.is_some());
+            assert!(turn.activity.socket.thinking_reply_fallback.is_some());
         } else {
             let prompt = reply.expect("drawing alone still needs an explicit reply");
             send_model_text(
@@ -4180,7 +4185,7 @@ async fn repeated_thinking_acknowledges_without_finalizing_resumed_speech() {
     assert_eq!(turn.state.take_thinking_notice(), Some(true));
     turn.activity
         .ignore_input_before_hold(click, THINKING_TRANSCRIPT_GRACE);
-    let original_window = turn.activity.thinking_ignore_input_until;
+    let original_window = turn.activity.socket.thinking_ignore_input_until;
     let original_hold = turn.state.thinking_hold;
     let duplicate_at = click + THINKING_TRANSCRIPT_GRACE + Duration::from_millis(100);
     let (mut output_audio, _frames) = test_output_audio();
@@ -4211,7 +4216,10 @@ async fn repeated_thinking_acknowledges_without_finalizing_resumed_speech() {
     };
     assert_eq!(effects, HoldEffects::default());
     assert_eq!(media.audio_bytes.len(), 640);
-    assert_eq!(turn.activity.thinking_ignore_input_until, original_window);
+    assert_eq!(
+        turn.activity.socket.thinking_ignore_input_until,
+        original_window
+    );
     turn.activity.observe_thinking_fragment(
         &mut turn.state,
         "I would use a hash map",
@@ -4317,7 +4325,7 @@ async fn releasing_into_an_open_candidate_turn_delivers_the_prompt_as_context() 
     assert!(reply.is_none(), "delivered as context, not asked for again");
     assert!(!turn.state.needs_cold_brief, "the debt it carried is paid");
     assert!(
-        turn.activity.thinking_reply_fallback.is_some(),
+        turn.activity.socket.thinking_reply_fallback.is_some(),
         "asked for outright if the open turn is never answered"
     );
     let sent = server.await.unwrap();
@@ -4533,9 +4541,9 @@ fn reply_timeout_requires_unanswered_work_and_no_output() {
     activity.settle_stalls(start + PROMPT_STALL, false);
     assert!(activity.reply_timed_out(deadline, false));
     assert!(!activity.reply_timed_out(deadline, true));
-    activity.discarding_output = true;
+    activity.socket.discarding_output = true;
     assert!(activity.reply_timed_out(deadline, false));
-    activity.discarding_output = false;
+    activity.socket.discarding_output = false;
     activity.note_output(start + Duration::from_secs(1));
     assert!(!activity.reply_timed_out(deadline, false));
 }
@@ -4698,13 +4706,13 @@ fn only_completed_delivered_output_clears_recovery_failures() {
         &activity,
         &GeminiEvent::Interrupted
     ));
-    activity.discarding_output = true;
+    activity.socket.discarding_output = true;
     assert!(!completed_live_reply(
         &state,
         &activity,
         &GeminiEvent::TurnComplete
     ));
-    activity.discarding_output = false;
+    activity.socket.discarding_output = false;
     state.paused = true;
     assert!(!completed_live_reply(
         &state,
@@ -4718,7 +4726,7 @@ fn discarded_tool_calls_do_not_answer_a_resume_prompt() {
     for tool_before_resume in [false, true] {
         let start = Instant::now();
         let mut activity = RuntimeActivity::new(start);
-        activity.discarding_output = true;
+        activity.socket.discarding_output = true;
         if !tool_before_resume {
             activity.mark_prompted(start, Some("resume"), false);
         }
@@ -4730,7 +4738,7 @@ fn discarded_tool_calls_do_not_answer_a_resume_prompt() {
         ));
         activity.note_tool_response(start);
         assert!(!activity.generating);
-        assert!(!activity.tool_response_outstanding);
+        assert!(!activity.socket.tool_response_outstanding);
         if tool_before_resume {
             activity.mark_prompted(start, Some("resume"), false);
         }
@@ -4795,7 +4803,7 @@ fn a_late_interrupted_turn_complete_does_not_settle_new_work() {
         let start = Instant::now();
         let mut activity = RuntimeActivity::new(start);
         let (mut output_audio, _) = test_output_audio();
-        activity.discarding_output = discarded;
+        activity.socket.discarding_output = discarded;
         let dispatch = accept_gemini_event(
             &GeminiEvent::Interrupted,
             &mut activity,
@@ -4814,7 +4822,7 @@ fn a_late_interrupted_turn_complete_does_not_settle_new_work() {
             Instant::now()
         ));
         assert!(activity.reply_timed_out(start + REPLY_TIMEOUT, false));
-        assert!(!activity.interrupted_turn_pending);
+        assert!(!activity.socket.interrupted_turn_pending);
     }
 }
 
@@ -4835,7 +4843,7 @@ fn new_output_clears_the_interrupted_boundary_guard() {
         false,
         Instant::now()
     ));
-    assert!(!activity.interrupted_turn_pending);
+    assert!(!activity.socket.interrupted_turn_pending);
     assert!(accept_gemini_event(
         &GeminiEvent::TurnComplete,
         &mut activity,
@@ -4947,7 +4955,7 @@ fn resume_rebases_tool_and_generation_progress_without_creating_debt() {
     activity.resume_reply_wait(resumed_at);
     assert_eq!(activity.last_output_at, Some(resumed_at));
     assert_eq!(activity.tool_response_at, Some(resumed_at));
-    assert!(activity.tool_response_outstanding);
+    assert!(activity.socket.tool_response_outstanding);
     assert!(!activity.reply_timed_out(
         resumed_at + turn::FIRST_OUTPUT_DEADLINE - Duration::from_millis(1),
         false
@@ -5330,16 +5338,16 @@ fn a_failed_cold_briefing_keeps_an_unanswered_candidate_turn() {
 #[test]
 fn an_interrupted_turn_ending_inside_a_discard_ends_both() {
     let mut activity = RuntimeActivity::new(Instant::now());
-    activity.discarding_output = true;
-    activity.interrupted_turn_pending = true;
+    activity.socket.discarding_output = true;
+    activity.socket.interrupted_turn_pending = true;
     assert!(!accept_gemini_event(
         &GeminiEvent::TurnComplete,
         &mut activity,
         false,
         Instant::now()
     ));
-    assert!(!activity.discarding_output);
-    assert!(!activity.interrupted_turn_pending);
+    assert!(!activity.socket.discarding_output);
+    assert!(!activity.socket.interrupted_turn_pending);
     assert!(accept_gemini_event(
         &audio_chunk(),
         &mut activity,
@@ -5607,7 +5615,7 @@ fn every_short_sequence_keeps_the_reply_debt_rules() {
                 Duration::from_secs(1)
             };
             let owed_before = debt_held(&state, &activity);
-            let discarding_before = activity.discarding_output;
+            let discarding_before = activity.socket.discarding_output;
             let settled = apply_debt_step(step, &mut state, &mut activity, &mut output_audio, now);
             let context = || format!("{:?} at step {offset}", &sequence[..=offset]);
             if owed_before && !settled {
@@ -5615,7 +5623,7 @@ fn every_short_sequence_keeps_the_reply_debt_rules() {
             }
             if step == DebtStep::TurnComplete {
                 assert!(
-                    !activity.discarding_output,
+                    !activity.socket.discarding_output,
                     "discard left armed: {}",
                     context()
                 );
@@ -5629,7 +5637,7 @@ fn every_short_sequence_keeps_the_reply_debt_rules() {
                 && !state.paused
             {
                 assert!(
-                    !activity.interrupted_turn_pending,
+                    !activity.socket.interrupted_turn_pending,
                     "guard left armed: {}",
                     context()
                 );
@@ -5674,7 +5682,10 @@ fn the_answer_to_a_resume_after_a_stalled_generation_is_heard() {
     let paused_at = start + PROMPT_STALL;
 
     assert!(toggle_pause(&mut state, &mut activity, &mut output_audio, paused_at).is_none());
-    assert!(!activity.discarding_output, "nothing stalled is on its way");
+    assert!(
+        !activity.socket.discarding_output,
+        "nothing stalled is on its way"
+    );
     let resumed_at = paused_at + Duration::from_secs(5);
     toggle_pause(&mut state, &mut activity, &mut output_audio, resumed_at).unwrap();
     assert!(activity.owes_prompt());
@@ -5698,14 +5709,14 @@ fn the_answer_to_a_resume_after_a_stalled_generation_is_heard() {
         ..RuntimeState::default()
     };
     update_pause_activity(&mut paused, &mut live, &mut output_audio, start);
-    assert!(live.discarding_output);
+    assert!(live.socket.discarding_output);
     assert!(!accept_gemini_event(
         &GeminiEvent::Interrupted,
         &mut live,
         false,
         start
     ));
-    assert!(!live.discarding_output);
+    assert!(!live.socket.discarding_output);
 }
 
 /// Jim calls `end_interview` and Gemini never sends the acknowledgement. The
@@ -5760,7 +5771,7 @@ fn a_close_from_a_discarded_generation_is_held_until_the_resume() {
         ..RuntimeState::default()
     };
     let mut activity = RuntimeActivity::new(start);
-    activity.discarding_output = true;
+    activity.socket.discarding_output = true;
     assert!(accept_gemini_event(
         &GeminiEvent::ToolCall(Vec::new()),
         &mut activity,
@@ -5773,7 +5784,7 @@ fn a_close_from_a_discarded_generation_is_held_until_the_resume() {
     state.end_requested = true;
     activity.note_tool_response(start);
     assert!(
-        !activity.tool_response_outstanding,
+        !activity.socket.tool_response_outstanding,
         "its acknowledgement is discarded"
     );
     assert!(!ready_to_close(&state, &activity), "held while paused");
@@ -5801,8 +5812,8 @@ fn a_stalled_generations_late_ending_does_not_settle_the_resume() {
     activity.note_output(start);
     let paused_at = start + PROMPT_STALL;
     update_pause_activity(&mut state, &mut activity, &mut output_audio, paused_at);
-    assert!(!activity.discarding_output);
-    assert!(activity.stale_turn_pending);
+    assert!(!activity.socket.discarding_output);
+    assert!(activity.socket.stale_turn_pending);
 
     state.paused = false;
     let resumed_at = paused_at + Duration::from_secs(5);
@@ -5816,11 +5827,11 @@ fn a_stalled_generations_late_ending_does_not_settle_the_resume() {
         ));
         assert!(activity.owes_prompt(), "{ending:?} is the old turn's");
     }
-    assert!(!activity.stale_turn_pending);
+    assert!(!activity.socket.stale_turn_pending);
     assert!(activity.reply_timed_out(resumed_at + REPLY_TIMEOUT, false));
 
     // New output disarms it, so the resume's own ending counts.
-    activity.stale_turn_pending = true;
+    activity.socket.stale_turn_pending = true;
     let chunk = audio_chunk();
     assert!(accept_gemini_event(
         &chunk,
@@ -5828,7 +5839,7 @@ fn a_stalled_generations_late_ending_does_not_settle_the_resume() {
         false,
         resumed_at
     ));
-    assert!(!activity.stale_turn_pending);
+    assert!(!activity.socket.stale_turn_pending);
     assert!(accept_gemini_event(
         &GeminiEvent::TurnComplete,
         &mut activity,
@@ -5958,7 +5969,7 @@ fn a_late_acknowledgement_ending_does_not_cut_the_goodbye() {
     activity.note_output(start);
     activity.settle_stalls(start + PROMPT_STALL, false);
     assert!(
-        !activity.tool_response_outstanding,
+        !activity.socket.tool_response_outstanding,
         "the stalled ack is released"
     );
 
@@ -6374,7 +6385,11 @@ async fn a_held_round_transition_waits_for_its_judgment_or_its_deadline() {
 /// and the watch tick applies a held transition after collecting the judgment.
 #[test]
 fn the_room_loop_settles_the_end_and_holds_the_transition_before_applying_them() {
-    let source = include_str!("../../src/livekit.rs");
+    // The loop and the packet handlers it calls, read as one text.
+    let source = concat!(
+        include_str!("../../src/livekit.rs"),
+        include_str!("../../src/livekit/packets.rs")
+    );
     let body = |name: &str| {
         source
             .split(name)
@@ -7476,13 +7491,13 @@ fn a_pause_keeps_a_hold_discard_until_the_old_generation_ends() {
     let mut activity = RuntimeActivity::new(start);
     activity.note_output(start);
     session::cut_off_for_hold(&mut activity, &mut audio);
-    assert!(activity.discarding_output);
+    assert!(activity.socket.discarding_output);
     let mut state = RuntimeState {
         paused: true,
         ..RuntimeState::default()
     };
     update_pause_activity(&mut state, &mut activity, &mut audio, start);
-    assert!(activity.discarding_output);
+    assert!(activity.socket.discarding_output);
     state.paused = false;
     update_pause_activity(&mut state, &mut activity, &mut audio, start);
     activity.mark_prompted(start, Some("resume"), false);
@@ -7707,4 +7722,175 @@ async fn livekit_proxy_child() {
         .err()
         .expect("the fake proxy ends the tunnel after the ClientHello");
     assert!(!error.to_string().contains("requires"), "{error}");
+}
+
+/// The ambiguity `stale_turn_pending` resolves toward the old turn: a resume
+/// answered with nothing at all ends like the stalled turn would. That costs
+/// one reply timeout, after which the watchdog still finds the prompt owed;
+/// counting it as the answer would have settled the prompt with nothing said.
+#[test]
+fn a_silent_answer_to_the_resume_is_recovered_by_the_reply_watchdog() {
+    let start = Instant::now();
+    let mut state = RuntimeState {
+        paused: true,
+        ..RuntimeState::default()
+    };
+    let mut activity = RuntimeActivity::new(start);
+    let (mut output_audio, _) = test_output_audio();
+    activity.note_output(start);
+    let paused_at = start + PROMPT_STALL;
+    update_pause_activity(&mut state, &mut activity, &mut output_audio, paused_at);
+    assert!(activity.socket.stale_turn_pending);
+
+    state.paused = false;
+    let resumed_at = paused_at + Duration::from_secs(5);
+    activity.mark_prompted(resumed_at, Some("resume"), false);
+    assert!(!accept_gemini_event(
+        &GeminiEvent::TurnComplete,
+        &mut activity,
+        false,
+        resumed_at
+    ));
+    assert!(!activity.socket.stale_turn_pending);
+    assert!(activity.owes_prompt());
+    assert!(!activity.reply_timed_out(resumed_at, false));
+    assert!(activity.reply_timed_out(resumed_at + REPLY_TIMEOUT, false));
+}
+
+/// Everything a closed socket owed is dropped with it, in one assignment, so
+/// a wait added to `SocketWork` cannot be forgotten by the replacement. What
+/// belongs to the candidate rather than the socket survives.
+#[test]
+fn a_replacement_drops_every_wait_the_old_socket_owed() {
+    let now = Instant::now();
+    let mut state = RuntimeState {
+        thinking_hold: ThinkingHold::Held { since: now },
+        end_requested: true,
+        ..RuntimeState::default()
+    };
+    let mut activity = RuntimeActivity::new(now);
+    activity.socket = turn::SocketWork {
+        discarding_output: true,
+        thinking_ignore_input_until: Some(now),
+        reply_after_thinking_discard: true,
+        thinking_reply_fallback: Some((now, "ready".into())),
+        interrupted_turn_pending: true,
+        stale_turn_pending: true,
+        tool_response_outstanding: true,
+    };
+    clear_abandoned_socket_work(&mut state, &mut activity);
+    assert_eq!(activity.socket, turn::SocketWork::default());
+    assert!(!state.end_requested);
+    assert!(state.thinking_hold.is_declared());
+}
+
+/// The interview a packet handler is given, for a room that never connected.
+fn packet_config() -> AgentConfig {
+    load_from_pairs([
+        ("LIVEKIT_URL", "wss://example.livekit.cloud"),
+        ("LIVEKIT_API_KEY", "devkey"),
+        ("LIVEKIT_API_SECRET", "devsecret"),
+        ("GOOGLE_API_KEY", "packet-test-key"),
+    ])
+    .unwrap()
+}
+
+#[tokio::test]
+async fn a_resume_through_the_packet_handler_owes_the_paused_event_and_tells_the_page() {
+    let config = packet_config();
+    let keys = Arc::new(GeminiKeys::from_config(&config));
+    let boot = candidate_bootstrap(&config, "room-test", None);
+    let (_room_events, events) = tokio::sync::mpsc::unbounded_channel();
+    let events = tokio::sync::Mutex::new(events);
+    let interview = InterviewContext {
+        config: &config,
+        keys: &keys,
+        boot: &boot,
+        started_at: Instant::now(),
+        candidate_identity: "candidate",
+        events: &events,
+        slot: None,
+    };
+    let mut turn = hold_turn(RuntimeState {
+        paused: true,
+        owed_reply_on_resume: Some(Some(REACTION.into())),
+        ..RuntimeState::default()
+    });
+    let (mut gemini, server) = fake_socket(None).await;
+    let (mut output_audio, _queued) = test_output_audio();
+    let mut board = board::Board::new();
+    let mut media = CandidateMedia::new();
+    let (room, sent) = room_link::RoomLink::recording("room-test");
+    {
+        let mut context = turn.context(&mut output_audio, &mut gemini, &mut board, &mut media);
+        let flow = apply_data_packet(
+            &room,
+            &mut context,
+            interview,
+            crate::runtime::TOPIC_CONTROL,
+            &serde_json::json!({"type": "pause_interview", "paused": false}),
+            true,
+        )
+        .await
+        .unwrap();
+        assert!(flow.is_continue());
+    }
+
+    // What is owed is the event the pause cut off, not the resume line that
+    // asked for it, and the page is told the interview is running again.
+    assert!(!turn.state.paused);
+    assert_eq!(turn.activity.prompt_text.as_deref(), Some(REACTION));
+    assert!(sent.take().contains(&room_link::Sent::Data {
+        topic: Some(TOPIC_CONTROL.into()),
+        message: serde_json::json!({"type": "pause_state", "paused": false}),
+    }));
+
+    // And Gemini is asked for it, framed as the event the pause cut off.
+    let asked = server.await.unwrap().to_string();
+    assert!(asked.contains("BEGIN OWED EVENT"), "{asked}");
+    assert!(asked.contains(REACTION), "{asked}");
+}
+
+#[test]
+fn only_a_failed_reply_that_carried_thinking_debt_stays_owed() {
+    let result = |carries_thinking_debt, pause_changed| crate::agent::DataEventResult {
+        carries_thinking_debt,
+        pause_changed,
+        ..crate::agent::DataEventResult::default()
+    };
+    assert!(owes_failed_reply(&result(true, None)));
+    assert!(owes_failed_reply(&result(true, Some(true))));
+    // A resume's debt is moved by `record_event_prompt` instead.
+    assert!(!owes_failed_reply(&result(true, Some(false))));
+    assert!(!owes_failed_reply(&result(false, None)));
+}
+
+#[test]
+fn only_a_test_results_packet_is_logged_as_a_test_run() {
+    let state = RuntimeState::default();
+    let result = crate::agent::DataEventResult::default();
+    let line = test_run_line(crate::runtime::TOPIC_TEST_RESULTS, &state, &result, true)
+        .expect("a test results packet is always logged");
+    assert!(line.reacted && !line.ended);
+    assert!(test_run_line(TOPIC_CONTROL, &state, &result, true).is_none());
+}
+
+#[test]
+fn the_interview_length_is_counted_in_minutes() {
+    let config = packet_config();
+    let keys = Arc::new(GeminiKeys::from_config(&config));
+    let boot = candidate_bootstrap(&config, "room-test", None);
+    let (_room_events, events) = tokio::sync::mpsc::unbounded_channel();
+    let events = tokio::sync::Mutex::new(events);
+    let interview = InterviewContext {
+        config: &config,
+        keys: &keys,
+        boot: &boot,
+        started_at: Instant::now().checked_sub(Duration::from_secs(90)).unwrap(),
+        candidate_identity: "candidate",
+        events: &events,
+        slot: None,
+    };
+    let minutes = interview.elapsed_min();
+    assert!((1.5..1.6).contains(&minutes), "{minutes}");
 }

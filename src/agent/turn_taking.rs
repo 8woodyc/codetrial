@@ -154,8 +154,9 @@ impl RuntimeState {
 
     /// Whether the interviewer must stay quiet: a pause or a hold. The one
     /// question every reply, nudge and close asks; only the places where the
-    /// two differ read them apart.
-    pub fn floor_held(&self) -> bool {
+    /// two differ read them apart. Not who has the floor, which is
+    /// `RuntimeActivity::floor` and is often read right beside this.
+    pub fn interviewer_silenced(&self) -> bool {
         self.paused || self.thinking_hold.is_active()
     }
 

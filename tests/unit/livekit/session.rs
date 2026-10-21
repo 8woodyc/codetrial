@@ -11,6 +11,7 @@ use crate::agent::{ThinkingHold, record_framework_evidence};
 
 // The room half's test module owns the audio fixture, because the room half
 // owns the track it is a stand-in for.
+use crate::livekit::GEMINI_OUTPUT_AUDIO_SAMPLE_RATE;
 use crate::livekit::tests::{observed_source, receive_test_run, test_output_audio};
 
 #[tokio::test]
@@ -223,7 +224,7 @@ fn voice_observations_preserve_runtime_and_timing_hold_filters() {
                 state.thinking_hold = ThinkingHold::Held { since: start };
             }
             let mut activity = RuntimeActivity::new(start);
-            activity.discarding_output = discarding;
+            activity.socket.discarding_output = discarding;
             activity.note_candidate_voice(start);
             activity.turn_timing.note_voice(start);
             let observed = observe_voice_activity(
@@ -464,7 +465,7 @@ fn obsolete_completion_does_not_close_the_new_turn_timing() {
         .turn_timing
         .finish(start + Duration::from_secs(1), TimingOutcome::Interrupted);
     activity.note_candidate_finished(start + Duration::from_secs(2), false);
-    activity.stale_turn_pending = true;
+    activity.socket.stale_turn_pending = true;
     assert!(!accept_gemini_event(
         &GeminiEvent::TurnComplete,
         &mut activity,
@@ -1854,7 +1855,7 @@ fn a_spoken_hold_cuts_generation_so_the_next_reply_is_tracked_as_its_own() {
     assert!(activity.generating);
     cut_off_for_hold(&mut activity, &mut output_audio);
     assert!(!activity.generating);
-    assert!(activity.discarding_output);
+    assert!(activity.socket.discarding_output);
     assert_eq!(activity.floor, Floor::Listening);
     activity.mark_prompted(Instant::now(), Some("Continue"), false);
     assert!(!activity.prompt_behind_turn);
@@ -1874,14 +1875,14 @@ fn output_dropped_by_a_hold_is_disowned_when_the_hold_ends() {
     state.paused = true;
     drop_output(&mut state, &mut activity);
     assert!(!state.thinking_unheard_reply, "a pause owes nothing here");
-    assert!(!activity.discarding_output);
+    assert!(!activity.socket.discarding_output);
     state.paused = false;
     state.thinking_hold = ThinkingHold::Held {
         since: std::time::Instant::now(),
     };
     drop_output(&mut state, &mut activity);
     assert!(state.thinking_unheard_reply);
-    assert!(activity.discarding_output);
+    assert!(activity.socket.discarding_output);
 }
 
 #[test]
@@ -1981,24 +1982,27 @@ fn a_hold_cuts_a_live_turn_and_spares_a_stalled_one() {
     let mut live = RuntimeActivity::new(start);
     live.note_output(Instant::now());
     cut_off_for_hold(&mut live, &mut output_audio);
-    assert!(live.discarding_output);
-    assert!(!live.stale_turn_pending);
+    assert!(live.socket.discarding_output);
+    assert!(!live.socket.stale_turn_pending);
 
     let mut stalled = RuntimeActivity::new(start);
     stalled.note_output(start - super::super::turn::PROMPT_STALL);
     cut_off_for_hold(&mut stalled, &mut output_audio);
-    assert!(!stalled.discarding_output);
-    assert!(stalled.stale_turn_pending);
+    assert!(!stalled.socket.discarding_output);
+    assert!(stalled.socket.stale_turn_pending);
 
     let mut idle = RuntimeActivity::new(start);
     cut_off_for_hold(&mut idle, &mut output_audio);
-    assert!(!idle.discarding_output);
-    assert!(!idle.stale_turn_pending);
+    assert!(!idle.socket.discarding_output);
+    assert!(!idle.socket.stale_turn_pending);
 
     let mut discarding = RuntimeActivity::new(start);
-    discarding.discarding_output = true;
+    discarding.socket.discarding_output = true;
     cut_off_for_hold(&mut discarding, &mut output_audio);
-    assert!(discarding.discarding_output, "a discard under way is kept");
+    assert!(
+        discarding.socket.discarding_output,
+        "a discard under way is kept"
+    );
 }
 
 /// A turn's end, dispatched or swallowed, confirms a spoken request for
@@ -3692,7 +3696,7 @@ fn tools_from_a_stalled_generation_during_a_hold_do_not_claim_the_resume_reply()
     let mut activity = RuntimeActivity::new(start);
     activity.latency.voice(start);
     activity.latency.boundary(Boundary::Held, start);
-    activity.stale_turn_pending = true;
+    activity.socket.stale_turn_pending = true;
     let calls = GeminiEvent::ToolCall(vec![GeminiFunctionCall {
         id: "old".into(),
         name: "read_editor".into(),
@@ -4181,7 +4185,7 @@ fn a_provider_cut_of_a_discard_keeps_the_deferred_thinking_reply() {
     let start = Instant::now();
     for candidate in [false, true] {
         let mut activity = RuntimeActivity::new(start);
-        activity.discarding_output = true;
+        activity.socket.discarding_output = true;
         activity.defer_thinking_reply("resume reply");
         if candidate {
             activity.note_candidate_voice_activity(true, start);
@@ -4325,7 +4329,7 @@ fn silent_completion_kind_classifies_debt_in_precedence_order() {
         silent_completion_kind(&complete, &activity),
         Some("optional_prompt")
     );
-    activity.tool_response_outstanding = true;
+    activity.socket.tool_response_outstanding = true;
     assert_eq!(
         silent_completion_kind(&complete, &activity),
         Some("tool_continuation")
@@ -4350,11 +4354,11 @@ fn silent_completion_kind_classifies_debt_in_precedence_order() {
     // A thinking release silences every other kind, including the prompt
     // `defer_thinking_reply` records beside it.
     activity.generating = false;
-    activity.reply_after_thinking_discard = true;
+    activity.socket.reply_after_thinking_discard = true;
     assert_eq!(silent_completion_kind(&complete, &activity), None);
     let mut activity = RuntimeActivity::new(now);
     activity.mark_prompted(now, None, false);
-    activity.reply_after_thinking_discard = true;
+    activity.socket.reply_after_thinking_discard = true;
     assert_eq!(silent_completion_kind(&complete, &activity), None);
 }
 
@@ -4376,7 +4380,7 @@ fn a_silent_completion_is_classified_before_the_accept_settles_it() {
             "candidate_turn" => activity.note_candidate_finished(now, false),
             "required_prompt" => activity.mark_prompted(now, None, false),
             "optional_prompt" => activity.mark_prompted(now, None, true),
-            "tool_continuation" => activity.tool_response_outstanding = true,
+            "tool_continuation" => activity.socket.tool_response_outstanding = true,
             _ => unreachable!(),
         }
         let (accepted, _, owed) = accept_event_noting_silence(&complete, &mut activity, false, now);
@@ -4396,7 +4400,7 @@ fn a_silent_completion_is_classified_before_the_accept_settles_it() {
     // A thinking release stays owed, so neither the log nor the timing treats
     // the completion as its answer.
     let mut activity = RuntimeActivity::new(now);
-    activity.reply_after_thinking_discard = true;
+    activity.socket.reply_after_thinking_discard = true;
     let (accepted, _, owed) = accept_event_noting_silence(&complete, &mut activity, false, now);
     assert!(accepted);
     assert_eq!(owed, None);
@@ -4411,9 +4415,323 @@ fn a_silent_completion_is_classified_before_the_accept_settles_it() {
     // A completion the accept swallows is no silence at all.
     let mut activity = RuntimeActivity::new(now);
     activity.note_candidate_finished(now, false);
-    activity.stale_turn_pending = true;
+    activity.socket.stale_turn_pending = true;
     let (accepted, _, owed) = accept_event_noting_silence(&complete, &mut activity, false, now);
     assert!(!accepted);
     assert_eq!(owed, None);
     assert!(activity.reply_in_flight());
+}
+
+#[test]
+fn closing_both_turns_counts_each_before_anything_is_published() {
+    let mut state = RuntimeState::default();
+    let mut turns = SpeakerTurns::default();
+    turns
+        .candidate
+        .record(&mut state.transcript, CANDIDATE_SPEAKER, "Wait,");
+    turns
+        .interviewer
+        .record(&mut state.transcript, INTERVIEWER_SPEAKER, "Go ahead.");
+    let closing = close_both_turns(
+        &mut turns,
+        &mut state.evidence_ledger,
+        1,
+        Some("candidate-1"),
+    );
+
+    // In transcript order, attributed, and both already counted: a publish that
+    // fails after this cannot leave a closed turn out of the report's counts.
+    let attributed: Vec<_> = closing
+        .iter()
+        .map(|segment| (segment.text.as_str(), segment.identity.as_deref()))
+        .collect();
+    assert_eq!(
+        attributed,
+        [("Wait,", Some("candidate-1")), ("Go ahead.", None)]
+    );
+    assert!(closing.iter().all(|segment| segment.final_segment));
+    assert_eq!(state.evidence_ledger.conversation.candidate_turns, 1);
+    assert_eq!(state.evidence_ledger.conversation.interviewer_turns, 1);
+    assert!(!turns.candidate.is_open() && !turns.interviewer.is_open());
+
+    // Nothing open, nothing to publish or count.
+    assert!(close_both_turns(&mut turns, &mut state.evidence_ledger, 2, None).is_empty());
+    assert_eq!(state.evidence_ledger.conversation.candidate_turns, 1);
+}
+
+/// One room loop's worth of state, around a room that records what it is
+/// sent and a Gemini socket that never answers, so the handlers themselves
+/// can be driven: the same `handle_gemini_event` the loop calls, in the order
+/// a provider sends its events.
+struct Harness {
+    turn: TurnState,
+    output: OutputAudio,
+    queued: tokio::sync::mpsc::Receiver<crate::livekit::media::QueuedOutputFrame>,
+    gemini: GeminiLiveSession,
+    board: crate::livekit::board::Board,
+    media: CandidateMedia,
+    room: RoomLink,
+    sent: std::sync::Arc<crate::livekit::room_link::Recorder>,
+}
+
+impl Harness {
+    async fn new() -> Self {
+        let (gemini, _server) = crate::livekit::tests::fake_socket(None).await;
+        let (output, queued) = test_output_audio();
+        let (room, sent) = RoomLink::recording("room-test");
+        let mut media = CandidateMedia::new();
+        media.identity = Some("candidate".into());
+        Self {
+            turn: crate::livekit::tests::hold_turn(RuntimeState::default()),
+            output,
+            queued,
+            gemini,
+            board: crate::livekit::board::Board::new(),
+            media,
+            room,
+            sent,
+        }
+    }
+
+    async fn event(&mut self, event: GeminiEvent) {
+        let mut context = self.turn.context(
+            &mut self.output,
+            &mut self.gemini,
+            &mut self.board,
+            &mut self.media,
+        );
+        handle_gemini_event(&self.room, &mut context, event, Interruptible::Yes)
+            .await
+            .unwrap();
+    }
+
+    /// The transcript segments the page was sent, once the writer has sent
+    /// everything queued.
+    async fn segments(&mut self) -> Vec<(String, bool)> {
+        self.turn.transcripts.flush(Duration::from_secs(1)).await;
+        self.sent
+            .take()
+            .into_iter()
+            .filter_map(|sent| match sent {
+                crate::livekit::room_link::Sent::Text {
+                    text, attributes, ..
+                } => Some((text, attributes["lk.transcription_final"] == "true")),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
+fn reply_audio() -> GeminiEvent {
+    GeminiEvent::Audio {
+        bytes: vec![0; GEMINI_OUTPUT_AUDIO_SAMPLE_RATE as usize / 100 * 2],
+        mime_type: format!("audio/pcm;rate={GEMINI_OUTPUT_AUDIO_SAMPLE_RATE}"),
+    }
+}
+
+// What a provider interruption does to words already recorded, through the
+// handlers rather than the steps they call. The cut-off line stays in the
+// transcript as said and goes to the page as a finished turn, with nothing
+// marking that its audio was cancelled before it played. Characterized, not
+// endorsed: it is the evidence gap a transcript policy would have to close.
+#[tokio::test]
+async fn an_interruption_keeps_the_cut_words_as_an_ordinary_finished_turn() {
+    let mut harness = Harness::new().await;
+    harness
+        .event(GeminiEvent::InputTranscript("I will use a map.".into()))
+        .await;
+    harness.event(GeminiEvent::TurnComplete).await;
+    for fragment in ["Could you explain", " the space complexity?"] {
+        harness
+            .event(GeminiEvent::OutputTranscript(fragment.into()))
+            .await;
+    }
+    harness.event(reply_audio()).await;
+    assert_eq!(harness.output.queued_frames(), 1);
+    assert_eq!(harness.turn.agent_state.current(), AGENT_STATE_SPEAKING);
+    // Model a playout backlog without a wall-clock race on a loaded runner.
+    harness.output.playout_deadline = Instant::now() + Duration::from_secs(60);
+
+    harness.event(GeminiEvent::Interrupted).await;
+
+    let frame = harness.queued.try_recv().unwrap();
+    assert!(frame.output_cancellation.is_cancelled());
+    let speech = "Could you explain the space complexity?";
+    assert_eq!(
+        harness.turn.state.transcript,
+        [
+            format!("{CANDIDATE_SPEAKER}: I will use a map."),
+            format!("{INTERVIEWER_SPEAKER}: {speech}"),
+        ]
+    );
+    assert!(!harness.turn.turns.interviewer.is_open());
+    assert_eq!(harness.turn.agent_state.current(), AGENT_STATE_LISTENING);
+    let segments = harness.segments().await;
+    assert_eq!(segments.last(), Some(&(speech.to_string(), true)));
+    assert_eq!(
+        harness
+            .turn
+            .state
+            .evidence_ledger
+            .conversation
+            .interviewer_turns,
+        1
+    );
+}
+
+impl Harness {
+    /// What the room loop does after every step.
+    fn correct(&mut self) -> &'static str {
+        correct_agent_state(
+            &self.room,
+            &mut self.turn.agent_state,
+            &self.turn.activity,
+            self.output.is_playing(),
+        );
+        self.turn.agent_state.current()
+    }
+}
+
+#[tokio::test]
+async fn the_per_step_check_leaves_a_reply_that_published_its_own_states_alone() {
+    let mut harness = Harness::new().await;
+    harness
+        .event(GeminiEvent::InputTranscript("I will use a map.".into()))
+        .await;
+    harness.event(GeminiEvent::TurnComplete).await;
+    let before = harness.turn.agent_state.current();
+    assert_eq!(harness.correct(), before);
+
+    harness
+        .event(GeminiEvent::OutputTranscript("Go ahead.".into()))
+        .await;
+    harness.event(reply_audio()).await;
+    harness.output.playout_deadline = Instant::now() + Duration::from_secs(60);
+    assert_eq!(harness.correct(), AGENT_STATE_SPEAKING);
+
+    // Finished generating with audio still queued: still speaking.
+    harness.event(GeminiEvent::TurnComplete).await;
+    assert_eq!(harness.turn.activity.floor, Floor::AwaitingPlayout);
+    assert_eq!(harness.correct(), AGENT_STATE_SPEAKING);
+}
+
+#[tokio::test]
+async fn a_state_whose_condition_has_gone_is_taken_back() {
+    let mut harness = Harness::new().await;
+
+    // A path that cut the turn and forgot to say so.
+    set_agent_state(
+        &harness.room,
+        &mut harness.turn.agent_state,
+        AGENT_STATE_SPEAKING,
+    );
+    assert_eq!(harness.turn.activity.floor, Floor::Listening);
+    assert!(!harness.output.is_playing());
+    assert_eq!(harness.correct(), AGENT_STATE_LISTENING);
+
+    // Thinking holds while a reply is unfinished, and goes once it is not.
+    harness
+        .turn
+        .activity
+        .mark_prompted(Instant::now(), Some("owed"), false);
+    assert!(harness.turn.activity.reply_unfinished());
+    set_agent_state(
+        &harness.room,
+        &mut harness.turn.agent_state,
+        AGENT_STATE_THINKING,
+    );
+    assert_eq!(harness.correct(), AGENT_STATE_THINKING);
+    harness.event(GeminiEvent::TurnComplete).await;
+    assert!(!harness.turn.activity.reply_unfinished());
+    set_agent_state(
+        &harness.room,
+        &mut harness.turn.agent_state,
+        AGENT_STATE_THINKING,
+    );
+    assert_eq!(harness.correct(), AGENT_STATE_LISTENING);
+
+    // It never starts a state: queued audio alone does not show speaking.
+    let (mut output, _queued) = test_output_audio();
+    output.playout_deadline = Instant::now() + Duration::from_secs(60);
+    harness.output = output;
+    assert!(harness.output.is_playing());
+    assert_eq!(harness.correct(), AGENT_STATE_LISTENING);
+}
+
+#[tokio::test]
+async fn speaking_shown_over_queued_audio_stays_once_the_floor_is_back() {
+    let mut harness = Harness::new().await;
+    set_agent_state(
+        &harness.room,
+        &mut harness.turn.agent_state,
+        AGENT_STATE_SPEAKING,
+    );
+    // The candidate has the floor, but the reply is still playing.
+    harness.output.playout_deadline = Instant::now() + Duration::from_secs(60);
+    assert_eq!(harness.turn.activity.floor, Floor::Listening);
+    assert!(harness.output.is_playing());
+    assert_eq!(harness.correct(), AGENT_STATE_SPEAKING);
+}
+
+/// What the handlers send through the room reaches it: a control message as
+/// a data packet, the agent's state as attributes merged into the ones
+/// already set, and leaving as leaving.
+#[tokio::test]
+async fn the_room_link_carries_what_the_handlers_send() {
+    use crate::livekit::room_link::Sent;
+
+    let mut harness = Harness::new().await;
+    assert_eq!(harness.room.name(), "room-test");
+
+    publish_control(
+        &harness.room,
+        &serde_json::json!({"type": "round_state", "status": "started"}),
+        "the round state",
+    )
+    .await;
+    assert_eq!(
+        harness.sent.take(),
+        [Sent::Data {
+            topic: Some(TOPIC_CONTROL.into()),
+            message: serde_json::json!({"type": "round_state", "status": "started"}),
+        }]
+    );
+
+    publish_opening_attributes(&harness.room, &mut harness.turn.agent_state, 3_000)
+        .await
+        .unwrap();
+    set_agent_state(
+        &harness.room,
+        &mut harness.turn.agent_state,
+        AGENT_STATE_SPEAKING,
+    );
+    // The writer task sends on its own; give it the turn it needs.
+    let latest = tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            tokio::task::yield_now().await;
+            let attributes = harness.room.participant().attributes();
+            if attributes.get(LIVEKIT_AGENT_STATE).map(String::as_str) == Some(AGENT_STATE_SPEAKING)
+            {
+                return attributes;
+            }
+        }
+    })
+    .await
+    .expect("the writer sets the state");
+    assert_eq!(
+        latest.get(TURN_WINDOW_ATTRIBUTE).map(String::as_str),
+        Some("3000"),
+        "the state is merged into the attributes already set: {latest:?}"
+    );
+    assert_eq!(latest.len(), 2, "{latest:?}");
+    let attributes = harness
+        .sent
+        .take()
+        .into_iter()
+        .filter(|sent| matches!(sent, Sent::Attributes(_)))
+        .count();
+    assert_eq!(attributes, 2);
+
+    harness.room.close().await.unwrap();
+    assert_eq!(harness.sent.take(), [Sent::Left]);
 }
