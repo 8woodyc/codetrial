@@ -34,8 +34,8 @@
 #               is the newest comment; stale is null when the history is cut,
 #               and idle_days too when none of their acts is in what was read
 #   truncated   issues with more than 100 comments or cross-references, 10
-#               assignees or 20 assignments, whose lists above may miss what
-#               was cut
+#               assignees, 20 assignments or 20 body edits, whose lists above
+#               may miss what was cut
 
 set -eu
 
@@ -48,8 +48,11 @@ query='query($owner: String!, $name: String!, $endCursor: String) {
     issues(states: OPEN, first: 50, after: $endCursor) {
       pageInfo { hasNextPage endCursor }
       nodes {
-        number title body createdAt lastEditedAt authorAssociation
-        author { login } editor { login } issueType { name }
+        number title body createdAt authorAssociation
+        author { login } issueType { name }
+        userContentEdits(last: 20) {
+          totalCount nodes { editedAt editor { login } }
+        }
         assignees(first: 10) { totalCount nodes { login } }
         assigned: timelineItems(last: 20, itemTypes: [ASSIGNED_EVENT]) {
           totalCount
@@ -94,7 +97,9 @@ pages=$(gh api graphql --paginate -F owner="${repo%/*}" -F name="${repo#*/}" \
 # collaborators with read or triage access, students among them, so the badge
 # counts only when the push listing could not be read. A bot's comment never
 # asks the reporter for anything. The reporter answering by editing the body
-# counts, since the bug form and maintainers both ask for that.
+# counts, since the bug form and maintainers both ask for that; every edit is
+# read rather than only the last, which a maintainer tidying the body would
+# otherwise hide.
 printf '%s\n' "$pages" | jq -s --argjson days "$days" --arg repo "$repo" \
     --argjson pushers "$pushers" --arg me "$me" '
 def ts: if . == null then 0 else fromdateiso8601 end;
@@ -119,28 +124,48 @@ def ink: [limit(40; split("\n")[] | select(startswith("#") | not)
 [.[].data.repository.issues.nodes[]] as $issues |
 def maint: [.comments.nodes[] | select(human and staff)];
 def cut: .comments.totalCount > 100 or .timelineItems.totalCount > 100
-  or .assignees.totalCount > 10 or .assigned.totalCount > 20;
+  or .assignees.totalCount > 10 or .assigned.totalCount > 20
+  or .userContentEdits.totalCount > 20;
 def prs: [.timelineItems.nodes[] | select(.source.number != null
   and .source.repository.nameWithOwner == $repo)];
 def split: {open: [.[] | select(.state == "OPEN") | .number] | unique,
   merged: [.[] | select(.mergedAt != null) | .number] | unique};
 def mine: .author.login as $a | [.comments.nodes[]
   | select($a != null and .author.login == $a) | .createdAt | ts]
-  + [if .editor.login == $a then .lastEditedAt | ts else 0 end] | max;
+  + [.userContentEdits.nodes[] | select($a != null and .editor.login == $a)
+      | .editedAt | ts] + [0] | max;
+# Per line rather than one regex over the body, since "the same or a higher
+# level" is not a backreference. A fence counts as content and what is inside
+# it is skipped, so the comments in a pasted shell session are not headings; it
+# closes only on its own character, at least as long, with nothing after it.
+def empty_section: [foreach (split("\n")[] | select(test("\\S"))) as $l
+    ({fence: null, level: null};
+     ([$l | capture("^ {0,3}(?<m>`{3,}|~{3,})(?<rest>.*)$")] | first) as $f
+     | if .fence == null then
+         if $f != null and ($f.m[0:1] == "~" or ($f.rest | contains("`") | not))
+         then {fence: $f.m, level: 0}
+         else .level = (($l | capture("^(?<h>#{1,6}) +\\S") | .h | length) // 0)
+         end
+       elif $f != null and $f.m[0:1] == .fence[0:1]
+           and ($f.m | length) >= (.fence | length) and ($f.rest | test("^\\s*$"))
+       then {fence: null, level: 0}
+       else .level = null end;
+     .level | select(. != null))] as $lv
+  | any(range($lv | length); . as $k | $lv[$k] > 0
+      and ($lv[$k + 1] // -1 | . == -1 or (. > 0 and . <= $lv[$k])));
 def gaps: (.body // "") as $b
   | ($b + " " + ([.author.login as $a | .comments.nodes[]
       | select($a != null and .author.login == $a) | .body] | join(" "))) as $said
   | [ (select($b | ink < 40) | "empty_body"),
       (select($b | test("\\[([Pp]lease )?[Ff]ill in|<[A-Z][a-z][^<>\\n]{15,}>"))
         | "placeholder"),
-      (select($b | test("(?m)^(#{1,6}) [^\\n]+\\n\\s*(^\\1 |\\z)"))
-        | "empty_section"),
+      (select($b | empty_section) | "empty_section"),
       (select(.title | test("^\\s*(\\[[^\\]]+\\]|[A-Za-z]+(\\([^)]*\\))?:)\\s"))
         | "title_prefix"),
       (select((.title | cjk > latin) or (($b | cjk) > ($b | latin)))
         | "not_english"),
       (select(.issueType.name == "Bug"
-          and ($said | test("codetrial [0-9.]+ \\([0-9a-f]{7,40}\\)|\\b(?=[0-9a-f]*[0-9])(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\\b") | not))
+          and ($said | test("codetrial [0-9.]+ \\([0-9a-f]{7,40}\\)|\\b(?=[0-9a-f]*[0-9])(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\\b"; "i") | not))
         | "no_revision") ];
 def claim: . as $i | maint as $m
   | (($pushers // []) + [$m[].author.login]
@@ -150,8 +175,9 @@ def claim: . as $i | maint as $m
   | ([$i.assigned.nodes[] | select(.assignee.login == $a) | .createdAt]
       + [$i.comments.nodes[] | select(.author.login == $a) | .createdAt]
       + [$xrefs[].createdAt] | map(ts) | max) as $last
-  | ([$m[] | select((.createdAt | ts) > ($last // 0)) | .createdAt]
-      | max) as $check
+  | (if $last == null then null
+      else [$m[] | select((.createdAt | ts) > $last) | .createdAt] | max end)
+      as $check
   | (if $check then $check | ts else $last end) as $since
   | ([$i.comments.nodes[] | select(human)] | max_by(.createdAt | ts)
       | .author.login == $a) as $asked

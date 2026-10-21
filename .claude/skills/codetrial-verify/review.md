@@ -19,8 +19,9 @@ gh pr diff "$pr" --repo sysprog21/codetrial > "$SCRATCH/pr-$pr.diff"
 
 Group the changed files by the area they touch, an area being a row of the
 table in step 2 or "other", and review one area at a time; past about 500
-changed lines, report per area. Read the PR's linked issue and the maintainer
-comment that accepted its scope
+changed lines, report per area. A wire change is one area however its files
+split: review the `web/` and Rust sides of a topic together. Read the PR's
+linked issue and the maintainer comment that accepted its scope
 ([collaboration.md](../codetrial-contribute/collaboration.md#start-with-an-actionable-contribution)):
 that comment is the specification, and work outside it is a finding. When the
 issue was only assigned, its body's scope stands in, and that is worth saying.
@@ -108,7 +109,7 @@ report what it reports. For each area, look for:
   version bump that frees it.
 - Skills. A diff that renames or removes a gate, a lane, a CI job, a script,
   a flag or a make target, or changes a maintainer wording, leaves stale the
-  skill that names it; run [skill-refs.sh](skill-refs.sh) and reread the skills
+  skill that names it; run `scripts/check-skill-refs.py` and reread the skills
   that name it. A new file moves nothing.
 
 Done when each area has been read against every item above, with a finding or

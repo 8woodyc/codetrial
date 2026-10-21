@@ -316,13 +316,13 @@ shell_syntax()
 {
     status=0
     scripts=0
-    for script in "$ROOT"/scripts/*.sh; do
+    for script in "$ROOT"/scripts/*.sh "$ROOT"/.claude/skills/*/*.sh; do
         scripts=$((scripts + 1))
         sh -n "$script" || status=1
     done
 
     if command -v shellcheck > /dev/null 2>&1; then
-        (cd "$ROOT" && shellcheck scripts/*.sh) || status=1
+        (cd "$ROOT" && shellcheck scripts/*.sh .claude/skills/*/*.sh) || status=1
     else
         skip "shellcheck: installing it checks what $scripts shell scripts mean, not just that they parse"
     fi
@@ -422,6 +422,12 @@ gate test-gate-tests unittest_gate "$ROOT/tests/test_test_gate.py"
 gate mutants-plan-tests unittest_gate "$ROOT/tests/test_mutants_plan.py"
 gate mutants-install-tests unittest_gate "$ROOT/tests/test_mutants_install.py"
 gate latency-tests unittest_gate "$ROOT/tests/test_analyze_latency.py"
+
+# The skills name scripts, lanes, make targets and each other's headings, and an
+# agent follows a dangling one without noticing. Their own scripts are tested
+# like any other, against a fake gh and a scratch repository.
+gate skill-refs "$PYTHON" "$ROOT/scripts/check-skill-refs.py"
+gate skill-scripts-tests unittest_gate "$ROOT/tests/test_skill_scripts.py"
 gate --lane browser browser-tests browser_tests static
 gate eslint eslint_gate
 gate cargo-audit cargo_audit_gate

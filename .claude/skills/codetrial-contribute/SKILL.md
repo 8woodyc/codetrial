@@ -1,6 +1,6 @@
 ---
 name: codetrial-contribute
-description: Help CodeTrial contributors turn observations into clear English GitHub issues, small contribution plans, and pull request descriptions, and see them through. Use to draft, improve or file a CodeTrial issue, answer what a maintainer asked on it (a revision, a log, an initial analysis, a retest), prepare a PR description, respond to review requests such as rebase, squash or commit message fixes, check which of your own issues and PRs are waiting on you, ask a focused maintainer question, or choose a bounded first contribution with an AI agent. The deliverable is copy-ready text; judging an existing backlog for duplicates is codetrial-triage. Opening a PR goes through gh-submit when it is installed; this skill covers it otherwise.
+description: Help CodeTrial contributors turn observations into clear English GitHub issues, small contribution plans, and pull request descriptions, and see them through. Use to draft, improve or file a CodeTrial issue, answer what a maintainer asked on it (a revision, a log, an initial analysis, a retest), prepare a PR description, retrieve and address PR review comments, respond to requests such as rebase, squash or commit message fixes, check which of your own issues and PRs are waiting on you, ask a focused maintainer question, or choose a bounded first contribution with an AI agent. The deliverable is copy-ready text, or verified fixes when asked to address review feedback; judging an existing backlog for duplicates is codetrial-triage. Opening a PR goes through gh-submit when it is installed; this skill covers it otherwise.
 ---
 
 # Contribute to CodeTrial
@@ -234,6 +234,10 @@ the issue, with the user's approval, if a maintainer has not. An open issue nobo
 everyone's list.
 
 ## Answer a review
+
+Fetching every thread, including long ones, and rechecking the head after a
+push, and where failed checks are diagnosed, are in
+[review-feedback.md](review-feedback.md).
 
 Git and commit-message requests recur alongside substantive code review. Read
 the current inline threads, unanswered cubic findings and failing checks as

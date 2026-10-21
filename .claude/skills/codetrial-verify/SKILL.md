@@ -1,6 +1,6 @@
 ---
 name: codetrial-verify
-description: How a CodeTrial change is validated - scripts/test.sh as the credential-free gate, which generated artifacts have to be regenerated before it passes, the checks that need credentials or a browser and therefore sit outside it, the browser and mutation lanes, and how to bring the server up for a live look without taking the maintainer's port. Use before calling work done, when a gate fails on drift rather than on a bug, when adding a test, when a fix needs to be seen working in the app, when reviewing a diff or an open pull request against the contracts in docs/ (review.md), or after editing a skill or anything a skill names (skill-refs.sh).
+description: How a CodeTrial change is validated - scripts/test.sh as the credential-free gate, which generated artifacts have to be regenerated before it passes, the checks that need credentials or a browser and therefore sit outside it, the browser and mutation lanes, and how to bring the server up for a live look without taking the maintainer's port. Use before calling work done, when diagnosing failed GitHub Actions checks, when a gate fails on drift rather than on a bug, when adding a test, when a fix needs to be seen working in the app, when reviewing a diff or an open pull request against the contracts in docs/ (review.md), or after editing a skill or anything a skill names (scripts/check-skill-refs.py).
 ---
 
 # Validating a CodeTrial change
@@ -27,8 +27,8 @@ Reproduce a failure with the same lane locally.
 one failure does not hide the next; the summary line names every gate that
 failed. It covers `cargo fmt --check`, `clippy -D warnings`, `cargo test`, the
 Python unittest suites, the Node browser tests, ESLint, `ruff check`,
-`shellcheck`, the generated-artifact drift checks, the hook suite, `cargo-audit`
-and `actionlint`.
+`shellcheck`, the generated-artifact drift checks, the hook suite, the skill
+references, `cargo-audit` and `actionlint`.
 
 It is not offline. The `fetch-vendor` gate downloads missing assets named by a
 `web/vendor/**/FETCH` manifest; it cannot restore committed vendor files.
@@ -111,6 +111,45 @@ CI additionally mutation-tests the diff: `plan-mutants` counts what the change
 is worth and `mutants` runs `cargo-mutants` over it. A surviving mutant means a
 line changed behavior with no test noticing, so the answer is a test, not a
 retry.
+
+## Browser investigation
+
+Drive pages with the repository's Node Playwright dependency; no Python
+Playwright environment and no second server wrapper. `scripts/browser-check.sh`,
+whose validation block lists its `BROWSER_CHECK_FLOW` values, and
+`scripts/visual-parity-check.sh` pick a free port and clean up after themselves;
+for an exploratory session use the separate-port recipe in
+[Seeing it work in the app](#seeing-it-work-in-the-app) and stop only the
+server you started. LiveKit pages never go network-idle, so wait for the
+specific control or state the action needs. Attach console and page-error
+listeners before navigating, keep screenshots in `$SCRATCH` with credentials and
+interview content removed, and look at a screenshot before claiming a visual
+result. Never refresh `tests/golden/visual` merely to silence a difference;
+establish that the new output is intended. A behavior change gets its
+regression check in the existing lane.
+
+## Failed GitHub Actions checks
+
+The lanes and the aggregate `check` and `mutation` jobs are described above;
+telling a stale base, a regression, a race and an environment limit apart is in
+[collaboration.md](../codetrial-contribute/collaboration.md#make-ci-green-before-asking-for-review);
+reading the job log, and why it is `--log`, is the recipe in
+[pulls.md](../codetrial-triage/pulls.md#recheck-dependencies-and-substantive-review).
+What this adds is checking that the failure is current:
+
+```sh
+gh pr view "$pr" --repo sysprog21/codetrial --json headRefOid
+gh pr checks "$pr" --repo sysprog21/codetrial --json name,state,bucket,link
+gh run view "$run" --repo sysprog21/codetrial --json headSha,status,conclusion,jobs
+```
+
+A run whose `headSha` is not the PR head is history, not the current failure.
+`gh pr checks` exits non-zero when a check fails and still prints its rows. An
+empty list after `gh auth status` fails is an access gap; a held run has no log
+yet. A third-party check is reported by name and details URL. Reproduce with the
+lane at the same head, fix the cause, run the lane and then the full gate, and
+after an authorized push reread the head and checks: pending stays pending in
+the report.
 
 ## The git hooks
 
@@ -201,7 +240,7 @@ rebase or amend:
 | --- | --- | --- |
 | fixed | the original reproduction now behaves | the code changed |
 | tests pass | `./scripts/test.sh` at this head, its skips read | an earlier run |
-| CI is green | `gh pr checks` naming this head | a local pass |
+| CI is green | `gh pr checks` passing, and each run's `headSha` from `gh run view` at this head | a local pass, or a run on an older head |
 | review addressed | each open thread reread at this head | a pushed commit |
 | the agent did it | `git diff` shows the change | the agent's summary |
 
@@ -214,9 +253,9 @@ A passing gate is not a review; reviewing a diff, one's own or an open pull
 request, follows [review.md](review.md).
 
 A skill names gates, lanes, scripts, flags, make targets and documents, and
-each one can move. After changing either side, run
-`.claude/skills/codetrial-verify/skill-refs.sh`: it prints every reference a
-skill makes that no longer resolves, and every check script this skill does
-not list. It catches a
-rename, not a change of meaning, so a changed rule still needs the skill
-reread.
+each one can move. The `skill-refs` gate runs `scripts/check-skill-refs.py`,
+which prints every reference a skill makes that no longer resolves and every
+check script this skill does not list; run it on its own after changing either
+side. It catches a rename, not a change of meaning, so a changed rule still
+needs the skill reread. The scripts the skills run are tested in
+`tests/test_skill_scripts.py`.

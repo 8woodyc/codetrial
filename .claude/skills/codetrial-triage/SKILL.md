@@ -6,8 +6,9 @@ description: >
   review, and draft the reminders, acceptances and closes that follow. Use for
   backlog triage, checking new issues or PRs, asking what needs attention,
   deciding whether a symptom already has an issue, explicit PR sweeps,
-  approving GitHub Actions runs held for first-time contributors, and asking
-  conflicting PRs to rebase. Default to a read-only report; a PR sweep has
+  approving GitHub Actions runs held for first-time contributors, asking
+  conflicting PRs to rebase, and applying requested label, assignee, issue type,
+  sub-issue or blocked-by changes. Default to a read-only report; a PR sweep has
   narrowly defined actions in pulls.md. Use codetrial-contribute for drafts on
   a contributor's behalf, new issues or PRs, and focused maintainer questions.
 ---
@@ -402,6 +403,17 @@ flag fails locally without touching the thread, so no probe is needed. Only afte
 that error, comment `Duplicate of #N` and close with `--reason "not planned"`,
 which on its own reads as rejected and would take a reopen to correct, notifying
 the reporter a second time for nothing.
+
+A sub-issue, a blocked-by dependency and a duplicate are three different
+records, and a cross-link in prose establishes none of them. `gh issue edit`
+covers labels and assignees; for issue types, sub-issues and dependencies read
+GitHub's current API documentation for that operation rather than guessing an
+endpoint, check which issue is the parent or the blocker, and pass a node or
+database ID where the endpoint wants one instead of an issue number. Put the
+request body in a JSON file and send it with
+`gh api <endpoint> --method <method> --input "$SCRATCH/payload.json"`, then read
+the relationship back. If the operation is unavailable, say so and list the
+intended relationship as a proposal, never as applied.
 
 Post any preserved reproduction evidence to the canonical issue before closing.
 Do not pair `--duplicate-of` with a `Duplicate of #N` comment; GitHub's marker

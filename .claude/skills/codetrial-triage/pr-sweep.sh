@@ -62,7 +62,8 @@ known='["Rebase latest `main` and resolve conflicts",
 # first check suite, created when the push reached a workflow or app, or the
 # latest force push. The commit date, which the contributor's clock sets and
 # which can run ahead and make every later request look stale, is used only for
-# a head with no check suite.
+# a head with no check suite. A PR force-pushed back to its base has no commit
+# at all, and dates only its force push.
 # shellcheck disable=SC2016
 query='query($owner: String!, $name: String!, $endCursor: String) {
   repository(owner: $owner, name: $name) {
@@ -131,7 +132,7 @@ printf '%s\n%s\n' "$prs" "$runs" | jq -s --argjson days "$days" --arg me "$me" \
     --argjson pushers "$pushers" '
 def human: .author != null and .author.__typename != "Bot";
 def ts: if . == null then 0 else fromdateiso8601 end;
-def pushed: .commits.nodes[0].commit as $c
+def pushed: (.commits.nodes[0].commit // {checkSuites: {nodes: []}}) as $c
   | [([$c.checkSuites.nodes[].createdAt | ts] | min) // ($c.committedDate | ts),
      (.timelineItems.nodes[0].createdAt | ts)] | max;
 def trim: gsub("^\\s+|\\s+$"; "");
@@ -155,11 +156,10 @@ def requests: .author.login as $a | .headRefOid as $head | pushed as $p |
 def fixed_only: .inline == 0 and (.body | norm | IN($wordings[]));
 def asks_rebase: [requests[] | select(fixed_only)] | sort_by(.at | ts);
 def asked_here: any(requests[]; .current);
-# A conflicting PR whose only request on its current head is hand-written:
-# that request is the standing one, so no fixed one is kept beside it and it
-# is never offered for hiding.
-def hand_asked: .mergeable == "CONFLICTING"
-  and asked_here and all(asks_rebase[]; .current | not);
+# A PR whose only request on its current head is hand-written, whether or not
+# it still conflicts: that request is the standing one, so no fixed one is kept
+# beside it and it is never offered for hiding.
+def hand_asked: asked_here and all(asks_rebase[]; .current | not);
 def needs_rebase: .mergeable == "CONFLICTING" and (.isDraft | not)
   and .baseRefName == $base and $base == "main"
   and nudgeable and whole
