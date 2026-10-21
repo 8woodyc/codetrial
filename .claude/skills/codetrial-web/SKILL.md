@@ -22,8 +22,12 @@ root somewhere else.
 
 The consequence worth remembering: a debug build that reads from disk and a
 release build that serves embedded bytes can disagree, and only the second is
-what ships. `scripts/test.sh` covers this, and CI proves the binary serves with
-the web tree deleted.
+what ships. Neither `scripts/test.sh` nor the checks on a pull request build
+it: only CI's post-merge build on `main` proves the binary serves with the web
+tree deleted, so a change to how files are embedded needs the same check run
+by hand: a release binary copied into an empty directory holding only a config
+file, as the step "Prove the binary serves without a web tree" in
+`.github/workflows/check.yml` does.
 
 ## Vendored assets
 
@@ -79,11 +83,19 @@ The gate cannot see these, and reviews here keep raising them:
 - Accessibility. A toggle uses one pattern: a fixed name with `aria-pressed`,
   or a label naming the action with no `aria-pressed`, never both (#251);
   disabling the focused control drops focus, so move it first; `role="img"` hides the labels inside it; a tooltip needs a
-  keyboard-reachable trigger (#138, #226, #251, #276).
-- Theme. The page is dark-only; the editor alone has a light theme. A new
-  editor color is a `--code-*` custom property in `web/styles.css`, with its
-  light value in both `.editor-stack[data-theme="light"]` and the
-  `prefers-color-scheme: light` block, never a hex value inline (#252, #267).
+  keyboard-reachable trigger (#138, #226, #251, #276). Text and control
+  borders meet WCAG AA (4.5:1; 3:1 for large text, borders and focus rings),
+  in both lobby schemes.
+- Theme. The interview page is dark-only; the lobby follows the system scheme,
+  with its light values under `.practice-page`; the editor has its own light
+  theme. A color, a corner or a font size elsewhere is one of the role tokens or
+  scale steps on `:root` in `web/styles.css`, each commented with its role and
+  contrast; a role the page lacks is a new token with its lobby light value
+  beside it, never a literal in a rule. Match what the lobby renders on `main`,
+  not a screenshot in the issue (#147). A new editor color is a `--code-*`
+  custom property in `web/styles.css`, with its light value in both
+  `.editor-stack[data-theme="light"]` and the `prefers-color-scheme: light`
+  block, never a hex value inline (#252, #267).
 - Keys. A global `keydown` handler ignores IME composition (`isComposing`, and
   `keyCode === 229` for engines that clear it early), `event.repeat`, and
   modifier chords it does not own; the Cmd/Ctrl+Enter handler in
