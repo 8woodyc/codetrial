@@ -1,0 +1,67 @@
+//! The `tests` module of `src/livekit/transcripts.rs`, which declares this file
+//! by path. The writer task needs a connected room; the queue it drains does
+//! not, and the queue is what decides what the page is sent.
+
+use super::*;
+
+fn segment(id: &str, text: &str, final_segment: bool) -> Segment {
+    Segment {
+        id: id.into(),
+        text: text.into(),
+        final_segment,
+        identity: None,
+    }
+}
+
+fn drain(pending: &mut Pending) -> Vec<Segment> {
+    std::iter::from_fn(|| pending.pop()).collect()
+}
+
+#[test]
+fn a_newer_view_of_a_waiting_segment_replaces_it_where_it_stands() {
+    let mut pending = Pending::default();
+    pending.push(segment("candidate-1", "I will", false));
+    pending.push(segment("interviewer-1", "Go", false));
+    pending.push(segment("candidate-1", "I will use a map", false));
+    pending.push(segment("interviewer-1", "Go ahead.", false));
+    assert_eq!(
+        drain(&mut pending),
+        [
+            segment("candidate-1", "I will use a map", false),
+            segment("interviewer-1", "Go ahead.", false),
+        ]
+    );
+    assert!(pending.is_empty());
+}
+
+#[test]
+fn a_final_replaces_its_waiting_update_and_is_never_replaced_itself() {
+    let mut pending = Pending::default();
+    pending.push(segment("interviewer-1", "Could you", false));
+    pending.push(segment("candidate-1", "Wait", false));
+    pending.push(segment("interviewer-1", "Could you explain?", true));
+
+    // A later view under a finished id is queued behind the final, not over it:
+    // the final is the last word on the segment the page shows.
+    pending.push(segment("interviewer-1", "Could you explain? Sure", false));
+    pending.push(segment("candidate-1", "Wait, one thing.", true));
+    assert_eq!(
+        drain(&mut pending),
+        [
+            segment("interviewer-1", "Could you explain?", true),
+            segment("candidate-1", "Wait, one thing.", true),
+            segment("interviewer-1", "Could you explain? Sure", false),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn flushing_a_writer_that_never_sent_returns_at_once() {
+    let writer = TranscriptWriter::default();
+    tokio::time::timeout(
+        Duration::from_millis(50),
+        writer.flush(Duration::from_secs(5)),
+    )
+    .await
+    .expect("nothing queued, nothing to wait for");
+}

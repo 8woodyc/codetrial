@@ -4428,18 +4428,29 @@ fn closing_both_turns_counts_each_before_anything_is_published() {
     turns
         .interviewer
         .record(&mut state.transcript, INTERVIEWER_SPEAKER, "Go ahead.");
-    let closing = close_both_turns(&mut turns, &mut state.evidence_ledger, 1);
+    let closing = close_both_turns(
+        &mut turns,
+        &mut state.evidence_ledger,
+        1,
+        Some("candidate-1"),
+    );
 
-    // In transcript order, and both already counted: a publish that fails after
-    // this cannot leave a closed turn out of the report's counts.
-    let speakers: Vec<_> = closing.iter().map(|(speaker, ..)| *speaker).collect();
-    assert_eq!(speakers, ["candidate", "interviewer"]);
-    assert_eq!(closing[0].1, "Wait,");
+    // In transcript order, attributed, and both already counted: a publish that
+    // fails after this cannot leave a closed turn out of the report's counts.
+    let attributed: Vec<_> = closing
+        .iter()
+        .map(|segment| (segment.text.as_str(), segment.identity.as_deref()))
+        .collect();
+    assert_eq!(
+        attributed,
+        [("Wait,", Some("candidate-1")), ("Go ahead.", None)]
+    );
+    assert!(closing.iter().all(|segment| segment.final_segment));
     assert_eq!(state.evidence_ledger.conversation.candidate_turns, 1);
     assert_eq!(state.evidence_ledger.conversation.interviewer_turns, 1);
     assert!(!turns.candidate.is_open() && !turns.interviewer.is_open());
 
     // Nothing open, nothing to publish or count.
-    assert!(close_both_turns(&mut turns, &mut state.evidence_ledger, 2).is_empty());
+    assert!(close_both_turns(&mut turns, &mut state.evidence_ledger, 2, None).is_empty());
     assert_eq!(state.evidence_ledger.conversation.candidate_turns, 1);
 }

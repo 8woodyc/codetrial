@@ -35,6 +35,7 @@ use super::board::{self, Board};
 use super::latency::{self, Boundary};
 use super::media::{CandidateMedia, OutputAudio};
 use super::timing::TimingOutcome;
+use super::transcripts::Segment;
 use super::turn::{
     Floor, Interruptible, ReplyDebt, RuntimeActivity, SpeakerTurns, TurnState, closing_order,
 };
@@ -427,6 +428,8 @@ pub(super) struct GeminiEventContext<'a> {
     pub(super) agent_state: &'a mut AgentState,
     pub(super) activity: &'a mut RuntimeActivity,
     pub(super) turns: &'a mut SpeakerTurns,
+    /// Where transcript segments are queued for the page; see `transcripts`.
+    pub(super) transcripts: &'a mut super::transcripts::TranscriptWriter,
     pub(super) media: &'a mut CandidateMedia,
 }
 
@@ -1227,10 +1230,14 @@ async fn on_output_transcript(
     // this event carried anything at all.
     if transcript_text(text).is_some() {
         let turn = &mut context.turns.interviewer;
-        let whole = turn
-            .record(&mut context.state.transcript, INTERVIEWER_SPEAKER, text)
-            .to_string();
-        publish_transcript(room, &whole, turn.segment_id("interviewer"), false, None).await;
+        let text = turn.record(&mut context.state.transcript, INTERVIEWER_SPEAKER, text);
+        let segment = Segment {
+            id: turn.segment_id("interviewer"),
+            text,
+            final_segment: false,
+            identity: None,
+        };
+        context.transcripts.publish(room, segment);
     }
     Ok(())
 }
@@ -1264,11 +1271,11 @@ async fn on_input_transcript(
         if context.agent_state.current() == AGENT_STATE_THINKING {
             set_agent_state(room, context.agent_state, AGENT_STATE_LISTENING);
         }
-        let whole = context
-            .turns
-            .candidate
-            .record(&mut context.state.transcript, CANDIDATE_SPEAKER, text)
-            .to_string();
+        let whole =
+            context
+                .turns
+                .candidate
+                .record(&mut context.state.transcript, CANDIDATE_SPEAKER, text);
         let was_thinking = context.state.thinking_hold.is_active();
         let was_requested = context.state.thinking_hold.is_requested();
         if interruptible == Interruptible::Yes {
@@ -1321,14 +1328,13 @@ async fn on_input_transcript(
                 }
             }
         }
-        publish_transcript(
-            room,
-            &whole,
-            context.turns.candidate.segment_id("candidate"),
-            false,
-            Some(identity),
-        )
-        .await;
+        let segment = Segment {
+            id: context.turns.candidate.segment_id("candidate"),
+            text: whole,
+            final_segment: false,
+            identity: Some(identity.to_string()),
+        };
+        context.transcripts.publish(room, segment);
     }
     Ok(())
 }
@@ -1549,7 +1555,7 @@ async fn on_turn_complete(
 
     // Gemini finishing its turn also means the candidate utterance it answered
     // is over, so both sides close here.
-    close_turns(room, context).await;
+    close_turns(room, context);
     context
         .activity
         .settle_completed_turn(context.output_audio.is_playing());
@@ -1655,7 +1661,7 @@ async fn on_interruption(
     // says appends to the abandoned turn under its segment id, so the panel
     // would glue two separate utterances into one row and the report prompt
     // would read them as one line.
-    close_turns(room, context).await;
+    close_turns(room, context);
 
     set_agent_state(room, context.agent_state, AGENT_STATE_LISTENING);
     Ok(())
@@ -2382,34 +2388,10 @@ async fn publish_framework_progress(
     Ok(())
 }
 
-/// Best effort, like every publish the interview does not depend on. The
-/// transcript is already recorded when this runs, and the report is written
-/// from that record, so a segment the panel misses is cosmetic. Propagating
-/// the error ended the room loop instead, and with it the report: a signal
-/// reconnect under one fragment cost the whole interview.
-async fn publish_transcript(
-    room: &Room,
-    text: &str,
-    segment_id: String,
-    final_segment: bool,
-    sender_identity: Option<&str>,
-) {
-    if let Err(error) = room
-        .local_participant()
-        .send_text(
-            text,
-            transcript_stream_options(segment_id, final_segment, sender_identity),
-        )
-        .await
-    {
-        eprintln!("publishing a transcript segment failed ({error}); continuing the interview");
-    }
-}
-
 /// `lk.segment_id` is what lets the browser patch one row per turn instead of
 /// reassembling sentences from timestamps, and `lk.transcription_final` says
 /// whether the turn is still being spoken.
-fn transcript_stream_options(
+pub(super) fn transcript_stream_options(
     segment_id: String,
     final_segment: bool,
     sender_identity: Option<&str>,
@@ -2631,30 +2613,28 @@ fn take_stale_playout(
 /// Both turns are counted in the ledger before either is published. The count
 /// is what the report reads; the publish only tells the panel, and a failed
 /// one used to leave the other speaker's closed turn uncounted.
-pub(super) async fn close_turns(room: &Room, context: &mut GeminiEventContext<'_>) {
-    let candidate_identity = context.media.identity.clone();
+pub(super) fn close_turns(room: &Room, context: &mut GeminiEventContext<'_>) {
     let closing = close_both_turns(
         context.turns,
         &mut context.state.evidence_ledger,
         crate::current_epoch_millis(),
+        context.media.identity.as_deref(),
     );
-    for (speaker, whole, segment_id) in closing {
-        // Only the candidate's own speech is attributed to them; the
-        // interviewer publishes as the agent participant.
-        let identity = (speaker == "candidate")
-            .then_some(candidate_identity.as_deref())
-            .flatten();
-        publish_transcript(room, &whole, segment_id, true, identity).await;
+    for segment in closing {
+        context.transcripts.publish(room, segment);
     }
 }
 
 /// The room-free half of `close_turns`: finishes each open turn, counts it in
-/// the ledger, and returns what has to be published, in publishing order.
+/// the ledger, and returns its final segment, in publishing order. Only the
+/// candidate's own speech is attributed to them; the interviewer publishes as
+/// the agent participant.
 pub(super) fn close_both_turns(
     turns: &mut SpeakerTurns,
     ledger: &mut crate::agent::EvidenceLedger,
     receipt_timestamp_ms: u64,
-) -> Vec<(&'static str, String, String)> {
+    candidate_identity: Option<&str>,
+) -> Vec<Segment> {
     let order = closing_order(
         turns.interviewer.transcript_line(),
         turns.candidate.transcript_line(),
@@ -2668,7 +2648,7 @@ pub(super) fn close_both_turns(
     ];
     let mut out = Vec::with_capacity(2);
     for speaker in order {
-        let Some((whole, segment_id)) = closing
+        let Some((text, id)) = closing
             .iter_mut()
             .find(|(name, _)| *name == speaker)
             .and_then(|(_, closed)| closed.take())
@@ -2676,14 +2656,21 @@ pub(super) fn close_both_turns(
             continue;
         };
         ledger.record_conversation_turn(receipt_timestamp_ms, speaker);
-        out.push((speaker, whole, segment_id));
+        out.push(Segment {
+            id,
+            text,
+            final_segment: true,
+            identity: (speaker == "candidate")
+                .then_some(candidate_identity)
+                .flatten()
+                .map(str::to_string),
+        });
     }
     out
 }
 
 /// Ends the turn and hands back what has to be published as final, or `None`
-/// when the speaker had nothing open. Split out so the borrow ends before the
-/// publish await.
+/// when the speaker had nothing open.
 fn close_turn(turn: &mut SpeakerTurn, speaker: &str) -> Option<(String, String)> {
     if !turn.is_open() {
         return None;
@@ -2713,6 +2700,7 @@ impl TurnState {
             agent_state: &mut self.agent_state,
             activity: &mut self.activity,
             turns: &mut self.turns,
+            transcripts: &mut self.transcripts,
             media,
         }
     }

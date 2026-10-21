@@ -100,6 +100,7 @@ mod room_service;
 mod rooms;
 mod session;
 mod timing;
+mod transcripts;
 mod turn;
 
 // The room half reaches back for these on every inbound event, which is what
@@ -818,7 +819,7 @@ async fn replace_gemini_session(
         prompt_fields(context.state, context.activity),
         interview.boot.room_name
     );
-    close_turns(room, context).await;
+    close_turns(room, context);
     set_agent_state(room, context.agent_state, AGENT_STATE_LISTENING);
     publish_control(room, &interviewer_state(false), "the reconnected notice").await;
     let spoke = if let Some(handoff) = speech_handoff {
@@ -1646,6 +1647,7 @@ async fn open_session<'a>(
         agent_state: std::mem::take(&mut agent_state),
         activity: runtime_activity(config, started_at, session_id),
         turns: SpeakerTurns::default(),
+        transcripts: Default::default(),
     };
     turn.activity.latency.bind(
         &room.name(),
@@ -3101,6 +3103,12 @@ async fn publish_interviewer_state(
     Ok(())
 }
 
+/// How long the ending waits for queued transcript segments to reach the page
+/// before it goes on. Normally they are out well within a second; a room that
+/// cannot take them in this long will not take the report either, and the
+/// report has its own recovery.
+const TRANSCRIPT_FLUSH_LIMIT: Duration = Duration::from_secs(2);
+
 /// A control message the page shows and the interview does not depend on,
 /// sent best effort. The state it describes is already in effect, and a failed
 /// publish used to end the room loop and with it the report.
@@ -3583,7 +3591,7 @@ async fn apply_data_packet(
     let grace = thinking_transcript_grace(interview.boot.silence_ms);
     let effects = settle_hold(context, &result, &mut reply, packet_at, grace).await;
     if effects.cut_off {
-        close_turns(room, context).await;
+        close_turns(room, context);
         set_agent_state(room, context.agent_state, AGENT_STATE_LISTENING);
     }
 
@@ -3631,7 +3639,7 @@ async fn apply_data_packet(
                 timing::TimingOutcome::Paused,
                 &mut std::io::stderr().lock(),
             );
-            close_turns(room, context).await;
+            close_turns(room, context);
             set_agent_state(room, context.agent_state, AGENT_STATE_LISTENING);
         }
         publish_control(
@@ -3746,7 +3754,8 @@ async fn apply_data_packet(
     // turns go out as a LiveKit text stream and the report as a data packet, so
     // the one failing says nothing about the other, and a final segment the
     // panel never saw is cosmetic where a missing report is not.
-    close_turns(room, context).await;
+    close_turns(room, context);
+    context.transcripts.flush(TRANSCRIPT_FLUSH_LIMIT).await;
 
     // The board the browser sent just before ending can still be on its way;
     // see `BOARD_FINAL_WAIT`. Copied out rather than borrowed: the farewell
@@ -3778,7 +3787,8 @@ async fn apply_data_packet(
         // The goodbye is the last turn there will be. Closing here keeps the
         // panel from leaving it rendered as still-in-progress for the rest of
         // the page's life, and costs one publish.
-        close_turns(room, context).await;
+        close_turns(room, context);
+        context.transcripts.flush(TRANSCRIPT_FLUSH_LIMIT).await;
     };
     let (generated, ()) = tokio::join!(
         generate_report_bounded(

@@ -1948,12 +1948,12 @@ pub(super) struct UnsentWatch {
 /// mutable borrow for as long as the select is polled, so bundling them here
 /// would make every other arm's condition fight the borrow checker.
 ///
-/// The four that are left exist to make [`TurnState::context`] possible. Three
-/// arms of the select need a `GeminiEventContext`, and it borrows seven things
+/// The five that are left exist to make [`TurnState::context`] possible. Three
+/// arms of the select need a `GeminiEventContext`, and it borrows eight things
 /// mutably, so it lives exactly as long as the call it is handed to. That used
 /// to be a macro, purely to stop the field list being written out three times.
 ///
-/// Worth knowing before anyone tries to go further: bundling these four and
+/// Worth knowing before anyone tries to go further: bundling these and
 /// stopping there makes the function *longer*, because every use site grows a
 /// prefix and the macro stays. It only pays once the method exists to replace
 /// the macro outright.
@@ -1962,6 +1962,7 @@ pub(super) struct TurnState {
     pub(super) agent_state: super::session::AgentState,
     pub(super) activity: RuntimeActivity,
     pub(super) turns: SpeakerTurns,
+    pub(super) transcripts: super::transcripts::TranscriptWriter,
 }
 
 /// Whether a candidate talking over the interviewer cuts it short.

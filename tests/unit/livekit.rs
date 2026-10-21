@@ -4066,6 +4066,7 @@ fn hold_turn(state: RuntimeState) -> TurnState {
         agent_state: Default::default(),
         activity: RuntimeActivity::new(Instant::now()),
         turns: SpeakerTurns::default(),
+        transcripts: Default::default(),
     }
 }
 
