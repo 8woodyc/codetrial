@@ -33,6 +33,19 @@ after(async () => {
   await new Promise((closed) => (server ? server.close(closed) : closed()));
 });
 
+/// The sample is a few seconds long and reports paused again once it ends,
+/// so a slow runner can miss the !paused wait. Looping keeps it playing
+/// until the stop under test, which pauses and rewinds it either way.
+async function playLoopedSpeech(page) {
+  await page
+    .locator("#audio-test-voice")
+    .evaluate((audio) => (audio.loop = true));
+  await page.locator("#audio-test-speech").click();
+  await page.waitForFunction(
+    () => !document.querySelector("#audio-test-voice").paused,
+  );
+}
+
 async function preflight(t) {
   const page = await browser.newPage();
   t.after(() => page.close());
@@ -203,10 +216,7 @@ test("leaving the preflight stops speech before navigation", async (t) => {
     await route.continue();
   });
   try {
-    await page.locator("#audio-test-speech").click();
-    await page.waitForFunction(
-      () => !document.querySelector("#audio-test-voice").paused,
-    );
+    await playLoopedSpeech(page);
     const stopped = await page.evaluate(() => {
       document.querySelector("#audio-check-leave").click();
       const audio = document.querySelector("#audio-test-voice");
@@ -230,10 +240,7 @@ test("starting the interview stops preflight speech while keeping the microphone
   await page.waitForFunction(
     () => !document.querySelector("#audio-check-join").disabled,
   );
-  await page.locator("#audio-test-speech").click();
-  await page.waitForFunction(
-    () => !document.querySelector("#audio-test-voice").paused,
-  );
+  await playLoopedSpeech(page);
   const stopped = await page.evaluate(() => {
     document.querySelector("#audio-check-join").click();
     const audio = document.querySelector("#audio-test-voice");
