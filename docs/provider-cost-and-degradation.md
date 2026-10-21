@@ -503,6 +503,13 @@ output retains synthetic replies, usage and failures for inspection. Like the
 other direct-socket probes, it does not validate LiveKit playout, and the
 detector remains a heuristic rather than a provider compression event.
 
+Final report stability has its own credentialed probe, the ignored
+`report_eval_run` test in `tests/unit/gemini.report_eval.rs`. It sends the
+synthetic corpus through the production report transport under explicit call
+and token ceilings and keeps a durable journal of every call;
+`tests/fixtures/report-eval/README.md` has its environment, ceilings and
+resume rules.
+
 ## Retrieving omitted conversation
 
 `read_conversation` is available on both interview surfaces. It reads only
