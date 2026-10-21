@@ -36,6 +36,7 @@ mod value;
 #[path = "../tests/unit/agent/evidence.rs"]
 mod evidence_tests;
 
+pub use events::ParseBudget;
 pub use events::apply_data_event;
 pub(crate) use events::apply_data_event_at;
 pub(crate) use events::apply_server_event_at;
@@ -850,6 +851,8 @@ pub struct RuntimeState {
     /// The last buffer parsed and its tree, so the next update does not parse
     /// it again. Runtime-only for the same reason as the baselines above.
     pub parse_cache: ParseCache,
+    /// The byte rate editor parsing is held to; see `ParseBudget`.
+    pub parse_budget: ParseBudget,
     /// Whether the candidate has typed, as opposed to the browser having
     /// published a template. See `apply_code_update`.
     pub code_edited: bool,
@@ -1103,6 +1106,7 @@ impl Default for RuntimeState {
             code: String::new(),
             last_parseable_code: std::collections::BTreeMap::new(),
             parse_cache: ParseCache::default(),
+            parse_budget: ParseBudget::default(),
             code_edited: false,
             code_templates: std::collections::BTreeMap::new(),
             language: "python".to_string(),

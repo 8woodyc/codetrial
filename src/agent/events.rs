@@ -292,7 +292,52 @@ fn apply_code_update(
     // tab's grammar beside it. The reducer still coalesces the case where
     // neither the text nor the language moved.
     if update_last_code_change || language_changed.is_some() {
-        let analysis = if language_changed.is_some() {
+        // What the parser will read: the new tab's buffer after a switch, both
+        // sides of an edit otherwise, the earlier one when it is not cached. A
+        // side over `MAX_PARSED_BYTES` is never parsed, and neither is its
+        // pair, so it costs nothing and leaves the budget to the edits after
+        // it.
+        let parseable = |code: &str| code.len() <= super::evidence::MAX_PARSED_BYTES;
+        let prior = prior_code.as_deref().filter(|_| language_changed.is_none());
+        let parsed_bytes = match prior {
+            _ if !parseable(new_code) => 0,
+            None => new_code.len(),
+            Some(prior) if parseable(prior) => prior.len() + new_code.len(),
+            Some(_) => 0,
+        };
+
+        // An edit that ends an invalid streak is parsed once more against the
+        // baseline the streak began from, so the most it can cost is counted.
+        let recovery_bytes = state
+            .last_parseable_code
+            .get(&state.language)
+            .filter(|baseline| prior.is_some() && parseable(baseline))
+            .map_or(0, |baseline| baseline.len() + new_code.len());
+        let parsed_bytes = if parsed_bytes == 0 {
+            0
+        } else {
+            parsed_bytes + recovery_bytes
+        };
+        let analysis = if !state.parse_budget.admit(receipt_timestamp_ms, parsed_bytes) {
+            // Recorded as not parsed, as an oversized paste is. The analysis
+            // runs on the room loop, so a client sending distinct buffers as
+            // fast as the room relays them would otherwise hold the candidate's
+            // audio behind the parser; see `ParseBudget`.
+            //
+            // The buffer before this one is still known to parse, and the
+            // ledger is about to stop saying so. Kept as the baseline, so an
+            // invalid streak that starts here still recovers against it; an
+            // edit that parses spends it as usual.
+            if let Some(prior) = prior.filter(|_| {
+                state.evidence_ledger.code.parser_observation
+                    == Some(super::CodeObservation::Parsed)
+            }) {
+                state
+                    .last_parseable_code
+                    .insert(state.language.clone(), prior.to_string());
+            }
+            super::evidence::parser_unavailable()
+        } else if language_changed.is_some() {
             // The buffer before this packet belongs to the tab the candidate
             // just left, so there is nothing here to diff against and no
             // classification to make. What there is to record is whether the
@@ -334,6 +379,49 @@ fn apply_code_update(
         update_last_interjection: language_changed.is_some(),
         generate_reply: language_changed,
         ..DataEventResult::default()
+    }
+}
+
+/// How much editor text may be parsed, as a rate in bytes measured on receipt
+/// time, so the same packets always get the same answer. Parsing costs about
+/// what it reads, and a candidate's edits, a few kilobytes sent at most every
+/// 300 ms, never come near the rate. A client flooding the topic with distinct
+/// buffers at `MAX_PARSED_BYTES`, each parsed beside the one before it, gets
+/// eight of them and then about two a second, which keeps the parser to a
+/// bounded share of the room loop.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ParseBudget {
+    /// When the budget would be back to full, in epoch milliseconds: the
+    /// generic cell rate algorithm's theoretical arrival time.
+    full_at_ms: u64,
+}
+
+const PARSE_BYTES_PER_SECOND: u64 = 256 * 1024;
+const PARSE_BURST_BYTES: u64 = 1024 * 1024;
+/// How far ahead of now the budget may be spent: the burst, as time.
+const PARSE_TOLERANCE_MS: u64 = PARSE_BURST_BYTES * 1000 / PARSE_BYTES_PER_SECOND;
+
+impl ParseBudget {
+    /// Whether `bytes` more may be parsed now, spending them if so.
+    pub(crate) fn admit(&mut self, now_ms: u64, bytes: usize) -> bool {
+        // Rounded up, so no parse is free: a flood of tiny distinct buffers
+        // costs at least a millisecond each.
+        let cost_ms = (bytes as u64)
+            .saturating_mul(1000)
+            .div_ceil(PARSE_BYTES_PER_SECOND);
+
+        // Receipt time is the wall clock, which can step back. A budget spent
+        // further ahead than the tolerance allows was spent before such a step,
+        // and is taken as spent only to the limit, so parsing resumes as it
+        // refills rather than once the clock has caught up.
+        let full_at = self
+            .full_at_ms
+            .clamp(now_ms, now_ms.saturating_add(PARSE_TOLERANCE_MS));
+        if full_at - now_ms + cost_ms > PARSE_TOLERANCE_MS {
+            return false;
+        }
+        self.full_at_ms = full_at + cost_ms;
+        true
     }
 }
 

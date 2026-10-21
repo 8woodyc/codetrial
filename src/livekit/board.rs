@@ -155,6 +155,11 @@ impl Board {
         self.settle_pending(state, BOARD_FINAL_WAIT).await;
     }
 
+    /// Takes a board still being read before `read_board` answers, so the
+    /// model sees what the candidate just drew rather than the board before
+    /// it. Returns at once when no stream is in flight, since every reader
+    /// permit is then free; only a board actually on its way holds the room
+    /// loop, and for at most 100 ms, while the tool acknowledgement plays.
     pub(super) async fn settle_for_read(&mut self, state: &mut RuntimeState) {
         self.settle_pending(state, Duration::from_millis(100)).await;
     }

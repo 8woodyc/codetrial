@@ -3581,3 +3581,178 @@ fn automatic_test_coverage_uses_the_packets_server_receipt() {
     assert_eq!(coverage[0].provenance, Provenance::Derived);
     assert_eq!(state.evidence_ledger.coverage.covered, ["test"]);
 }
+
+#[test]
+fn a_flood_of_editor_packets_is_parsed_at_a_bounded_rate() {
+    // Distinct buffers of the size the parser still reads.
+    let buffer = |n: u64| {
+        let mut code = format!("value = {n}\n");
+        while code.len() + 12 < crate::agent::evidence::MAX_PARSED_BYTES / 2 {
+            code.push_str("total += 1\n");
+        }
+        code
+    };
+    let packet = |state: &mut RuntimeState, receipt: u64, code: &str| {
+        apply_data_event_at(
+            state,
+            crate::runtime::TOPIC_CODE_UPDATE,
+            &serde_json::json!({ "code": code }),
+            0.0,
+            receipt,
+        );
+        state.evidence_ledger.code.parser_observation.clone()
+    };
+
+    // Small edits, however close together, are never limited.
+    let mut typing = RuntimeState::default();
+    for n in 0..200 {
+        assert_eq!(
+            packet(&mut typing, 1_000 + n * 10, &format!("value = {n}\n")),
+            Some(CodeObservation::Parsed),
+            "packet {n}"
+        );
+    }
+
+    // Large distinct buffers sent at once: the burst is parsed, the rest are
+    // recorded as not parsed rather than held on the room loop, and the budget
+    // comes back with time.
+    let mut flood = RuntimeState::default();
+    let observed: Vec<_> = (0..40)
+        .map(|n| packet(&mut flood, 1_000, &buffer(n)))
+        .collect();
+    let parsed = observed
+        .iter()
+        .filter(|seen| **seen == Some(CodeObservation::Parsed))
+        .count();
+    assert!((8..=16).contains(&parsed), "{parsed} of 40 parsed");
+    assert_eq!(observed[39], Some(CodeObservation::ParserUnavailable));
+    assert_eq!(
+        packet(&mut flood, 1_000 + 4_000, &buffer(40)),
+        Some(CodeObservation::Parsed)
+    );
+}
+
+#[test]
+fn an_edit_refused_by_the_parse_budget_keeps_the_recovery_baseline() {
+    let mut state = RuntimeState::default();
+    let packet = |state: &mut RuntimeState, receipt: u64, code: &str| {
+        apply_data_event_at(
+            state,
+            crate::runtime::TOPIC_CODE_UPDATE,
+            &serde_json::json!({ "code": code }),
+            0.0,
+            receipt,
+        );
+        state.evidence_ledger.code.parser_observation.clone()
+    };
+    assert_eq!(
+        packet(&mut state, 1_000, "value = 1\n"),
+        Some(CodeObservation::Parsed)
+    );
+
+    // Spend the budget, as a flood would, and the next edit is refused.
+    state.parse_budget = crate::agent::ParseBudget::default();
+    assert!(state.parse_budget.admit(1_000, 1024 * 1024));
+    // Large enough to cost something; a few bytes never do.
+    let edit = format!("value = 1\nif value\n{}", "# padding\n".repeat(200));
+    assert_eq!(
+        packet(&mut state, 1_000, &edit),
+        Some(CodeObservation::ParserUnavailable)
+    );
+    assert_eq!(
+        state
+            .last_parseable_code
+            .get(&state.language)
+            .map(String::as_str),
+        Some("value = 1\n")
+    );
+}
+
+/// Bytes the parser never reads cost nothing. An oversized paste is recorded
+/// as not parsed, and so is the edit after it, since its pair is the paste;
+/// charging either would leave the edits that follow refused for a parse that
+/// never ran.
+#[test]
+fn text_the_parser_never_reads_costs_no_budget() {
+    let packet = |state: &mut RuntimeState, code: &str| {
+        apply_data_event_at(
+            state,
+            crate::runtime::TOPIC_CODE_UPDATE,
+            &serde_json::json!({ "code": code }),
+            0.0,
+            1_000,
+        );
+        state.evidence_ledger.code.parser_observation.clone()
+    };
+    let oversized = |n: usize| {
+        format!(
+            "value = {n}\n{}",
+            "# padding\n".repeat(crate::agent::evidence::MAX_PARSED_BYTES / 10 + 1)
+        )
+    };
+    let medium = |n: usize| format!("value = {n}\n{}", "total += 1\n".repeat(200));
+
+    let mut state = RuntimeState::default();
+    for n in 0..20 {
+        assert_eq!(
+            packet(&mut state, &oversized(n)),
+            Some(CodeObservation::ParserUnavailable)
+        );
+        assert_eq!(
+            packet(&mut state, &medium(n)),
+            Some(CodeObservation::ParserUnavailable)
+        );
+    }
+
+    // Forty unparsed packets at one instant, and the budget is untouched: large
+    // edits that parse still get all of it.
+    let large = |n: usize| format!("value = {n}\n{}", "total += 1\n".repeat(5_000));
+    for n in 0..4 {
+        assert_eq!(
+            packet(&mut state, &large(n)),
+            Some(CodeObservation::Parsed),
+            "large edit {n}"
+        );
+    }
+}
+
+#[test]
+fn no_parse_is_free_and_a_recovery_baseline_is_charged_too() {
+    let packet = |state: &mut RuntimeState, code: &str| {
+        apply_data_event_at(
+            state,
+            crate::runtime::TOPIC_CODE_UPDATE,
+            &serde_json::json!({ "code": code }),
+            0.0,
+            1_000,
+        );
+        state.evidence_ledger.code.parser_observation.clone()
+    };
+    let refused = |state: &mut RuntimeState, count: usize, edit: fn(usize) -> String| {
+        (0..count)
+            .filter(|n| packet(state, &edit(*n)) == Some(CodeObservation::ParserUnavailable))
+            .count()
+    };
+    let valid: fn(usize) -> String = |n| format!("value = {n}\n");
+    let invalid: fn(usize) -> String = |n| format!("if value {n}\n");
+
+    // A flood of tiny distinct buffers is still a flood.
+    let mut tiny = RuntimeState::default();
+    assert!(refused(&mut tiny, 4_100, valid) > 0);
+
+    // An edit inside an invalid streak could end it, and is charged for the
+    // baseline it would be parsed against, so a large one makes small edits
+    // expensive. The streak keeps the baseline until an edit parses.
+    let baseline = |len: usize| format!("value = 0\n{}", "total += 1\n".repeat(len / 11));
+    let mut held = RuntimeState::default();
+    held.last_parseable_code
+        .insert(held.language.clone(), baseline(60_000));
+    assert!(refused(&mut held, 40, invalid) > 0);
+
+    // A baseline the parser would not read costs nothing.
+    let mut oversized = RuntimeState::default();
+    oversized
+        .last_parseable_code
+        .insert(oversized.language.clone(), baseline(70_000));
+    assert_eq!(refused(&mut oversized, 40, invalid), 0);
+}
