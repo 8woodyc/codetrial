@@ -250,6 +250,12 @@ pub(super) struct RuntimeActivity {
     /// to that old turn and must not settle the resume prompt sent since:
     /// swallowed here, the way `interrupted_turn_pending` swallows the second
     /// ending of an interrupted turn. New output disarms it.
+    ///
+    /// A lone ending that follows the resume cannot be told apart from a
+    /// silent answer to it, and is taken as the old turn's. Taken the other
+    /// way, a late ending would settle the prompt with nothing said and leave
+    /// the reply watchdog nothing to recover; taken this way, a silent answer
+    /// keeps the prompt owed until the watchdog asks again.
     pub(super) stale_turn_pending: bool,
     /// When Gemini last completed a turn that said something, which
     /// `LATE_TRANSCRIPT_GRACE` is measured from. Not stamped by an

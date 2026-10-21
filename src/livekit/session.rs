@@ -651,6 +651,13 @@ pub(super) fn accept_gemini_event(
         activity.interrupted_turn_pending = true;
         activity.turn_completed_at = None;
     } else if answers_prompt(event) && !activity.discarding_output && !held {
+        // Not under a hold, even for a tool call, which is still delivered then
+        // and counted as output below. The generation a hold cut off can keep
+        // calling tools, and those calls are no sign that a newer turn began;
+        // disarming on them handed its late ending the resume prompt. The cost
+        // falls on a newer turn under a hold that only calls tools: its ending
+        // is swallowed, and `generating` stays set until the stall check clears
+        // it.
         activity.interrupted_turn_pending = false;
         activity.stale_turn_pending = false;
     }

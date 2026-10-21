@@ -7708,3 +7708,36 @@ async fn livekit_proxy_child() {
         .expect("the fake proxy ends the tunnel after the ClientHello");
     assert!(!error.to_string().contains("requires"), "{error}");
 }
+
+/// The ambiguity `stale_turn_pending` resolves toward the old turn: a resume
+/// answered with nothing at all ends like the stalled turn would. That costs
+/// one reply timeout, after which the watchdog still finds the prompt owed;
+/// counting it as the answer would have settled the prompt with nothing said.
+#[test]
+fn a_silent_answer_to_the_resume_is_recovered_by_the_reply_watchdog() {
+    let start = Instant::now();
+    let mut state = RuntimeState {
+        paused: true,
+        ..RuntimeState::default()
+    };
+    let mut activity = RuntimeActivity::new(start);
+    let (mut output_audio, _) = test_output_audio();
+    activity.note_output(start);
+    let paused_at = start + PROMPT_STALL;
+    update_pause_activity(&mut state, &mut activity, &mut output_audio, paused_at);
+    assert!(activity.stale_turn_pending);
+
+    state.paused = false;
+    let resumed_at = paused_at + Duration::from_secs(5);
+    activity.mark_prompted(resumed_at, Some("resume"), false);
+    assert!(!accept_gemini_event(
+        &GeminiEvent::TurnComplete,
+        &mut activity,
+        false,
+        resumed_at
+    ));
+    assert!(!activity.stale_turn_pending);
+    assert!(activity.owes_prompt());
+    assert!(!activity.reply_timed_out(resumed_at, false));
+    assert!(activity.reply_timed_out(resumed_at + REPLY_TIMEOUT, false));
+}
