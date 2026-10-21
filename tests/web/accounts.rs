@@ -592,10 +592,10 @@ async fn a_forged_session_cookie_is_not_a_session() {
     remove_database(db_path).await;
 }
 
-/// Guest and signed-in token requests share an IP-based rate limit, so
-/// changing authentication state cannot reset the request budget.
+/// Guest and signed-in token requests use separate IP-based rate limits,
+/// so anonymous traffic cannot consume a signed-in candidate's budget.
 #[tokio::test]
-async fn anonymous_requests_share_the_signed_in_ip_budget() {
+async fn anonymous_requests_do_not_consume_the_signed_in_ip_budget() {
     let path = std::env::temp_dir().join(format!(
         "codetrial-token-budget-{}-{}.db",
         std::process::id(),
@@ -625,7 +625,7 @@ async fn anonymous_requests_share_the_signed_in_ip_budget() {
     let url = format!("{base}/api/token");
     let client = http_client();
 
-    // Guest requests consume the shared IP-based token budget.
+    // Guest requests consume their own IP-based token budget.
     for _ in 0..TOKEN_RATE_LIMIT {
         let response = client.post(&url).json(&json!({})).send().await.unwrap();
         assert_eq!(response.status(), 200);
@@ -653,8 +653,8 @@ async fn anonymous_requests_share_the_signed_in_ip_budget() {
 
     assert_eq!(
         signed_in.status(),
-        429,
-        "signing in must not reset the shared IP token budget"
+        200,
+        "guest requests must not consume the signed-in token budget"
     );
 
     server.shutdown().await;

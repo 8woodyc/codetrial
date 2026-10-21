@@ -1205,9 +1205,12 @@ async fn token_rejects_guest_when_guest_mode_is_disabled() {
     let body = json!({"problemId": "two-sum", "durationMin": 45});
 
     let guest = http_client().post(&url).json(&body).send().await.unwrap();
-    assert_eq!(guest.status(), 403);
+    assert_eq!(guest.status(), 401);
     let guest_body: Value = guest.json().await.unwrap();
-    assert_eq!(guest_body["error"], "Guest interviews are disabled.");
+    assert_eq!(
+        guest_body["error"],
+        "Enter your GitHub username to start an interview."
+    );
 
     let signed_in = http_client()
         .post(&url)
@@ -1225,8 +1228,8 @@ async fn token_rejects_guest_when_guest_mode_is_disabled() {
 }
 
 /// When recording is disabled, guests may obtain an interview token even if
-/// accounts exist. Guests and signed-in users share the IP token limit, and
-/// guest tokens must not grant access to observer tokens.
+/// accounts exist. Guest traffic has its own IP token limit, and guest tokens
+/// must not grant access to observer tokens.
 #[tokio::test]
 async fn token_allows_guest_when_accounts_exist_and_recording_is_disabled() {
     let path = std::env::temp_dir().join(format!(
@@ -1311,8 +1314,12 @@ async fn token_allows_guest_when_accounts_exist_and_recording_is_disabled() {
         .unwrap();
     assert_eq!(
         signed_in.status(),
-        429,
-        "signing in must not reset the shared IP token budget"
+        200,
+        "guest requests must not spend the signed-in token budget"
+    );
+    assert!(
+        signed_in.json::<Value>().await.unwrap()["token"].is_string(),
+        "a signed-in candidate must still receive a token"
     );
 
     server.shutdown().await;

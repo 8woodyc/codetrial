@@ -440,9 +440,8 @@ enum AdmittedCaller {
 /// when they are apart. Account and verified-email checks run before the rate
 /// limit, so requests that cannot be admitted do not consume token capacity.
 ///
-/// Guests and authenticated callers share one IP-based token limit. This
-/// prevents switching authentication state from granting another request
-/// budget, although callers behind the same NAT also share that capacity.
+/// Guests and authenticated callers use separate IP-based token limits,
+/// so anonymous traffic cannot spend a signed-in candidate's allowance.
 /// Guests are admitted only when recording is disabled.
 #[allow(clippy::result_large_err)]
 async fn admit_caller(
@@ -464,6 +463,13 @@ async fn admit_caller(
     let now = Instant::now();
 
     let Some(user) = user else {
+        if !state.config.guest_mode_enabled {
+            return Err(json_response(
+                StatusCode::UNAUTHORIZED,
+                json!({ "error": "Enter your GitHub username to start an interview." }),
+            ));
+        }
+
         // A configured but unavailable account database must fail closed.
         if state.accounts_required && state.accounts.is_none() {
             return Err(state.accounts_error());
@@ -483,7 +489,7 @@ async fn admit_caller(
             ));
         }
 
-        if !state.token_limit.allow(client, now) {
+        if !state.guest_token_limit.allow(client, now) {
             return Err(rate_limited_response(
                 "Too many session requests. Wait a minute and try again.",
             ));

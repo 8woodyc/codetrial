@@ -186,7 +186,10 @@ pub(crate) struct AppState {
     /// wherever `config.recording` is `None`, which is every deployment that
     /// has not provisioned it.
     recorder: Option<crate::recording::Recorder>,
+    /// Token requests made by signed-in candidates.
     token_limit: TokenRateLimit,
+    /// Anonymous traffic must not spend a signed-in candidate's allowance.
+    guest_token_limit: TokenRateLimit,
 
     /// Every timer this server started, held only so they stop when it does.
     /// Never read. Why that matters is on `BackgroundTasks`.
@@ -491,6 +494,7 @@ pub(crate) fn web_router(
             dispatcher,
             recorder,
             token_limit: TokenRateLimit::with_limit(token::TOKEN_RATE_LIMIT),
+            guest_token_limit: TokenRateLimit::with_limit(token::TOKEN_RATE_LIMIT),
             login_limit: TokenRateLimit::with_limit(token::TOKEN_RATE_LIMIT),
             replay_limit: TokenRateLimit::with_limit(interviews::REPLAY_RATE_LIMIT),
             read_limit: TokenRateLimit::with_limit(recordings::READ_RATE_LIMIT),
