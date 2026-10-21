@@ -32,6 +32,187 @@ test("a malformed candidate case is refused", () => {
   );
 });
 
+test("a candidate integer outside the 32-bit range is refused", () => {
+  const spec = {
+    kind: "function",
+    paramNames: [
+      "count",
+      "nums",
+      "grid",
+      "rows",
+      "head",
+      "lists",
+      "root",
+      "next",
+      "random",
+    ],
+    paramTypes: [
+      "integer",
+      "integer[]",
+      "integer[][]",
+      "list<list<integer>>",
+      "ListNode",
+      "ListNode[]",
+      "TreeNode",
+      "Node",
+      "Node",
+    ],
+    argTypes: [
+      null,
+      null,
+      null,
+      null,
+      "linkedList",
+      "linkedListArray",
+      "binaryTree",
+      "nextTree",
+      "randomList",
+    ],
+  };
+  const place = (value) => [
+    value,
+    [value],
+    [[value]],
+    [[value]],
+    [value],
+    [[value]],
+    [value],
+    [value],
+    [[value, null]],
+  ];
+  for (const bound of [2147483647, -2147483648]) {
+    const input = place(bound);
+    assert.deepEqual(parseCandidateCase(spec, JSON.stringify(input)), input);
+  }
+  for (const outside of [2147483648, -2147483649]) {
+    for (const [index, name] of spec.paramNames.entries()) {
+      const input = place(0);
+      input[index] = place(outside)[index];
+      assert.throws(
+        () => parseCandidateCase(spec, JSON.stringify(input)),
+        new RegExp(
+          `Parameter ${index + 1} \\(${name}\\) holds an integer outside -2147483648 to 2147483647\\.`,
+        ),
+      );
+    }
+  }
+  const queue = {
+    kind: "class",
+    className: "EventQueue",
+    cases: [
+      {
+        input: [
+          ["EventQueue", "push"],
+          [[2], [7]],
+        ],
+      },
+    ],
+  };
+  const cursor = {
+    kind: "class",
+    className: "OrderedCursor",
+    constructorArgTypes: ["binaryTree"],
+    cases: [
+      {
+        input: [
+          ["OrderedCursor", "next"],
+          [[[7]], []],
+        ],
+      },
+    ],
+  };
+  for (const [judge, operation, input] of [
+    [
+      queue,
+      "push",
+      (value) => [
+        ["EventQueue", "push"],
+        [[2], [value]],
+      ],
+    ],
+    [
+      queue,
+      "EventQueue",
+      (value) => [
+        ["EventQueue", "push"],
+        [[value], [7]],
+      ],
+    ],
+    [cursor, "OrderedCursor", (value) => [["OrderedCursor"], [[[value]]]]],
+  ]) {
+    for (const bound of [2147483647, -2147483648]) {
+      assert.deepEqual(
+        parseCandidateCase(judge, JSON.stringify(input(bound))),
+        input(bound),
+      );
+    }
+    for (const outside of [2147483648, -2147483649]) {
+      assert.throws(
+        () => parseCandidateCase(judge, JSON.stringify(input(outside))),
+        new RegExp(
+          `Arguments for operation ${operation} hold an integer outside -2147483648 to 2147483647\\.`,
+        ),
+      );
+    }
+  }
+  // The range is named only when it is the one fault: a number given for a
+  // string, or a string for an integer, is still a type mismatch.
+  assert.throws(
+    () => parseCandidateCase(queue, '[["EventQueue", "push"], [[2], ["x"]]]'),
+    /Arguments for operation push do not match its parameter types\./,
+  );
+  assert.throws(
+    () =>
+      parseCandidateCase(
+        { kind: "function", paramNames: ["s"], paramTypes: ["string"] },
+        "[3000000000]",
+      ),
+    /Parameter 1 \(s\) must match string\./,
+  );
+});
+
+test("a cycle position, node reference and graph neighbor keep their checks", () => {
+  const spec = {
+    kind: "function",
+    paramNames: ["head", "pos", "root", "node", "graph"],
+    paramTypes: ["ListNode", "integer", "TreeNode", "TreeNode", "Node"],
+    argTypes: [
+      "linkedList",
+      "cyclePos",
+      "binaryTree",
+      "treeNodeValue",
+      "graphNode",
+    ],
+    cyclePosParam: 1,
+    nodeRefRootParam: 2,
+  };
+  for (const [input, refusal] of [
+    [
+      [[1], 2147483648, [1], 1, [[]]],
+      /Parameter 2 must name a list position or -1\./,
+    ],
+    [
+      [[1], -1, [1], 2147483648, [[]]],
+      /Parameter 4 must name a value in the tree\./,
+    ],
+    // Membership bounds a node reference only because the tree's own values
+    // are bounded now: before, both this tree and the reference into it passed.
+    [
+      [[1], -1, [2147483648], 2147483648, [[]]],
+      /Parameter 3 \(root\) holds an integer outside -2147483648 to 2147483647\./,
+    ],
+    [
+      [[1], -1, [1], 1, [[2147483648]]],
+      /Parameter 5 \(graph\) must match graphNode\./,
+    ],
+  ]) {
+    assert.throws(
+      () => parseCandidateCase(spec, JSON.stringify(input)),
+      refusal,
+    );
+  }
+});
+
 test("a candidate case is typed by paramTypes", () => {
   const spec = {
     kind: "function",
