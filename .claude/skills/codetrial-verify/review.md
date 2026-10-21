@@ -109,7 +109,7 @@ report what it reports. For each area, look for:
   version bump that frees it.
 - Skills. A diff that renames or removes a gate, a lane, a CI job, a script,
   a flag or a make target, or changes a maintainer wording, leaves stale the
-  skill that names it; run [skill-refs.sh](skill-refs.sh) and reread the skills
+  skill that names it; run `scripts/check-skill-refs.py` and reread the skills
   that name it. A new file moves nothing.
 
 Done when each area has been read against every item above, with a finding or

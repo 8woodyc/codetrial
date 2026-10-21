@@ -1,6 +1,6 @@
 ---
 name: codetrial-verify
-description: How a CodeTrial change is validated - scripts/test.sh as the credential-free gate, which generated artifacts have to be regenerated before it passes, the checks that need credentials or a browser and therefore sit outside it, the browser and mutation lanes, and how to bring the server up for a live look without taking the maintainer's port. Use before calling work done, when diagnosing failed GitHub Actions checks, when a gate fails on drift rather than on a bug, when adding a test, when a fix needs to be seen working in the app, when reviewing a diff or an open pull request against the contracts in docs/ (review.md), or after editing a skill or anything a skill names (skill-refs.sh).
+description: How a CodeTrial change is validated - scripts/test.sh as the credential-free gate, which generated artifacts have to be regenerated before it passes, the checks that need credentials or a browser and therefore sit outside it, the browser and mutation lanes, and how to bring the server up for a live look without taking the maintainer's port. Use before calling work done, when diagnosing failed GitHub Actions checks, when a gate fails on drift rather than on a bug, when adding a test, when a fix needs to be seen working in the app, when reviewing a diff or an open pull request against the contracts in docs/ (review.md), or after editing a skill or anything a skill names (scripts/check-skill-refs.py).
 ---
 
 # Validating a CodeTrial change
@@ -27,8 +27,8 @@ Reproduce a failure with the same lane locally.
 one failure does not hide the next; the summary line names every gate that
 failed. It covers `cargo fmt --check`, `clippy -D warnings`, `cargo test`, the
 Python unittest suites, the Node browser tests, ESLint, `ruff check`,
-`shellcheck`, the generated-artifact drift checks, the hook suite, `cargo-audit`
-and `actionlint`.
+`shellcheck`, the generated-artifact drift checks, the hook suite, the skill
+references, `cargo-audit` and `actionlint`.
 
 It is not offline. The `fetch-vendor` gate downloads missing assets named by a
 `web/vendor/**/FETCH` manifest; it cannot restore committed vendor files.
@@ -253,9 +253,9 @@ A passing gate is not a review; reviewing a diff, one's own or an open pull
 request, follows [review.md](review.md).
 
 A skill names gates, lanes, scripts, flags, make targets and documents, and
-each one can move. After changing either side, run
-`.claude/skills/codetrial-verify/skill-refs.sh`: it prints every reference a
-skill makes that no longer resolves, and every check script this skill does
-not list. It catches a
-rename, not a change of meaning, so a changed rule still needs the skill
-reread.
+each one can move. The `skill-refs` gate runs `scripts/check-skill-refs.py`,
+which prints every reference a skill makes that no longer resolves and every
+check script this skill does not list; run it on its own after changing either
+side. It catches a rename, not a change of meaning, so a changed rule still
+needs the skill reread. The scripts the skills run are tested in
+`tests/test_skill_scripts.py`.

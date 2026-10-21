@@ -2,7 +2,9 @@
 """Contract tests for the scripts the agent skills under .claude/skills run.
 
 The sweeps read GitHub through `gh`, so each case serves them one GraphQL page
-from a fake `gh` and asserts on the lists they print.
+from a fake `gh` and asserts on the lists they print. The reference checker runs
+in a scratch repository whose Makefile, workflow and skills are written here, so
+a case names exactly what resolves and what does not.
 """
 
 import importlib.util
@@ -10,6 +12,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -26,6 +29,7 @@ ROOT = support.ROOT
 SKILLS = ROOT / ".claude" / "skills"
 ISSUE_SWEEP = SKILLS / "codetrial-triage" / "issue-sweep.sh"
 PR_SWEEP = SKILLS / "codetrial-triage" / "pr-sweep.sh"
+SKILL_REFS = ROOT / "scripts" / "check-skill-refs.py"
 
 # The viewer and the one account with push access. The sweeps ask `gh` for
 # both before the GraphQL page; the runs listing is empty, so no PR is held.
@@ -275,6 +279,132 @@ class PrSweepTests(SweepCase):
                 self.assertEqual([entry["id"] for entry in swept["hide"]], ["IC_old"])
                 self.assertEqual(swept["hide_ask"], [])
                 self.assertEqual(swept["rebase"], [])
+
+
+GOOD_TARGET = """\
+---
+name: fixture
+description: front matter is not a heading
+---
+# Foo, bar (baz)
+## The `make indent` target/lane
+## Repeat
+## Repeat
+## Closing hashes ##
+   ## Indented heading
+Setext heading
+--------------
+## See [the guide](guide.md)
+## Émigré café
+## a_b & c—d
+## The `<id>` and `__init__` hooks
+````md
+```
+# inside four-backtick fence
+```
+````
+~~~
+# inside tilde fence
+~~~
+"""
+
+RESOLVING = """\
+# Fixture
+
+[a](target.md#foo-bar-baz) [b](target.md#the-make-indent-targetlane)
+[c](target.md#repeat-1) [d](target.md#closing-hashes)
+[e](target.md#indented-heading) [f](target.md#setext-heading)
+[g](target.md#see-the-guide) [h](target.md#émigré-café) [i](target.md#a_b--cd)
+[j](target.md "Title") [k](../../../src/main.rs#L10) [l](https://example.com/x)
+[self](#fixture) `[in code](nowhere.md)` [r](target.md#the-id-and-__init__-hooks)
+`src/main.rs:12` `src/main.rs#L5` `Cargo.toml` `TODO.md` `make fmt_all`
+`make lint` `make -j4 V=1 lint` `scripts/test.sh --fixture` `gates (rust)`
+
+```sh
+./scripts/test.sh
+cat src/main.rs; ls src/main.rs, src/
+make hooks
+[in a fence](nowhere.md)
+```
+"""
+
+DANGLING = """\
+# Fixture
+
+[m](target.md#inside-four-backtick-fence) [n](target.md#inside-tilde-fence)
+[o](target.md#repeat-2) [p](target.md#description-front-matter-is-not-a-heading)
+[q](missing.md)
+
+[ref]: missing-ref.md
+
+`src/nope.rs:3` `Nope.toml` `make test2` `make indent-check`
+`scripts/test.sh --fix` `gates (lane-2)` `make -k test3`
+
+```sh
+scripts/missing.sh
+make no_such_target
+```
+"""
+
+DANGLING_REPORT = {
+    f".claude/skills/fixture/refs.md: {what}"
+    for what in (
+        "anchor target.md#inside-four-backtick-fence",
+        "anchor target.md#inside-tilde-fence",
+        "anchor target.md#repeat-2",
+        "anchor target.md#description-front-matter-is-not-a-heading",
+        "link missing.md",
+        "link missing-ref.md",
+        "path src/nope.rs",
+        "path scripts/missing.sh",
+        "file Nope.toml",
+        "make test2",
+        "make test3",
+        "make indent-check",
+        "make no_such_target",
+        "flag scripts/test.sh --fix",
+        "CI lane lane-2",
+    )
+}
+
+
+class SkillRefsTests(unittest.TestCase):
+    def check(self, refs):
+        with tempfile.TemporaryDirectory() as repo:
+            repo = Path(repo)
+            files = {
+                "Makefile": "hooks:\n\ttrue\nindent:\n\ttrue\nfmt_all:\n\ttrue\n"
+                "test lint: hooks\n\ttrue\nindent-check:= yes\n",
+                ".github/workflows/check.yml": "jobs:\n  gates:\n"
+                "    strategy:\n      matrix:\n        include:\n"
+                "          - lane: rust\n          - lane: portable\n",
+                "scripts/test.sh": "#!/bin/sh\ncase $1 in --fixture) ;; esac\n",
+                "src/main.rs": "fn main() {}\n",
+                "Cargo.toml": "[package]\n",
+                ".claude/skills/codetrial-verify/SKILL.md": "# Verify\n",
+                ".claude/skills/fixture/guide.md": "# Guide\n",
+                ".claude/skills/fixture/target.md": GOOD_TARGET,
+                ".claude/skills/fixture/refs.md": refs,
+            }
+            for name, text in files.items():
+                (repo / name).parent.mkdir(parents=True, exist_ok=True)
+                (repo / name).write_text(text)
+            script = repo / "scripts/check-skill-refs.py"
+            shutil.copy(SKILL_REFS, script)
+            return subprocess.run(
+                [sys.executable, str(script)], cwd=repo, capture_output=True, text=True
+            )
+
+    def test_references_that_resolve_print_nothing(self):
+        result = self.check(RESOLVING)
+        self.assertEqual((result.returncode, result.stdout), (0, ""), result.stderr)
+
+    def test_each_dangling_reference_is_named_once(self):
+        result = self.check(DANGLING)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual(set(lines), DANGLING_REPORT)
+        self.assertEqual(len(lines), len(DANGLING_REPORT))
 
 
 if __name__ == "__main__":

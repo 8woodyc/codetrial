@@ -423,7 +423,10 @@ gate mutants-plan-tests unittest_gate "$ROOT/tests/test_mutants_plan.py"
 gate mutants-install-tests unittest_gate "$ROOT/tests/test_mutants_install.py"
 gate latency-tests unittest_gate "$ROOT/tests/test_analyze_latency.py"
 
-# The scripts the agent skills run are tested like any other, against a fake gh.
+# The skills name scripts, lanes, make targets and each other's headings, and an
+# agent follows a dangling one without noticing. Their own scripts are tested
+# like any other, against a fake gh and a scratch repository.
+gate skill-refs "$PYTHON" "$ROOT/scripts/check-skill-refs.py"
 gate skill-scripts-tests unittest_gate "$ROOT/tests/test_skill_scripts.py"
 gate --lane browser browser-tests browser_tests static
 gate eslint eslint_gate
