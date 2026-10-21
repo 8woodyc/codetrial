@@ -272,13 +272,14 @@ vendor_patches_gate()
 {
     # One pass, the manifests before the lockfile: awk -v cannot carry a
     # multi-line list portably. The [package] name only: [lib], [[test]] and
-    # [[example]] have names too.
+    # [[example]] have names too. Deduplicated in awk rather than by a pipe, so
+    # an unreadable input fails the gate instead of passing it empty.
     unpatched=$(awk -v lock="$ROOT/Cargo.lock" '
         FILENAME != lock && /^\[/ { package = ($0 == "[package]") }
         FILENAME != lock && package && /^name = / { gsub(/"/, "", $3); vendored[$3] = 1 }
         FILENAME == lock && /^name = / { name = $3; gsub(/"/, "", name) }
-        FILENAME == lock && /^source = "registry\+/ && (name in vendored) { print name }
-    ' "$ROOT"/vendor/*/Cargo.toml "$ROOT/Cargo.lock" | sort -u)
+        FILENAME == lock && /^source = "registry\+/ && (name in vendored) && !seen[name]++ { print name }
+    ' "$ROOT"/vendor/*/Cargo.toml "$ROOT/Cargo.lock") || return 1
     if [ -n "$unpatched" ]; then
         echo "vendored crates also resolve from a registry; re-vendor them from" >&2
         echo "the version Cargo.lock now wants (see vendor/*/README.md):" >&2
