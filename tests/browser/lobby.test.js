@@ -1377,6 +1377,482 @@ lobbyTest(
 );
 
 lobbyTest(
+  "title search only narrows visible cards and combines with topic filtering",
+  async (page) => {
+    await lobby(page);
+    await openTopicFilter(page);
+    await page.selectOption("#problem-topic", "Array");
+
+    const available = await page
+      .locator(".problem-card:visible")
+      .evaluateAll((cards) =>
+        cards.map((card) => ({
+          id: card.dataset.problem,
+          title: card.querySelector(".problem-title").textContent.trim(),
+        })),
+      );
+    assert.ok(available.length > 0);
+    const original = await snapshot(page);
+    const target = available[0];
+
+    await page.fill("#problem-search", target.title.toUpperCase());
+    const found = await page
+      .locator(".problem-card:visible")
+      .evaluateAll((cards) => cards.map((card) => card.dataset.problem));
+    assert.deepEqual(found, [target.id]);
+    assert.equal((await snapshot(page)).card, original.card);
+    assert.match(
+      await page.locator("#problem-filter-summary").textContent(),
+      /tagged Array and matching/,
+    );
+
+    await page.fill("#problem-search", "title_that_does_not_exist_12409");
+    assert.equal(await page.locator(".problem-card:visible").count(), 0);
+    assert.match(
+      await page.locator("#problem-filter-summary").textContent(),
+      /0 problems/,
+    );
+
+    await page.click("#problem-filters-reset");
+    assert.equal(await page.locator("#problem-search").inputValue(), "");
+    assert.equal(await page.locator("#problem-topic").inputValue(), "");
+    assert.equal(
+      await page.locator("#problem-filter-summary").textContent(),
+      "",
+    );
+  },
+);
+
+lobbyTest(
+  "switching search modes looks up published titles without changing recommendations",
+  async (page) => {
+    await lobby(page);
+    await page.click("details.problem-picker summary");
+    await setLevel(page, "Easy", true);
+    const chosen = pageOf("two-sum");
+    const originalRecommendation = (await snapshot(page)).card;
+    const sourceCheckbox = page.locator("#show-sources");
+    assert.equal(await sourceCheckbox.isChecked(), false);
+
+    await page.fill("#problem-search", "Two Sum");
+    assert.equal(
+      await page.locator(`[data-problem="${chosen}"]`).isVisible(),
+      false,
+    );
+
+    await page
+      .locator('[name="problem-search-mode"][value="leetcode"]')
+      .check();
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#problem-filter-summary")
+        .textContent.includes("matching LeetCode title"),
+    );
+    assert.equal(
+      await page.locator(`[data-problem="${chosen}"]`).isVisible(),
+      true,
+    );
+    assert.equal(await sourceCheckbox.isChecked(), false);
+    assert.equal((await snapshot(page)).card, originalRecommendation);
+
+    await page
+      .locator('[name="problem-search-mode"][value="scenario"]')
+      .check();
+    assert.equal(
+      await page.locator(`[data-problem="${chosen}"]`).isVisible(),
+      false,
+    );
+    await page.click("#problem-filters-reset");
+    assert.equal(
+      await page
+        .locator('[name="problem-search-mode"][value="scenario"]')
+        .isChecked(),
+      true,
+    );
+    assert.equal(await page.locator("#problem-search").inputValue(), "");
+  },
+);
+
+lobbyTest(
+  "search field stays above Topic and leaves room for the focus ring",
+  async (page) => {
+    await lobby(page);
+    await page.click("details.problem-picker summary");
+    for (const width of [320, 375, 800]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.locator("#problem-search").focus();
+      const boxes = await page.evaluate(() => {
+        const rect = (selector) =>
+          document.querySelector(selector).getBoundingClientRect();
+        return {
+          headingBottom: rect(".practice-filters legend").bottom,
+          inputTop: rect("#problem-search").top,
+          inputBottom: rect("#problem-search").bottom,
+          topicTop: rect('label[for="problem-topic"]').top,
+          scroll: document.documentElement.scrollWidth,
+          viewport: document.documentElement.clientWidth,
+        };
+      });
+      assert.ok(
+        boxes.inputTop - boxes.headingBottom >= 5,
+        `search focus ring overlaps heading at ${width}px`,
+      );
+      assert.ok(
+        boxes.topicTop - boxes.inputBottom >= 5,
+        `Topic sits beside or overlaps search at ${width}px`,
+      );
+      assert.equal(
+        boxes.scroll,
+        boxes.viewport,
+        `horizontal overflow at ${width}px`,
+      );
+    }
+  },
+);
+
+lobbyTest(
+  "account refresh cannot expose a manual pick hidden by title search",
+  async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    await lobby(page);
+    await openTopicFilter(page);
+    const chosen = MEDIUM[0];
+    await page.click(`[data-problem="${chosen}"]`);
+    await page.fill("#problem-search", "no-title-has-this-unique-phrase-404");
+    assert.equal(await page.locator(".problem-card:visible").count(), 0);
+    assert.equal((await snapshot(page)).card, chosen);
+
+    await page.fill("#github-login", "candidate");
+    await page.click("#login-link");
+    await reaches(
+      page,
+      () =>
+        document.querySelector("#account-status").textContent ===
+          "Signed in as candidate" &&
+        !document.querySelector("#start").disabled,
+    );
+
+    assert.equal((await snapshot(page)).card, chosen);
+    assert.equal(
+      await page.locator(".problem-card:visible").count(),
+      0,
+      "account refresh must not override active title search",
+    );
+    assert.match(
+      await page.locator("#problem-filter-summary").textContent(),
+      /0 problems matching scenario title/,
+    );
+  },
+);
+
+lobbyTest(
+  "title search cannot invalidate a manual pick through difficulty or topic filters",
+  async (page) => {
+    const easyArray = Object.entries(TOPICS_BY_PAGE).find(
+      ([pageName, topics]) =>
+        topics.includes("Array") &&
+        !topics.includes("Tree") &&
+        read("web/index.html").includes(
+          `data-problem="${pageName}" data-difficulty="Easy"`,
+        ),
+    )?.[0];
+    assert.ok(easyArray, "the problem bank has no Easy Array example");
+
+    await lobby(page);
+    await awaitReady(page);
+    await openTopicFilter(page);
+    await setLevel(page, "Easy", true);
+    await page.click(`[data-problem="${easyArray}"]`);
+    assert.equal((await snapshot(page)).card, easyArray);
+
+    await page.fill("#problem-search", "no_such_scenario_title_404");
+    assert.equal(
+      await page.locator(`[data-problem="${easyArray}"]`).isVisible(),
+      false,
+    );
+    assert.equal((await snapshot(page)).card, easyArray);
+
+    await setLevel(page, "Hard", true);
+    assert.equal(
+      (await snapshot(page)).card,
+      easyArray,
+      "a difficulty change discarded a pick hidden only by title search",
+    );
+    await page.selectOption("#problem-topic", "Array");
+    assert.equal(
+      (await snapshot(page)).card,
+      easyArray,
+      "a matching topic change discarded a pick hidden only by title search",
+    );
+
+    // A genuinely incompatible topic still has to discard the manual pick.
+    assert.equal(TOPICS_BY_PAGE[easyArray].includes("Tree"), false);
+    await page.selectOption("#problem-topic", "Tree");
+    assert.notEqual((await snapshot(page)).card, easyArray);
+  },
+);
+
+lobbyTest(
+  "changing the topic while LeetCode titles load cannot keep an ineligible pick",
+  async (page) => {
+    let releaseMap;
+    const heldMap = new Promise((resolve) => (releaseMap = resolve));
+    await page.route("**/problem-pages.json", async (route) => {
+      await heldMap;
+      await route.continue();
+    });
+
+    try {
+      const easyArray = Object.entries(TOPICS_BY_PAGE).find(
+        ([pageName, topics]) =>
+          topics.includes("Array") &&
+          !topics.includes("Tree") &&
+          read("web/index.html").includes(
+            `data-problem="${pageName}" data-difficulty="Easy"`,
+          ),
+      )?.[0];
+      assert.ok(easyArray, "the bank has no Easy Array-only example");
+
+      await lobby(page);
+      await awaitReady(page);
+      await openTopicFilter(page);
+      await setLevel(page, "Easy", true);
+      await page.click(`[data-problem="${easyArray}"]`);
+      const scenarioTitle = (
+        await page
+          .locator(`[data-problem="${easyArray}"] .problem-title`)
+          .textContent()
+      ).trim();
+      await page.fill("#problem-search", scenarioTitle);
+      assert.equal(
+        await page.locator(`[data-problem="${easyArray}"]`).isVisible(),
+        true,
+      );
+
+      await page
+        .locator('[name="problem-search-mode"][value="leetcode"]')
+        .check();
+      await page.waitForFunction(
+        () =>
+          document.querySelector("#problem-filter-summary").textContent ===
+          "Loading LeetCode titles...",
+      );
+
+      // The grid is hidden, and its card.hidden flags have not been refreshed.
+      // A filter change must check topic eligibility, not those stale flags.
+      await page.selectOption("#problem-topic", "Tree");
+      assert.notEqual(
+        (await snapshot(page)).card,
+        easyArray,
+        "an old Array selection survived a Tree filter during map loading",
+      );
+
+      releaseMap();
+      await page.waitForFunction(() =>
+        document
+          .querySelector("#problem-filter-summary")
+          .textContent.includes("matching LeetCode title"),
+      );
+      const state = await snapshot(page);
+      assert.notEqual(state.card, easyArray);
+      assert.ok(state.card, "the Tree filter found no replacement problem");
+      assert.equal(TOPICS_BY_PAGE[state.card].includes("Tree"), true);
+      await page.click("#start");
+      await page.waitForURL(/\/interview/);
+      assert.equal(new URL(page.url()).searchParams.get("problem"), state.card);
+    } finally {
+      releaseMap();
+    }
+  },
+);
+
+lobbyTest(
+  "published-title search hides stale scenario cards while the map loads",
+  async (page) => {
+    let releaseMap;
+    const heldMap = new Promise((resolve) => (releaseMap = resolve));
+    await page.route("**/problem-pages.json", async (route) => {
+      await heldMap;
+      await route.continue();
+    });
+    try {
+      await lobby(page);
+      await page.click("details.problem-picker summary");
+      const originalRecommendation = (await snapshot(page)).card;
+      const scenarioTitle = (
+        await page
+          .locator(".problem-card:visible .problem-title")
+          .first()
+          .textContent()
+      ).trim();
+      await page.fill("#problem-search", scenarioTitle);
+      assert.equal(await page.locator(".problem-card:visible").count(), 1);
+
+      await page
+        .locator('[name="problem-search-mode"][value="leetcode"]')
+        .check();
+      await page.waitForFunction(
+        () =>
+          document.querySelector("#problem-filter-summary").textContent ===
+          "Loading LeetCode titles...",
+      );
+      assert.equal(
+        await page.locator(".problem-card:visible").count(),
+        0,
+        "scenario matches remain visible while LeetCode titles load",
+      );
+      assert.equal((await snapshot(page)).card, originalRecommendation);
+
+      releaseMap();
+      await page.waitForFunction(() =>
+        document
+          .querySelector("#problem-filter-summary")
+          .textContent.includes("matching LeetCode title"),
+      );
+      assert.equal(
+        await page.locator(".problem-grid").evaluate((grid) => !grid.hidden),
+        true,
+        "successful title lookup did not restore the picker",
+      );
+      assert.equal((await snapshot(page)).card, originalRecommendation);
+    } finally {
+      releaseMap();
+    }
+  },
+);
+
+lobbyTest(
+  "published-title search failure hides stale cards and leaves scenario search usable",
+  async (page) => {
+    await page.route("**/problem-pages.json", (route) =>
+      route.fulfill({ status: 503, body: "unavailable" }),
+    );
+    await lobby(page);
+    await page.click("details.problem-picker summary");
+    const originalRecommendation = (await snapshot(page)).card;
+    const scenarioTitle = (
+      await page
+        .locator(".problem-card:visible .problem-title")
+        .first()
+        .textContent()
+    ).trim();
+    await page.fill("#problem-search", scenarioTitle);
+    assert.equal(await page.locator(".problem-card:visible").count(), 1);
+
+    await page
+      .locator('[name="problem-search-mode"][value="leetcode"]')
+      .check();
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#problem-filter-summary")
+        .textContent.includes("could not be loaded"),
+    );
+    assert.equal(
+      await page.locator(".problem-card:visible").count(),
+      0,
+      "failed LeetCode lookup still shows scenario search results",
+    );
+    assert.equal((await snapshot(page)).card, originalRecommendation);
+
+    await page
+      .locator('[name="problem-search-mode"][value="scenario"]')
+      .check();
+    assert.equal(await page.locator(".problem-card:visible").count(), 1);
+    assert.equal((await snapshot(page)).card, originalRecommendation);
+  },
+);
+
+lobbyTest(
+  "returning to LeetCode search during a pending lookup hides stale scenario cards",
+  async (page) => {
+    let releaseMap;
+    const heldMap = new Promise((resolve) => (releaseMap = resolve));
+    await page.route("**/problem-pages.json", async (route) => {
+      await heldMap;
+      await route.continue();
+    });
+    try {
+      await lobby(page);
+      await page.click("details.problem-picker summary");
+      const scenarioTitle = (
+        await page
+          .locator(".problem-card:visible .problem-title")
+          .first()
+          .textContent()
+      ).trim();
+      await page.fill("#problem-search", scenarioTitle);
+      assert.equal(await page.locator(".problem-card:visible").count(), 1);
+
+      const leetcode = page.locator(
+        '[name="problem-search-mode"][value="leetcode"]',
+      );
+      const scenario = page.locator(
+        '[name="problem-search-mode"][value="scenario"]',
+      );
+      await leetcode.check();
+      await page.waitForFunction(
+        () =>
+          document.querySelector("#problem-filter-summary").textContent ===
+          "Loading LeetCode titles...",
+      );
+      assert.equal(await page.locator(".problem-card:visible").count(), 0);
+
+      await scenario.check();
+      assert.equal(await page.locator(".problem-card:visible").count(), 1);
+      await leetcode.check();
+      assert.equal(
+        await page.locator(".problem-card:visible").count(),
+        0,
+        "a pending lookup left old scenario search results visible",
+      );
+      assert.equal(
+        await page.locator(".problem-grid").isVisible(),
+        false,
+        "a pending title lookup must hide the entire problem grid",
+      );
+      releaseMap();
+      await page.waitForFunction(() =>
+        document
+          .querySelector("#problem-filter-summary")
+          .textContent.includes("matching LeetCode title"),
+      );
+    } finally {
+      releaseMap();
+    }
+  },
+);
+
+lobbyTest(
+  "a missing published-title map is reported as unavailable rather than zero matches",
+  async (page) => {
+    await page.route("**/problem-pages.json", (route) =>
+      route.fulfill({ status: 404, body: "not found" }),
+    );
+    await lobby(page);
+    await page.click("details.problem-picker summary");
+    await page.fill("#problem-search", "Two Sum");
+    await page
+      .locator('[name="problem-search-mode"][value="leetcode"]')
+      .check();
+    await page.waitForFunction(() => {
+      const status = document.querySelector(
+        "#problem-filter-summary",
+      ).textContent;
+      return (
+        status.includes("matching LeetCode title") ||
+        status.includes("could not be loaded")
+      );
+    });
+    assert.match(
+      await page.locator("#problem-filter-summary").textContent(),
+      /could not be loaded/,
+      "a missing title map should not be presented as a valid empty result",
+    );
+    assert.equal(await page.locator(".problem-card:visible").count(), 0);
+  },
+);
+
+lobbyTest(
   "a failed topic lookup is retried when the picker reopens",
   async (page) => {
     let requests = 0;
@@ -1415,6 +1891,7 @@ lobbyTest("a topic choice does not survive a lobby restore", async (page) => {
   await lobby(page);
   await openTopicFilter(page);
   await page.selectOption("#problem-topic", "Array");
+  await page.fill("#problem-search", "Array");
   assert.match(
     await page.locator("#problem-filter-summary").textContent(),
     /tagged Array/,
@@ -1423,6 +1900,7 @@ lobbyTest("a topic choice does not survive a lobby restore", async (page) => {
   await restore(page);
   await awaitReady(page);
   assert.equal(await page.locator("#problem-topic").inputValue(), "");
+  assert.equal(await page.locator("#problem-search").inputValue(), "");
   assert.equal(await page.locator("#problem-filter-summary").textContent(), "");
 });
 
@@ -1449,6 +1927,145 @@ lobbyTest(
     assert.notEqual(state.card, hardArray);
     assert.equal((await cardInfo(page, hardArray)).hidden, true);
     assert.equal((await cardInfo(page, state.card)).hidden, false);
+  },
+);
+
+lobbyTest(
+  "a due review does not appear in zero title-search results after a topic change",
+  async (page) => {
+    const manual = pageOf("two-sum");
+    const due = pageOf("valid-parentheses");
+    assert.equal(TOPICS_BY_PAGE[manual].includes("Array"), true);
+    assert.equal(TOPICS_BY_PAGE[manual].includes("Binary Tree"), false);
+    assert.equal(TOPICS_BY_PAGE[due].includes("Binary Tree"), false);
+
+    reports = [savedAttempt(due)];
+    await lobby(page);
+    await awaitReady(page);
+    await openTopicFilter(page);
+    await setLevel(page, "Easy", true);
+    await page.click(`[data-problem="${manual}"]`);
+    assert.equal((await snapshot(page)).card, manual);
+
+    await page.fill("#problem-search", "zzzzzz-no-match");
+    assert.equal(await page.locator(".problem-card:visible").count(), 0);
+    await page.selectOption("#problem-topic", "Array");
+    assert.equal(
+      (await snapshot(page)).card,
+      manual,
+      "a matching topic change discarded the hand-picked problem",
+    );
+
+    // Exclude the manual pick: the due-review recommendation is allowed to
+    // take priority, but its card cannot bypass the active title query.
+    await page.selectOption("#problem-topic", "Binary Tree");
+    assert.equal((await snapshot(page)).card, due);
+    assert.match((await snapshot(page)).note, /Review due after/);
+    assert.equal(
+      await page.locator(".problem-card:visible").count(),
+      0,
+      "a due review escaped a title search with zero results",
+    );
+    assert.equal(
+      await page.locator(`[data-problem="${due}"]`).isVisible(),
+      false,
+    );
+    assert.match(
+      await page.locator("#problem-filter-summary").textContent(),
+      /0 problems tagged Binary Tree and matching scenario title/,
+    );
+  },
+);
+
+lobbyTest(
+  "opening the picker preserves a due review outside the selected difficulty",
+  async (page) => {
+    const due = pageOf("valid-parentheses");
+    reports = [savedAttempt(due)];
+    await lobby(page);
+    await awaitReady(page);
+    await setLevel(page, "Hard", true);
+    await setLevel(page, "Medium", false);
+    assert.deepEqual((await snapshot(page)).levels, ["Hard"]);
+    assert.equal((await snapshot(page)).card, due);
+    assert.match((await snapshot(page)).note, /Review due after/);
+    assert.equal((await cardInfo(page, due)).level, "Easy");
+    assert.equal((await cardInfo(page, due)).hidden, false);
+
+    // Finishing the topic-map load must not hide the active review exception.
+    await openTopicFilter(page);
+    assert.equal((await snapshot(page)).card, due);
+    assert.equal((await cardInfo(page, due)).hidden, false);
+  },
+);
+
+lobbyTest(
+  "opening the picker preserves a history retry outside the selected difficulty",
+  async (page) => {
+    reports = [savedAttempt(EASY[0])];
+    await lobby(page);
+    await awaitReady(page);
+    await setLevel(page, "Hard", true);
+    await setLevel(page, "Medium", false);
+    assert.deepEqual((await snapshot(page)).levels, ["Hard"]);
+    await page.getByRole("button", { name: "Try again", exact: true }).click();
+    assert.equal((await snapshot(page)).card, EASY[0]);
+    assert.equal((await cardInfo(page, EASY[0])).hidden, false);
+
+    await openTopicFilter(page);
+    assert.equal((await snapshot(page)).card, EASY[0]);
+    assert.equal((await cardInfo(page, EASY[0])).hidden, false);
+  },
+);
+
+lobbyTest(
+  "clearing title search restores an out-of-filter due-review card",
+  async (page) => {
+    const due = pageOf("valid-parentheses");
+    assert.equal(TOPICS_BY_PAGE[due].includes("Array"), false);
+    reports = [savedAttempt(due)];
+    await lobby(page);
+    await openTopicFilter(page);
+    await page.selectOption("#problem-topic", "Array");
+    assert.equal((await snapshot(page)).card, due);
+    assert.equal((await cardInfo(page, due)).hidden, false);
+
+    await page.fill("#problem-search", "no-title-matches-this-query-404");
+    assert.equal((await cardInfo(page, due)).hidden, true);
+    await page.fill("#problem-search", "");
+    assert.equal((await snapshot(page)).card, due);
+    assert.equal(
+      (await cardInfo(page, due)).hidden,
+      false,
+      "clearing title search left the due-review card hidden",
+    );
+    // Clicking the visible review card also must not lose its exception.
+    await page.locator(`[data-problem="${due}"]`).click();
+    await page.fill("#problem-search", "no-title-matches-this-query-404");
+    await page.fill("#problem-search", "");
+    assert.equal((await cardInfo(page, due)).hidden, false);
+  },
+);
+
+lobbyTest(
+  "clearing title search restores a retried card outside difficulty",
+  async (page) => {
+    reports = [savedAttempt(EASY[0])];
+    await lobby(page);
+    await openTopicFilter(page);
+    await page.getByRole("button", { name: "Try again", exact: true }).click();
+    assert.equal((await snapshot(page)).card, EASY[0]);
+    assert.equal((await cardInfo(page, EASY[0])).hidden, false);
+
+    await page.fill("#problem-search", "no-title-matches-this-query-404");
+    assert.equal((await cardInfo(page, EASY[0])).hidden, true);
+    await page.fill("#problem-search", "");
+    assert.equal((await snapshot(page)).card, EASY[0]);
+    assert.equal(
+      (await cardInfo(page, EASY[0])).hidden,
+      false,
+      "clearing title search left the retried card hidden",
+    );
   },
 );
 
@@ -3114,6 +3731,33 @@ for (const storage of ["account", "device"]) {
     { timezoneId: "Asia/Taipei", locale: "en-US", acceptDownloads: true },
   );
 }
+
+lobbyTest(
+  "try again selects a problem without escaping an active title search",
+  async (page) => {
+    reports = [savedAttempt(EASY[0])];
+    await lobby(page);
+    await openTopicFilter(page);
+    await page.fill("#problem-search", "zzzzzz-no-match");
+    assert.equal(await page.locator(".problem-card:visible").count(), 0);
+
+    await page.getByRole("button", { name: "Try again", exact: true }).click();
+    assert.equal((await snapshot(page)).card, EASY[0]);
+    assert.equal(
+      await page.locator(".problem-card:visible").count(),
+      0,
+      "try again made a card visible despite a zero-result title search",
+    );
+    assert.equal(
+      await page.locator(`[data-problem="${EASY[0]}"]`).isVisible(),
+      false,
+    );
+    assert.match(
+      await page.locator("#problem-filter-summary").textContent(),
+      /0 problems matching scenario title/,
+    );
+  },
+);
 
 lobbyTest("try again selects the problem", async (page) => {
   reports = [savedAttempt(EASY[0])];

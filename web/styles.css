@@ -371,17 +371,88 @@ p {
   font-weight: 700;
 }
 
+.practice-filters input[type="search"],
 .practice-filters select,
 .practice-filters button {
   min-height: 2.5rem;
 }
 
+.practice-filters input[type="search"],
 .practice-filters select {
   padding: 0.4rem 0.6rem;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--ink);
+}
+
+/* Keep search on its own row and reserve space for the focus ring.
+   Without the padding, the outline overlaps the section heading. */
+.problem-search-field {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: start;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.5rem 0.35rem 0.35rem;
+}
+
+.problem-search-field > label {
+  padding-top: 0.55rem;
+}
+
+.problem-search-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.practice-filters .problem-search-content > input[type="search"] {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  font: inherit;
+  border-color: var(--control-border);
+}
+
+.problem-search-modes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.problem-search-modes label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.65rem;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.problem-search-modes input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.problem-search-modes label:has(input:checked) {
+  border-color: var(--accent);
+}
+
+@media (max-width: 480px) {
+  .problem-search-field {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.35rem;
+  }
+
+  .problem-search-field > label {
+    padding-top: 0;
+  }
 }
 
 .practice-filters p {
@@ -3903,4 +3974,10 @@ body:not([data-recording]) .replay-detail > :not(header) {
   margin: 0;
   padding: 0;
   overflow: clip;
+}
+
+/* Title-map loading must not overwrite the responsive problem-grid
+   hidden="until-found" state managed by problem-grid.js. */
+.lobby .problem-grid.title-search-unavailable {
+  display: none !important;
 }

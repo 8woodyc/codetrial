@@ -45,6 +45,100 @@ test("difficulty and topic filters combine", () => {
   );
 });
 
+test("title search is case-insensitive and combines with other filters", () => {
+  const named = [
+    {
+      id: "a",
+      title: "Chargeback Pair Match",
+      difficulty: "Easy",
+      topics: ["Array"],
+    },
+    {
+      id: "b",
+      title: "Packet Pair Match",
+      difficulty: "Medium",
+      topics: ["Graph"],
+    },
+    {
+      id: "c",
+      title: "Chargeback Audit",
+      difficulty: "Medium",
+      topics: ["Array"],
+    },
+  ];
+
+  assert.deepEqual(
+    filterProblems(named, { query: "  CHARGEBACK " }).map(
+      (problem) => problem.id,
+    ),
+    ["a", "c"],
+  );
+  assert.deepEqual(
+    filterProblems(named, {
+      difficulties: new Set(["Medium"]),
+      topic: "Array",
+      query: "chargeback",
+    }).map((problem) => problem.id),
+    ["c"],
+  );
+  assert.deepEqual(filterProblems(named, { query: "no such title" }), []);
+  assert.equal(filterProblems(named, { query: " " }).length, named.length);
+});
+
+test("title search matches English uppercase titles with lowercase queries", () => {
+  const named = [
+    { id: "a", title: "Integer to Roman", difficulty: "Easy", topics: [] },
+  ];
+  assert.deepEqual(
+    filterProblems(named, { query: "int" }).map((problem) => problem.id),
+    ["a"],
+  );
+});
+
+test("search mode selects scenario or published title without changing difficulty filters", () => {
+  const named = [
+    {
+      id: "a",
+      title: "Chargeback Pair Match",
+      leetcodeTitle: "Two Sum",
+      difficulty: "Easy",
+      topics: ["Array"],
+    },
+    {
+      id: "b",
+      title: "Symmetric Lottery Tickets",
+      leetcodeTitle: "Symmetric Tree",
+      difficulty: "Easy",
+      topics: ["Tree"],
+    },
+    {
+      id: "c",
+      title: "Two Sum Scenario",
+      leetcodeTitle: "Graph Paths",
+      difficulty: "Medium",
+      topics: ["Graph"],
+    },
+  ];
+  assert.deepEqual(
+    filterProblems(named, { query: "two sum" }).map((p) => p.id),
+    ["c"],
+  );
+  assert.deepEqual(
+    filterProblems(named, { query: " TWO sum ", searchBy: "leetcode" }).map(
+      (p) => p.id,
+    ),
+    ["a"],
+  );
+  assert.deepEqual(
+    filterProblems(named, {
+      query: "two sum",
+      searchBy: "leetcode",
+      difficulties: new Set(["Medium"]),
+    }),
+    [],
+  );
+});
+
 test("recent performance summarizes assessed reports newest first", () => {
   const reports = [
     report("a", 10, "NO_HIRE"),

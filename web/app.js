@@ -65,6 +65,9 @@ let reports = [];
 /// The practice focus the share box currently refers to.
 let sharedFocus = null;
 let manualProblem = false;
+// Due reviews, history retries, and practice-list draws may bypass
+// difficulty/topic filters, but never an active title search.
+let searchVisibilityException = null;
 /// The reports a drawn problem kept across a difficulty change was drawn from,
 /// serialized, or null when nothing is kept. Not `manualProblem`: a hand pick
 /// stands for good, while a kept draw stands only until the history it was
@@ -145,10 +148,13 @@ const nodes = {
   groundingClear: document.querySelector("#grounding-clear"),
   groundingError: document.querySelector("#grounding-error"),
   durationNote: document.querySelector("#duration-note"),
+  problemSearch: document.querySelector("#problem-search"),
+  problemSearchModes: document.querySelectorAll('[name="problem-search-mode"]'),
   problemTopic: document.querySelector("#problem-topic"),
   problemPicker: document.querySelector("details.problem-picker"),
   problemFiltersReset: document.querySelector("#problem-filters-reset"),
   problemFilterSummary: document.querySelector("#problem-filter-summary"),
+  problemGrid: document.querySelector(".problem-grid"),
   recentPerformance: document.querySelector("#recent-performance"),
   recentPerformanceSummary: document.querySelector(
     "#recent-performance-summary",
@@ -162,6 +168,10 @@ const nodes = {
 const cards = [...document.querySelectorAll("[data-problem]")].map(
   (button) => ({
     id: button.dataset.problem,
+    get title() {
+      return button.querySelector(".problem-title").textContent.trim();
+    },
+    leetcodeTitle: "",
     difficulty: button.dataset.difficulty,
     topics: [],
     button,
@@ -230,7 +240,7 @@ async function loadTopics() {
       }
       topicLoadFailed = false;
       nodes.problemTopic.disabled = false;
-      nodes.problemFilterSummary.textContent = "";
+      applyTitleSearchFilters();
       renderRecentPerformance();
       return true;
     })
@@ -281,8 +291,11 @@ for (const card of cards) {
     syncLobbyControls();
   });
   card.button.addEventListener("click", () => {
+    // setProblem clears the exception; restore it when reselecting.
+    const wasException = searchVisibilityException === card;
     manualProblem = true;
     setProblem(card);
+    if (wasException) searchVisibilityException = card;
     setDuration(suggestedDuration(new Set([card.difficulty])));
     nodes.recommendation.textContent = `Selected problem: ${title(card)}.`;
   });
@@ -328,8 +341,9 @@ nodes.practiceListPick.addEventListener("click", () => {
   manualProblem = true;
   keptDraw = null;
   applyProblemFilters();
-  setCardHidden(card, false);
+  if (!nodes.problemSearch.value.trim()) setCardHidden(card, false);
   setProblem(card);
+  searchVisibilityException = card;
   setDuration(suggestedDuration(new Set([card.difficulty])));
   nodes.recommendation.textContent = `From my list: ${title(card)} (${card.difficulty}).`;
 });
@@ -375,7 +389,7 @@ for (const input of levels) {
     // picked by hand or drawn: the checkbox answered which levels to offer,
     // not whether to throw away the problem on screen. Only a filter that now
     // hides it hands the choice back to the lobby.
-    if (problem && !problem.button.hidden) {
+    if (selectedProblemMatchesFilters()) {
       // Kept, a drawn problem is no longer what `roll` draws under this
       // filter, so the next `settle` would swap it. Held against the reports
       // in hand, which while the history is still loading are the ones about
@@ -401,11 +415,63 @@ for (const input of levels) {
   });
 }
 
+// Reuse the source-label title map, loading it only for LeetCode search.
+// Search state changes visibility, not the recommended problem.
+let leetcodeSearchState = "idle";
+const selectedSearchMode = () =>
+  [...nodes.problemSearchModes].find((input) => input.checked)?.value ??
+  "scenario";
+
+async function loadLeetCodeSearchTitles() {
+  if (leetcodeSearchState === "loading") {
+    // Re-entering LeetCode mode during an earlier lookup must hide stale cards.
+    applyProblemFilters();
+    return;
+  }
+  if (leetcodeSearchState === "ready") return;
+  leetcodeSearchState = "loading";
+  applyProblemFilters();
+  try {
+    const pages = await loadPageMap();
+    if (!pages) throw new Error("LeetCode title map is unavailable");
+    const titles = new Map(
+      Object.values(pages)
+        .filter((entry) => entry.page && entry.source)
+        .map((entry) => [entry.page, entry.source]),
+    );
+    for (const card of cards) card.leetcodeTitle = titles.get(card.id) ?? "";
+    leetcodeSearchState = "ready";
+  } catch {
+    leetcodeSearchState = "failed";
+  }
+  if (selectedSearchMode() === "leetcode") applyTitleSearchFilters();
+}
+
+for (const input of nodes.problemSearchModes) {
+  input.addEventListener("change", () => {
+    if (!input.checked) return;
+    nodes.problemSearch.placeholder =
+      input.value === "leetcode"
+        ? "Search LeetCode titles"
+        : "Search scenario titles";
+    if (input.value === "leetcode" && leetcodeSearchState !== "ready")
+      void loadLeetCodeSearchTitles();
+    else applyTitleSearchFilters();
+  });
+}
+
 nodes.problemTopic.addEventListener("change", () => {
   filterSelectionChanged();
 });
 
+nodes.problemSearch.addEventListener("input", () => {
+  applyTitleSearchFilters();
+});
+
 nodes.problemFiltersReset.addEventListener("click", () => {
+  nodes.problemSearch.value = "";
+  nodes.problemSearchModes[0].checked = true;
+  nodes.problemSearch.placeholder = "Search scenario titles";
   nodes.problemTopic.value = "";
   filterSelectionChanged();
 });
@@ -641,6 +707,9 @@ window.addEventListener("pageshow", (event) => {
   // late enough to re-enable a button the candidate already pressed and hand
   // them a second navigation.
   if (!event.persisted) return;
+  nodes.problemSearch.value = "";
+  nodes.problemSearchModes[0].checked = true;
+  nodes.problemSearch.placeholder = "Search scenario titles";
   nodes.problemTopic.value = "";
   applyProblemFilters();
   // The cache holds the page as it was before the candidate left, and a login
@@ -768,7 +837,9 @@ function settle() {
   historyReady = true;
   // A back/forward restore reapplies the filters. Keep an explicit choice
   // visible, whether selected by card, practice draw or history's Try again.
-  if (manualProblem && problem) setCardHidden(problem, false);
+  // A non-empty title search still owns card visibility during account refresh.
+  if (manualProblem && problem && !nodes.problemSearch.value.trim())
+    setCardHidden(problem, false);
   // Refreshed reports that differ from the ones a kept draw came from may have
   // just recorded it as passed, so the lobby draws again.
   if (keptDraw !== null && keptDraw !== JSON.stringify(reports))
@@ -1116,17 +1187,55 @@ function topicEligibleCards() {
   return filterProblems(cards, { topic: nodes.problemTopic.value });
 }
 
+// Title search changes which cards are shown, not which selected problem
+// is eligible under the user's difficulty and topic filters.
+function selectedProblemMatchesFilters() {
+  return (
+    problem !== null &&
+    filterProblems([problem], {
+      difficulties: selectedDifficulties(),
+      topic: nodes.problemTopic.value,
+    }).length === 1
+  );
+}
+
 function applyProblemFilters(difficulties = selectedDifficulties()) {
+  const titlesUnavailable =
+    selectedSearchMode() === "leetcode" && leetcodeSearchState !== "ready";
+  // problem-grid.js owns hidden="until-found"; search must not overwrite it.
+  // Hide the grid via CSS while LeetCode titles are unavailable.
+  nodes.problemGrid.classList.toggle(
+    "title-search-unavailable",
+    titlesUnavailable,
+  );
+  if (titlesUnavailable) {
+    nodes.problemFilterSummary.textContent =
+      leetcodeSearchState === "failed"
+        ? "LeetCode titles could not be loaded. Switch modes to retry."
+        : "Loading LeetCode titles...";
+    return;
+  }
   const visible = new Set(
     filterProblems(cards, {
       difficulties,
       topic: nodes.problemTopic.value,
+      query: nodes.problemSearch.value ?? "",
+      searchBy: selectedSearchMode(),
     }),
   );
   for (const card of cards) setCardHidden(card, !visible.has(card));
   const topic = nodes.problemTopic.value;
-  nodes.problemFilterSummary.textContent = topic
-    ? `${visible.size} problem${visible.size === 1 ? "" : "s"} tagged ${topic} shown.`
+  const query = (nodes.problemSearch.value ?? "").trim();
+  const description = [
+    ...(topic ? [`tagged ${topic}`] : []),
+    ...(query
+      ? [
+          `matching ${selectedSearchMode() === "leetcode" ? "LeetCode" : "scenario"} title "${query}"`,
+        ]
+      : []),
+  ];
+  nodes.problemFilterSummary.textContent = description.length
+    ? `${visible.size} problem${visible.size === 1 ? "" : "s"} ${description.join(" and ")} shown.`
     : "";
 }
 
@@ -1135,9 +1244,22 @@ function setCardHidden(card, hidden) {
   card.entry.hidden = hidden;
 }
 
+// Reapply only the pre-existing exception when the user edits title search.
+// Difficulty and topic changes still use their original selection policy.
+function applyTitleSearchFilters() {
+  applyProblemFilters();
+  if (
+    !nodes.problemSearch.value.trim() &&
+    !nodes.problemGrid.classList.contains("title-search-unavailable") &&
+    problem &&
+    searchVisibilityException === problem
+  )
+    setCardHidden(problem, false);
+}
+
 function filterSelectionChanged() {
   applyProblemFilters();
-  if (manualProblem && !problem?.button.hidden) return;
+  if (manualProblem && selectedProblemMatchesFilters()) return;
   manualProblem = false;
   keptDraw = null;
   roll = Math.random();
@@ -1183,9 +1305,10 @@ function recommend(note = "", mode = "recommend") {
     return;
   }
   if (choice.review) {
-    // A review can fall outside the levels now selected, so the card is
-    // unhidden and the level said out loud rather than silently ignored.
-    setCardHidden(choice.picked, false);
+    searchVisibilityException = choice.picked;
+    // Due reviews may bypass difficulty and topic filters, but title
+    // search controls which cards appear in the picker.
+    if (!nodes.problemSearch.value.trim()) setCardHidden(choice.picked, false);
     const level = selectedDifficulties().has(choice.picked.difficulty)
       ? ""
       : ` (${choice.picked.difficulty})`;
@@ -1243,6 +1366,7 @@ function setProblem(card, language = null) {
   mark(problem?.button, false);
   mark(card?.button, true);
   problem = card;
+  searchVisibilityException = null;
   retryLanguage = language;
   syncLobbyControls();
 }
@@ -1607,8 +1731,10 @@ function renderAttemptHistory(attempts) {
       );
       if (!card) return;
       manualProblem = true;
-      setCardHidden(card, false);
+      // A history retry bypasses the picker filters, not active title search.
+      if (!nodes.problemSearch.value.trim()) setCardHidden(card, false);
       setProblem(card, attempt.language);
+      searchVisibilityException = card;
       const savedDuration = attempt.durationMin;
       const offered = durations.map((button) =>
         Number(button.dataset.duration),
