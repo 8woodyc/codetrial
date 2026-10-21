@@ -4578,3 +4578,160 @@ async fn an_interruption_keeps_the_cut_words_as_an_ordinary_finished_turn() {
         1
     );
 }
+
+impl Harness {
+    /// What the room loop does after every step.
+    fn correct(&mut self) -> &'static str {
+        correct_agent_state(
+            &self.room,
+            &mut self.turn.agent_state,
+            &self.turn.activity,
+            self.output.is_playing(),
+        );
+        self.turn.agent_state.current()
+    }
+}
+
+#[tokio::test]
+async fn the_per_step_check_leaves_a_reply_that_published_its_own_states_alone() {
+    let mut harness = Harness::new().await;
+    harness
+        .event(GeminiEvent::InputTranscript("I will use a map.".into()))
+        .await;
+    harness.event(GeminiEvent::TurnComplete).await;
+    let before = harness.turn.agent_state.current();
+    assert_eq!(harness.correct(), before);
+
+    harness
+        .event(GeminiEvent::OutputTranscript("Go ahead.".into()))
+        .await;
+    harness.event(reply_audio()).await;
+    harness.output.playout_deadline = Instant::now() + Duration::from_secs(60);
+    assert_eq!(harness.correct(), AGENT_STATE_SPEAKING);
+
+    // Finished generating with audio still queued: still speaking.
+    harness.event(GeminiEvent::TurnComplete).await;
+    assert_eq!(harness.turn.activity.floor, Floor::AwaitingPlayout);
+    assert_eq!(harness.correct(), AGENT_STATE_SPEAKING);
+}
+
+#[tokio::test]
+async fn a_state_whose_condition_has_gone_is_taken_back() {
+    let mut harness = Harness::new().await;
+
+    // A path that cut the turn and forgot to say so.
+    set_agent_state(
+        &harness.room,
+        &mut harness.turn.agent_state,
+        AGENT_STATE_SPEAKING,
+    );
+    assert_eq!(harness.turn.activity.floor, Floor::Listening);
+    assert!(!harness.output.is_playing());
+    assert_eq!(harness.correct(), AGENT_STATE_LISTENING);
+
+    // Thinking holds while a reply is unfinished, and goes once it is not.
+    harness
+        .turn
+        .activity
+        .mark_prompted(Instant::now(), Some("owed"), false);
+    assert!(harness.turn.activity.reply_unfinished());
+    set_agent_state(
+        &harness.room,
+        &mut harness.turn.agent_state,
+        AGENT_STATE_THINKING,
+    );
+    assert_eq!(harness.correct(), AGENT_STATE_THINKING);
+    harness.event(GeminiEvent::TurnComplete).await;
+    assert!(!harness.turn.activity.reply_unfinished());
+    set_agent_state(
+        &harness.room,
+        &mut harness.turn.agent_state,
+        AGENT_STATE_THINKING,
+    );
+    assert_eq!(harness.correct(), AGENT_STATE_LISTENING);
+
+    // It never starts a state: queued audio alone does not show speaking.
+    let (mut output, _queued) = test_output_audio();
+    output.playout_deadline = Instant::now() + Duration::from_secs(60);
+    harness.output = output;
+    assert!(harness.output.is_playing());
+    assert_eq!(harness.correct(), AGENT_STATE_LISTENING);
+}
+
+#[tokio::test]
+async fn speaking_shown_over_queued_audio_stays_once_the_floor_is_back() {
+    let mut harness = Harness::new().await;
+    set_agent_state(
+        &harness.room,
+        &mut harness.turn.agent_state,
+        AGENT_STATE_SPEAKING,
+    );
+    // The candidate has the floor, but the reply is still playing.
+    harness.output.playout_deadline = Instant::now() + Duration::from_secs(60);
+    assert_eq!(harness.turn.activity.floor, Floor::Listening);
+    assert!(harness.output.is_playing());
+    assert_eq!(harness.correct(), AGENT_STATE_SPEAKING);
+}
+
+/// What the handlers send through the room reaches it: a control message as
+/// a data packet, the agent's state as attributes merged into the ones
+/// already set, and leaving as leaving.
+#[tokio::test]
+async fn the_room_link_carries_what_the_handlers_send() {
+    use crate::livekit::room_link::Sent;
+
+    let mut harness = Harness::new().await;
+    assert_eq!(harness.room.name(), "room-test");
+
+    publish_control(
+        &harness.room,
+        &serde_json::json!({"type": "round_state", "status": "started"}),
+        "the round state",
+    )
+    .await;
+    assert_eq!(
+        harness.sent.take(),
+        [Sent::Data {
+            topic: Some(TOPIC_CONTROL.into()),
+            message: serde_json::json!({"type": "round_state", "status": "started"}),
+        }]
+    );
+
+    publish_opening_attributes(&harness.room, &mut harness.turn.agent_state, 3_000)
+        .await
+        .unwrap();
+    set_agent_state(
+        &harness.room,
+        &mut harness.turn.agent_state,
+        AGENT_STATE_SPEAKING,
+    );
+    // The writer task sends on its own; give it the turn it needs.
+    let latest = tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            tokio::task::yield_now().await;
+            let attributes = harness.room.participant().attributes();
+            if attributes.get(LIVEKIT_AGENT_STATE).map(String::as_str) == Some(AGENT_STATE_SPEAKING)
+            {
+                return attributes;
+            }
+        }
+    })
+    .await
+    .expect("the writer sets the state");
+    assert_eq!(
+        latest.get(TURN_WINDOW_ATTRIBUTE).map(String::as_str),
+        Some("3000"),
+        "the state is merged into the attributes already set: {latest:?}"
+    );
+    assert_eq!(latest.len(), 2, "{latest:?}");
+    let attributes = harness
+        .sent
+        .take()
+        .into_iter()
+        .filter(|sent| matches!(sent, Sent::Attributes(_)))
+        .count();
+    assert_eq!(attributes, 2);
+
+    harness.room.close().await.unwrap();
+    assert_eq!(harness.sent.take(), [Sent::Left]);
+}

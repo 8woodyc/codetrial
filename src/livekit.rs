@@ -2844,6 +2844,12 @@ pub(crate) async fn run_room_with_slot(
             // since the step that ends the interview leaves the room before
             // this runs.
             session::flush_thinking_notice(&room, &mut turn.state).await;
+            session::correct_agent_state(
+                &room,
+                &mut turn.agent_state,
+                &turn.activity,
+                output_audio.is_playing(),
+            );
         }
     }
     .await;

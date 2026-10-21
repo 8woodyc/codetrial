@@ -1712,6 +1712,29 @@ pub(super) fn set_agent_state(room: &RoomLink, state: &mut AgentState, next: &'s
     writer.send_replace(next);
 }
 
+/// Takes back a state the page is showing whose condition has gone. Each path
+/// that moves the floor publishes its own state, twelve of them by hand, and
+/// the room loop runs this once per step after them, the way it flushes the
+/// thinking notice, so a path that forgets cannot leave the page wrong past
+/// the step that caused it. Never sets `speaking` or `thinking` itself: those
+/// start with the audio and the watch tick that see them begin, and only
+/// their end is checked here.
+pub(super) fn correct_agent_state(
+    room: &RoomLink,
+    shown: &mut AgentState,
+    activity: &RuntimeActivity,
+    audio_playing: bool,
+) {
+    let stale = match shown.current() {
+        AGENT_STATE_SPEAKING => activity.floor == Floor::Listening && !audio_playing,
+        AGENT_STATE_THINKING => !activity.reply_unfinished(),
+        _ => false,
+    };
+    if stale {
+        set_agent_state(room, shown, AGENT_STATE_LISTENING);
+    }
+}
+
 /// How long Gemini waits through the candidate's silence before taking the
 /// turn, so the page can draw the countdown to it. An attribute rather than a
 /// message: it is fixed for the interview, and a page that joins or reloads
