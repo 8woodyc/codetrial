@@ -1955,7 +1955,36 @@ fn an_outage_after_test_is_recorded_does_not_reopen_it() {
         .generate_reply
         .unwrap();
     assert!(!reply.contains("trace their code by hand"), "{reply}");
+    assert!(reply.contains("not the candidate's error"), "{reply}");
+    assert!(!reply.contains("read the first setup error"), "{reply}");
     assert!(!time_warning_reply(&mut state).contains("by hand"));
+}
+
+#[test]
+fn a_later_outage_is_not_the_candidate_s_to_diagnose() {
+    // A run that still covers the code on screen leaves nothing to trace, so
+    // the outage on a rerun of that code is the runner's, not a setup error.
+    let mut state = with_written_code(RuntimeState::default());
+    receive_test_run(&mut state);
+    let outage = json!({"total": 0, "setupError": "Compiler Explorer did not respond to 2 requests. Try again later.",
+        "runnerUnavailable": true, "code": state.code, "language": "python"});
+    let reply = apply_data_event(&mut state, TOPIC_TEST_RESULTS, &outage, 99.0)
+        .generate_reply
+        .unwrap();
+    assert!(reply.contains("not the candidate's error"), "{reply}");
+    assert!(!reply.contains("read the first setup error"), "{reply}");
+    assert!(!reply.contains("trace their code by hand"), "{reply}");
+
+    // An outage from a language the candidate has since left says nothing about
+    // the code on screen, so it keeps the setup-error reaction.
+    let mut state = with_written_code(RuntimeState::default());
+    receive_test_run(&mut state);
+    let elsewhere = json!({"total": 0, "setupError": "Compiler Explorer returned HTTP 503.",
+        "runnerUnavailable": true, "code": "int solve() { return 1; }", "language": "cpp"});
+    let reply = apply_data_event(&mut state, TOPIC_TEST_RESULTS, &elsewhere, 99.0)
+        .generate_reply
+        .unwrap();
+    assert!(reply.contains("read the first setup error"), "{reply}");
 }
 
 fn time_warning_reply(state: &mut RuntimeState) -> String {

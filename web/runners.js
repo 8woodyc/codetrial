@@ -23,6 +23,9 @@ const testTimeoutMs = 5000;
 /// execution budget failed the first compiled run of every interview and told
 /// the candidate to try again later.
 const compilerExplorerTimeoutMs = 20_000;
+/// How many requests one compiled run may make when Compiler Explorer gives no
+/// answer at all.
+const compilerExplorerAttempts = 2;
 /// Starting Pyodide is not a test run, so it gets its own, much longer budget.
 /// It exists only so a stalled or truncated download eventually gives up.
 const pythonBootTimeoutMs = 60_000;
@@ -392,7 +395,14 @@ export async function runBrowserTests(
   }
 }
 
-async function runCompilerExplorer(language, code, spec, reportStatus = null) {
+async function runCompilerExplorer(
+  language,
+  code,
+  spec,
+  reportStatus = null,
+  attempt = 1,
+  stalledBefore = false,
+) {
   reportStatus?.("compiling");
   // Built before the request: a harness that cannot be built is this run's
   // own setup error, which an edit can fix, not the service being down.
@@ -405,6 +415,7 @@ async function runCompilerExplorer(language, code, spec, reportStatus = null) {
   const config = compilerExplorer[language];
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), compilerExplorerTimeoutMs);
+  let answered = false;
   try {
     const response = await fetch(
       `${compilerExplorerBaseUrl()}/api/compiler/${config.compiler}/compile`,
@@ -426,6 +437,7 @@ async function runCompilerExplorer(language, code, spec, reportStatus = null) {
         signal: controller.signal,
       },
     );
+    answered = true;
     // A 4xx is this run's request refused (an oversized or rejected source),
     // which an edit can fix. Only the service failing, or refusing for load,
     // is an outage.
@@ -444,10 +456,42 @@ async function runCompilerExplorer(language, code, spec, reportStatus = null) {
       lineCount: code.split("\n").length,
     });
   } catch (error) {
-    if (error?.name === "AbortError") {
+    const timedOut = error?.name === "AbortError";
+    const stalled = stalledBefore || timedOut;
+    // A request that got no answer, dropped or out of time before any reply,
+    // is sent again: both usually clear by the next click, and until then the
+    // candidate is shown an error no edit can fix. Anything that did answer is
+    // final, even a body that then stalls, because a compile error arrives
+    // inside a 200 and asking twice only doubles the wait for it. A service
+    // that never answers is reported after one timer per attempt.
+    if (!answered && attempt < compilerExplorerAttempts) {
+      return runCompilerExplorer(
+        language,
+        code,
+        spec,
+        reportStatus,
+        attempt + 1,
+        stalled,
+      );
+    }
+    // Every attempt went unanswered, each one dropped or out of time in any
+    // order, so the wait ran from nothing to one timer per attempt. The message
+    // counts requests rather than naming a duration it cannot know, and the
+    // timeout diagnostic follows whether any attempt actually stalled.
+    if (!answered) {
       return {
         ...outage(
-          `Compiler Explorer did not respond within ${compilerExplorerTimeoutMs / 1000} seconds. Try again later.`,
+          `Compiler Explorer did not respond to ${compilerExplorerAttempts} requests. Try again later.`,
+        ),
+        ...(stalled ? { diagnostic: DIAGNOSTIC.timeout } : {}),
+      };
+    }
+    // An answer whose body then stalled was never retried, so it was one
+    // request and one timer.
+    if (timedOut) {
+      return {
+        ...outage(
+          `Compiler Explorer did not finish its answer within ${compilerExplorerTimeoutMs / 1000} seconds. Try again later.`,
         ),
         diagnostic: DIAGNOSTIC.timeout,
       };

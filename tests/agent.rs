@@ -789,6 +789,10 @@ fn prompt_samples() -> Value {
         "Compiler Explorer returned HTTP 503.",
         None
     ));
+    prompts["testsRunnerOutage"] = json!(test_runner_outage_reaction(
+        "Compiler Explorer returned HTTP 503.",
+        None
+    ));
     prompts
 }
 

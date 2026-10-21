@@ -689,3 +689,213 @@ test("a compile error reaches the summary on the candidate's line", async () => 
     restoreFetch();
   }
 });
+
+const sumJudge = {
+  kind: "function",
+  entry: "sum",
+  paramNames: ["value"],
+  paramTypes: ["integer"],
+  returnType: "integer",
+  checker: "exact",
+  cases: [{ label: "judge", input: [1], expected: 1 }],
+};
+
+// A dropped connection or a stalled compile says nothing about the code, and
+// the next run usually succeeds, so one more request goes out before the
+// candidate and Jim hear about it. Any answer, even an error, is final: a
+// compile error comes back inside a 200, and sending it twice only doubles the
+// wait for the same message.
+test("a compiled run is sent once more only when no answer came back", async (t) => {
+  const dropped = () => {
+    throw new TypeError("Failed to fetch");
+  };
+  const stalled = () => {
+    throw new DOMException("Timed out", "AbortError");
+  };
+  const passed = () =>
+    Response.json({
+      stdout: [
+        { text: JSON.stringify({ results: [{ actual: 1, timeMs: 1 }] }) },
+      ],
+    });
+  const scenarios = [
+    { name: "dropped, then answered", answers: [dropped, passed], sent: 2 },
+    { name: "stalled, then answered", answers: [stalled, passed], sent: 2 },
+    // However the two unanswered requests failed, the message counts them
+    // without naming a wait, and only one that stalled is called a timeout.
+    {
+      name: "dropped twice",
+      answers: [dropped, dropped, passed],
+      sent: 2,
+      unavailable: true,
+      says: /^Compiler Explorer did not respond to 2 requests\. /,
+      timeout: false,
+    },
+    {
+      name: "stalled twice",
+      answers: [stalled, stalled, passed],
+      sent: 2,
+      unavailable: true,
+      says: /^Compiler Explorer did not respond to 2 requests\. /,
+      timeout: true,
+    },
+    {
+      name: "dropped, then stalled",
+      answers: [dropped, stalled, passed],
+      sent: 2,
+      unavailable: true,
+      says: /^Compiler Explorer did not respond to 2 requests\. /,
+      timeout: true,
+    },
+    {
+      name: "stalled, then dropped",
+      answers: [stalled, dropped, passed],
+      sent: 2,
+      unavailable: true,
+      says: /^Compiler Explorer did not respond to 2 requests\. /,
+      timeout: true,
+    },
+    {
+      name: "server error",
+      answers: [() => new Response("", { status: 503 }), passed],
+      sent: 1,
+      unavailable: true,
+    },
+    {
+      name: "request rejected",
+      answers: [() => new Response("", { status: 413 }), passed],
+      sent: 1,
+      unavailable: false,
+    },
+    {
+      name: "compilation error",
+      answers: [
+        () =>
+          Response.json({
+            didExecute: false,
+            stderr: [{ text: "syntax error" }],
+          }),
+        passed,
+      ],
+      sent: 1,
+      unavailable: false,
+    },
+    {
+      name: "unreadable answer",
+      answers: [() => new Response("<html>down</html>"), passed],
+      sent: 1,
+      unavailable: true,
+    },
+    {
+      name: "answered, then stalled",
+      answers: [
+        () =>
+          new Response(
+            new ReadableStream({
+              pull(controller) {
+                controller.error(new DOMException("Timed out", "AbortError"));
+              },
+            }),
+          ),
+        passed,
+      ],
+      sent: 1,
+      unavailable: true,
+      says: /did not finish its answer within 20 seconds/,
+      timeout: true,
+    },
+  ];
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, async () => {
+      let sent = 0;
+      const restoreFetch = failFetchWith(async (url) => {
+        if (String(url).startsWith("/judges/")) return Response.json(sumJudge);
+        sent += 1;
+        return scenario.answers[sent - 1]();
+      });
+      try {
+        const summary = await runBrowserTests(
+          "retry-" + scenario.name,
+          "int sum(int value) { return value; }",
+          "cpp",
+        );
+        assert.equal(sent, scenario.sent);
+        if (scenario.says) assert.match(summary.setupError, scenario.says);
+        if (scenario.timeout !== undefined) {
+          assert.equal(
+            summary.diagnostic?.category === "timeout",
+            scenario.timeout,
+          );
+        }
+        if (scenario.unavailable === undefined) {
+          assert.equal(summary.setupError, undefined);
+          assert.equal(summary.passed, 1);
+        } else {
+          assert.ok(summary.setupError);
+          assert.equal(
+            Boolean(summary.runnerUnavailable),
+            scenario.unavailable,
+          );
+        }
+      } finally {
+        restoreFetch();
+      }
+    });
+  }
+});
+
+// The scenarios above throw the abort themselves, so they would still pass
+// with the timer removed or shared between attempts. Here the real timer has
+// to fire: each request is cut off by its own, and the second only after its
+// full budget.
+test("each compiled request is cut off by a timer of its own", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const signals = [];
+  const restoreFetch = failFetchWith((url, request) => {
+    if (String(url).startsWith("/judges/")) {
+      return Promise.resolve(Response.json(sumJudge));
+    }
+    signals.push(request.signal);
+    return new Promise((_, reject) =>
+      request.signal.addEventListener("abort", () =>
+        reject(new DOMException("Timed out", "AbortError")),
+      ),
+    );
+  });
+  const requests = async (count) => {
+    for (let turn = 0; turn < 100 && signals.length < count; turn += 1) {
+      await new Promise(setImmediate);
+    }
+    assert.equal(signals.length, count);
+  };
+  try {
+    const summary = runBrowserTests(
+      "retry-own-timer",
+      "int sum(int value) { return value; }",
+      "cpp",
+    );
+    await requests(1);
+    t.mock.timers.tick(19_999);
+    assert.equal(signals[0].aborted, false);
+    t.mock.timers.tick(1);
+    assert.equal(signals[0].aborted, true);
+
+    await requests(2);
+    assert.equal(signals[1].aborted, false, "the retry is not sent aborted");
+    t.mock.timers.tick(19_999);
+    assert.equal(signals[1].aborted, false, "the retry gets its full budget");
+    t.mock.timers.tick(1);
+
+    const result = await summary;
+    assert.equal(signals.length, 2);
+    assert.equal(result.runnerUnavailable, true);
+    assert.equal(result.diagnostic?.category, "timeout");
+    assert.match(
+      result.setupError,
+      /^Compiler Explorer did not respond to 2 requests\. /,
+      "the message counts the requests without naming a wait",
+    );
+  } finally {
+    restoreFetch();
+  }
+});
