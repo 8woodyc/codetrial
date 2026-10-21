@@ -264,6 +264,29 @@ cargo_audit_gate()
     cargo audit --file "$ROOT/Cargo.lock"
 }
 
+# The crates under vendor/ carry fixes upstream has not released. A bump that
+# outruns a vendored copy brings the registry crate back beside it, or in its
+# place with only a Cargo warning, so no vendored name may resolve from a
+# registry.
+vendor_patches_gate()
+{
+    # One pass, the manifests before the lockfile: awk -v cannot carry a
+    # multi-line list portably. The [package] name only: [lib], [[test]] and
+    # [[example]] have names too.
+    unpatched=$(awk -v lock="$ROOT/Cargo.lock" '
+        FILENAME != lock && /^\[/ { package = ($0 == "[package]") }
+        FILENAME != lock && package && /^name = / { gsub(/"/, "", $3); vendored[$3] = 1 }
+        FILENAME == lock && /^name = / { name = $3; gsub(/"/, "", name) }
+        FILENAME == lock && /^source = "registry\+/ && (name in vendored) { print name }
+    ' "$ROOT"/vendor/*/Cargo.toml "$ROOT/Cargo.lock" | sort -u)
+    if [ -n "$unpatched" ]; then
+        echo "vendored crates also resolve from a registry; re-vendor them from" >&2
+        echo "the version Cargo.lock now wants (see vendor/*/README.md):" >&2
+        echo "$unpatched" >&2
+        return 1
+    fi
+}
+
 # The Python here is not incidental: it generates the problem bank, checks the
 # study plan and drives two integration harnesses. It had unittest suites and no
 # linter, which is how an unused import or a name that does not exist survives
@@ -401,6 +424,7 @@ gate latency-tests unittest_gate "$ROOT/tests/test_analyze_latency.py"
 gate --lane browser browser-tests browser_tests static
 gate eslint eslint_gate
 gate cargo-audit cargo_audit_gate
+gate vendor-patches vendor_patches_gate
 gate actionlint actionlint_gate
 
 gate browser-check-syntax node --check "$ROOT/scripts/browser-check.cjs"

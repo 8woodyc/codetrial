@@ -23,25 +23,30 @@ axum = { version = "0.8.9", default-features = false, features = ["http1", "json
 base64 = "0.23.1"
 futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
 jpeg-encoder = "0.7.1"
-livekit = { version = "0.9.3", features = ["rustls-tls-webpki-roots"] }
+livekit = { version = "0.9.6", features = ["rustls-tls-webpki-roots"] }
 ring = "0.17.14"
-# Mozilla's roots compiled in, for this client and the Gemini WebSocket below
-# alike, so the binary verifies every host it talks to without asking the
-# machine for a CA store: docs/install.md promises nothing is required beyond
-# the binary. The trade is that a CA an organization installs locally, a
-# TLS-inspecting proxy's for one, is not trusted.
+# Mozilla's roots compiled in, one rustls configuration shared by this HTTP
+# client and the Gemini WebSocket, so the binary verifies every host it talks
+# to without asking the machine for a CA store: docs/install.md promises
+# nothing is required beyond the binary. The trade is that a CA an
+# organization installs locally, a TLS-inspecting proxy's for one, is not
+# trusted.
 #
-# reqwest, tokio-tungstenite and tower-http stay on the majors LiveKit depends
-# on, so each builds once; .github/dependabot.yml holds them there.
-reqwest = { version = "0.12.28", default-features = false, features = ["json", "rustls-tls"] }
+# Direct dependencies track their latest release so Dependabot can deliver
+# security fixes. That builds two majors of reqwest (LiveKit is on 0.12) and of
+# tower-http (reqwest 0.13 is on 0.6); they collapse when LiveKit and reqwest
+# move, and pinning back here would also block their security updates.
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "form", "query", "rustls-no-provider"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1.0.10"
 rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
-rust-embed = { version = "8.12.0", features = ["include-exclude"] }
-serde_json = "1.0.151"
+rust-embed = { version = "8.13.0", features = ["include-exclude"] }
+serde_json = "1.0.154"
 serde = { version = "1.0.229", features = ["derive"] }
-tokio = { version = "1.53.1", features = ["fs", "macros", "net", "rt-multi-thread", "sync", "time"] }
-tokio-tungstenite = { version = "0.29.0", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
-tokio-util = "0.7.19"
-tower-http = { version = "0.6.11", default-features = false, features = ["compression-gzip"] }
+tokio = { version = "1.54.0", features = ["fs", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+tokio-util = "0.7.20"
+tower-http = { version = "0.7.1", default-features = false, features = ["compression-gzip"] }
 tree-sitter = "=0.27.1"
 tree-sitter-c = "=0.24.2"
 tree-sitter-cpp = "=0.23.4"
@@ -60,12 +65,12 @@ tree-sitter-python = "=0.25.0"
 [dev-dependencies]
 # Independent implementations verify production signatures and digest fixtures.
 hmac = "0.13.0"
-sha2 = "0.11.0"
+sha2 = "0.11.1"
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
-livekit-protocol = "0.8.0"
+livekit-protocol = "0.8.2"
 # The paused clock, so the Live socket's keepalive and idle limits are tested
 # at their real values instead of waiting them out.
-tokio = { version = "1.53.1", features = ["test-util"] }
+tokio = { version = "1.54.0", features = ["test-util"] }
 
 # Release archives distribute the executable, not a debugging target. Cargo
 # already omits debug information in this profile; omit linker symbols too.
@@ -131,7 +136,8 @@ debug-assertions = true
 [profile.test.package.rust-embed]
 debug-assertions = true
 
-# Moves LiveKit's build helper off vulnerable zip 0.6. See
-# vendor/webrtc-sys-build/README.md for what changed and when to remove it.
+# Move both WebSocket callers to one transport with patched certificate roots.
+# Each vendor README records the upstream condition for removing its patch.
 [patch.crates-io]
-webrtc-sys-build = { path = "vendor/webrtc-sys-build" }
+livekit-net = { path = "vendor/livekit-net" }
+tokio-tungstenite = { path = "vendor/tokio-tungstenite" }

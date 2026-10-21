@@ -3019,6 +3019,7 @@ async fn join_room(
     options.data_stream = options
         .data_stream
         .with_max_payload_byte_length(MAX_BOARD_BYTES);
+    crate::install_crypto_provider();
     let (room, events) = Room::connect(&config.livekit_url, &token, options).await?;
     eprintln!(
         "joined room={} identity={}",

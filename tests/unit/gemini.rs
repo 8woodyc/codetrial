@@ -2599,7 +2599,13 @@ async fn only_transient_upstream_failures_are_retried() {
         let _connection = listener.accept().await.unwrap();
         tokio::time::sleep(Duration::from_secs(1)).await;
     });
-    let timeout = reqwest::Client::new()
+
+    // Built here rather than the shared client, whose pool would outlive this
+    // test's runtime; no proxy, so the stall is the one this test set up.
+    let timeout = crate::http_client_builder()
+        .no_proxy()
+        .build()
+        .unwrap()
         .get(format!("http://{address}"))
         .timeout(Duration::from_millis(10))
         .send()

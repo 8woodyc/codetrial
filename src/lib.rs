@@ -130,8 +130,46 @@ pub(crate) fn no_redirect_http_client() -> &'static reqwest::Client {
 
 // Built and `expect`ed rather than `unwrap_or_default()`: that hands back a
 // client with no timeout at all, quietly dropping the backstop this exists for.
-fn http_client_builder() -> reqwest::ClientBuilder {
-    reqwest::Client::builder().timeout(std::time::Duration::from_secs(30))
+pub(crate) fn http_client_builder() -> reqwest::ClientBuilder {
+    bundled_roots_client_builder().timeout(std::time::Duration::from_secs(30))
+}
+
+/// The one TLS configuration for every connection this crate opens, HTTP and
+/// the Gemini WebSocket alike: ring, and only the Mozilla roots compiled into
+/// the binary, never the machine's certificate store.
+pub(crate) fn tls_config() -> &'static std::sync::Arc<rustls::ClientConfig> {
+    static CONFIG: std::sync::OnceLock<std::sync::Arc<rustls::ClientConfig>> =
+        std::sync::OnceLock::new();
+    CONFIG.get_or_init(|| {
+        std::sync::Arc::new(
+            rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
+                rustls::crypto::ring::default_provider(),
+            ))
+            .with_safe_default_protocol_versions()
+            .expect("default TLS versions should be supported")
+            .with_root_certificates(rustls::RootCertStore {
+                roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+            })
+            .with_no_client_auth(),
+        )
+    })
+}
+
+/// A client builder on [`tls_config`], with no timeout. Without it reqwest 0.13
+/// fails to build a client on a host with no certificate store. Use
+/// [`http_client`] unless a caller needs its own bounds.
+pub fn bundled_roots_client_builder() -> reqwest::ClientBuilder {
+    // reqwest takes an owned config; the clone shares the root store.
+    reqwest::Client::builder().tls_backend_preconfigured(rustls::ClientConfig::clone(tls_config()))
+}
+
+/// Makes ring the process-wide rustls provider for LiveKit's transport, which
+/// builds its TLS client without one. rustls otherwise picks a provider from
+/// crate features, and panics once a dependency enables a second. Called at
+/// startup, and again where a room is joined for hosts that skip `main`.
+pub fn install_crypto_provider() {
+    // An error only means a provider is already installed.
+    let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
 #[cfg(test)]

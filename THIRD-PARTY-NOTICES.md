@@ -35,11 +35,18 @@ License texts and source details are shipped with the relevant assets:
 - `web/vendor/pyodide/README.md`
 - `web/vendor/pdfjs/README.md`
 
-The build also patches one Rust crate, kept in source form with its license:
+The build also patches two Rust crates, kept in source form with their licenses:
 
-- `vendor/webrtc-sys-build/` ([webrtc-sys-build](https://crates.io/crates/webrtc-sys-build)
-  0.3.19, Apache-2.0), LiveKit's libwebrtc download helper, moved to zip 9;
-  its `README.md` and `LICENSE` say what changed
+- `vendor/livekit-net/` ([livekit-net](https://crates.io/crates/livekit-net)
+  0.1.4, Apache-2.0), LiveKit's network transport, moved to tokio-tungstenite
+  0.30 for patched certificate roots; its `README.md` and `LICENSE` say what changed
+- `vendor/tokio-tungstenite/` ([tokio-tungstenite](https://crates.io/crates/tokio-tungstenite)
+  0.30.0, MIT), moved to webpki-roots 1.0.10; its `README.md` and `LICENSE`
+  say what changed
+
+The executable compiles in Mozilla's root certificates from
+[webpki-roots](https://crates.io/crates/webpki-roots) 1.0.10, under
+the [Community Data License Agreement - Permissive 2.0](https://cdla.dev/permissive-2-0/).
 
 Compiler Explorer is a remote service, not bundled software. C, C++, and Java
 source is sent to it only when remote test runs are enabled.
