@@ -162,7 +162,7 @@ fn service_account_validation_agrees_at_configuration_and_startup() {
 /// Nothing here signs, so the credential only has to exist.
 fn delivery_reading_from(base: String) -> GoogleDelivery {
     GoogleDelivery {
-        http: reqwest::Client::builder().no_proxy().build().unwrap(),
+        http: crate::http_client_builder().no_proxy().build().unwrap(),
         credentials: ServiceAccount {
             client_email: String::new(),
             private_key: Vec::new(),

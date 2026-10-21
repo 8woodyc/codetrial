@@ -11,7 +11,8 @@ use std::time::Duration;
 const FIXTURE_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub fn client_builder() -> reqwest::ClientBuilder {
-    reqwest::Client::builder().no_proxy()
+    // The production trust store; see `bundled_roots_client_builder`.
+    codetrial::bundled_roots_client_builder().no_proxy()
 }
 
 pub fn client() -> reqwest::Client {

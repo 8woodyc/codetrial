@@ -69,6 +69,7 @@ const MODES: [(&str, usize, &str, ModeFn); 3] = [
 type ModeFn = fn(&[String], CliOptions) -> Result<(), String>;
 
 fn main() {
+    codetrial::install_crypto_provider();
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     std::process::exit(run_agent_command(&args));
 }

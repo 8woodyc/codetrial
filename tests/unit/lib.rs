@@ -46,3 +46,47 @@ fn shared_http_clients_carry_the_backstop_timeout() {
         assert!(debug.contains("TotalTimeout: 30s"), "{debug}");
     }
 }
+
+/// LiveKit's transport builds its TLS client on the process-wide provider, so
+/// this has to leave ring installed. Checked in a child, because any test in
+/// this process that joined a room may have installed one already.
+#[test]
+fn install_crypto_provider_makes_ring_the_process_default() {
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tests::install_crypto_provider_child",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env("CODETRIAL_CRYPTO_PROVIDER_TEST_CHILD", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "child failed: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+}
+
+#[test]
+fn install_crypto_provider_child() {
+    if std::env::var_os("CODETRIAL_CRYPTO_PROVIDER_TEST_CHILD").is_none() {
+        return;
+    }
+    assert!(rustls::crypto::CryptoProvider::get_default().is_none());
+    super::install_crypto_provider();
+    let installed = rustls::crypto::CryptoProvider::get_default()
+        .expect("a provider is installed")
+        .cipher_suites
+        .iter()
+        .map(|suite| suite.suite())
+        .collect::<Vec<_>>();
+    let ring = rustls::crypto::ring::default_provider()
+        .cipher_suites
+        .iter()
+        .map(|suite| suite.suite())
+        .collect::<Vec<_>>();
+    assert_eq!(installed, ring);
+}

@@ -4,19 +4,15 @@ updates:
     directory: /
     schedule:
       interval: weekly
-    # LiveKit's HTTP and WebSocket stack pins these majors; moving ahead of it
-    # builds each crate twice. Lift an entry when LiveKit moves.
-    ignore:
-      - dependency-name: reqwest
-        update-types: ["version-update:semver-major", "version-update:semver-minor"]
-      - dependency-name: tokio-tungstenite
-        update-types: ["version-update:semver-major", "version-update:semver-minor"]
-      - dependency-name: tower-http
-        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     # Separate groups so a failure in one does not hold back the rest: a
     # LiveKit release can raise the Clang floor in scripts/fetch-clang.sh, and
     # a tree-sitter grammar has to stay within the runtime's ABI range and the
     # version named in docs/evidence-runtime.md.
+    #
+    # Security updates otherwise arrive one crate per pull request; only the
+    # coupled sets are grouped for them too. Nothing is ignored, because an
+    # ignore rule also suppresses security pull requests; a bump past a crate
+    # under vendor/ fails the vendor-patches gate in scripts/test.sh instead.
     groups:
       livekit:
         patterns:
@@ -28,6 +24,15 @@ updates:
       rust:
         patterns:
           - "*"
+      livekit-security:
+        applies-to: security-updates
+        patterns:
+          - "livekit*"
+          - "webrtc-sys*"
+      tree-sitter-security:
+        applies-to: security-updates
+        patterns:
+          - "tree-sitter*"
   - package-ecosystem: npm
     directory: /
     schedule:

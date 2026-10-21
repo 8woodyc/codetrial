@@ -369,6 +369,15 @@ fn gemini_shaped(chat: &Value) -> Value {
     json!({ "candidates": [{ "content": { "role": "model", "parts": parts } }] })
 }
 
+/// No 30-second backstop: a local model on a CPU, or a long judge call, can
+/// take minutes to answer. Built per use, since a pooled connection would
+/// outlive the test runtime that opened it.
+fn live_client() -> reqwest::Client {
+    codetrial::bundled_roots_client_builder()
+        .build()
+        .expect("live HTTP client builds")
+}
+
 struct Conversation {
     client: reqwest::Client,
     backend: Backend,
@@ -890,7 +899,7 @@ async fn uncertain_speech_is_clarified_without_crediting_or_correcting_it() {
             ),
         ] {
             let mut conversation = Conversation {
-                client: reqwest::Client::new(),
+                client: live_client(),
                 backend: backend.clone(),
                 instructions: build_instructions_for_plan(
                     problem,
@@ -994,7 +1003,7 @@ async fn live_interviewer_poses_the_variant_and_serves_hints_in_order() {
     for mode in [InterviewMode::Coding, InterviewMode::Whiteboard] {
         for problem in problems.iter().copied() {
             let mut conversation = Conversation {
-                client: reqwest::Client::new(),
+                client: live_client(),
                 backend: backend.clone(),
                 instructions: build_instructions_for_plan(
                     problem,
@@ -1152,7 +1161,7 @@ impl Candidate {
             problem.variant().brief_text()
         );
         Candidate {
-            client: reqwest::Client::new(),
+            client: live_client(),
             base: candidate_base(),
             messages: vec![json!({ "role": "system", "content": system })],
         }
@@ -1487,7 +1496,7 @@ async fn played_candidates_are_held_to_the_same_rules() {
                 },
             );
             let mut conversation = Conversation {
-                client: reqwest::Client::new(),
+                client: live_client(),
                 backend: backend.clone(),
                 instructions: instructions.clone(),
                 contents: Vec::new(),
@@ -1549,7 +1558,7 @@ async fn played_candidates_are_held_to_the_same_rules() {
 async fn conversational_reacto_answers_are_recorded_in_the_same_reply() {
     let problem = get_problem(Some("two-sum"));
     let mut conversation = Conversation {
-        client: reqwest::Client::new(),
+        client: live_client(),
         backend: Backend::from_env(),
         instructions: build_instructions_for_plan(
             problem,
@@ -1616,7 +1625,7 @@ async fn judge_phases(state: &mut RuntimeState, problem: &'static Problem) -> Ve
         .ok()
         .filter(|model| !model.is_empty())
         .unwrap_or_else(|| codetrial::config::DEFAULT_GEMINI_REPORT_MODEL.to_string());
-    let response: Value = reqwest::Client::new()
+    let response: Value = live_client()
         .post(format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
         ))

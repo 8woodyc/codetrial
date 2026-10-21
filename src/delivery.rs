@@ -159,7 +159,7 @@ impl GoogleDelivery {
         let credentials = parse_service_account(service_account_json)?;
         let fields = service_account_fields(&credentials)?;
         Ok(Self {
-            http: reqwest::Client::builder()
+            http: crate::http_client_builder()
                 .timeout(REQUEST_TIMEOUT)
                 .build()
                 .map_err(|error| format!("the delivery client could not be built: {error}"))?,
