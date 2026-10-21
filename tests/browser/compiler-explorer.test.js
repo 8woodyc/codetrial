@@ -872,12 +872,21 @@ test("harness generator handles output parameter and output prefix specs", () =>
     judges["remove-element"],
     "class Solution { public int dropMutedCode(int[] nums, int val) { return 0; } }",
   );
+  const removeC = generateHarness(
+    "c",
+    judges["remove-element"],
+    "int dropMutedCode(int* nums, int numsSize, int val) { return 0; }",
+  );
 
   assert.match(merge, /solution\.spliceReadings\(nums1, m, nums2, n\)/);
   assert.match(merge, /auto actual = nums1/);
   assert.match(remove, /outputSize < 0 \|\| outputSize > nums\.length/);
   assert.match(remove, /int outputSize = solution\.dropMutedCode\(nums, val\)/);
   assert.match(remove, /Arrays\.copyOf\(nums, outputSize\)/);
+  assert.match(
+    removeC,
+    /actualSize < 0 \|\| actualSize > numsSize[\s\S]*Return value must be an integer length for the kept prefix\./,
+  );
 });
 
 test("class harness generator handles constructor, mutator, query, and tree constructor calls", () => {

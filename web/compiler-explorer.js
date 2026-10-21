@@ -413,7 +413,7 @@ ${declarations}
 function cCall(spec) {
   const callArgs = cCallArgs(spec).join(", ");
   if (Number.isInteger(spec.outputPrefixParam)) {
-    return `int actualSize = ${spec.entry}(${callArgs}); if (actualSize < 0 || actualSize > ${spec.paramNames[spec.outputPrefixParam]}Size) actualSize = 0;`;
+    return `int actualSize = ${spec.entry}(${callArgs});`;
   }
   if (spec.returnType === "void") return `${spec.entry}(${callArgs});`;
   return `${cReturnDeclaration(spec.returnType)} actual = ${spec.entry}(${callArgs});`;
@@ -450,8 +450,10 @@ function cPrintActual(spec) {
   const type = Number.isInteger(spec.outputParam)
     ? spec.paramTypes[spec.outputParam]
     : spec.returnType;
-  if (Number.isInteger(spec.outputPrefixParam))
-    return `json_int_array(stdout, ${spec.paramNames[spec.outputPrefixParam]}, actualSize);`;
+  if (Number.isInteger(spec.outputPrefixParam)) {
+    const prefixName = spec.paramNames[spec.outputPrefixParam];
+    return `if (actualSize < 0 || actualSize > ${prefixName}Size) { printf("null,\\"error\\":"); json_string(stdout, "Return value must be an integer length for the kept prefix."); } else { json_int_array(stdout, ${prefixName}, actualSize); }`;
+  }
   if (spec.outputType === "linkedList") return `json_list(stdout, ${name});`;
   if (spec.outputType === "binaryTree") return `json_tree(stdout, ${name});`;
   if (spec.outputType === "randomList")
