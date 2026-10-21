@@ -9,6 +9,7 @@ import {
   storeSharedFocus,
   suggestDifficulty,
 } from "../../web/problem-picker.js";
+import { ACTIVE_CONTRACT } from "../../web/lib.js";
 
 const bank = [
   { id: "passed", difficulty: "Easy" },
@@ -439,6 +440,44 @@ test("junk history is no opinion, not a crash", () => {
   assert.equal(
     suggestDifficulty(bySuggestion, [null, {}, { problemId: "easy-a" }]),
     null,
+  );
+});
+
+test("an unsupported contract still steers the picker by its saved verdict", () => {
+  // The practice summary leaves these out of its totals; the picker reads the
+  // entry as saved, so a pass recorded under a newer bundle is still a pass.
+  const future = {
+    ...ACTIVE_CONTRACT,
+    bundleVersion: ACTIVE_CONTRACT.bundleVersion + 1,
+  };
+  const now = 10 * day;
+  const passedUnder = (problemId, interviewContract) => ({
+    problemId,
+    at: now - day + 1,
+    report: { decision: "HIRE", interviewContract },
+  });
+  for (const interviewContract of [future, { ...ACTIVE_CONTRACT, extra: 1 }]) {
+    const choice = pickProblem(
+      bank,
+      new Set(["Easy"]),
+      [passedUnder("passed", interviewContract)],
+      first,
+      now,
+    );
+    assert.equal(choice.picked.id, "fresh");
+  }
+  assert.deepEqual(
+    suggestDifficulty(bySuggestion, [
+      {
+        problemId: "easy-a",
+        report: { decision: "HIRE", interviewContract: future },
+      },
+      {
+        problemId: "easy-b",
+        report: { decision: "HIRE", interviewContract: future },
+      },
+    ]),
+    { difficulty: "Medium", from: "Easy", reason: "passed" },
   );
 });
 

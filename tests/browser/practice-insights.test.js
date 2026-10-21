@@ -7,6 +7,8 @@ import {
   recentPerformance,
 } from "../../web/practice-insights.js";
 
+import { ACTIVE_CONTRACT, reportContractStatus } from "../../web/lib.js";
+
 const problems = [
   { id: "a", difficulty: "Easy", topics: ["Array", "Hash Table"] },
   { id: "b", difficulty: "Medium", topics: ["Array", "Sorting"] },
@@ -51,6 +53,7 @@ test("recent performance summarizes assessed reports newest first", () => {
 
   assert.deepEqual(recentPerformance(reports, 3), {
     attempts: 3,
+    legacyAttempts: 3,
     passes: 2,
     misses: 1,
     passRate: 67,
@@ -110,4 +113,65 @@ test("recent performance counts each normalized topic once per report", () => {
     "Array",
     "Hash Table",
   ]);
+});
+
+const versionedReport = (at, decision, contract = ACTIVE_CONTRACT) => {
+  const entry = report("a", at, decision);
+  entry.report.interviewContract = { ...contract };
+  return entry;
+};
+
+test("recent performance excludes future and malformed contracts before limiting", () => {
+  const future = versionedReport(40, "HIRE", {
+    ...ACTIVE_CONTRACT,
+    bundleVersion: ACTIVE_CONTRACT.bundleVersion + 1,
+  });
+  const malformed = versionedReport(30, "HIRE", {
+    ...ACTIVE_CONTRACT,
+    extra: 1,
+  });
+  const supported = versionedReport(20, "NO_HIRE");
+  const snapshot = recentPerformance([future, malformed, supported], 1);
+  assert.equal(snapshot.attempts, 1);
+  assert.equal(snapshot.passes, 0);
+  assert.equal(snapshot.legacyAttempts, 0);
+  assert.equal(snapshot.latestDecision, "NO_HIRE");
+  assert.equal(recentPerformance([future, malformed]), null);
+});
+
+test("recent performance counts legacy provenance only inside the window", () => {
+  const legacy = report("a", 20, "HIRE");
+  const supported = versionedReport(30, "NO_HIRE");
+  assert.equal(recentPerformance([legacy]).legacyAttempts, 1);
+  assert.equal(recentPerformance([legacy, supported], 1).legacyAttempts, 0);
+  assert.equal(recentPerformance([legacy, supported], 2).legacyAttempts, 1);
+});
+
+test("contract classification shares the report compatibility policy", () => {
+  assert.equal(reportContractStatus({}), "legacy");
+  assert.equal(
+    reportContractStatus({ interviewContract: ACTIVE_CONTRACT }),
+    "supported",
+  );
+  for (const contract of [
+    null,
+    [],
+    { ...ACTIVE_CONTRACT, extra: 1 },
+    { ...ACTIVE_CONTRACT, rubricVersion: ACTIVE_CONTRACT.rubricVersion + 1 },
+    { ...ACTIVE_CONTRACT, reportSchemaVersion: 999 },
+    { ...ACTIVE_CONTRACT, bundleVersion: 3 },
+    {
+      ...ACTIVE_CONTRACT,
+      livePromptVersion: ACTIVE_CONTRACT.livePromptVersion + 1,
+    },
+    {
+      ...ACTIVE_CONTRACT,
+      reportPromptVersion: ACTIVE_CONTRACT.reportPromptVersion + 1,
+    },
+  ]) {
+    assert.equal(
+      reportContractStatus({ interviewContract: contract }),
+      "unsupported",
+    );
+  }
 });

@@ -23,7 +23,7 @@ import {
   read,
   startStaticServer,
 } from "./source.js";
-import { frameworkPhases } from "../../web/lib.js";
+import { ACTIVE_CONTRACT, frameworkPhases } from "../../web/lib.js";
 
 let browser = null;
 let server = null;
@@ -819,9 +819,60 @@ lobbyTest(
 
     assert.equal(
       await page.locator("#recent-performance-summary").textContent(),
-      "Last 3 assessed interviews: 1 passed, 2 missed (33%).",
+      "Last 3 assessed interviews: 1 passed, 2 missed (33%). 3 of these interviews predate versioned scoring.",
     );
     assert.equal(await page.locator("#recent-performance").isHidden(), false);
+  },
+);
+
+lobbyTest(
+  "recent snapshot excludes unsupported contracts and labels only counted legacy reports",
+  async (page) => {
+    const saved = (createdAt, decision, interviewContract) => ({
+      problemId: EASY[0],
+      createdAt,
+      payload: { report: { decision, interviewContract } },
+    });
+    reports = [
+      saved(40, "HIRE", {
+        ...ACTIVE_CONTRACT,
+        bundleVersion: ACTIVE_CONTRACT.bundleVersion + 1,
+      }),
+      saved(30, "HIRE", { ...ACTIVE_CONTRACT, extra: 1 }),
+      saved(20, "NO_HIRE", ACTIVE_CONTRACT),
+    ];
+    await lobby(page);
+    assert.equal(
+      await page.locator("#recent-performance-summary").textContent(),
+      "Last 1 assessed interview: 0 passed, 1 missed (0%).",
+    );
+    reports.push(saved(10, "HIRE", undefined));
+    await lobby(page);
+    assert.equal(
+      await page.locator("#recent-performance-summary").textContent(),
+      "Last 2 assessed interviews: 1 passed, 1 missed (50%). 1 of these interviews predates versioned scoring.",
+    );
+  },
+);
+
+lobbyTest(
+  "recent snapshot reports a streak and the legacy note together",
+  async (page) => {
+    const saved = (problemId, createdAt, decision, interviewContract) => ({
+      problemId,
+      createdAt,
+      payload: { report: { decision, interviewContract } },
+    });
+    reports = [
+      saved(EASY[0], 30, "HIRE", ACTIVE_CONTRACT),
+      saved(EASY[1], 20, "HIRE", undefined),
+      saved(MEDIUM[0], 10, "NO_HIRE", undefined),
+    ];
+    await lobby(page);
+    assert.equal(
+      await page.locator("#recent-performance-summary").textContent(),
+      "Last 3 assessed interviews: 2 passed, 1 missed (67%). Current pass streak: 2. 2 of these interviews predate versioned scoring.",
+    );
   },
 );
 

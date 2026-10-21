@@ -1342,7 +1342,10 @@ function renderRecentPerformance() {
     snapshot.streak > 1
       ? ` Current ${snapshot.latestDecision === "HIRE" ? "pass" : "miss"} streak: ${snapshot.streak}.`
       : "";
-  nodes.recentPerformanceSummary.textContent = `Last ${snapshot.attempts} assessed interview${snapshot.attempts === 1 ? "" : "s"}: ${result} (${snapshot.passRate}%).${streak}`;
+  const legacy = snapshot.legacyAttempts
+    ? ` ${snapshot.legacyAttempts} of these interviews predate${snapshot.legacyAttempts === 1 ? "s" : ""} versioned scoring.`
+    : "";
+  nodes.recentPerformanceSummary.textContent = `Last ${snapshot.attempts} assessed interview${snapshot.attempts === 1 ? "" : "s"}: ${result} (${snapshot.passRate}%).${streak}${legacy}`;
   nodes.recentWeakTopics.textContent = snapshot.weakTopics.length
     ? `Topics to revisit: ${snapshot.weakTopics.slice(0, 5).join(", ")}.`
     : "No recurring weak topic in these interviews.";

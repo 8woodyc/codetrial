@@ -41,6 +41,7 @@ import {
   orPlaceholder,
   providerUiState,
   renderValue,
+  reportContractStatus,
   replayTimeline,
   responseWindowLabel,
   responseWindows,
@@ -1288,7 +1289,6 @@ test("sanitizeReport preserves a well-formed agent report", () => {
   });
 
   assert.deepEqual(report, {
-    interviewContract: null,
     mode: undefined,
     interviewLoop: "coding_behavioral",
     // Absent on this one, which is a report from before whiteboard mode: the
@@ -1385,8 +1385,24 @@ test("a scored summary reaches the candidate whole", () => {
 
 test("report contract migration preserves legacy and rejects unknown provenance", () => {
   const legacy = sanitizeReport({ incomplete: true, summary: "old report" });
-  assert.equal(legacy.interviewContract, null);
+  assert.equal("interviewContract" in legacy, false);
   assert.equal(legacy.summary, "old report");
+
+  // Saved history is sanitized on the way in and read raw on the way out, so a
+  // legacy report has to stay legacy across that round trip rather than come
+  // back carrying a null claim that reads as malformed.
+  const legacyScored = sanitizeReport({ codingScore: 70, decision: "HIRE" });
+  assert.equal("interviewContract" in legacyScored, false);
+  assert.equal(reportContractStatus(legacyScored), "legacy");
+  const reread = sanitizeReport(JSON.parse(JSON.stringify(legacyScored)));
+  assert.equal(reread.incomplete, undefined);
+  assert.equal(reread.decision, "HIRE");
+  assert.equal(reportContractStatus(reread), "legacy");
+
+  // A claim that was there and malformed stays a claim, so it stays rejected.
+  const rejected = sanitizeReport({ decision: "HIRE", interviewContract: [] });
+  assert.equal(rejected.interviewContract, null);
+  assert.equal(reportContractStatus(rejected), "unsupported");
 
   const active = ACTIVE_CONTRACT;
   assert.deepEqual(
