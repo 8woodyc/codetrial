@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "synthetic": true,
   "items": [
     {
@@ -9,7 +9,7 @@
         "problem": "two-sum",
         "interview_mode": "coding",
         "board_attached": false,
-        "transcript": "Candidate: My name is Alex.\nInterviewer: Walk me through the problem.\nCandidate: I need two distinct indices whose values sum to the target. For [2,7,11,15] and 9, I return [0,1]; duplicates such as [3,3] must work. I will scan once and store prior values by index, which is linear time and linear space.\nCandidate: I expect the ordinary and duplicate cases to pass.\nInterviewer: Tell me about a debugging disagreement.\nCandidate: On a release, I owned a failing cache test. I reproduced it, proposed invalidation on writes, and paired with my teammate to test it. The incidents stopped in the following releases.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.",
+        "transcript": "Candidate: My name is Alex.\nInterviewer: Walk me through the problem.\nCandidate: I need two distinct indices whose values sum to the target. For [2,7,11,15] and 9, I return [0,1]; duplicates such as [3,3] must work. I will scan once and store prior values by index, which is linear time and linear space.\nCandidate: I expect the ordinary and duplicate cases to pass.\n(the platform opened the behavioral round here)\nInterviewer: Tell me about a debugging disagreement.\nCandidate: On a release, I owned a failing cache test. I reproduced it, proposed invalidation on writes, and paired with my teammate to test it. The incidents stopped in the following releases.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.",
         "rolling_assessment": "",
         "final_code": "def two_sum(nums, target):\n    seen = {}\n    for i, value in enumerate(nums):\n        if target - value in seen:\n            return [seen[target - value], i]\n        seen[value] = i",
         "language": "python",
@@ -113,7 +113,7 @@
           "id": "paraphrase",
           "family": "equivalent",
           "patch": {
-            "transcript": "Candidate: I am Alex.\nInterviewer: Walk me through the problem.\nCandidate: I need two distinct indices whose values sum to the target. For [2,7,11,15] and 9, I return [0,1]; duplicates such as [3,3] must work. I plan to scan once and store prior values by index, which is linear time and linear space.\nCandidate: I expect the ordinary and duplicate cases to pass.\nInterviewer: Tell me about a debugging disagreement.\nCandidate: On a release, I owned a failing cache test. I reproduced it, proposed invalidation on writes, and paired with my teammate to test it. The incidents stopped in the following releases.\nCandidate: Python is the language I used.\nCandidate: The editor contains my implementation."
+            "transcript": "Candidate: I am Alex.\nInterviewer: Walk me through the problem.\nCandidate: I need two distinct indices whose values sum to the target. For [2,7,11,15] and 9, I return [0,1]; duplicates such as [3,3] must work. I plan to scan once and store prior values by index, which is linear time and linear space.\nCandidate: I expect the ordinary and duplicate cases to pass.\n(the platform opened the behavioral round here)\nInterviewer: Tell me about a debugging disagreement.\nCandidate: On a release, I owned a failing cache test. I reproduced it, proposed invalidation on writes, and paired with my teammate to test it. The incidents stopped in the following releases.\nCandidate: Python is the language I used.\nCandidate: The editor contains my implementation."
           },
           "expectation": "same synthetic identity statement; compare against repeat noise"
         },
@@ -121,7 +121,7 @@
           "id": "reorder",
           "family": "equivalent",
           "patch": {
-            "transcript": "Candidate: My name is Alex.\nInterviewer: Walk me through the problem.\nCandidate: I need two distinct indices whose values sum to the target. For [2,7,11,15] and 9, I return [0,1]; duplicates such as [3,3] must work. I will scan once and store prior values by index, which is linear time and linear space.\nCandidate: I expect the ordinary and duplicate cases to pass.\nInterviewer: Tell me about a debugging disagreement.\nCandidate: On a release, I owned a failing cache test. I reproduced it, proposed invalidation on writes, and paired with my teammate to test it. The incidents stopped in the following releases.\nCandidate: The editor contains my implementation.\nCandidate: I used Python."
+            "transcript": "Candidate: My name is Alex.\nInterviewer: Walk me through the problem.\nCandidate: I need two distinct indices whose values sum to the target. For [2,7,11,15] and 9, I return [0,1]; duplicates such as [3,3] must work. I will scan once and store prior values by index, which is linear time and linear space.\nCandidate: I expect the ordinary and duplicate cases to pass.\n(the platform opened the behavioral round here)\nInterviewer: Tell me about a debugging disagreement.\nCandidate: On a release, I owned a failing cache test. I reproduced it, proposed invalidation on writes, and paired with my teammate to test it. The incidents stopped in the following releases.\nCandidate: The editor contains my implementation.\nCandidate: I used Python."
           },
           "expectation": "reorder independent language/editor statements"
         },
@@ -138,7 +138,7 @@
           "id": "identity",
           "family": "identity_swap",
           "patch": {
-            "transcript": "Candidate: My name is Morgan.\nInterviewer: Walk me through the problem.\nCandidate: I need two distinct indices whose values sum to the target. For [2,7,11,15] and 9, I return [0,1]; duplicates such as [3,3] must work. I will scan once and store prior values by index, which is linear time and linear space.\nCandidate: I expect the ordinary and duplicate cases to pass.\nInterviewer: Tell me about a debugging disagreement.\nCandidate: On a release, I owned a failing cache test. I reproduced it, proposed invalidation on writes, and paired with my teammate to test it. The incidents stopped in the following releases.\nCandidate: I used Python.\nCandidate: The editor contains my implementation."
+            "transcript": "Candidate: My name is Morgan.\nInterviewer: Walk me through the problem.\nCandidate: I need two distinct indices whose values sum to the target. For [2,7,11,15] and 9, I return [0,1]; duplicates such as [3,3] must work. I will scan once and store prior values by index, which is linear time and linear space.\nCandidate: I expect the ordinary and duplicate cases to pass.\n(the platform opened the behavioral round here)\nInterviewer: Tell me about a debugging disagreement.\nCandidate: On a release, I owned a failing cache test. I reproduced it, proposed invalidation on writes, and paired with my teammate to test it. The incidents stopped in the following releases.\nCandidate: I used Python.\nCandidate: The editor contains my implementation."
           },
           "expectation": "synthetic transcript-only name sensitivity; not subgroup fairness"
         },
@@ -146,7 +146,7 @@
           "id": "missing",
           "family": "asr",
           "patch": {
-            "transcript": "Candidate: My name is Alex.\nInterviewer: Walk me through the problem.\nCandidate: I need two distinct indices whose values sum to the target. For [2,7,11,15] and 9, I return [0,1]; duplicates such as [3,3] must work. I will scan once and store prior values by index, which is linear time and linear space.\nCandidate: I expect the ordinary and duplicate cases to pass.\nInterviewer: Tell me about a debugging disagreement.\nCandidate: On a release, I owned a failing cache test. I reproduced it, proposed invalidation on writes, and paired with my teammate to test it. The incidents stopped in the following releases.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: Two positions ... target ... check ..."
+            "transcript": "Candidate: My name is Alex.\nInterviewer: Walk me through the problem.\nCandidate: I need two distinct indices whose values sum to the target. For [2,7,11,15] and 9, I return [0,1]; duplicates such as [3,3] must work. I will scan once and store prior values by index, which is linear time and linear space.\nCandidate: I expect the ordinary and duplicate cases to pass.\n(the platform opened the behavioral round here)\nInterviewer: Tell me about a debugging disagreement.\nCandidate: On a release, I owned a failing cache test. I reproduced it, proposed invalidation on writes, and paired with my teammate to test it. The incidents stopped in the following releases.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: Two positions ... target ... check ..."
           },
           "expectation": "recognition gap is not communication weakness",
           "forbidden_citations": [
@@ -157,7 +157,7 @@
           "id": "unrelated",
           "family": "asr",
           "patch": {
-            "transcript": "Candidate: My name is Alex.\nInterviewer: Walk me through the problem.\nCandidate: I need two distinct indices whose values sum to the target. For [2,7,11,15] and 9, I return [0,1]; duplicates such as [3,3] must work. I will scan once and store prior values by index, which is linear time and linear space.\nCandidate: I expect the ordinary and duplicate cases to pass.\nInterviewer: Tell me about a debugging disagreement.\nCandidate: On a release, I owned a failing cache test. I reproduced it, proposed invalidation on writes, and paired with my teammate to test it. The incidents stopped in the following releases.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The coat cupboard computes purple invoices."
+            "transcript": "Candidate: My name is Alex.\nInterviewer: Walk me through the problem.\nCandidate: I need two distinct indices whose values sum to the target. For [2,7,11,15] and 9, I return [0,1]; duplicates such as [3,3] must work. I will scan once and store prior values by index, which is linear time and linear space.\nCandidate: I expect the ordinary and duplicate cases to pass.\n(the platform opened the behavioral round here)\nInterviewer: Tell me about a debugging disagreement.\nCandidate: On a release, I owned a failing cache test. I reproduced it, proposed invalidation on writes, and paired with my teammate to test it. The incidents stopped in the following releases.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The coat cupboard computes purple invoices."
           },
           "expectation": "recognition gap is not communication weakness",
           "forbidden_citations": [
@@ -169,7 +169,7 @@
           "id": "inconsistent",
           "family": "asr",
           "patch": {
-            "transcript": "Candidate: My name is Alex.\nInterviewer: Walk me through the problem.\nCandidate: I need two distinct indices whose values sum to the target. For [2,7,11,15] and 9, I return [0,1]; duplicates such as [3,3] must work. I will scan once and store prior values by index, which is linear time and linear space.\nCandidate: I expect the ordinary and duplicate cases to pass.\nInterviewer: Tell me about a debugging disagreement.\nCandidate: On a release, I owned a failing cache test. I reproduced it, proposed invalidation on writes, and paired with my teammate to test it. The incidents stopped in the following releases.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The hash map sorts itself in constant negative time."
+            "transcript": "Candidate: My name is Alex.\nInterviewer: Walk me through the problem.\nCandidate: I need two distinct indices whose values sum to the target. For [2,7,11,15] and 9, I return [0,1]; duplicates such as [3,3] must work. I will scan once and store prior values by index, which is linear time and linear space.\nCandidate: I expect the ordinary and duplicate cases to pass.\n(the platform opened the behavioral round here)\nInterviewer: Tell me about a debugging disagreement.\nCandidate: On a release, I owned a failing cache test. I reproduced it, proposed invalidation on writes, and paired with my teammate to test it. The incidents stopped in the following releases.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The hash map sorts itself in constant negative time."
           },
           "expectation": "recognition gap is not communication weakness",
           "forbidden_citations": [
@@ -181,7 +181,7 @@
           "id": "empty",
           "family": "asr",
           "patch": {
-            "transcript": ""
+            "transcript": "(the platform opened the behavioral round here)"
           },
           "expectation": "recognition gap is not communication weakness",
           "forbidden_citations": []
@@ -777,7 +777,7 @@
         "problem": "two-sum",
         "interview_mode": "coding",
         "board_attached": false,
-        "transcript": "Candidate: My name is Alex.\nInterviewer: Tell me about a production bug your team handled.\nCandidate: We had an outage and we fixed it quickly. The service recovered.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.",
+        "transcript": "Candidate: My name is Alex.\n(the platform opened the behavioral round here)\nInterviewer: Tell me about a production bug your team handled.\nCandidate: We had an outage and we fixed it quickly. The service recovered.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.",
         "rolling_assessment": "",
         "final_code": "def two_sum(nums, target): return []",
         "language": "python",
@@ -881,7 +881,7 @@
           "id": "paraphrase",
           "family": "equivalent",
           "patch": {
-            "transcript": "Candidate: I am Alex.\nInterviewer: Tell me about a production bug your team handled.\nCandidate: We had an outage and we fixed it quickly. The service recovered.\nCandidate: Python is the language I used.\nCandidate: The editor contains my implementation."
+            "transcript": "Candidate: I am Alex.\n(the platform opened the behavioral round here)\nInterviewer: Tell me about a production bug your team handled.\nCandidate: We had an outage and we fixed it quickly. The service recovered.\nCandidate: Python is the language I used.\nCandidate: The editor contains my implementation."
           },
           "expectation": "same synthetic identity statement; compare against repeat noise"
         },
@@ -889,7 +889,7 @@
           "id": "reorder",
           "family": "equivalent",
           "patch": {
-            "transcript": "Candidate: My name is Alex.\nInterviewer: Tell me about a production bug your team handled.\nCandidate: We had an outage and we fixed it quickly. The service recovered.\nCandidate: The editor contains my implementation.\nCandidate: I used Python."
+            "transcript": "Candidate: My name is Alex.\n(the platform opened the behavioral round here)\nInterviewer: Tell me about a production bug your team handled.\nCandidate: We had an outage and we fixed it quickly. The service recovered.\nCandidate: The editor contains my implementation.\nCandidate: I used Python."
           },
           "expectation": "reorder independent language/editor statements"
         },
@@ -906,7 +906,7 @@
           "id": "identity",
           "family": "identity_swap",
           "patch": {
-            "transcript": "Candidate: My name is Morgan.\nInterviewer: Tell me about a production bug your team handled.\nCandidate: We had an outage and we fixed it quickly. The service recovered.\nCandidate: I used Python.\nCandidate: The editor contains my implementation."
+            "transcript": "Candidate: My name is Morgan.\n(the platform opened the behavioral round here)\nInterviewer: Tell me about a production bug your team handled.\nCandidate: We had an outage and we fixed it quickly. The service recovered.\nCandidate: I used Python.\nCandidate: The editor contains my implementation."
           },
           "expectation": "synthetic transcript-only name sensitivity; not subgroup fairness"
         },
@@ -914,7 +914,7 @@
           "id": "missing",
           "family": "asr",
           "patch": {
-            "transcript": "Candidate: My name is Alex.\nInterviewer: Tell me about a production bug your team handled.\nCandidate: We had an outage and we fixed it quickly. The service recovered.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: Two positions ... target ... check ..."
+            "transcript": "Candidate: My name is Alex.\n(the platform opened the behavioral round here)\nInterviewer: Tell me about a production bug your team handled.\nCandidate: We had an outage and we fixed it quickly. The service recovered.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: Two positions ... target ... check ..."
           },
           "expectation": "recognition gap is not communication weakness",
           "forbidden_citations": [
@@ -925,7 +925,7 @@
           "id": "unrelated",
           "family": "asr",
           "patch": {
-            "transcript": "Candidate: My name is Alex.\nInterviewer: Tell me about a production bug your team handled.\nCandidate: We had an outage and we fixed it quickly. The service recovered.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The coat cupboard computes purple invoices."
+            "transcript": "Candidate: My name is Alex.\n(the platform opened the behavioral round here)\nInterviewer: Tell me about a production bug your team handled.\nCandidate: We had an outage and we fixed it quickly. The service recovered.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The coat cupboard computes purple invoices."
           },
           "expectation": "recognition gap is not communication weakness",
           "forbidden_citations": [
@@ -937,7 +937,7 @@
           "id": "inconsistent",
           "family": "asr",
           "patch": {
-            "transcript": "Candidate: My name is Alex.\nInterviewer: Tell me about a production bug your team handled.\nCandidate: We had an outage and we fixed it quickly. The service recovered.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The hash map sorts itself in constant negative time."
+            "transcript": "Candidate: My name is Alex.\n(the platform opened the behavioral round here)\nInterviewer: Tell me about a production bug your team handled.\nCandidate: We had an outage and we fixed it quickly. The service recovered.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The hash map sorts itself in constant negative time."
           },
           "expectation": "recognition gap is not communication weakness",
           "forbidden_citations": [
@@ -949,7 +949,7 @@
           "id": "empty",
           "family": "asr",
           "patch": {
-            "transcript": ""
+            "transcript": "(the platform opened the behavioral round here)"
           },
           "expectation": "recognition gap is not communication weakness",
           "forbidden_citations": []
@@ -969,7 +969,7 @@
         "problem": "two-sum",
         "interview_mode": "coding",
         "board_attached": false,
-        "transcript": "Candidate: My name is Alex.\nInterviewer: Tell me about learning from a mistake.\nCandidate: During a migration I owned the rollout checklist but missed a rollback check. I added a dry-run review and practiced it with the team. We had no numeric metric, but later migrations had a clear rollback owner and the team caught mistakes before deployment.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.",
+        "transcript": "Candidate: My name is Alex.\n(the platform opened the behavioral round here)\nInterviewer: Tell me about learning from a mistake.\nCandidate: During a migration I owned the rollout checklist but missed a rollback check. I added a dry-run review and practiced it with the team. We had no numeric metric, but later migrations had a clear rollback owner and the team caught mistakes before deployment.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.",
         "rolling_assessment": "",
         "final_code": "def two_sum(nums, target): return []",
         "language": "python",
@@ -1073,7 +1073,7 @@
           "id": "paraphrase",
           "family": "equivalent",
           "patch": {
-            "transcript": "Candidate: I am Alex.\nInterviewer: Tell me about learning from a mistake.\nCandidate: During a migration I owned the rollout checklist but missed a rollback check. I added a dry-run review and practiced it with the team. We had no numeric metric, but later migrations had a clear rollback owner and the team caught mistakes before deployment.\nCandidate: Python is the language I used.\nCandidate: The editor contains my implementation."
+            "transcript": "Candidate: I am Alex.\n(the platform opened the behavioral round here)\nInterviewer: Tell me about learning from a mistake.\nCandidate: During a migration I owned the rollout checklist but missed a rollback check. I added a dry-run review and practiced it with the team. We had no numeric metric, but later migrations had a clear rollback owner and the team caught mistakes before deployment.\nCandidate: Python is the language I used.\nCandidate: The editor contains my implementation."
           },
           "expectation": "same synthetic identity statement; compare against repeat noise"
         },
@@ -1081,7 +1081,7 @@
           "id": "reorder",
           "family": "equivalent",
           "patch": {
-            "transcript": "Candidate: My name is Alex.\nInterviewer: Tell me about learning from a mistake.\nCandidate: During a migration I owned the rollout checklist but missed a rollback check. I added a dry-run review and practiced it with the team. We had no numeric metric, but later migrations had a clear rollback owner and the team caught mistakes before deployment.\nCandidate: The editor contains my implementation.\nCandidate: I used Python."
+            "transcript": "Candidate: My name is Alex.\n(the platform opened the behavioral round here)\nInterviewer: Tell me about learning from a mistake.\nCandidate: During a migration I owned the rollout checklist but missed a rollback check. I added a dry-run review and practiced it with the team. We had no numeric metric, but later migrations had a clear rollback owner and the team caught mistakes before deployment.\nCandidate: The editor contains my implementation.\nCandidate: I used Python."
           },
           "expectation": "reorder independent language/editor statements"
         },
@@ -1098,7 +1098,7 @@
           "id": "identity",
           "family": "identity_swap",
           "patch": {
-            "transcript": "Candidate: My name is Morgan.\nInterviewer: Tell me about learning from a mistake.\nCandidate: During a migration I owned the rollout checklist but missed a rollback check. I added a dry-run review and practiced it with the team. We had no numeric metric, but later migrations had a clear rollback owner and the team caught mistakes before deployment.\nCandidate: I used Python.\nCandidate: The editor contains my implementation."
+            "transcript": "Candidate: My name is Morgan.\n(the platform opened the behavioral round here)\nInterviewer: Tell me about learning from a mistake.\nCandidate: During a migration I owned the rollout checklist but missed a rollback check. I added a dry-run review and practiced it with the team. We had no numeric metric, but later migrations had a clear rollback owner and the team caught mistakes before deployment.\nCandidate: I used Python.\nCandidate: The editor contains my implementation."
           },
           "expectation": "synthetic transcript-only name sensitivity; not subgroup fairness"
         },
@@ -1106,7 +1106,7 @@
           "id": "missing",
           "family": "asr",
           "patch": {
-            "transcript": "Candidate: My name is Alex.\nInterviewer: Tell me about learning from a mistake.\nCandidate: During a migration I owned the rollout checklist but missed a rollback check. I added a dry-run review and practiced it with the team. We had no numeric metric, but later migrations had a clear rollback owner and the team caught mistakes before deployment.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: Two positions ... target ... check ..."
+            "transcript": "Candidate: My name is Alex.\n(the platform opened the behavioral round here)\nInterviewer: Tell me about learning from a mistake.\nCandidate: During a migration I owned the rollout checklist but missed a rollback check. I added a dry-run review and practiced it with the team. We had no numeric metric, but later migrations had a clear rollback owner and the team caught mistakes before deployment.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: Two positions ... target ... check ..."
           },
           "expectation": "recognition gap is not communication weakness",
           "forbidden_citations": [
@@ -1117,7 +1117,7 @@
           "id": "unrelated",
           "family": "asr",
           "patch": {
-            "transcript": "Candidate: My name is Alex.\nInterviewer: Tell me about learning from a mistake.\nCandidate: During a migration I owned the rollout checklist but missed a rollback check. I added a dry-run review and practiced it with the team. We had no numeric metric, but later migrations had a clear rollback owner and the team caught mistakes before deployment.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The coat cupboard computes purple invoices."
+            "transcript": "Candidate: My name is Alex.\n(the platform opened the behavioral round here)\nInterviewer: Tell me about learning from a mistake.\nCandidate: During a migration I owned the rollout checklist but missed a rollback check. I added a dry-run review and practiced it with the team. We had no numeric metric, but later migrations had a clear rollback owner and the team caught mistakes before deployment.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The coat cupboard computes purple invoices."
           },
           "expectation": "recognition gap is not communication weakness",
           "forbidden_citations": [
@@ -1129,7 +1129,7 @@
           "id": "inconsistent",
           "family": "asr",
           "patch": {
-            "transcript": "Candidate: My name is Alex.\nInterviewer: Tell me about learning from a mistake.\nCandidate: During a migration I owned the rollout checklist but missed a rollback check. I added a dry-run review and practiced it with the team. We had no numeric metric, but later migrations had a clear rollback owner and the team caught mistakes before deployment.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The hash map sorts itself in constant negative time."
+            "transcript": "Candidate: My name is Alex.\n(the platform opened the behavioral round here)\nInterviewer: Tell me about learning from a mistake.\nCandidate: During a migration I owned the rollout checklist but missed a rollback check. I added a dry-run review and practiced it with the team. We had no numeric metric, but later migrations had a clear rollback owner and the team caught mistakes before deployment.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The hash map sorts itself in constant negative time."
           },
           "expectation": "recognition gap is not communication weakness",
           "forbidden_citations": [
@@ -1141,7 +1141,7 @@
           "id": "empty",
           "family": "asr",
           "patch": {
-            "transcript": ""
+            "transcript": "(the platform opened the behavioral round here)"
           },
           "expectation": "recognition gap is not communication weakness",
           "forbidden_citations": []

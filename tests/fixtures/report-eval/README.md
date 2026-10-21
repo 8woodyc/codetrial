@@ -4,9 +4,12 @@ These authored fixtures probe report stability and policy invariants. They do
 not calibrate the rubric or measure hiring quality, fairness or correctness.
 The seven base cases adapt `tests/fixtures/framework-report-cases.json` and
 the recognition-recovery probe in `tests/unit/gemini.rs`; no candidate data is
-used. Manifest version 2 adds authored artifact-citation checks. Phase labels
-are authored expectations, not human ratings. A missing answer after a clear
-opportunity can be assessable; a skipped phase is not.
+used. Manifest version 3 retains authored artifact-citation checks and places
+the production platform marker before each opened behavioral round, including
+transcript variants. An opened round with no candidate speech keeps only the
+platform marker. Phase labels are authored expectations, not human ratings. A
+missing answer after a clear opportunity can be assessable; a skipped phase is
+not.
 
 The durable journal runner requires a Unix host and a filesystem supporting
 directory fsync. Pure corpus and metric tests also run on other platforms; an

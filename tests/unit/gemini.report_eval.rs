@@ -167,7 +167,7 @@ fn label_agreement(item: &Item, report: &Value) -> Option<f64> {
 #[test]
 fn report_eval_manifest_covers_seven_synthetic_items_and_all_families() {
     let corpus = manifest();
-    assert_eq!(corpus.version, 2);
+    assert_eq!(corpus.version, 3);
     assert!(corpus.synthetic);
     assert_eq!(corpus.items.len(), 7);
     let mut ids = BTreeSet::new();
@@ -191,7 +191,10 @@ fn report_eval_manifest_covers_seven_synthetic_items_and_all_families() {
             assert!(!prompt(&input).is_empty());
             let transcript = input["transcript"].as_str().unwrap().to_ascii_lowercase();
             if variant.family == "asr" {
-                assert!(transcript.is_empty() || !variant.forbidden_citations.is_empty());
+                assert!(
+                    transcript_content(&transcript).trim().is_empty()
+                        || !variant.forbidden_citations.is_empty()
+                );
             } else {
                 assert!(variant.forbidden_citations.is_empty());
             }
@@ -244,6 +247,36 @@ fn report_eval_manifest_covers_seven_synthetic_items_and_all_families() {
         DISCLAIMER,
         "synthetic stability probe; NOT CALIBRATED; not a hiring-quality, fairness or correctness measure"
     );
+}
+
+// Transcript content without the production round boundary, which an opened
+// behavioral round carries even when nobody spoke.
+fn transcript_content(transcript: &str) -> String {
+    transcript.replacen(crate::agent::BEHAVIORAL_ROUND_MARK, "", 1)
+}
+
+#[test]
+fn report_eval_opened_rounds_keep_the_production_transcript_boundary() {
+    let marker = crate::agent::BEHAVIORAL_ROUND_MARK;
+    for item in &manifest().items {
+        let opened = item.input["behavioral_opened"].as_bool().unwrap();
+        for (id, input) in std::iter::once(("base", item.input.clone())).chain(
+            item.variants
+                .iter()
+                .map(|v| (v.id.as_str(), variant_input(item, v))),
+        ) {
+            let text = input["transcript"].as_str().unwrap();
+            if opened {
+                assert_eq!(text.matches(marker).count(), 1, "{}/{id}", item.id);
+                if text != marker {
+                    let question = text.find("Interviewer: Tell me about").unwrap();
+                    assert!(text.find(marker).unwrap() < question, "{}/{id}", item.id);
+                }
+            } else {
+                assert!(!text.contains(marker), "{}/{id}", item.id);
+            }
+        }
+    }
 }
 
 #[test]
