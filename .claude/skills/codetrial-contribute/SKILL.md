@@ -102,6 +102,15 @@ contributor to read the code, not the UI. A useful answer has four parts, and
 3. One hypothesis, labeled as such, and the experiment that would refute it.
 4. Follow-up actions, each small enough to be a commit or a question.
 
+"Identify the root cause" asks for where the failure starts, not the line
+that fails. Reproduce at a named revision, then trace back: what passed the bad
+value, and what passed it that, until one caller made the wrong choice. For an
+interview failure, read the browser console and the agent log for the same
+moment and name the boundary where they disagree. After three hypotheses are
+refuted, post what each experiment showed as a question instead of a fourth
+guess. When the cause lies outside the tree, say what was
+ruled out and what stays unverified.
+
 An agent's summary of the codebase is not an analysis. A maintainer rejected
 one on #66 because it had no motivation and no evidence. Post the analysis as a
 comment, or fold it into the body, then say which one you did.
@@ -208,8 +217,12 @@ gh pr list --repo sysprog21/codetrial --author "@me" \
 
 `pr-sweep.sh` is no help for one's own pull requests: it leaves out the viewer's
 PRs, since its nudges and rebase requests are a maintainer's to send. A PR whose
-`reviewDecision` is `CHANGES_REQUESTED` or whose `mergeable` is `CONFLICTING`
-is waiting on its author.
+`reviewDecision` is `CHANGES_REQUESTED` or whose `mergeable` is `CONFLICTING` is
+waiting on its author, unless that decision comes only from a hidden rebase
+request the branch has since answered, which waits on a maintainer to
+re-review. Checks held as "awaiting approval" are waiting on a maintainer
+instead
+([collaboration.md](collaboration.md#make-ci-green-before-asking-for-review)).
 
 For each hit, read the newest maintainer comment and do what it asks, using the
 table above. Answer it in that thread, quoting the question when the thread has
@@ -237,13 +250,16 @@ the git steps behind them:
   clone of upstream itself it is `origin`, so use that name wherever `upstream`
   appears below. Then `git fetch upstream && git rebase upstream/main`,
   resolve each conflict, `./scripts/test.sh`, and
-  `git push --force-with-lease`. A merge commit from `main` is not a rebase.
+  `git push --force-with-lease --force-if-includes`, which also refuses when a
+  background fetch moved the branch under you. A merge commit from `main` is
+  not a rebase.
 - "Squash" or "fold similar commits": one commit per functional change, with the
   review fixups folded into the commit they fix. `git rebase -i upstream/main`
   is the tool. An agent that cannot drive an interactive editor can run
-  `git reset --soft "$(git merge-base HEAD upstream/main)"` and commit again, but
-  only when the result is meant to be a single commit. Show the contributor the
-  new `git log` before pushing.
+  `git reset --soft "$(git merge-base HEAD upstream/main)"` and commit again,
+  but only when the result is meant to be a single commit and `git status`
+  shows a clean index and work tree first, since anything staged would join
+  it. Show the contributor the new `git log` before pushing.
 - "Read cbea.ms/git-commit" or "refine commit messages": run
   `./scripts/git-commit-msg.sh --rules`, then `make hooks` so the next commit is
   checked before it leaves the machine. The body says what and why. The
@@ -257,8 +273,32 @@ the git steps behind them:
   `Closes #N`, each on its own line. `Refs #N` is for a PR that only touches
   the issue, and then the body says what is left; a bare `Refs: #60` told the
   reviewer nothing.
+- A code change requested in review: check it against the
+  current head, then make it. When any item in the review is unclear, ask
+  about all of them before changing any, since items in one review are often
+  related. When the code contradicts the request, answer with the
+  counterexample or the measurement rather than with agreement; one later
+  shown wrong gets a line naming what was rechecked, then the fix.
 - A question in a review thread: answer it in that thread. A changed line
   answers itself, so resolve the thread rather than replying "done".
+
+Before pushing, list every open request locally: each unresolved thread,
+unanswered cubic finding, failing lane and one-line request, with its state:
+fixed in a named commit, refuted with a counterexample, out of scope with the
+remainder named, or still open. Reply or resolve only the rows with evidence;
+the list itself never goes on GitHub. Then check what the push publishes:
+
+```sh
+base=$(git merge-base HEAD upstream/main)
+git log --oneline "$base"..HEAD                 # only the intended commits
+git diff --stat --diff-filter=A "$base"..HEAD   # every new file meant public
+git diff "$base"..HEAD |
+  grep -nE '^\+.*(AIza[0-9A-Za-z_-]{35}|BEGIN [A-Z ]*PRIVATE KEY)'
+```
+
+The last command prints nothing on a clean branch; a hit is a key to revoke,
+not only to delete. The pre-push hook checks commit messages and the branch,
+not content, and does not run for a clone without `make hooks`.
 
 Replies follow the register in conventions, which maintainers enforce in
 public.

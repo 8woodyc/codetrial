@@ -70,7 +70,8 @@ may print it so the reader can navigate.
 not through `.gitignore`, because the exclusion is one person's habit and
 `.gitignore` would push it onto everybody. Never `git add`, stage, commit or
 delete them, and never assume a clone has them. Reports and analyses stay out
-of the tree the same way: a scratch directory, not a new tracked file.
+of the tree the same way: a scratch directory, not a new tracked file. Every
+skill's `$SCRATCH` means that directory, the session's scratch space.
 
 ## Contracts that refuse a change
 
@@ -120,8 +121,8 @@ Drafting an issue or PR body, or planning a first contribution, is
 [codetrial-contribute](../codetrial-contribute/SKILL.md). Reviewing the backlog
 for duplicates and incomplete reports, and sweeping the open pull requests, is
 [codetrial-triage](../codetrial-triage/SKILL.md). Approving a held workflow
-run, resolving an outdated review thread, hiding a superseded review and
-posting its fixed rebase request need no per-thread approval of text; that
+run, resolving an outdated review thread, posting the fixed rebase request and
+hiding the copies it supersedes need no per-thread approval of text; that
 skill says when a sweep applies them without a separate confirmation.
 
 ## Pull request branches and review replies

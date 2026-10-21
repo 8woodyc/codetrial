@@ -50,7 +50,10 @@ thorough analysis and describe the approaches in detail" (#291), "Show
 detailed proposal and analysis" (#270). Separate the observed need,
 alternatives, compatibility costs and a bounded experiment from an unmeasured
 claim of benefit. When the question is whether behavior is intended, the answer
-is usually a PR that changes it with a reason (#185).
+is usually a PR that changes it with a reason (#185). Before investigating,
+write the symptom in one sentence and the area it lives in, and stay there
+until evidence points out of it; an unrelated problem seen on the way is noted
+for its own issue, not folded in.
 
 ## Scope one pull request
 
@@ -133,10 +136,20 @@ triage's outdated ones.
 ## Make CI green before asking for review
 
 "Before asking someone to review, you MUST resolve any regressions flagged by
-GitHub Actions." (#256, #260). The `check` job checks the commit messages
-before it builds, so a bad message skips every later step of that job,
-browser lane included (#256); the mutation jobs run separately. Fix the
-messages first.
+GitHub Actions." (#256, #260). Open the failing `gates (<lane>)` job, not
+`check`, and rerun that lane with `./scripts/test.sh <lane>`
+([codetrial-verify](../codetrial-verify/SKILL.md) describes the lanes). A bad
+commit message skips the rest of the portable lane, so fix the messages
+first.
+
+The repository holds `pull_request` runs from anyone without a merged commit
+until a maintainer approves them, and holds them again on every push until the
+contributor's first PR merges. A held run shows as "awaiting approval" in the
+checks and has not failed. Pushing again, an empty commit, or closing and
+reopening the PR only queues another held run; run `./scripts/test.sh` locally
+meanwhile, and say once on the PR that the run is awaiting approval if a day
+passes (#312). Maintainers approve held runs with `gh` during the PR sweep
+([pulls.md](../codetrial-triage/pulls.md#what-a-sweep-may-apply-without-asking)).
 
 A local pass, a rerun, or a failure in a file the PR did not touch explains
 nothing. On #269 "I reran locally" and a request to rerun upstream got "Do more
@@ -161,13 +174,16 @@ Keep private candidate material out of public evidence.
 
 ## What the one-line review requests mean
 
-Maintainers post short, fixed strings, some of them the description of a skill
-the contributor's agent is expected to run. Each maps to one action;
+Maintainers post short, fixed strings on PRs and issues, some of them the
+description of a skill the contributor's agent is expected to run. A request
+may come as a comment or a review, and a repeated one hides the older copies,
+so the newest visible one is current. Each maps to one action;
 [codetrial-contribute](SKILL.md) has the git steps.
 
 | Request | What it asks |
 | --- | --- |
-| "Rebase latest `main` branch and resolve conflicts." | A rebase onto upstream `main`, not a merge commit; contribute has the steps. |
+| "Rebase latest `main` branch and resolve conflicts." / "Rebase latest `main` and resolve conflicts" | A rebase onto upstream `main`, not a merge commit; contribute has the steps. |
+| "Rebase latest `main` branch." (to a question about a failing dependency check, #396) | `main` already carries the fix; rebase picks it up, and the PR carries no lockfile bump of its own. |
 | "Rebase the current branch onto the upstream default branch and rework the series into functionally minimal commits ..." | The rebase above, plus fold fixups into the commit they fix and rewrite the messages; it is the `rebase` skill's description, so run that skill when installed. |
 | "Fold similar commits" | One commit per functional change. |
 | "Check `CONTRIBUTING.md` carefully and enforce the rules." / "Check https://cbea.ms/git-commit/" | Usually the commit messages: run `./scripts/git-commit-msg.sh --rules`, then reread every commit and the PR title and body against CONTRIBUTING. |
@@ -179,3 +195,9 @@ the contributor's agent is expected to run. Each maps to one action;
 | "Create another pull request." / "split it into a separate pull request" | Move that change to its own branch and PR; drop it from this one. |
 | "Do more analysis and refinements." | Find the cause; a rerun or a local pass is not an answer. |
 | "Any update?" | A review is waiting on the author: push or reply on each open thread. |
+| "Provide a more thorough analysis and identify the root cause." / "... the detailed action items." / "Provide more analysis and consolidate proposal." (#317, #336, #368, #387, #392) | The issue is not actionable yet: name the code path at `file:line` and why it fails, or list bounded action items, each with an observable outcome. |
+| "Update the GitHub issue descriptions accordingly." (#359) | The analysis posted as a comment goes into the issue body, so the next reader needs no comments; "An edit to the issue" in [SKILL.md](SKILL.md) has the steps. |
+| "Create an issue addressing P1 and make it fully actionable." (#306) | Claiming one item of a multi-part proposal: file that item as its own issue with scope and acceptance criteria, rather than claiming it in the proposal thread. |
+| "Hold off for now, as we should first eliminate dependencies between tasks." (#306) | That item depends on another still open; wait until the maintainer splits the work. |
+| "If you want to close an issue without review, you MUST address the reasons." (#373) | Closing one's own PR or issue needs a reason in the thread; reopen when the reason turns out wrong, as #373 did for a valid cubic finding. |
+| "Always build from source." / "Build from source instead." (#216, #221) | A downloaded binary cannot be tied to a revision; follow "A retest after a merge" in [SKILL.md](SKILL.md). |
