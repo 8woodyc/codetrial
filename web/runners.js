@@ -595,7 +595,9 @@ const JS_RUNNER_SOURCE = `
       };
       const listToArray = (node) => {
         const values = [], seen = new Set();
-        while (node && !seen.has(node)) {
+        while (node) {
+          if (seen.has(node))
+            throw new TypeError("Returned list must not reach a node twice.");
           seen.add(node);
           values.push(node.val);
           node = node.next;
@@ -917,7 +919,9 @@ def _graph_from_adjacency(adjacency):
 def _list_to_array(node):
     values = []
     seen = set()
-    while node is not None and id(node) not in seen:
+    while node is not None:
+        if id(node) in seen:
+            raise TypeError("Returned list must not reach a node twice.")
         seen.add(id(node))
         values.append(node.val)
         node = node.next
