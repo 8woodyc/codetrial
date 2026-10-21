@@ -70,7 +70,13 @@ export function nativeLiteral(value, type, language) {
   if (type === "string") return JSON.stringify(value);
   if (type === "character") return charLiteral(value);
   if (type === "boolean") return value ? "true" : "false";
-  if (type === "integer" || type === "double") return String(value);
+  if (type === "integer") return String(value);
+  // javac types a numeral without point or exponent as int even for a double.
+  // From 1e21 String() writes an exponent, which a trailing ".0" would break.
+  if (type === "double") {
+    const text = String(value);
+    return /[.e]/.test(text) ? text : `${text}.0`;
+  }
   if (type === "ListNode")
     return helperCall("listNode", value, "integer[]", language);
   if (type === "Node")

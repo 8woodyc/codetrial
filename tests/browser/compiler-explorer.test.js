@@ -89,6 +89,13 @@ test("literal emitter covers every non-void function type in the bank", () => {
     nativeLiteral([1, null, 2], "TreeNode", "java"),
     "treeNode(new Integer[]{1, null, 2})",
   );
+  assert.equal(nativeLiteral(2147483648, "double", "java"), "2147483648.0");
+  assert.equal(nativeLiteral(1.5, "double", "java"), "1.5");
+  assert.equal(nativeLiteral(1e21, "double", "java"), "1e+21");
+  assert.equal(
+    nativeLiteral([2, 0.5], "double[]", "java"),
+    "new double[]{2.0, 0.5}",
+  );
 
   for (const type of bankFunctionTypes()) {
     if (type === "void" || type === "Node") continue;
@@ -630,6 +637,43 @@ public:
           judges["binary-search-tree-iterator"].cases.map(
             (testCase) => testCase.expected,
           ),
+        );
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  // 2147483648 is a valid double but too large for an int, and javac refuses
+  // it as an int literal even when the variable it initializes is a double.
+  it(
+    "Java harness passes a whole-number double past the int range",
+    { skip: noJava },
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "codetrial-java-double-"));
+      try {
+        const source = join(dir, "Main.java");
+        const spec = judges["powx-n"];
+        writeFileSync(
+          source,
+          generateHarness(
+            "java",
+            {
+              ...spec,
+              cases: [{ label: "Your case 1", input: [2147483648, 1] }],
+            },
+            `class Solution {
+    public double ${spec.entry}(double x, int n) { return x; }
+}`,
+          ),
+        );
+        await run("javac", [source]);
+        assert.deepEqual(
+          parseCompilerResults(
+            (await run("java", ["-cp", dir, "Main"], { encoding: "utf8" }))
+              .stdout,
+          ).results.map((result) => result.actual),
+          [2147483648],
         );
       } finally {
         rmSync(dir, { recursive: true, force: true });
