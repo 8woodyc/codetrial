@@ -1996,7 +1996,10 @@ for (const storage of ["account", "device"]) {
       const rows = page.locator("#attempt-history > li");
       assert.deepEqual(
         await rows.locator(":scope > p").allTextContents(),
-        times.map((when) => `${when} · Same problem · Python · HIRE`),
+        times.map(
+          (when) =>
+            `${when} · Same problem · Difficulty not recorded · Python · HIRE`,
+        ),
       );
       for (const [index, when] of times.entries()) {
         const row = rows.nth(index);
@@ -5230,4 +5233,50 @@ for (const settings of [
       );
     },
   );
+}
+
+for (const storage of ["account", "device"]) {
+  lobbyTest(`saved ${storage} attempt labels show difficulty`, async (page) => {
+    const difficulties = ["Easy", "Medium", "Hard", null, "Unknown"];
+    const entries = difficulties.map((difficulty, index) => ({
+      id: `difficulty-${index}`,
+      problemId: EASY[0],
+      problemTitle: `Difficulty example ${index}`,
+      language: "python",
+      date: `2026-01-01T0${index}:00:00Z`,
+      ...(difficulty === null ? {} : { difficulty }),
+      report: { decision: "HIRE" },
+    }));
+
+    if (storage === "account") {
+      reports = entries.map((payload) => ({
+        id: payload.id,
+        payload,
+      }));
+    } else {
+      session = { signedIn: false };
+      await page.addInitScript((entries) => {
+        localStorage.setItem("codetrial_history", JSON.stringify(entries));
+      }, entries);
+    }
+
+    await lobby(page);
+
+    const labels = await page
+      .locator("#attempt-history > li > p")
+      .allTextContents();
+
+    assert.equal(labels.length, entries.length);
+    for (const [index, difficulty] of difficulties.entries()) {
+      const expected =
+        difficulty === null || difficulty === "Unknown"
+          ? "Difficulty not recorded"
+          : difficulty;
+      assert.ok(
+        labels[entries.length - 1 - index].endsWith(
+          ` · Difficulty example ${index} · ${expected} · Python · HIRE`,
+        ),
+      );
+    }
+  });
 }
