@@ -7633,3 +7633,78 @@ async fn thinking_release_rebases_existing_tool_continuation_waits() {
     );
     server.await.unwrap();
 }
+
+/// LiveKit's transport is vendored so its proxied `wss://` path runs on the
+/// bundled roots; upstream refuses that path unless the machine's roots are
+/// enabled. The connection runs in a child so `HTTPS_PROXY` reaches only that
+/// process, and the fake proxy here sees the CONNECT and the TLS handshake
+/// that follows it through the tunnel.
+#[test]
+fn livekit_signaling_tunnels_through_an_https_proxy() {
+    use std::io::{BufRead, Read, Write};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let proxy = format!("http://{}", listener.local_addr().unwrap());
+
+    // Reported over a channel so a child that never reaches the proxy fails the
+    // test instead of leaving it blocked in accept.
+    let (seen, heard) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let (socket, _) = listener.accept().unwrap();
+        let mut reader = std::io::BufReader::new(socket);
+        let mut request = String::new();
+        reader.read_line(&mut request).unwrap();
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            if line == "\r\n" {
+                break;
+            }
+        }
+        let mut socket = reader.into_inner();
+        socket
+            .write_all(b"HTTP/1.1 200 Connection established\r\n\r\n")
+            .unwrap();
+        let mut record = [0u8; 1];
+        socket.read_exact(&mut record).unwrap();
+        let _ = seen.send((request, record[0]));
+    });
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "livekit::tests::livekit_proxy_child",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env("HTTPS_PROXY", &proxy)
+        .env("CODETRIAL_LIVEKIT_PROXY_TEST_CHILD", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "child failed: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+    let (request, record) = heard
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("the child tunneled through the proxy");
+    assert_eq!(request.trim_end(), "CONNECT livekit.example:443 HTTP/1.1");
+    // A TLS handshake record: the ClientHello went into the tunnel.
+    assert_eq!(record, 0x16);
+}
+
+#[tokio::test]
+async fn livekit_proxy_child() {
+    if std::env::var_os("CODETRIAL_LIVEKIT_PROXY_TEST_CHILD").is_none() {
+        return;
+    }
+    crate::install_crypto_provider();
+    let client = livekit_net::testing::native_ws_client();
+    let error = client
+        .connect("wss://livekit.example/rtc".into(), Vec::new(), 5_000)
+        .await
+        .err()
+        .expect("the fake proxy ends the tunnel after the ClientHello");
+    assert!(!error.to_string().contains("requires"), "{error}");
+}

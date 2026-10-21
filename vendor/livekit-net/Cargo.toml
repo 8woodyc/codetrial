@@ -58,6 +58,9 @@ rustls-tls-native-roots = [
 rustls-tls-webpki-roots = [
     "tokio-tungstenite?/rustls-tls-webpki-roots",
     "reqwest?/rustls-tls-webpki-roots",
+    "tokio-tungstenite?/__rustls-tls",
+    "dep:tokio-rustls",
+    "dep:webpki-roots",
 ]
 uniffi = ["dep:uniffi"]
 
@@ -133,6 +136,10 @@ default-features = false
 [dependencies.tokio-tungstenite]
 version = "0.30"
 features = ["url"]
+optional = true
+
+[dependencies.webpki-roots]
+version = "1.0.10"
 optional = true
 
 [dependencies.uniffi]

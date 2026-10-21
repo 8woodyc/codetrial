@@ -148,8 +148,11 @@ pub(super) async fn connect_ws(
 
             // Create MaybeTlsStream based on original URL scheme
             let stream = if url.scheme() == "wss" {
-                // Only enable proxy TLS support when rustls-tls-native-roots is enabled
-                #[cfg(feature = "rustls-tls-native-roots")]
+                // Proxy TLS support needs a rustls root store, native or bundled
+                #[cfg(any(
+                    feature = "rustls-tls-native-roots",
+                    feature = "rustls-tls-webpki-roots"
+                ))]
                 {
                     // For WSS, we need to establish TLS over the proxy connection
                     use std::sync::Arc;
@@ -158,26 +161,37 @@ pub(super) async fn connect_ws(
                         TlsConnector,
                     };
 
-                    // Load native root certificates
                     let mut root_store = rustls::RootCertStore::empty();
-                    let cert_result = rustls_native_certs::load_native_certs();
-                    if !cert_result.errors.is_empty() {
-                        log::warn!(
-                            "Native root CA certificate loading errors: {:?}",
-                            cert_result.errors
+
+                    // Load native root certificates
+                    #[cfg(feature = "rustls-tls-native-roots")]
+                    {
+                        let cert_result = rustls_native_certs::load_native_certs();
+                        if !cert_result.errors.is_empty() {
+                            log::warn!(
+                                "Native root CA certificate loading errors: {:?}",
+                                cert_result.errors
+                            );
+                        }
+                        // Not fatal when bundled roots are also enabled
+                        #[cfg(not(feature = "rustls-tls-webpki-roots"))]
+                        if cert_result.certs.is_empty() {
+                            return Err(TransportError::Connection(format!(
+                                "Could not load any native root certificates: {:?}",
+                                cert_result.errors
+                            )));
+                        }
+                        let total = cert_result.certs.len();
+                        let (added, ignored) =
+                            root_store.add_parsable_certificates(cert_result.certs);
+                        log::debug!(
+                            "Added {added}/{total} native root certificates ({ignored} ignored)"
                         );
                     }
-                    if cert_result.certs.is_empty() {
-                        return Err(TransportError::Connection(format!(
-                            "Could not load any native root certificates: {:?}",
-                            cert_result.errors
-                        )));
-                    }
-                    let total = cert_result.certs.len();
-                    let (added, ignored) = root_store.add_parsable_certificates(cert_result.certs);
-                    log::debug!(
-                        "Added {added}/{total} native root certificates ({ignored} ignored)"
-                    );
+
+                    // Load bundled Mozilla root certificates, as the direct path does
+                    #[cfg(feature = "rustls-tls-webpki-roots")]
+                    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
                     let tls_config = rustls::ClientConfig::builder()
                         .with_root_certificates(root_store)
@@ -196,11 +210,14 @@ pub(super) async fn connect_ws(
                     MaybeTlsStream::Rustls(tls_stream)
                 }
 
-                #[cfg(not(feature = "rustls-tls-native-roots"))]
+                #[cfg(not(any(
+                    feature = "rustls-tls-native-roots",
+                    feature = "rustls-tls-webpki-roots"
+                )))]
                 {
-                    // For non-rustls-tls-native-roots builds, don't support proxy for WSS
+                    // Without a rustls root store, don't support proxy for WSS
                     return Err(TransportError::Connection(
-                        "WSS over proxy requires rustls-tls-native-roots feature".into(),
+                        "WSS over proxy requires a rustls-tls-*-roots feature".into(),
                     ));
                 }
             } else {

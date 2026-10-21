@@ -39,7 +39,8 @@ The build also patches two Rust crates, kept in source form with their licenses:
 
 - `vendor/livekit-net/` ([livekit-net](https://crates.io/crates/livekit-net)
   0.1.4, Apache-2.0), LiveKit's network transport, moved to tokio-tungstenite
-  0.30 for patched certificate roots; its `README.md` and `LICENSE` say what changed
+  0.30 for patched certificate roots and given bundled roots on its proxied
+  path; its `README.md` and `LICENSE` say what changed
 - `vendor/tokio-tungstenite/` ([tokio-tungstenite](https://crates.io/crates/tokio-tungstenite)
   0.30.0, MIT), moved to webpki-roots 1.0.10; its `README.md` and `LICENSE`
   say what changed

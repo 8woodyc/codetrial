@@ -28,6 +28,15 @@ upstream URL, checks it against a pinned SHA-256, and keeps it in its own cache.
 Without that reachable, the interview falls back to Jim's voice-only panel and
 nothing else changes.
 
+On a network that reaches the internet only through a proxy, set `HTTPS_PROXY`
+to an `http://` proxy URL. HTTP requests, the Gemini Live socket and LiveKit
+signaling go through it; `NO_PROXY` exempts hosts from all but LiveKit
+signaling, which LiveKit's transport proxies regardless. LiveKit's audio and
+video travel over WebRTC, which does not use the proxy. Certificates are still
+checked against Mozilla's roots compiled into the binary, so a TLS-inspecting
+proxy, whose certificate authority is installed only on the machine, is
+refused.
+
 ```bash
 # Linux
 tar -xzf codetrial-x86_64-unknown-linux-gnu.tar.gz

@@ -8,10 +8,7 @@ use serde_json::{Value, json};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{Receiver, channel};
 use tokio::task::JoinHandle;
-use tokio_tungstenite::{
-    Connector, MaybeTlsStream, WebSocketStream, connect_async_tls_with_config,
-    tungstenite::protocol::Message,
-};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, tungstenite::protocol::Message};
 
 use crate::agent::InterviewMode;
 use crate::percent_encode_component;
@@ -21,6 +18,7 @@ use crate::runtime::{
 };
 
 mod credentials;
+mod socket;
 pub use credentials::GeminiKeys;
 
 /// What every image this process sends Gemini is encoded as: a camera frame, a
@@ -1654,9 +1652,7 @@ async fn open_live_session_redacted_at(
     resume: Option<&str>,
     api_keys: Vec<String>,
 ) -> Result<GeminiLiveSession, Box<dyn std::error::Error + Send + Sync>> {
-    let connector = Connector::Rustls(crate::tls_config().clone());
-    let connect = connect_async_tls_with_config(url, None, false, Some(connector));
-    let (mut stream, _) = tokio::time::timeout(CONNECT_TIMEOUT, connect)
+    let mut stream = tokio::time::timeout(CONNECT_TIMEOUT, socket::connect(url))
         .await
         .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "Gemini connect timed out"))??;
     stream
