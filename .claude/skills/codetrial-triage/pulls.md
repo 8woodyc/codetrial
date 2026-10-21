@@ -180,14 +180,15 @@ gh pr view "$pr" --repo "$repo" --json mergeable,headRefOid \
 Post it before hiding anything, so a failed post never leaves a conflicting PR
 with no visible request. `hide` lists the earlier requests, reviews and comments
 alike, in a known wording and with no inline comments: all of them on a PR in
-`rebase`, or on a conflicting PR whose current request is hand-written (that
-request stays and is kept out of `hide_ask`); on any other PR, all but one: the
-newest on the current head, or the newest overall when none is, since a review
-left on an older head can carry a later date. The entries for a PR in `rebase`
-assume its new request landed, so hide them only after that PR's post succeeded;
-when the check above skipped the post, or the post failed, keep the one that
-rule would keep, which is still the current request. Hiding a review does not
-dismiss it; the PR stays at changes requested until a reviewer re-reviews.
+`rebase`, or on a PR, conflicting or not, whose current request is hand-written
+(that request stays and is kept out of `hide_ask`); on any other PR, all but
+one: the newest on the current head, or the newest overall when none is, since a
+review left on an older head can carry a later date. The entries for a PR in
+`rebase` assume its new request landed, so hide them only after that PR's post
+succeeded; when the check above skipped the post, or the post failed, keep the
+one that rule would keep, which is still the current request. Hiding a review
+does not dismiss it; the PR stays at changes requested until a reviewer
+re-reviews.
 
 `hide_ask` lists the other requests that mention rebase on a PR that has, or is
 about to get, the fixed request: hand-written ones, and known-wording reviews
