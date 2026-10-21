@@ -859,6 +859,113 @@ public:
       },
     );
   }
+
+  // A merge that links its last node back to the head returns the right values
+  // in the right order, so only a serializer that refuses a revisited node can
+  // tell it from a correct answer. "both empty" returns no node to link back.
+  const cyclicMerges = {
+    c: `struct ListNode* interleaveEvents(struct ListNode* list1, struct ListNode* list2) {
+    struct ListNode dummy = { 0, NULL };
+    struct ListNode* tail = &dummy;
+    while (list1 && list2) {
+        if (list1->val <= list2->val) { tail->next = list1; list1 = list1->next; }
+        else { tail->next = list2; list2 = list2->next; }
+        tail = tail->next;
+    }
+    tail->next = list1 ? list1 : list2;
+    struct ListNode* last = dummy.next;
+    while (last && last->next) last = last->next;
+    if (last) last->next = dummy.next;
+    return dummy.next;
+}`,
+    cpp: `class Solution {
+public:
+    ListNode* interleaveEvents(ListNode* list1, ListNode* list2) {
+        ListNode dummy;
+        ListNode* tail = &dummy;
+        while (list1 && list2) {
+            if (list1->val <= list2->val) { tail->next = list1; list1 = list1->next; }
+            else { tail->next = list2; list2 = list2->next; }
+            tail = tail->next;
+        }
+        tail->next = list1 ? list1 : list2;
+        ListNode* last = dummy.next;
+        while (last && last->next) last = last->next;
+        if (last) last->next = dummy.next;
+        return dummy.next;
+    }
+};`,
+    java: `class Solution {
+    public ListNode interleaveEvents(ListNode list1, ListNode list2) {
+        ListNode dummy = new ListNode(0);
+        ListNode tail = dummy;
+        while (list1 != null && list2 != null) {
+            if (list1.val <= list2.val) { tail.next = list1; list1 = list1.next; }
+            else { tail.next = list2; list2 = list2.next; }
+            tail = tail.next;
+        }
+        tail.next = list1 != null ? list1 : list2;
+        ListNode last = dummy.next;
+        while (last != null && last.next != null) last = last.next;
+        if (last != null) last.next = dummy.next;
+        return dummy.next;
+    }
+}`,
+  };
+  const cyclicMergeRuns = {
+    c: { skip: noCc, file: "merge.c" },
+    cpp: { skip: noGpp, file: "merge.cpp" },
+    java: { skip: noJava, file: "Main.java" },
+  };
+  for (const [language, { skip, file }] of Object.entries(cyclicMergeRuns)) {
+    it(
+      `${language} harness refuses a returned list that loops back into itself`,
+      { skip },
+      async () => {
+        const dir = mkdtempSync(join(tmpdir(), `codetrial-${language}-cycle-`));
+        try {
+          const source = join(dir, file);
+          const binary = join(dir, "merge");
+          writeFileSync(
+            source,
+            generateHarness(
+              language,
+              judges["merge-two-sorted-lists"],
+              cyclicMerges[language],
+            ),
+          );
+          let command = binary;
+          let args = [];
+          if (language === "c")
+            await run("cc", ["-std=c17", source, "-o", binary]);
+          if (language === "cpp")
+            await run("g++", ["-std=c++20", source, "-o", binary]);
+          if (language === "java") {
+            await run("javac", [source]);
+            command = "java";
+            args = ["-cp", dir, "Main"];
+          }
+          const { results } = parseCompilerResults(
+            (await run(command, args, { encoding: "utf8" })).stdout,
+          );
+          judges["merge-two-sorted-lists"].cases.forEach((testCase, index) => {
+            const result = results[index];
+            if (testCase.expected.length === 0) {
+              assert.deepEqual(result.actual, [], testCase.label);
+              return;
+            }
+            assert.match(
+              result.error ?? "",
+              /Returned list must not reach a node twice\./,
+              testCase.label,
+            );
+          });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      },
+    );
+  }
 });
 
 test("harness generator handles output parameter and output prefix specs", () => {
