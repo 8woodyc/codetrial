@@ -817,6 +817,20 @@ pub(super) async fn handle_gemini_event(
             context.media.audio.is_some(),
         ) {
             if !context.state.interviewer_silenced() {
+                if !context.activity.socket.discarding_output {
+                    let event = if active {
+                        super::floor::Event::Start {
+                            generating: context.activity.generating,
+                            ahead: context
+                                .output_audio
+                                .playout_deadline
+                                .saturating_duration_since(now),
+                        }
+                    } else {
+                        super::floor::Event::End
+                    };
+                    context_floor(room, context, event);
+                }
                 if active {
                     context.activity.latency.voice_start();
                 } else {
@@ -884,7 +898,12 @@ pub(super) async fn handle_gemini_event(
             latency::log(&record);
         }
         match event {
-            GeminiEvent::ToolCall(calls) => on_tool_calls(room, context, calls).await,
+            GeminiEvent::ToolCall(calls) => {
+                if !held && !discarding {
+                    context_floor(room, context, super::floor::Event::Output { audio: false });
+                }
+                on_tool_calls(room, context, calls).await
+            }
             GeminiEvent::OutputTranscript(text) => {
                 on_output_transcript(room, context, &text);
                 Ok(())
@@ -903,6 +922,7 @@ pub(super) async fn handle_gemini_event(
             }
             GeminiEvent::TurnComplete => on_turn_complete(room, context).await,
             GeminiEvent::Interrupted => {
+                context_floor(room, context, super::floor::Event::Interrupted);
                 on_interruption(room, context, interruptible, interruption_debt).await
             }
 
@@ -1350,6 +1370,72 @@ async fn on_input_transcript(
     Ok(())
 }
 
+/// Most events emit nothing, and some arrive per audio chunk or per loop step,
+/// so the clock is only read when a record is written.
+pub(super) fn observe_floor(
+    room: &str,
+    activity: &mut RuntimeActivity,
+    state: &RuntimeState,
+    event: super::floor::Event,
+) {
+    write_floor(
+        room,
+        activity,
+        || log_clock(state),
+        event,
+        &mut std::io::stderr().lock(),
+    );
+}
+
+fn write_floor(
+    room: &str,
+    activity: &mut RuntimeActivity,
+    clock: impl Fn() -> String,
+    event: super::floor::Event,
+    output: &mut impl std::io::Write,
+) {
+    let session = activity.live_session_id;
+    let socket = activity.live_socket;
+    // Read once, so every record one event emits carries the same `at`.
+    let mut at = None;
+    activity
+        .floor_tracker
+        .observe(event, Instant::now(), &mut |record| {
+            let at = at.get_or_insert_with(&clock);
+            writeln!(output, "{}", record.log_line(room, session, socket, at))
+                .expect("failed to write floor observation");
+        });
+}
+
+pub(super) fn reconcile_floor(
+    room: &str,
+    activity: &mut RuntimeActivity,
+    clock: impl Fn() -> String,
+    playing: bool,
+    output: &mut impl std::io::Write,
+) {
+    if !activity.candidate_voice_active {
+        write_floor(
+            room,
+            activity,
+            &clock,
+            super::floor::Event::ActivityLost,
+            output,
+        );
+    }
+    if !activity.generating && !playing {
+        write_floor(room, activity, &clock, super::floor::Event::Drained, output);
+    }
+}
+
+fn context_floor(
+    room: &RoomLink,
+    context: &mut GeminiEventContext<'_>,
+    event: super::floor::Event,
+) {
+    observe_floor(room.name(), context.activity, context.state, event);
+}
+
 /// Emits only numbers and identifiers, never transcript or tool arguments.
 pub(super) fn finish_turn_timing(
     room: &str,
@@ -1358,6 +1444,21 @@ pub(super) fn finish_turn_timing(
     outcome: TimingOutcome,
     output: &mut impl std::io::Write,
 ) {
+    if matches!(
+        outcome,
+        TimingOutcome::Replaced
+            | TimingOutcome::Paused
+            | TimingOutcome::Held
+            | TimingOutcome::Ended
+    ) {
+        write_floor(
+            room,
+            activity,
+            || clock.to_string(),
+            super::floor::Event::Reset,
+            output,
+        );
+    }
     if let Some(summary) = activity.turn_timing.finish(Instant::now(), outcome) {
         log_turn_timing(room, activity, clock, summary, output);
     }
@@ -1451,6 +1552,7 @@ async fn on_generated_audio(
         );
     }
     if captured {
+        context_floor(room, context, super::floor::Event::Output { audio: true });
         context
             .state
             .interviewer_delivery
@@ -1548,6 +1650,8 @@ async fn on_turn_complete(
         TimingOutcome::NoAudio,
         &mut std::io::stderr().lock(),
     );
+    let playing = context.output_audio.is_playing();
+    context_floor(room, context, super::floor::Event::Complete { playing });
     settle_hold_at_turn_end(context.state, context.activity);
 
     // The gap between Gemini finishing and the queue emptying. Gemini
@@ -1661,6 +1765,12 @@ async fn on_interruption(
         &log_clock(context.state),
         TimingOutcome::Interrupted,
         &mut std::io::stderr().lock(),
+    );
+
+    context_floor(
+        room,
+        context,
+        super::floor::Event::Complete { playing: false },
     );
 
     // What Gemini heard is the whole diagnosis. It interrupts on its own voice
@@ -2553,6 +2663,7 @@ async fn drop_stale_playout(
     ) else {
         return Ok(());
     };
+    context_floor(room, context, super::floor::Event::Interrupted);
     eprintln!(
         "timing: dropped {:.1}s of queued interviewer speech the candidate talked over",
         dropped.as_secs_f64()

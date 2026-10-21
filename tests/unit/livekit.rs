@@ -7883,6 +7883,70 @@ async fn a_resume_through_the_packet_handler_owes_the_paused_event_and_tells_the
     assert!(asked.contains(REACTION), "{asked}");
 }
 
+#[tokio::test]
+async fn only_a_packet_that_starts_a_hold_flushes_the_open_floor_overlap() {
+    use crate::livekit::floor::Event;
+    let config = packet_config();
+    let keys = Arc::new(GeminiKeys::from_config(&config));
+    let boot = candidate_bootstrap(&config, "room-test", None);
+    let (_room_events, events) = tokio::sync::mpsc::unbounded_channel();
+    let events = tokio::sync::Mutex::new(events);
+    for (payload, flushed) in [
+        (serde_json::json!({"type":"thinking","thinking":true}), true),
+        (
+            serde_json::json!({"type":"thinking","thinking":false}),
+            false,
+        ),
+    ] {
+        let interview = InterviewContext {
+            config: &config,
+            keys: &keys,
+            boot: &boot,
+            started_at: Instant::now(),
+            candidate_identity: "candidate",
+            events: &events,
+            slot: None,
+        };
+        let mut turn = hold_turn(RuntimeState::default());
+        turn.activity.floor_tracker.observe(
+            Event::Start {
+                generating: true,
+                ahead: Duration::ZERO,
+            },
+            Instant::now(),
+            &mut |_| {},
+        );
+        let (mut gemini, _server) = fake_socket(None).await;
+        let (mut output_audio, _queued) = test_output_audio();
+        let mut board = board::Board::new();
+        let mut media = CandidateMedia::new();
+        let (room, _sent) = room_link::RoomLink::recording("room-test");
+        {
+            let mut context = turn.context(&mut output_audio, &mut gemini, &mut board, &mut media);
+            let flow = apply_data_packet(
+                &room,
+                &mut context,
+                interview,
+                crate::runtime::TOPIC_CONTROL,
+                &payload,
+                true,
+            )
+            .await
+            .unwrap();
+            assert!(flow.is_continue());
+        }
+        let mut records = Vec::new();
+        turn.activity
+            .floor_tracker
+            .observe(Event::Reset, Instant::now(), &mut |r| records.push(r));
+        assert_eq!(
+            records.iter().all(|r| r.kind != "overlap"),
+            flushed,
+            "{payload}"
+        );
+    }
+}
+
 #[test]
 fn only_a_failed_reply_that_carried_thinking_debt_stays_owed() {
     let result = |carries_thinking_debt, pause_changed| crate::agent::DataEventResult {

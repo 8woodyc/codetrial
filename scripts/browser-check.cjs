@@ -10,6 +10,12 @@
 const { chromium } = require(process.env.PLAYWRIGHT_PATH);
 const assert = require("node:assert/strict");
 const fs = require("fs");
+const { installBargeReplay } = require("./barge-replay.cjs");
+const {
+  FloorCapture,
+  assertInterruptedOverlap,
+  readFloorRecords,
+} = require("./floor-capture.cjs");
 const http = require("http");
 const { spawn } = require("child_process");
 const {
@@ -18,6 +24,29 @@ const {
   removeParticipant,
 } = require("./livekit-room-service.cjs");
 const { problemPages, judgeCaseCount } = require("./judge-case-counts.cjs");
+
+const floorLogPath = process.env.BROWSER_CHECK_FLOOR_LOG || null;
+
+// Written before the run can fail, so an aborted run still points at its
+// retained floor log.
+function writeIncompleteCapture(fields) {
+  fs.writeFileSync(
+    process.env.BROWSER_CHECK_CAPTURE,
+    JSON.stringify(
+      {
+        mode: process.env.BROWSER_CHECK_AGENT,
+        flow: process.env.BROWSER_CHECK_FLOW,
+        status: "incomplete",
+        floorLogPath,
+        ...fields,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+if (process.env.BROWSER_CHECK_CAPTURE && floorLogPath) writeIncompleteCapture();
 
 const PROBLEM_IDS = {
   twoSum: "two-sum",
@@ -744,7 +773,8 @@ async function isolateRustAgent(
       args: [
         "--use-fake-device-for-media-stream",
         "--use-fake-ui-for-media-stream",
-        ...(process.env.BROWSER_CHECK_BARGE_AUDIO_FILE
+        ...(process.env.BROWSER_CHECK_BARGE_AUDIO_FILE &&
+        process.env.BROWSER_CHECK_FLOW !== "barge"
           ? [
               `--use-file-for-fake-audio-capture=${process.env.BROWSER_CHECK_BARGE_AUDIO_FILE}`,
             ]
@@ -761,6 +791,15 @@ async function isolateRustAgent(
 
   try {
     const page = await browser.newPage();
+    let bargeReplay = null;
+    if (process.env.BROWSER_CHECK_FLOW === "barge") {
+      await page.addInitScript(
+        installBargeReplay,
+        fs
+          .readFileSync(process.env.BROWSER_CHECK_BARGE_AUDIO_FILE)
+          .toString("base64"),
+      );
+    }
     // Playwright defaults both of these to 30s, which is generous until the
     // machine is busy and then is not. `interview.js` is a module with a
     // top-level await, so DOMContentLoaded does not fire until the problem
@@ -940,13 +979,18 @@ async function isolateRustAgent(
         },
       );
       for (const stream of [rustAgent.stdout, rustAgent.stderr]) {
+        const streamCapture = floorLogPath
+          ? new FloorCapture(floorLogPath)
+          : null;
         stream.on("data", (chunk) => {
+          streamCapture?.push(chunk);
           const text = redact(chunk);
           if (text.includes("problem=two-sum duration=20min"))
             sawRustMetadataConfig = true;
           agentOutput.push(text);
           while (agentOutput.join("").length > 12000) agentOutput.shift();
         });
+        stream.once("close", () => streamCapture?.close());
       }
       agentFailure = new Promise((_, reject) => {
         rustAgent.once("exit", (code, signal) => {
@@ -2258,6 +2302,19 @@ PatternLexicon.prototype.search = function(word) {
             .locator("#agent-state")
             .filter({ hasText: "Speaking" })
             .waitFor({ timeout: 120000 });
+          try {
+            bargeReplay = await page.evaluate(() => globalThis.replayBarge());
+          } catch (error) {
+            bargeReplay = await page
+              .evaluate(
+                () =>
+                  globalThis.bargeReplayAttempt ?? { excluded: "unavailable" },
+              )
+              .catch(() => ({ excluded: "unavailable" }));
+            throw error;
+          }
+          if (process.env.BROWSER_CHECK_CAPTURE)
+            writeIncompleteCapture({ bargeReplay });
           const candidateLabels = page
             .locator("p")
             .filter({ hasText: /^You$/ });
@@ -2287,6 +2344,22 @@ PatternLexicon.prototype.search = function(word) {
             throw new Error(
               `agent did not respond after candidate barge-in\n${agentOutput.join("")}`,
             );
+          }
+        }
+        if (credentialed && flow === "barge") {
+          if (!floorLogPath)
+            throw new Error(
+              "barge smoke requires BROWSER_CHECK_FLOOR_LOG from browser-check.sh",
+            );
+          const deadline = Date.now() + 10000;
+          while (true) {
+            try {
+              assertInterruptedOverlap(floorLogPath, roomName);
+              break;
+            } catch (error) {
+              if (Date.now() >= deadline) throw error;
+              await sleep(50);
+            }
           }
         }
         if (process.env.BROWSER_CHECK_CAPTURE) {
@@ -2333,6 +2406,11 @@ PatternLexicon.prototype.search = function(word) {
                 candidateSegmentCount,
                 agentAfterCandidate,
                 rustAgentParticipants,
+                floorLogPath,
+                floorRecords: floorLogPath
+                  ? readFloorRecords(floorLogPath)
+                  : [],
+                bargeReplay,
                 latencyLog: (agentOutput.join("") + "\n" + readServerLog())
                   .split("\n")
                   .filter((line) => line.includes("codetrial latency "))
@@ -2347,6 +2425,11 @@ PatternLexicon.prototype.search = function(word) {
       })(),
       agentFailure ?? never,
     ]).catch(async (error) => {
+      if (process.env.BROWSER_CHECK_CAPTURE && floorLogPath)
+        writeIncompleteCapture({
+          floorRecords: readFloorRecords(floorLogPath),
+          bargeReplay,
+        });
       console.error(
         redact(
           await page
@@ -2371,7 +2454,15 @@ PatternLexicon.prototype.search = function(word) {
     agentDone = true;
   } finally {
     agentDone = true;
-    if (rustAgent) stopProcessGroup(rustAgent);
+    if (
+      rustAgent &&
+      rustAgent.exitCode === null &&
+      rustAgent.signalCode === null
+    ) {
+      const closed = new Promise((resolve) => rustAgent.once("close", resolve));
+      stopProcessGroup(rustAgent);
+      await Promise.race([closed, sleep(5000)]);
+    }
     if (compilerExplorerMock)
       await new Promise((resolve) =>
         compilerExplorerMock.server.close(resolve),

@@ -5296,3 +5296,236 @@ fn delivery_uncertainty_flags_a_page_continuation_into_a_marked_turn() {
     );
     assert!(candidate.get("nextDelivery").is_none());
 }
+
+#[test]
+fn floor_resets_flush_once_before_socket_identity_changes() {
+    use crate::livekit::floor::Event;
+    for outcome in [
+        TimingOutcome::Paused,
+        TimingOutcome::Held,
+        TimingOutcome::Replaced,
+        TimingOutcome::Ended,
+    ] {
+        let mut activity = RuntimeActivity::for_interview(Instant::now(), 0, 42);
+        activity.live_socket = 3;
+        let mut output = Vec::new();
+        write_floor(
+            "room-a",
+            &mut activity,
+            || "0:01.000".into(),
+            Event::Start {
+                generating: true,
+                ahead: Duration::ZERO,
+            },
+            &mut output,
+        );
+        assert!(output.is_empty());
+        finish_turn_timing("room-a", &mut activity, "0:02.000", outcome, &mut output);
+        activity.live_socket = 4;
+        finish_turn_timing(
+            "room-a",
+            &mut activity,
+            "0:03.000",
+            TimingOutcome::Ended,
+            &mut output,
+        );
+        let log = String::from_utf8(output).unwrap();
+        assert_eq!(log.lines().count(), 1);
+        assert!(log.contains("room=room-a session=42 socket=3 seq=1"));
+        assert!(log.contains("kind=overlap outcome=unresolved at=0:02.000"));
+        assert!(log.contains("overlap_ms=unknown"));
+    }
+}
+
+#[tokio::test]
+async fn floor_ignores_tool_output_during_discard_or_hold() {
+    use crate::livekit::floor::Event;
+    for (discarding, held) in [(true, false), (false, true)] {
+        let mut harness = Harness::new().await;
+        harness.turn.activity.socket.discarding_output = discarding;
+        harness.turn.state.paused = held;
+        let start = Instant::now();
+        let mut records = Vec::new();
+        harness
+            .turn
+            .activity
+            .floor_tracker
+            .observe(Event::End, start, &mut |r| records.push(r));
+        harness.event(GeminiEvent::ToolCall(Vec::new())).await;
+        harness.turn.activity.floor_tracker.observe(
+            Event::Output { audio: true },
+            start + Duration::from_millis(100),
+            &mut |r| records.push(r),
+        );
+        harness.turn.activity.floor_tracker.observe(
+            Event::Start {
+                generating: false,
+                ahead: Duration::ZERO,
+            },
+            start + Duration::from_millis(200),
+            &mut |r| records.push(r),
+        );
+        assert_eq!(records[0].outcome, "respond");
+        assert_eq!(records[0].gap_ms, Some(100));
+    }
+}
+
+#[tokio::test]
+async fn actual_stale_playout_drop_settles_the_open_floor_overlap() {
+    use crate::livekit::floor::Event;
+    let mut harness = Harness::new().await;
+    harness.turn.activity.floor = Floor::AwaitingPlayout;
+    harness.output.playout_deadline = Instant::now() + Duration::from_secs(10);
+    let start = Instant::now();
+    harness.turn.activity.floor_tracker.observe(
+        Event::Start {
+            generating: false,
+            ahead: Duration::from_secs(10),
+        },
+        start,
+        &mut |_| {},
+    );
+    let mut context = harness.turn.context(
+        &mut harness.output,
+        &mut harness.gemini,
+        &mut harness.board,
+        &mut harness.media,
+    );
+    drop_stale_playout(&harness.room, &mut context, Interruptible::Yes)
+        .await
+        .unwrap();
+
+    // A drain after the drop must not turn the settled overlap into a
+    // continuation; END then emits it with the outcome the drop chose.
+    let mut records = Vec::new();
+    let tracker = &mut harness.turn.activity.floor_tracker;
+    tracker.observe(Event::Drained, start, &mut |r| records.push(r));
+    tracker.observe(Event::End, start, &mut |r| records.push(r));
+    let overlaps: Vec<_> = records.iter().filter(|r| r.kind == "overlap").collect();
+    assert_eq!(overlaps.len(), 1, "drop must settle the open overlap");
+    assert_eq!(overlaps[0].outcome, "interrupted");
+}
+
+#[tokio::test]
+async fn stale_playout_drop_after_activity_end_emits_the_overlap() {
+    use crate::livekit::floor::Event;
+    let mut harness = Harness::new().await;
+    harness.turn.activity.floor = Floor::AwaitingPlayout;
+    harness.output.playout_deadline = Instant::now() + Duration::from_secs(10);
+    let start = Instant::now();
+    let tracker = &mut harness.turn.activity.floor_tracker;
+    tracker.observe(
+        Event::Start {
+            generating: false,
+            ahead: Duration::from_secs(10),
+        },
+        start,
+        &mut |_| {},
+    );
+    tracker.observe(Event::End, start, &mut |_| {});
+    let mut context = harness.turn.context(
+        &mut harness.output,
+        &mut harness.gemini,
+        &mut harness.board,
+        &mut harness.media,
+    );
+    drop_stale_playout(&harness.room, &mut context, Interruptible::Yes)
+        .await
+        .unwrap();
+    let mut records = Vec::new();
+    harness
+        .turn
+        .activity
+        .floor_tracker
+        .observe(Event::Reset, Instant::now(), &mut |r| records.push(r));
+    assert!(
+        records.iter().all(|r| r.kind != "overlap"),
+        "an ended overlap is emitted by the drop itself"
+    );
+}
+
+#[test]
+fn loop_floor_reconciliation_waits_for_generation_and_playout() {
+    use crate::livekit::floor::Event;
+    for (generating, playing) in [(true, false), (false, true), (true, true)] {
+        let mut activity = RuntimeActivity::new(Instant::now());
+        activity.candidate_voice_active = true;
+        activity.generating = generating;
+        let mut output = Vec::new();
+        write_floor(
+            "room-a",
+            &mut activity,
+            || "0:01.000".into(),
+            Event::Start {
+                generating: true,
+                ahead: Duration::ZERO,
+            },
+            &mut output,
+        );
+        write_floor(
+            "room-a",
+            &mut activity,
+            || "0:02.000".into(),
+            Event::End,
+            &mut output,
+        );
+        reconcile_floor(
+            "room-a",
+            &mut activity,
+            || "0:03.000".into(),
+            playing,
+            &mut output,
+        );
+        let log = String::from_utf8(output).unwrap();
+        assert!(
+            !log.contains("kind=overlap"),
+            "generating={generating} playing={playing}: {log}"
+        );
+    }
+}
+
+#[test]
+fn loop_floor_reconciliation_observes_loss_and_natural_drain() {
+    use crate::livekit::floor::Event;
+    for lost in [false, true] {
+        let mut activity = RuntimeActivity::new(Instant::now());
+        activity.candidate_voice_active = !lost;
+        let mut output = Vec::new();
+        write_floor(
+            "room-a",
+            &mut activity,
+            || "0:01.000".into(),
+            Event::Start {
+                generating: false,
+                ahead: Duration::from_secs(1),
+            },
+            &mut output,
+        );
+        reconcile_floor(
+            "room-a",
+            &mut activity,
+            || "0:02.000".into(),
+            false,
+            &mut output,
+        );
+        if !lost {
+            assert!(output.is_empty(), "drain still waits for activity END");
+            write_floor(
+                "room-a",
+                &mut activity,
+                || "0:03.000".into(),
+                Event::End,
+                &mut output,
+            );
+        }
+        let log = String::from_utf8(output).unwrap();
+        assert!(log.contains(if lost {
+            "outcome=unresolved"
+        } else {
+            "outcome=continued"
+        }));
+        if lost {
+            assert!(log.contains("overlap_ms=unknown"));
+        }
+    }
+}
