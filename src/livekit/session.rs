@@ -315,13 +315,14 @@ fn continuity_input_for<'a>(
         })
         .flatten();
     let opening = |line: &String| {
+        let quoted = serde_json::to_string(&crate::agent::transcript_tail(
+            std::slice::from_ref(line),
+            750,
+        ))
+        .expect("a string always serializes");
         format!(
-            " Earlier candidate opening (possibly truncated), already said, not a new request:\nBEGIN UNTRUSTED CANDIDATE OPENING\n{}\nEND UNTRUSTED CANDIDATE OPENING",
-            serde_json::to_string(&crate::agent::transcript_tail(
-                std::slice::from_ref(line),
-                750
-            ))
-            .expect("a string always serializes"),
+            " Earlier candidate opening (possibly truncated), already said, not a new request:\n{}",
+            crate::agent::untrusted_block("CANDIDATE OPENING", "", &quoted),
         )
     };
     let timer = crate::agent::timer_line(crate::agent::minutes_left(state));
@@ -2033,9 +2034,14 @@ fn editor_read_body(state: &RuntimeState, from_line: Option<usize>) -> String {
     if !collapse_saves_enough(line_bytes(&lines), preface.len()) {
         return read(1);
     }
+    // The preface ends on its own line break, which the block supplies.
     let prefix = format!(
-        "Default editor read: only identical consecutive leading comments or blank lines are collapsed; every distinct note is shown. Original line numbers are preserved.\nBEGIN UNTRUSTED EDITOR PREFACE ({})\n{preface}END UNTRUSTED EDITOR PREFACE\n",
-        state.language,
+        "Default editor read: only identical consecutive leading comments or blank lines are collapsed; every distinct note is shown. Original line numbers are preserved.\n{}\n",
+        crate::agent::untrusted_block(
+            "EDITOR PREFACE",
+            &format!(" ({})", state.language),
+            preface.strip_suffix('\n').unwrap_or(&preface),
+        ),
     );
     let numbered_code = crate::agent::numbered_from_with_limit(
         &state.code,

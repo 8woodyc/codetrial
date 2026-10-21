@@ -76,7 +76,7 @@ pub(crate) use prompts::{
     behavioral_round_start, editor_tool_continuity, end_interview_refusal, evidenced_among,
     latest_candidate_continuity, numbered_bounded_line, numbered_from_with_limit,
     pending_candidate_line, read_editor_text_from_numbered, report_transcript_lines,
-    tool_editor_review,
+    tool_editor_review, untrusted_block,
 };
 pub(crate) use report::{
     MAX_ERROR_CHARS, Sanitized, sanitize_example_drawing_candidate, sanitize_report_candidate,
@@ -669,7 +669,19 @@ impl SpeakerTurn {
         // may split mid-word, so inserting a separator turns "Hey, I'm" + ",
         // so" into "Hey, I'm , so" and "Hel" + "lo" into "Hel lo". Only the
         // assembled turn is cleaned.
-        self.text.push_str(fragment);
+        //
+        // A turn is one transcript line, and every prompt that quotes the
+        // transcript relies on each line opening with its speaker. A break
+        // inside the recognized text would start a line with whatever the
+        // candidate said, which is how a spoken fence marker would close an
+        // untrusted block, so breaks become spaces as each fragment arrives.
+        self.text.extend(fragment.chars().map(|character| {
+            if value::breaks_a_prompt_line(character) {
+                ' '
+            } else {
+                character
+            }
+        }));
         let spoken = spoken_text(&self.text);
 
         // A turn that is nothing but artifact has not said anything yet.
