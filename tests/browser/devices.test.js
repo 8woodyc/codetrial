@@ -44,6 +44,166 @@ test("a granted track of each kind lands in one stream", async () => {
   assert.equal(pool.errorOf("audio"), null);
 });
 
+test("selecting a microphone replaces only audio and preserves processing constraints", async () => {
+  const asked = [];
+  const { pool } = poolWith(async (constraints) => {
+    asked.push(constraints);
+    return new FakeStream([
+      new FakeTrack(constraints.audio ? "audio" : "video"),
+    ]);
+  });
+  let lost = 0;
+  pool.configure("audio", {
+    onLost: () => {
+      lost += 1;
+    },
+  });
+  pool.start();
+  await settle();
+  const original = pool.trackOf("audio");
+  const camera = pool.trackOf("video");
+  const stream = pool.stream;
+  pool.selectMicrophone("usb");
+  assert.equal(original.stopped, true);
+  assert.equal(pool.trackOf("audio"), null);
+  assert.equal(lost, 1);
+  await settle();
+  assert.deepEqual(asked.at(-1), {
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      deviceId: { exact: "usb" },
+    },
+  });
+  assert.equal(pool.stream, stream);
+  assert.equal(pool.trackOf("video"), camera);
+  assert.equal(camera.stopped, false);
+  assert.notEqual(pool.trackOf("audio"), original);
+  const count = asked.length;
+  pool.selectMicrophone("usb");
+  assert.equal(asked.length, count);
+  pool.selectMicrophone("");
+  await settle();
+  assert.equal(asked.at(-1).audio.deviceId, undefined);
+  assert.equal(pool.stream.getTracks().length, 2);
+});
+
+test("rapid microphone choices stop the old grant and request only the latest device", async () => {
+  const pending = [];
+  const asked = [];
+  const { pool } = poolWith((constraints) => {
+    if (constraints.video)
+      return Promise.resolve(new FakeStream([new FakeTrack("video")]));
+    asked.push(constraints.audio.deviceId?.exact || "");
+    return new Promise((resolve) => pending.push(resolve));
+  });
+  pool.start();
+  pool.selectMicrophone("usb");
+  pool.selectMicrophone("headset");
+  assert.deepEqual(asked, [""]);
+  const abandoned = new FakeTrack("audio");
+  pending.shift()(new FakeStream([abandoned]));
+  await settle();
+  assert.equal(abandoned.stopped, true);
+  assert.equal(pool.trackOf("audio"), null);
+  assert.deepEqual(asked, ["", "headset"]);
+  const latest = new FakeTrack("audio");
+  pending.shift()(new FakeStream([latest]));
+  await settle();
+  assert.equal(pool.trackOf("audio"), latest);
+  assert.equal(latest.stopped, false);
+});
+
+test("an obsolete microphone rejection does not poison the latest choice", async () => {
+  let rejectOld;
+  let grantNew;
+  const { pool } = poolWith((constraints) => {
+    if (constraints.video)
+      return Promise.resolve(new FakeStream([new FakeTrack("video")]));
+    if (!constraints.audio.deviceId)
+      return new Promise((resolve, reject) => {
+        rejectOld = reject;
+      });
+    return new Promise((resolve) => {
+      grantNew = resolve;
+    });
+  });
+  pool.start();
+  pool.selectMicrophone("usb");
+  rejectOld(new Error("Old device refused"));
+  await settle();
+  assert.equal(pool.errorOf("audio"), null);
+  const selected = new FakeTrack("audio");
+  grantNew(new FakeStream([selected]));
+  await settle();
+  assert.equal(pool.trackOf("audio"), selected);
+});
+
+test("a failed selected microphone retries that device and can return to default", async () => {
+  const asked = [];
+  const retries = [];
+  const { pool } = poolWith(
+    async (constraints) => {
+      if (constraints.audio?.deviceId) {
+        asked.push(constraints.audio.deviceId.exact);
+        throw new Error("Selected device unavailable");
+      }
+      return new FakeStream([
+        new FakeTrack(constraints.audio ? "audio" : "video"),
+      ]);
+    },
+    {
+      schedule: (callback) => {
+        retries.push(callback);
+        return retries.length;
+      },
+      unschedule: () => {},
+    },
+  );
+  pool.start();
+  await settle();
+  pool.selectMicrophone("missing");
+  await settle();
+  assert.equal(pool.trackOf("audio"), null);
+  assert.match(pool.errorOf("audio"), /Selected device unavailable/);
+  retries.shift()();
+  await settle();
+  assert.deepEqual(asked, ["missing", "missing"]);
+  pool.selectMicrophone("");
+  await settle();
+  assert.ok(pool.trackOf("audio"));
+  assert.equal(pool.errorOf("audio"), null);
+});
+
+test("leaving during a microphone change stops a late grant without requesting again", async () => {
+  let finished = false;
+  let grant;
+  let asked = 0;
+  const { pool } = poolWith(
+    (constraints) => {
+      if (constraints.video)
+        return Promise.resolve(new FakeStream([new FakeTrack("video")]));
+      asked += 1;
+      return new Promise((resolve) => {
+        grant = resolve;
+      });
+    },
+    { isFinished: () => finished },
+  );
+  pool.start();
+  pool.selectMicrophone("usb");
+  finished = true;
+  const late = new FakeTrack("audio");
+  grant(new FakeStream([late]));
+  await settle();
+  assert.equal(late.stopped, true);
+  assert.equal(pool.trackOf("audio"), null);
+  assert.equal(asked, 1);
+  pool.selectMicrophone("headset");
+  assert.equal(asked, 1);
+});
+
 // The bug this replaces: each device scheduled its own retry and both called
 // back into the same start, so denying both prompts doubled the number of
 // in-flight requests every two seconds until the tab died.

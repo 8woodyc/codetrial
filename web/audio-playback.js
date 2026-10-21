@@ -31,6 +31,12 @@ export function createAudioPlayback({
   let pending = false;
   let blocked = false;
 
+  function paused() {
+    // Unmuting can pause native playback after its play promise succeeded.
+    if (element?.paused && !element.ended && !pending && !blocked)
+      void play(element);
+  }
+
   function render() {
     if (!blocked && button.ownerDocument.activeElement === button)
       focusTarget.focus({ preventScroll: true });
@@ -60,6 +66,7 @@ export function createAudioPlayback({
   /// restored, so nothing is announced.
   function clear() {
     revision += 1;
+    element?.removeEventListener?.("pause", paused);
     element = null;
     pending = false;
     blocked = false;
@@ -84,6 +91,10 @@ export function createAudioPlayback({
   function play(nextElement) {
     if (!room) return Promise.resolve();
     revision += 1;
+    if (element !== nextElement) {
+      element?.removeEventListener?.("pause", paused);
+      nextElement.addEventListener?.("pause", paused);
+    }
     element = nextElement;
     pending = false;
     reapply();

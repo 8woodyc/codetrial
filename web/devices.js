@@ -48,6 +48,7 @@ export function createDevicePool({
     kind,
     constraints: { [kind]: CONSTRAINTS[kind] },
     pending: false,
+    generation: 0,
     disabled: false,
     error: null,
     accept: () => true,
@@ -87,6 +88,7 @@ export function createDevicePool({
   // `pending` matters as much as the shared timer: a retry must not open a
   // second prompt while the first is still on screen.
   const requestDevice = (device) => {
+    if (isFinished()) return;
     // An ended track never revives, and while it sits in the stream it looks
     // like a device this pool already holds, so the retry asks for nothing and
     // the candidate is stranded with no way back.
@@ -103,10 +105,15 @@ export function createDevicePool({
 
     if (device.disabled || device.pending || trackOf(device.kind)) return;
     device.pending = true;
+    const generation = device.generation;
     void mediaDevices
       .getUserMedia(device.constraints)
       .then((granted) => {
-        if (device.disabled) {
+        if (
+          device.disabled ||
+          isFinished() ||
+          generation !== device.generation
+        ) {
           granted.getTracks().forEach((track) => track.stop());
           return;
         }
@@ -122,6 +129,7 @@ export function createDevicePool({
         device.onTrack();
       })
       .catch((error) => {
+        if (isFinished() || generation !== device.generation) return;
         // Some browsers leave a DOMException's message empty and name the
         // failure instead. Keep both: the preflight words are the candidate's
         // only explanation, and the optional-camera path distinguishes denied
@@ -133,6 +141,9 @@ export function createDevicePool({
       })
       .finally(() => {
         device.pending = false;
+        // A selection changed while the browser was answering the old request.
+        // Reuse the pending guard so repeated changes never open more prompts.
+        if (generation !== device.generation) requestDevice(device);
         onChange();
       });
   };
@@ -162,6 +173,30 @@ export function createDevicePool({
     },
     start,
     retry,
+    selectMicrophone(deviceId) {
+      const audio = devices.audio;
+      if (
+        isFinished() ||
+        (audio.constraints.audio.deviceId?.exact || "") === deviceId
+      )
+        return;
+      audio.generation += 1;
+      audio.constraints = {
+        audio: {
+          ...CONSTRAINTS.audio,
+          ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+        },
+      };
+      audio.error = null;
+      const held = trackOf("audio");
+      if (held) {
+        stream.removeTrack(held);
+        held.stop();
+      }
+      audio.onLost();
+      start();
+      onChange();
+    },
     disable(kind) {
       const device = devices[kind];
       device.disabled = true;

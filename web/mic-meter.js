@@ -66,6 +66,7 @@ export function createMicMeter({
     return startMeter(
       pool.stream,
       (level) => {
+        if (isFinished() || mine !== generation) return;
         pool.setError("audio", null);
         recent.push(level);
         if (recent.length > MIC_CONFIRM_FRAMES) recent.shift();
@@ -75,6 +76,7 @@ export function createMicMeter({
         onLevel(level);
       },
       (error) => {
+        if (isFinished() || mine !== generation) return;
         pool.setError("audio", error);
         forgetPeak();
         onFailure(error);

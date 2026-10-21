@@ -12,12 +12,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
-  assertIncludesCompact,
   firstPartyScripts as webScripts,
   interviewSource,
   root,
 } from "./source.js";
-import { outputAfterRouting, outputOptions } from "../../web/meet-audio.js";
+import { outputOptions } from "../../web/meet-audio.js";
 
 const web = join(root, "web");
 const read = (name) => readFileSync(join(web, name), "utf8");
@@ -121,101 +120,48 @@ test("meet-mode getusermedia allowlist", () => {
 // These execute the decisions instead of reading them. The text assertions
 // below still guard the wiring, but a wiring assertion cannot tell whether the
 // logic is right, and both bugs this feature shipped with were logic.
-test("sink routing offers only devices the browser has named", () => {
+test("output choices include one default and only named device ids", () => {
   const before = [{ kind: "audiooutput", deviceId: "", label: "" }];
   const after = [
+    { kind: "audiooutput", deviceId: "default", label: "System speaker" },
     { kind: "audiooutput", deviceId: "speakers", label: "Built-in" },
     { kind: "audioinput", deviceId: "mic", label: "Mic" },
     { kind: "audiooutput", deviceId: "usb", label: "" },
   ];
 
-  // Pre-grant placeholder: an empty deviceId renders as a real choice and then
-  // routes to nothing, so it must not reach the list at all.
-  assert.deepEqual(outputOptions(before, null), []);
+  // The explicit default replaces blank placeholders and the browser's default
+  // alias, so neither can produce a duplicate choice.
+  assert.deepEqual(outputOptions(before, null), [
+    { deviceId: "", label: "System default", selected: true },
+  ]);
   assert.deepEqual(outputOptions(after, "usb"), [
+    { deviceId: "", label: "System default", selected: false },
     { deviceId: "speakers", label: "Built-in", selected: false },
     { deviceId: "usb", label: "Output 2", selected: true },
   ]);
   // An unnamed device still gets a usable label, and inputs never appear.
   assert.deepEqual(
     outputOptions(after, null).map((option) => option.deviceId),
-    ["speakers", "usb"],
-  );
-});
-
-test("sink routing keeps the preference and the real sink in agreement", () => {
-  // Success: the pick becomes the preference.
-  assert.equal(outputAfterRouting("old", "new", true), "new");
-  // Refusal rolls back. Keeping the refused device would leave the select
-  // showing a speaker Jim never played through, until the next reload.
-  assert.equal(outputAfterRouting("old", "new", false), "old");
-  // Refused with nothing to fall back to: no preference at all, so the caller
-  // clears the key rather than persisting the device that just failed.
-  assert.equal(outputAfterRouting(null, "new", false), null);
-  // Reapplying a stored preference passes the same id as both, so there is no
-  // earlier device to fall back to. Returning it would write the refused id
-  // back and retry it on every reload.
-  assert.equal(
-    outputAfterRouting("same", "same", false),
-    "",
-    "a refused reapply must clear the preference, not re-store it",
-  );
-  assert.equal(
-    outputAfterRouting("same", "same", true),
-    "same",
-    "and a reapply that works keeps it",
+    ["", "speakers", "usb"],
   );
 });
 
 // What the executable tests above cannot see: that interview.js actually wires
 // those decisions to the right nodes and the right track.
 test("sink routing", () => {
-  // setSinkId targets Jim's element and nothing else, so the candidate cannot
-  // accidentally reroute their own microphone monitoring.
+  // Playback routing must never target the candidate's microphone monitoring.
   const sinkCalls = [...script.matchAll(/(\w+)\s*\n?\s*\.setSinkId\(/g)].map(
     (match) => match[1],
   );
   assert.deepEqual(
     sinkCalls,
-    ["jimAudio"],
-    "setSinkId may only target Jim's audio element",
+    ["target", "jimAudio", "jimAudio"],
+    "setSinkId targets only the test sounds and Jim's audio",
   );
   assert.match(
     script,
     /element\.id = "jim-audio"/,
     "the remote audio element needs a stable id",
-  );
-  assert.match(
-    script,
-    /outputOptions\(devices, readStored\(AUDIO_OUTPUT_KEY\)\)/,
-    "the selector is built from the shared decision",
-  );
-  // Persist before routing. A choice made during the preflight, before Jim's
-  // track exists, is dropped if it only survives a successful setSinkId.
-  // `applyAudioOutput` is the queue in front of this; the routing itself is
-  // what has to get the order right.
-  const apply = script.slice(script.indexOf("async function routeAudioOutput"));
-  assert.ok(
-    apply.indexOf("writeStored(AUDIO_OUTPUT_KEY") <
-      apply.indexOf(".setSinkId("),
-    "routing must persist before it routes",
-  );
-  // Serialized and stamped. Two picks in flight can settle in either order, and
-  // the older one must not write its device over the newer one's.
-  assertIncludesCompact(
-    script,
-    "routingChain = routingChain.then(() => routeAudioOutput(deviceId, ++routingRequest))",
-    "routing requests are serialized",
-  );
-  assert.match(
-    apply,
-    /if \(request !== routingRequest\) return;/,
-    "and a superseded request does not get the last word on the preference",
-  );
-  assert.match(
-    apply,
-    /outputAfterRouting\(previous, deviceId, routed\)/,
-    "rollback comes from the tested decision",
   );
   // One element for the session, and it is released on unsubscribe.
   assert.match(
@@ -228,11 +174,6 @@ test("sink routing", () => {
     /TrackUnsubscribed, dropRemoteAudio/,
     "unsubscribed audio must be detached",
   );
-  // Unsupported browsers get told, not silently downgraded, and the whole row
-  // hides so the label does not dangle over a control that is gone.
-  assert.match(script, /"setSinkId" in HTMLMediaElement\.prototype/);
-  assert.match(script, /meetOutputRow\.hidden = true/);
-  assert.match(script, /showOutputNote\(OUTPUT_NOTES\.unsupported\)/);
 });
 
 test("no synthetic microphone", () => {

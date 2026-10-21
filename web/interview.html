@@ -561,6 +561,21 @@
                 Devices
               </h3>
               <div class="audio-check-step" id="audio-step-output">
+                <div class="meet-mode-output">
+                  <label for="preflight-output">Output device</label>
+                  <select
+                    id="preflight-output"
+                    aria-describedby="preflight-output-note"
+                  >
+                    <option value="">System default</option>
+                  </select>
+                </div>
+                <p
+                  id="preflight-output-note"
+                  class="muted small"
+                  role="status"
+                  hidden
+                ></p>
                 <p>
                   <span class="step-mark" aria-hidden="true"></span
                   ><strong>Sound</strong> —
@@ -607,6 +622,21 @@
               </div>
 
               <div class="audio-check-step" id="audio-step-mic">
+                <div class="meet-mode-output">
+                  <label for="preflight-input">Microphone device</label>
+                  <select
+                    id="preflight-input"
+                    aria-describedby="preflight-input-note"
+                  >
+                    <option value="">System default</option>
+                  </select>
+                </div>
+                <p
+                  id="preflight-input-note"
+                  class="muted small"
+                  role="status"
+                  hidden
+                ></p>
                 <p>
                   <span class="step-mark" aria-hidden="true"></span
                   ><strong>Microphone</strong> — say something and watch the

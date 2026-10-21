@@ -19,6 +19,26 @@ function fixture(stored = null, audio = { volume: 1, muted: false }) {
   };
 }
 
+test("routing hold and candidate mute remain independent through volumechange", () => {
+  const audio = Object.assign(new EventTarget(), { volume: 1, muted: false });
+  const f = fixture("37", audio);
+  f.volume.setRoutingHeld(true);
+  assert.equal(audio.muted, true);
+  assert.equal(f.volume.muted, false);
+  f.volume.setVolume(45);
+  audio.muted = false;
+  audio.dispatchEvent(new Event("volumechange"));
+  assert.equal(audio.muted, true);
+  f.volume.toggleMute();
+  f.volume.setRoutingHeld(false);
+  assert.equal(audio.muted, true);
+  assert.equal(f.volume.muted, true);
+  f.volume.toggleMute();
+  assert.equal(audio.muted, false);
+  assert.equal(audio.volume, 0.45);
+  assert.equal(f.storage.getItem(JIM_VOLUME_KEY), "45");
+});
+
 for (const stored of [
   null,
   "",

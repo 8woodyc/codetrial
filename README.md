@@ -152,6 +152,14 @@ it is unavailable or declined; the signed integrity trail and the report record
 that neutral condition and why. A recorded interview still requires its camera
 before it can start.
 
+Where the browser supports device selection, preflight offers microphone and
+output selectors using System default until another device is chosen. Changing
+the microphone releases the previous track and requires a fresh sound check;
+the selected track is published to the interview. The output selection applies
+to test sounds and Jim's voice, is shared with the Meet sidebar, and is
+remembered across reloads. A saved output that is no longer listed falls back
+to System default.
+
 Candidates can present the interview in Google Meet by sharing the CodeTrial tab
 with tab audio enabled. Meet owns the shared tab after that, and face-presence
 analysis is disabled for the session. See the
