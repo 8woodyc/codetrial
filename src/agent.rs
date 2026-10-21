@@ -180,9 +180,9 @@ pub const THINKING_CHECK_IN_S: u64 = 120;
 pub(crate) const THINKING_RELEASE_COOLDOWN: std::time::Duration =
     std::time::Duration::from_secs(10);
 
-pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 38;
-pub const LIVE_PROMPT_VERSION: u32 = 29;
-pub const REPORT_PROMPT_VERSION: u32 = 22;
+pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 39;
+pub const LIVE_PROMPT_VERSION: u32 = 30;
+pub const REPORT_PROMPT_VERSION: u32 = 23;
 pub const RUBRIC_VERSION: u32 = 1;
 pub const REPORT_SCHEMA_VERSION: u32 = 3;
 
@@ -764,6 +764,181 @@ impl SpeakerTurn {
     }
 }
 
+/// Local cancellation evidence is separate from recognition text: raw text
+/// still establishes who supplied an idea first, but not whether it was heard.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct InterviewerDelivery {
+    pub(crate) uncertain: std::collections::BTreeSet<usize>,
+    current: Option<usize>,
+    pending_audio: Option<std::time::Instant>,
+    queued: Vec<(usize, std::time::Instant)>,
+    /// While open, every fragment is marked as possibly cut output.
+    window: Option<FragmentWindow>,
+    /// The marked line that fragments in the open window may still extend.
+    /// Every other marked line is sealed; see `accepts`.
+    extendable: Option<usize>,
+}
+
+/// How long fragments after a cut stay marked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FragmentWindow {
+    /// A running generation was cut: its fragments can still arrive, up to
+    /// the next completion.
+    UntilCompletion,
+    /// Completed output was cut while queued: transcription trails audio, so
+    /// a fragment arriving before the next generation's audio may be its tail.
+    UntilNextAudio,
+}
+
+/// What a local cut stopped, as `cut_off_turn` and the stale playout drop
+/// see it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DeliveryCut {
+    /// Nothing was generating or still queued: nothing is marked.
+    Idle,
+    /// Output that had completed was still queued, or its transcription was
+    /// still arriving.
+    Playout,
+    /// A generation was cut while it was still producing output.
+    Generation,
+}
+
+impl InterviewerDelivery {
+    pub(crate) fn transcript(&mut self, line: usize) {
+        self.current = Some(line);
+        if self.window.is_some() {
+            self.uncertain.insert(line);
+            self.extendable = Some(line);
+        }
+        if let Some(deadline) = self.pending_audio.take() {
+            self.audio(deadline);
+        }
+    }
+
+    /// Whether an open interviewer line may take another fragment. A cut
+    /// seals the line it marks, and so does the end of the window that marked
+    /// it: words after either belong on a new line, never inside text every
+    /// model reader omits.
+    pub(crate) fn accepts(&self, line: usize) -> bool {
+        !self.is_uncertain(line) || self.extendable == Some(line)
+    }
+
+    pub(crate) fn is_uncertain(&self, line: usize) -> bool {
+        self.uncertain.contains(&line)
+    }
+
+    /// Whether any line from `start` on is marked.
+    pub(crate) fn any_uncertain_from(&self, start: usize) -> bool {
+        self.uncertain.range(start..).next().is_some()
+    }
+
+    pub(crate) fn audio(&mut self, deadline: std::time::Instant) {
+        // Completed output has no audio left to send, so audio after a cut of
+        // it belongs to the next generation, whose words open their own line.
+        if self.window == Some(FragmentWindow::UntilNextAudio) {
+            self.window = None;
+            self.extendable = None;
+        }
+        if self.current.is_some_and(|line| !self.accepts(line)) {
+            self.current = None;
+        }
+        self.prune(std::time::Instant::now());
+        if let Some(line) = self.current {
+            if let Some((_, end)) = self.queued.iter_mut().find(|(index, _)| *index == line) {
+                *end = deadline;
+            } else {
+                self.queued.push((line, deadline));
+            }
+        } else {
+            self.pending_audio = Some(deadline);
+        }
+    }
+
+    /// Forgets lines whose audio has finished playing by `now`: audio that
+    /// ends at a cut was heard.
+    fn prune(&mut self, now: std::time::Instant) {
+        self.queued.retain(|(_, end)| *end > now);
+    }
+
+    /// A generation completed. It ends a generation cut's window, but not a
+    /// playout cut's: a completion with no audio says nothing about whether
+    /// the cut output's trailing words are still to come.
+    pub(crate) fn complete(&mut self) {
+        self.current = None;
+        self.pending_audio = None;
+        if self.window == Some(FragmentWindow::UntilCompletion) {
+            self.window = None;
+            self.extendable = None;
+        }
+    }
+
+    /// The provider socket was replaced: nothing the old one generated can
+    /// arrive on the new one, so every window ends.
+    pub(crate) fn replace(&mut self) {
+        self.complete();
+        self.window = None;
+        self.extendable = None;
+    }
+
+    /// Marks every line with audio still queued, and the open line when
+    /// something was cut: without word alignment its words may describe the
+    /// cut output. Nothing generating and nothing queued marks nothing.
+    pub(crate) fn cancel(&mut self, cut: DeliveryCut, now: std::time::Instant) {
+        self.prune(now);
+        self.uncertain
+            .extend(self.queued.drain(..).map(|(line, _)| line));
+
+        if let Some(line) = self.current.take()
+            && cut != DeliveryCut::Idle
+        {
+            self.uncertain.insert(line);
+        }
+        self.pending_audio = None;
+        self.extendable = None;
+        match cut {
+            DeliveryCut::Idle => {}
+            DeliveryCut::Playout => {
+                if self.window != Some(FragmentWindow::UntilCompletion) {
+                    self.window = Some(FragmentWindow::UntilNextAudio);
+                }
+            }
+            DeliveryCut::Generation => self.window = Some(FragmentWindow::UntilCompletion),
+        }
+    }
+}
+
+impl RuntimeState {
+    /// The transcript as model readers see it, borrowed when nothing is
+    /// marked.
+    pub(crate) fn delivery_transcript(&self) -> std::borrow::Cow<'_, [String]> {
+        if self.interviewer_delivery.uncertain.is_empty() {
+            return std::borrow::Cow::Borrowed(&self.transcript);
+        }
+        self.transcript
+            .iter()
+            .enumerate()
+            .map(|(index, line)| {
+                if self.interviewer_delivery.is_uncertain(index) {
+                    format!("{INTERVIEWER_SPEAKER}: {CANCELLED_INTERVIEWER_OUTPUT}")
+                } else {
+                    line.clone()
+                }
+            })
+            .collect()
+    }
+}
+
+/// Defined as a macro so the prompts that describe the marker can `concat!`
+/// the same text.
+macro_rules! cancelled_interviewer_output {
+    () => {
+        "[Interviewer output cancelled; delivery uncertain; generated words omitted.]"
+    };
+}
+pub(crate) use cancelled_interviewer_output;
+
+pub(crate) const CANCELLED_INTERVIEWER_OUTPUT: &str = cancelled_interviewer_output!();
+
 /// What a recorded complexity analysis describes; see
 /// `RuntimeState::analysis`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -895,6 +1070,9 @@ pub struct RuntimeState {
     /// asks for the interview to be closed.
     pub board_resend_requested: bool,
     pub transcript: Vec<String>,
+    /// Local delivery evidence; raw transcript text retains recognition and
+    /// independence provenance even when queued output is cancelled.
+    pub interviewer_delivery: InterviewerDelivery,
     pub last_test_run: Option<serde_json::Value>,
     /// Submitted source belonging to the displayed report, including runs
     /// that earned no Test credit. Missing submission leaves provenance
@@ -1117,6 +1295,7 @@ impl Default for RuntimeState {
             last_board_at_ms: None,
             board_resend_requested: false,
             transcript: Vec::new(),
+            interviewer_delivery: InterviewerDelivery::default(),
             last_test_run: None,
             last_test_run_code: None,
             test_runs: 0,
@@ -1544,7 +1723,8 @@ pub fn take_phase_judge_window(state: &mut RuntimeState, problem: &Problem) -> S
     // Only the tail is marked, since only the tail is sent. A behavioral round
     // is read from where it opened: an answer given before it was asked for
     // counts for nothing, as the report reads it.
-    let lines = &state.transcript[judged_from(state)..];
+    let delivery = state.delivery_transcript();
+    let lines = &delivery[judged_from(state)..];
     let tail = &lines[tail_start(lines, PHASE_JUDGE_WINDOW_BYTES)..];
     let window = transcript_tail(&mark_unrecognized_turns(tail), PHASE_JUDGE_WINDOW_BYTES);
     state.judged_for = phase_judge_need(state);

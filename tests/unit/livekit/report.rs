@@ -2650,6 +2650,21 @@ fn the_debrief_places_each_follow_up_judgment_beside_its_follow_up() {
     assert_eq!(report["debrief"]["followUps"][0]["raised"], true);
     assert!(report["debrief"]["followUps"][1]["raised"].is_null());
 
+    let mut uncertain = released.clone();
+
+    // The reviewer sees only the marker for line 0, so a positive judgment
+    // rests on other evidence, here the candidate's answer, and is kept.
+    uncertain.transcript = vec![
+        "Interviewer: Could you extend that to three?".into(),
+        "Candidate: For three I would keep a second map of pair sums.".into(),
+    ];
+    uncertain.interviewer_delivery.uncertain.insert(0);
+    let mut report = judged();
+    stamp_report_debrief(&mut report, &boot, &uncertain);
+    assert_eq!(report["debrief"]["followUps"][0]["raised"], true);
+    assert!(report["debrief"]["followUps"][1]["raised"].is_null());
+    assert!(report["debrief"]["followUps"][1]["assessment"].is_null());
+
     let mut lost = final_report(None, 0, Some("model unavailable"), boot.problem);
     stamp_report_debrief(&mut lost, &boot, &released);
     for entry in lost["debrief"]["followUps"].as_array().unwrap() {

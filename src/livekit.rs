@@ -968,7 +968,9 @@ fn hand_over(
         activity.generating,
     );
     let owed = activity.reply_unfinished();
-    cut_off_turn(activity, output_audio);
+    cut_off_turn(state, activity, output_audio);
+    // Late fragments belong to the retired socket, never its replacement.
+    state.interviewer_delivery.replace();
     clear_abandoned_socket_work(state, activity);
     activity.evidence_shown = None;
     activity.silent_editor_delivery = None;
@@ -1459,7 +1461,9 @@ fn take_interim_review_window(state: &mut RuntimeState, boot: &RuntimeBootstrap<
     // and the editor is unbounded on the way in -- either one would otherwise
     // hand a call that has twelve seconds an input too large to read.
     let window = transcript_tail(
-        &crate::agent::mark_unrecognized_turns(&state.transcript[unreviewed_from(state)..]),
+        &crate::agent::mark_unrecognized_turns(
+            &state.delivery_transcript()[unreviewed_from(state)..],
+        ),
         INTERIM_WINDOW_BYTES,
     );
     state.interim_transcript_lines = state.transcript.len();
@@ -2223,7 +2227,13 @@ fn update_pause_activity(
             .filter(|_| activity.owes_prompt());
         hold_owed_reply(state, owed_prompt);
     }
-    session::cut_off_generation(activity, output_audio, latency::Boundary::Paused, now);
+    session::cut_off_generation(
+        state,
+        activity,
+        output_audio,
+        latency::Boundary::Paused,
+        now,
+    );
 }
 
 /// The event a resume owes a reply for, read before the resume prompt is

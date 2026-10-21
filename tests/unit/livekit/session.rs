@@ -113,7 +113,7 @@ fn activity_before_interruption_preserves_reply_debt_and_next_turn_timing() {
         voice
     ));
     let (mut output, _queued) = test_output_audio();
-    cut_off_turn(&mut activity, &mut output);
+    cut_off_turn(&mut RuntimeState::default(), &mut activity, &mut output);
     activity
         .turn_timing
         .finish(voice, TimingOutcome::Interrupted);
@@ -753,7 +753,15 @@ fn the_closing_message_is_not_cut_short_by_a_candidate_talking_over_it() {
     let mut activity = RuntimeActivity::new(Instant::now());
     activity.floor = Floor::AwaitingPlayout;
 
-    assert!(take_stale_playout(&mut activity, &mut output_audio, Interruptible::No).is_none());
+    assert!(
+        take_stale_playout(
+            &mut RuntimeState::default(),
+            &mut activity,
+            &mut output_audio,
+            Interruptible::No
+        )
+        .is_none()
+    );
 
     assert!(!closing.is_cancelled(), "the ending has to play out");
     assert!(output_audio.is_playing());
@@ -772,8 +780,13 @@ fn a_candidate_speaking_over_a_draining_turn_drops_what_is_left_of_it() {
     let mut activity = RuntimeActivity::new(Instant::now());
     activity.floor = Floor::AwaitingPlayout;
 
-    let dropped = take_stale_playout(&mut activity, &mut output_audio, Interruptible::Yes)
-        .expect("a draining turn must be dropped");
+    let dropped = take_stale_playout(
+        &mut RuntimeState::default(),
+        &mut activity,
+        &mut output_audio,
+        Interruptible::Yes,
+    )
+    .expect("a draining turn must be dropped");
     assert!(
         dropped >= Duration::from_secs(9),
         "reports what it dropped: {dropped:?}"
@@ -816,7 +829,13 @@ fn nothing_is_dropped_once_the_queue_has_drained_or_while_the_agent_speaks() {
         activity.floor = floor;
 
         assert!(
-            take_stale_playout(&mut activity, &mut output_audio, Interruptible::Yes).is_none(),
+            take_stale_playout(
+                &mut RuntimeState::default(),
+                &mut activity,
+                &mut output_audio,
+                Interruptible::Yes
+            )
+            .is_none(),
             "{why}"
         );
         assert!(!live.is_cancelled(), "{why}");
@@ -1853,7 +1872,11 @@ fn a_spoken_hold_cuts_generation_so_the_next_reply_is_tracked_as_its_own() {
     activity.mark_speaking();
     activity.note_output(Instant::now());
     assert!(activity.generating);
-    cut_off_for_hold(&mut activity, &mut output_audio);
+    cut_off_for_hold(
+        &mut RuntimeState::default(),
+        &mut activity,
+        &mut output_audio,
+    );
     assert!(!activity.generating);
     assert!(activity.socket.discarding_output);
     assert_eq!(activity.floor, Floor::Listening);
@@ -1862,7 +1885,11 @@ fn a_spoken_hold_cuts_generation_so_the_next_reply_is_tracked_as_its_own() {
     activity.note_output(Instant::now());
     assert!(!activity.owes_prompt());
     activity.generating = true;
-    cut_off_for_hold(&mut activity, &mut output_audio);
+    cut_off_for_hold(
+        &mut RuntimeState::default(),
+        &mut activity,
+        &mut output_audio,
+    );
     activity.note_candidate_finished(Instant::now(), false);
     assert!(activity.awaiting_reply_since.is_some());
     assert!(activity.owes_reply());
@@ -1981,24 +2008,32 @@ fn a_hold_cuts_a_live_turn_and_spares_a_stalled_one() {
 
     let mut live = RuntimeActivity::new(start);
     live.note_output(Instant::now());
-    cut_off_for_hold(&mut live, &mut output_audio);
+    cut_off_for_hold(&mut RuntimeState::default(), &mut live, &mut output_audio);
     assert!(live.socket.discarding_output);
     assert!(!live.socket.stale_turn_pending);
 
     let mut stalled = RuntimeActivity::new(start);
     stalled.note_output(start - super::super::turn::PROMPT_STALL);
-    cut_off_for_hold(&mut stalled, &mut output_audio);
+    cut_off_for_hold(
+        &mut RuntimeState::default(),
+        &mut stalled,
+        &mut output_audio,
+    );
     assert!(!stalled.socket.discarding_output);
     assert!(stalled.socket.stale_turn_pending);
 
     let mut idle = RuntimeActivity::new(start);
-    cut_off_for_hold(&mut idle, &mut output_audio);
+    cut_off_for_hold(&mut RuntimeState::default(), &mut idle, &mut output_audio);
     assert!(!idle.socket.discarding_output);
     assert!(!idle.socket.stale_turn_pending);
 
     let mut discarding = RuntimeActivity::new(start);
     discarding.socket.discarding_output = true;
-    cut_off_for_hold(&mut discarding, &mut output_audio);
+    cut_off_for_hold(
+        &mut RuntimeState::default(),
+        &mut discarding,
+        &mut output_audio,
+    );
     assert!(
         discarding.socket.discarding_output,
         "a discard under way is kept"
@@ -3826,7 +3861,7 @@ fn an_interruption_preserves_platform_debt_until_new_candidate_words_arrive() {
         let (accepted, owed) =
             accept_event_with_reply_debt(&GeminiEvent::Interrupted, &mut activity, false, cut);
         assert!(accepted);
-        cut_off_turn(&mut activity, &mut audio);
+        cut_off_turn(&mut RuntimeState::default(), &mut activity, &mut audio);
         activity.keep_reply_debt(owed.expect("an interruption reads the debt"));
         assert!(activity.reply_in_flight());
         assert!(activity.owes_prompt());
@@ -3855,7 +3890,7 @@ fn an_interruption_without_a_queued_prompt_preserves_an_unanswered_candidate_rep
         let (accepted, debt) =
             accept_event_with_reply_debt(&GeminiEvent::Interrupted, &mut activity, false, cut);
         assert!(accepted);
-        cut_off_turn(&mut activity, &mut audio);
+        cut_off_turn(&mut RuntimeState::default(), &mut activity, &mut audio);
         activity.keep_reply_debt(debt.expect("an interruption reads the debt"));
         assert!(activity.reply_in_flight());
         assert_eq!(
@@ -3884,7 +3919,10 @@ fn provider_interruption_preserves_tool_only_debt_on_both_playout_paths() {
             vec!["Candidate: question".to_string()]
         };
         let unplayed = settle_interruption_debt(
-            &transcript,
+            &mut RuntimeState {
+                transcript: (transcript).to_vec(),
+                ..RuntimeState::default()
+            },
             Interruptible::Yes,
             &mut activity,
             &mut audio,
@@ -3913,7 +3951,10 @@ fn provider_interruption_gives_an_unheard_tool_reply_a_fresh_deadline() {
         accept_event_with_reply_debt(&GeminiEvent::Interrupted, &mut activity, false, cut);
     assert!(accepted);
     settle_interruption_debt(
-        &["Candidate: question".to_string()],
+        &mut RuntimeState {
+            transcript: (["Candidate: question".to_string()]).to_vec(),
+            ..RuntimeState::default()
+        },
         Interruptible::Yes,
         &mut activity,
         &mut audio,
@@ -3938,8 +3979,17 @@ fn provider_interruption_before_the_greeting_preserves_its_reply_debt() {
     );
     assert!(accepted);
     assert!(
-        settle_interruption_debt(&[], Interruptible::Yes, &mut activity, &mut audio, debt)
-            .is_none()
+        settle_interruption_debt(
+            &mut RuntimeState {
+                transcript: ([]).to_vec(),
+                ..RuntimeState::default()
+            },
+            Interruptible::Yes,
+            &mut activity,
+            &mut audio,
+            debt
+        )
+        .is_none()
     );
     activity.settle_completed_turn(false);
     assert!(activity.owes_prompt());
@@ -3965,7 +4015,10 @@ fn finished_speech_is_not_a_barge_in_that_cancels_a_queued_prompt() {
         accept_event_with_reply_debt(&GeminiEvent::Interrupted, &mut activity, false, cut);
     assert!(accepted);
     settle_interruption_debt(
-        &["Candidate: question".to_string()],
+        &mut RuntimeState {
+            transcript: (["Candidate: question".to_string()]).to_vec(),
+            ..RuntimeState::default()
+        },
         Interruptible::Yes,
         &mut activity,
         &mut audio,
@@ -3986,7 +4039,10 @@ fn an_interruption_rebases_a_prompt_queued_behind_a_running_generation() {
         accept_event_with_reply_debt(&GeminiEvent::Interrupted, &mut activity, false, cut);
     assert!(accepted);
     settle_interruption_debt(
-        &["Candidate: question".to_string()],
+        &mut RuntimeState {
+            transcript: (["Candidate: question".to_string()]).to_vec(),
+            ..RuntimeState::default()
+        },
         Interruptible::Yes,
         &mut activity,
         &mut audio,
@@ -4012,7 +4068,10 @@ fn an_interruption_rebases_an_unheard_generation_without_reviving_audible_reply_
             accept_event_with_reply_debt(&GeminiEvent::Interrupted, &mut activity, false, cut);
         assert!(accepted);
         settle_interruption_debt(
-            &["Candidate: question".to_string()],
+            &mut RuntimeState {
+                transcript: (["Candidate: question".to_string()]).to_vec(),
+                ..RuntimeState::default()
+            },
             Interruptible::Yes,
             &mut activity,
             &mut audio,
@@ -4041,7 +4100,10 @@ fn a_barge_in_without_words_does_not_cancel_a_required_platform_prompt() {
         accept_event_with_reply_debt(&GeminiEvent::Interrupted, &mut activity, false, cut);
     assert!(accepted);
     settle_interruption_debt(
-        &["Candidate: earlier words".to_string()],
+        &mut RuntimeState {
+            transcript: (["Candidate: earlier words".to_string()]).to_vec(),
+            ..RuntimeState::default()
+        },
         Interruptible::Yes,
         &mut activity,
         &mut audio,
@@ -4075,7 +4137,10 @@ fn untranscribed_noise_does_not_cancel_an_unheard_candidate_reply() {
         accept_event_with_reply_debt(&GeminiEvent::Interrupted, &mut activity, false, cut);
     assert!(accepted);
     settle_interruption_debt(
-        &["Candidate: question".to_string()],
+        &mut RuntimeState {
+            transcript: (["Candidate: question".to_string()]).to_vec(),
+            ..RuntimeState::default()
+        },
         Interruptible::Yes,
         &mut activity,
         &mut audio,
@@ -4121,7 +4186,10 @@ fn only_current_candidate_speech_cancels_a_requested_close() {
                 Interruptible::Yes
             };
             if settle_interruption_debt(
-                &["Candidate: earlier words".to_string()],
+                &mut RuntimeState {
+                    transcript: (["Candidate: earlier words".to_string()]).to_vec(),
+                    ..RuntimeState::default()
+                },
                 mode,
                 &mut activity,
                 &mut audio,
@@ -4162,7 +4230,10 @@ fn local_pcm_barge_in_preserves_the_wait_without_recovering_mid_speech() {
         accept_event_with_reply_debt(&GeminiEvent::Interrupted, &mut activity, false, cut);
     assert!(accepted);
     settle_interruption_debt(
-        &["Candidate: question".to_string()],
+        &mut RuntimeState {
+            transcript: (["Candidate: question".to_string()]).to_vec(),
+            ..RuntimeState::default()
+        },
         Interruptible::Yes,
         &mut activity,
         &mut audio,
@@ -4529,13 +4600,10 @@ fn reply_audio() -> GeminiEvent {
     }
 }
 
-// What a provider interruption does to words already recorded, through the
-// handlers rather than the steps they call. The cut-off line stays in the
-// transcript as said and goes to the page as a finished turn, with nothing
-// marking that its audio was cancelled before it played. Characterized, not
-// endorsed: it is the evidence gap a transcript policy would have to close.
+// No frame is consumed: the marker describes cancellation, not an audible word
+// boundary. Drive the handlers so storage and page publication agree.
 #[tokio::test]
-async fn an_interruption_keeps_the_cut_words_as_an_ordinary_finished_turn() {
+async fn an_interruption_marks_cancelled_words_in_model_views() {
     let mut harness = Harness::new().await;
     harness
         .event(GeminiEvent::InputTranscript("I will use a map.".into()))
@@ -4557,6 +4625,22 @@ async fn an_interruption_keeps_the_cut_words_as_an_ordinary_finished_turn() {
     let frame = harness.queued.try_recv().unwrap();
     assert!(frame.output_cancellation.is_cancelled());
     let speech = "Could you explain the space complexity?";
+    assert!(
+        harness
+            .turn
+            .state
+            .interviewer_delivery
+            .uncertain
+            .contains(&1)
+    );
+    assert!(
+        !harness
+            .turn
+            .state
+            .delivery_transcript()
+            .join("\n")
+            .contains(speech)
+    );
     assert_eq!(
         harness.turn.state.transcript,
         [
@@ -4734,4 +4818,481 @@ async fn the_room_link_carries_what_the_handlers_send() {
 
     harness.room.close().await.unwrap();
     assert_eq!(harness.sent.take(), [Sent::Left]);
+}
+
+#[tokio::test]
+async fn delivery_uncertainty_survives_late_fragments_but_not_the_next_boundary() {
+    for late_fragment in [false, true] {
+        let mut h = Harness::new().await;
+        h.event(GeminiEvent::InputTranscript("I will use a map.".into()))
+            .await;
+        h.event(GeminiEvent::TurnComplete).await;
+        h.event(GeminiEvent::OutputTranscript("Use a hash table.".into()))
+            .await;
+        h.event(reply_audio()).await;
+        h.event(GeminiEvent::Interrupted).await;
+        assert!(h.turn.state.interviewer_delivery.uncertain.contains(&1));
+        if late_fragment {
+            h.event(GeminiEvent::OutputTranscript(
+                "Then compare the keys.".into(),
+            ))
+            .await;
+            assert!(!h.turn.activity.socket.interrupted_turn_pending);
+            assert!(h.turn.state.interviewer_delivery.uncertain.contains(&2));
+        }
+        h.event(GeminiEvent::TurnComplete).await;
+        assert!(!h.turn.activity.socket.interrupted_turn_pending);
+        h.event(GeminiEvent::OutputTranscript(
+            "What is your next step?".into(),
+        ))
+        .await;
+        let last = h.turn.state.transcript.len() - 1;
+        assert!(!h.turn.state.interviewer_delivery.uncertain.contains(&last));
+        assert_eq!(h.turn.state.transcript[0], "Candidate: I will use a map.");
+        assert!(h.turn.state.delivery_transcript()[last].contains("What is your next step?"));
+    }
+}
+
+#[tokio::test]
+async fn delivery_uncertainty_on_completed_playout_reaches_every_model_reader() {
+    let mut h = Harness::new().await;
+    let speech = "Could you explain the space complexity?";
+    h.event(GeminiEvent::OutputTranscript(speech.into())).await;
+
+    // Seed a deterministic native backlog before the handler accepts audio; the
+    // production attribution must capture that chunk's deadline.
+    h.output.playout_deadline = Instant::now() + Duration::from_secs(60);
+    h.event(reply_audio()).await;
+    h.event(GeminiEvent::TurnComplete).await;
+    h.event(GeminiEvent::InputTranscript("I need a moment.".into()))
+        .await;
+    assert!(
+        h.queued
+            .try_recv()
+            .unwrap()
+            .output_cancellation
+            .is_cancelled()
+    );
+    let state = &h.turn.state;
+    assert_eq!(
+        state.transcript,
+        [
+            format!("Interviewer: {speech}"),
+            "Candidate: I need a moment.".into()
+        ]
+    );
+    let page = conversation_page(state, &serde_json::json!({"query":"complexity"}));
+    assert_eq!(page["turns"][0]["text"], speech);
+    assert_eq!(page["turns"][0]["delivery"], "uncertain");
+    for input in [
+        crate::agent::cold_restart(state),
+        crate::agent::compressed_context(state),
+        crate::agent::resumed_context(state, false, None),
+        crate::agent::transcript_for_report(&crate::agent::report_transcript_lines(state)),
+    ] {
+        assert!(
+            input.contains(crate::agent::CANCELLED_INTERVIEWER_OUTPUT),
+            "{input}"
+        );
+        assert!(!input.contains(speech), "{input}");
+        assert!(input.contains("I need a moment."), "{input}");
+    }
+    h.event(GeminiEvent::OutputTranscript("Take your time.".into()))
+        .await;
+    assert!(!h.turn.state.interviewer_delivery.uncertain.contains(&2));
+}
+
+#[tokio::test]
+async fn delivery_uncertainty_does_not_mark_protected_or_completed_output() {
+    for protected in [false, true] {
+        let mut h = Harness::new().await;
+        h.event(GeminiEvent::OutputTranscript(
+            "Welcome to the interview.".into(),
+        ))
+        .await;
+        h.event(reply_audio()).await;
+        if protected {
+            h.event(GeminiEvent::Interrupted).await;
+        } else {
+            h.event(GeminiEvent::TurnComplete).await;
+        }
+        assert!(h.turn.state.interviewer_delivery.uncertain.is_empty());
+        assert_eq!(h.turn.state.delivery_transcript(), h.turn.state.transcript);
+    }
+}
+
+#[test]
+fn delivery_uncertainty_preserves_archive_byte_cursors_and_page_budgets() {
+    let speech = "a quoted \"word\" and a backslash \\ ".repeat(400);
+    let mut state = RuntimeState {
+        transcript: vec![format!("Interviewer: {speech}")],
+        ..RuntimeState::default()
+    };
+    let first = conversation_page(&state, &serde_json::json!({}));
+    let cursor = first["nextByte"].as_u64().unwrap() as usize;
+    state.interviewer_delivery.uncertain.insert(0);
+    let next = conversation_page(&state, &serde_json::json!({"fromTurn":1,"fromByte":cursor}));
+    assert_eq!(next["turns"][0]["delivery"], "uncertain");
+    let text = next["turns"][0]["text"].as_str().unwrap();
+    assert!(speech[cursor..].starts_with(text));
+    assert!(next["turns"].to_string().len() <= 5502);
+}
+
+#[tokio::test]
+async fn delivery_uncertainty_omits_the_whole_turn_after_partial_native_capture() {
+    let mut h = Harness::new().await;
+    h.event(GeminiEvent::InputTranscript("Please continue.".into()))
+        .await;
+    h.event(GeminiEvent::TurnComplete).await;
+    h.event(GeminiEvent::OutputTranscript(
+        "This prefix was captured; this tail was queued.".into(),
+    ))
+    .await;
+    h.event(reply_audio()).await;
+    let first = h.queued.try_recv().unwrap();
+    let frame = ::livekit::webrtc::audio_frame::AudioFrame {
+        data: first.samples.into(),
+        sample_rate: GEMINI_OUTPUT_AUDIO_SAMPLE_RATE,
+        num_channels: crate::livekit::media::LIVEKIT_OUTPUT_CHANNELS,
+        samples_per_channel: GEMINI_OUTPUT_AUDIO_SAMPLE_RATE / 100,
+    };
+    h.output.source.capture_frame(&frame).await.unwrap();
+    h.event(reply_audio()).await;
+    h.event(GeminiEvent::Interrupted).await;
+    assert!(
+        h.queued
+            .try_recv()
+            .unwrap()
+            .output_cancellation
+            .is_cancelled()
+    );
+    assert!(h.turn.state.interviewer_delivery.uncertain.contains(&1));
+    assert_eq!(
+        h.turn.state.delivery_transcript()[1],
+        format!(
+            "Interviewer: {}",
+            crate::agent::CANCELLED_INTERVIEWER_OUTPUT
+        )
+    );
+}
+
+#[tokio::test]
+async fn delivery_uncertainty_ends_at_cold_and_resumed_socket_replacement() {
+    for resumed in [false, true] {
+        let mut h = Harness::new().await;
+        h.event(GeminiEvent::InputTranscript("I use a map.".into()))
+            .await;
+        h.event(GeminiEvent::TurnComplete).await;
+        h.event(GeminiEvent::OutputTranscript(
+            "An unfinished question.".into(),
+        ))
+        .await;
+        h.event(reply_audio()).await;
+        let (owed, _, prompt) =
+            crate::livekit::hand_over(&mut h.turn.state, &mut h.turn.activity, &mut h.output);
+        assert!(h.turn.state.interviewer_delivery.uncertain.contains(&1));
+        // The room closes transcript accumulators before replacing a socket.
+        let mut context = h
+            .turn
+            .context(&mut h.output, &mut h.gemini, &mut h.board, &mut h.media);
+        close_turns(&h.room, &mut context);
+        let (replacement, server) =
+            crate::livekit::tests::fake_socket(resumed.then_some("resumed")).await;
+        h.gemini = replacement;
+        let kind = if resumed {
+            crate::livekit::Replacement::Resumed { owed }
+        } else {
+            crate::livekit::Replacement::Cold { owed }
+        };
+        crate::livekit::brief_replacement(
+            &mut h.gemini,
+            &mut h.turn.state,
+            &mut h.turn.activity,
+            kind,
+            prompt.as_deref(),
+        )
+        .await;
+        server.await.unwrap();
+        h.event(GeminiEvent::OutputTranscript(
+            "The replacement reply plays normally.".into(),
+        ))
+        .await;
+        h.event(reply_audio()).await;
+        h.event(GeminiEvent::TurnComplete).await;
+        assert!(
+            !h.turn.state.interviewer_delivery.uncertain.contains(&2),
+            "resumed={resumed}"
+        );
+        assert!(h.turn.state.delivery_transcript()[2].contains("replacement reply"));
+    }
+}
+
+// A line opened after a completion and before the next audio may be that
+// output's trailing words, so the backstop marks it. The incoming generation
+// loses only those words: what follows its first audio starts a new line.
+#[tokio::test]
+async fn delivery_uncertainty_at_the_playout_backstop_seals_the_ambiguous_line() {
+    let mut h = Harness::new().await;
+    h.event(GeminiEvent::OutputTranscript("The previous reply.".into()))
+        .await;
+    h.output.playout_deadline = Instant::now() + Duration::from_secs(60);
+    h.event(reply_audio()).await;
+    h.event(GeminiEvent::TurnComplete).await;
+    h.event(GeminiEvent::OutputTranscript(
+        "Words before the old audio drains.".into(),
+    ))
+    .await;
+    h.event(reply_audio()).await;
+    assert!(h.turn.state.interviewer_delivery.uncertain.contains(&0));
+    assert!(h.turn.state.interviewer_delivery.uncertain.contains(&1));
+    h.event(GeminiEvent::OutputTranscript(
+        "This is still the new reply.".into(),
+    ))
+    .await;
+    h.event(GeminiEvent::TurnComplete).await;
+    assert_eq!(
+        h.turn.state.transcript,
+        [
+            "Interviewer: The previous reply.",
+            "Interviewer: Words before the old audio drains.",
+            "Interviewer: This is still the new reply.",
+        ]
+    );
+    assert!(!h.turn.state.interviewer_delivery.uncertain.contains(&2));
+    assert!(h.turn.state.delivery_transcript()[2].contains("new reply"));
+    let segments = h.segments().await;
+    assert!(segments.contains(&("Words before the old audio drains.".into(), true)));
+}
+
+#[tokio::test]
+async fn delivery_uncertainty_keeps_tail_padding_with_the_completed_generation() {
+    let mut h = Harness::new().await;
+    h.event(GeminiEvent::OutputTranscript(
+        "A reply with a partial frame.".into(),
+    ))
+    .await;
+    h.output.playout_deadline = Instant::now() + Duration::from_secs(60);
+    h.event(GeminiEvent::Audio {
+        bytes: vec![0; GEMINI_OUTPUT_AUDIO_SAMPLE_RATE as usize / 100 * 2 + 2],
+        mime_type: format!("audio/pcm;rate={GEMINI_OUTPUT_AUDIO_SAMPLE_RATE}"),
+    })
+    .await;
+    assert!(!h.output.pending_bytes.is_empty());
+    h.event(GeminiEvent::TurnComplete).await;
+    assert!(h.output.pending_bytes.is_empty());
+    h.event(reply_audio()).await;
+    h.event(GeminiEvent::OutputTranscript(
+        "A fully delivered incoming question.".into(),
+    ))
+    .await;
+    h.event(GeminiEvent::TurnComplete).await;
+    assert!(h.turn.state.interviewer_delivery.uncertain.contains(&0));
+    assert!(!h.turn.state.interviewer_delivery.uncertain.contains(&1));
+    assert!(h.turn.state.delivery_transcript()[1].contains("fully delivered incoming question"));
+}
+
+#[tokio::test]
+async fn delivery_uncertainty_marks_trailing_transcription_at_a_candidate_playout_cut() {
+    let mut h = Harness::new().await;
+    h.event(GeminiEvent::OutputTranscript(
+        "A generated question.".into(),
+    ))
+    .await;
+    h.output.playout_deadline = Instant::now() + Duration::from_secs(60);
+    h.event(reply_audio()).await;
+    h.event(GeminiEvent::TurnComplete).await;
+    h.event(GeminiEvent::OutputTranscript(
+        "An unreceived trailing clause.".into(),
+    ))
+    .await;
+    h.event(GeminiEvent::InputTranscript("Please stop.".into()))
+        .await;
+    assert!(h.turn.state.interviewer_delivery.uncertain.contains(&0));
+    assert!(h.turn.state.interviewer_delivery.uncertain.contains(&1));
+    assert!(
+        !h.turn
+            .state
+            .delivery_transcript()
+            .join("\n")
+            .contains("unreceived trailing clause")
+    );
+    // A completion with no audio leaves the cut tail possible: still marked.
+    h.event(GeminiEvent::TurnComplete).await;
+    h.event(GeminiEvent::OutputTranscript(
+        "Words after an audio-less completion.".into(),
+    ))
+    .await;
+    assert!(h.turn.state.interviewer_delivery.uncertain.contains(&3));
+    h.event(GeminiEvent::TurnComplete).await;
+    h.output.playout_deadline = Instant::now();
+    h.event(reply_audio()).await;
+    h.event(GeminiEvent::OutputTranscript(
+        "A fresh turn after the boundary.".into(),
+    ))
+    .await;
+    let last = h.turn.state.transcript.len() - 1;
+    assert_eq!(
+        h.turn.state.transcript[last],
+        "Interviewer: A fresh turn after the boundary."
+    );
+    assert!(!h.turn.state.interviewer_delivery.uncertain.contains(&last));
+    assert_eq!(h.turn.state.transcript[2], "Candidate: Please stop.");
+}
+
+#[tokio::test]
+async fn delivery_uncertainty_covers_interruption_before_the_first_output() {
+    let mut h = Harness::new().await;
+    h.event(GeminiEvent::InputTranscript(
+        "My question is about memory.".into(),
+    ))
+    .await;
+    h.event(GeminiEvent::TurnComplete).await;
+    assert!(!h.turn.activity.generating);
+    h.event(GeminiEvent::Interrupted).await;
+    h.event(GeminiEvent::OutputTranscript(
+        "A late fragment with no earlier output.".into(),
+    ))
+    .await;
+    assert!(h.turn.state.interviewer_delivery.uncertain.contains(&1));
+    h.event(GeminiEvent::TurnComplete).await;
+    h.event(GeminiEvent::OutputTranscript(
+        "The next ordinary reply.".into(),
+    ))
+    .await;
+    assert!(!h.turn.state.interviewer_delivery.uncertain.contains(&2));
+}
+
+/// Completed output still queued, then a trailing fragment, then the candidate
+/// talking over it: the case that has a candidate line between the cut and the
+/// reply.
+async fn cut_after_a_trailing_fragment() -> Harness {
+    let mut h = Harness::new().await;
+    h.event(GeminiEvent::OutputTranscript(
+        "A generated question.".into(),
+    ))
+    .await;
+    h.output.playout_deadline = Instant::now() + Duration::from_secs(60);
+    h.event(reply_audio()).await;
+    h.event(GeminiEvent::TurnComplete).await;
+    h.event(GeminiEvent::OutputTranscript(
+        "An unreceived trailing clause.".into(),
+    ))
+    .await;
+    h.event(GeminiEvent::InputTranscript("Please stop.".into()))
+        .await;
+    assert!(h.turn.state.interviewer_delivery.uncertain.contains(&1));
+    h
+}
+
+#[tokio::test]
+async fn delivery_uncertainty_keeps_the_reply_after_a_candidate_cut_on_its_own_line() {
+    let mut h = cut_after_a_trailing_fragment().await;
+    h.output.playout_deadline = Instant::now();
+    h.event(reply_audio()).await;
+    for fragment in ["Sure, what would", " you like to change?"] {
+        h.event(GeminiEvent::OutputTranscript(fragment.into()))
+            .await;
+    }
+    h.event(GeminiEvent::TurnComplete).await;
+    let state = &h.turn.state;
+    assert_eq!(
+        state.transcript,
+        [
+            "Interviewer: A generated question.",
+            "Interviewer: An unreceived trailing clause.",
+            "Candidate: Please stop.",
+            "Interviewer: Sure, what would you like to change?",
+        ]
+    );
+    assert_eq!(state.interviewer_delivery.uncertain, [0, 1].into());
+    let projected = state.delivery_transcript();
+    assert_eq!(
+        projected[3],
+        "Interviewer: Sure, what would you like to change?"
+    );
+    assert!(!projected.join("\n").contains("unreceived trailing clause"));
+}
+
+// Words ahead of the reply's first audio cannot be told from the cut output's
+// tail. They stay marked; the rest of the reply is kept.
+#[tokio::test]
+async fn delivery_uncertainty_bounds_over_marking_to_words_before_the_next_audio() {
+    let mut h = cut_after_a_trailing_fragment().await;
+    h.output.playout_deadline = Instant::now();
+    h.event(GeminiEvent::OutputTranscript("Sure,".into())).await;
+    h.event(reply_audio()).await;
+    h.event(GeminiEvent::OutputTranscript(
+        "what would you like to change?".into(),
+    ))
+    .await;
+    h.event(GeminiEvent::TurnComplete).await;
+    let state = &h.turn.state;
+    assert_eq!(state.transcript[3], "Interviewer: Sure,");
+    assert_eq!(
+        state.transcript[4],
+        "Interviewer: what would you like to change?"
+    );
+    assert_eq!(state.interviewer_delivery.uncertain, [0, 1, 3].into());
+}
+
+// Transcription trails audio, so the cut output's last words can arrive after
+// the candidate's words cut it.
+#[tokio::test]
+async fn delivery_uncertainty_marks_a_fragment_arriving_after_a_candidate_cut() {
+    let mut h = Harness::new().await;
+    h.event(GeminiEvent::OutputTranscript(
+        "A generated question.".into(),
+    ))
+    .await;
+    h.output.playout_deadline = Instant::now() + Duration::from_secs(60);
+    h.event(reply_audio()).await;
+    h.event(GeminiEvent::TurnComplete).await;
+    h.event(GeminiEvent::InputTranscript("Please stop.".into()))
+        .await;
+    assert!(!h.turn.activity.generating);
+    h.event(GeminiEvent::OutputTranscript(
+        "An unreceived trailing clause.".into(),
+    ))
+    .await;
+    assert_eq!(
+        h.turn.state.transcript[2],
+        "Interviewer: An unreceived trailing clause."
+    );
+    assert!(h.turn.state.interviewer_delivery.uncertain.contains(&2));
+    h.output.playout_deadline = Instant::now();
+    h.event(reply_audio()).await;
+    h.event(GeminiEvent::OutputTranscript(
+        "What would you like to change?".into(),
+    ))
+    .await;
+    h.event(GeminiEvent::TurnComplete).await;
+    assert_eq!(
+        h.turn.state.transcript[3],
+        "Interviewer: What would you like to change?"
+    );
+    assert!(!h.turn.state.interviewer_delivery.uncertain.contains(&3));
+}
+
+#[test]
+fn delivery_uncertainty_flags_a_page_continuation_into_a_marked_turn() {
+    let speech = "word ".repeat(2_000);
+    let mut state = RuntimeState {
+        transcript: vec!["Candidate: Short.".into(), format!("Interviewer: {speech}")],
+        ..RuntimeState::default()
+    };
+    let plain = conversation_page(&state, &serde_json::json!({"fromTurn":2}));
+    assert!(plain["nextByte"].is_u64());
+    assert!(plain.get("nextDelivery").is_none());
+    state.interviewer_delivery.uncertain.insert(1);
+    let page = conversation_page(&state, &serde_json::json!({"fromTurn":2}));
+    assert_eq!(page["nextTurn"], 2);
+    assert_eq!(page["nextDelivery"], "uncertain");
+    let candidate = conversation_page(
+        &RuntimeState {
+            transcript: vec![format!("Candidate: {speech}")],
+            ..RuntimeState::default()
+        },
+        &serde_json::json!({}),
+    );
+    assert!(candidate.get("nextDelivery").is_none());
 }

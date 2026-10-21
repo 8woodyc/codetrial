@@ -37,6 +37,14 @@ transcript that notes, reports and recovery read; the interviewer hears the
 audio itself. None of this is a guarantee that provider-generated transcripts
 are accurate.
 
+Cancelled interviewer output is a session condition too. The
+[interviewer delivery evidence policy](interviewer-delivery-evidence.md)
+substitutes a delivery-uncertain marker for an affected whole turn in model
+prompt views. Raw transcript storage stays unchanged; conversation lookup
+retains its text with a separate delivery field. A marked turn cannot
+establish that a question or hint reached the candidate, and a missing reply
+to it must not count against the candidate. Candidate speech remains usable.
+
 ## What enforces it
 
 The report prompt states the boundary, and the server independently scans every
