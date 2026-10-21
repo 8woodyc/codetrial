@@ -128,7 +128,8 @@ async fn account_routes_record_interviewee_github_login() {
 
     assert_eq!(
         session.json::<Value>().await.unwrap(),
-        json!({"signedIn": false, "loginRequired": true, "maxDurationMin": MAX_DURATION_MIN})
+        json!({"signedIn": false, "loginRequired": true,
+                "guestModeAvailable": true, "maxDurationMin": MAX_DURATION_MIN})
     );
 
     let signed_in = client
@@ -249,7 +250,8 @@ async fn an_unmigratable_account_database_refuses_rather_than_disabling_login() 
         .unwrap();
     assert_eq!(
         session,
-        json!({"signedIn": false, "loginRequired": true, "maxDurationMin": MAX_DURATION_MIN}),
+        json!({"signedIn": false, "loginRequired": true,
+                "guestModeAvailable": false, "maxDurationMin": MAX_DURATION_MIN}),
         "a database this binary cannot migrate still requires a login"
     );
 
@@ -289,7 +291,8 @@ async fn an_unopenable_account_database_refuses_rather_than_disabling_login() {
         .unwrap();
     assert_eq!(
         session,
-        json!({"signedIn": false, "loginRequired": true, "maxDurationMin": MAX_DURATION_MIN}),
+        json!({"signedIn": false, "loginRequired": true,
+                "guestModeAvailable": false, "maxDurationMin": MAX_DURATION_MIN}),
         "a broken database still requires a login; it cannot serve one"
     );
 
@@ -315,12 +318,10 @@ async fn an_unopenable_account_database_refuses_rather_than_disabling_login() {
     server.shutdown().await;
     fs::remove_dir_all(path).unwrap();
 
-    // The other answer, so "503 rather than 404" above is a distinction this
-    // server really draws rather than the only status it knows. A deployment
-    // with no cookie secret and no database has nothing broken: it never
-    // offered accounts, so the browser is told login is not on offer and the
-    // session row says so too.
-    let (base, server) = spawn_web_server(web_config()).await;
+    // With no account database configured, the server can offer guest access.
+    // This is different from the broken-database case above: that case returns
+    // 503, while this case returns a guest token with status 200.
+    let (base, server) = spawn_web_server_with_guest_dispatcher(web_config()).await;
     let client = http_client();
 
     let token = client
@@ -329,11 +330,9 @@ async fn an_unopenable_account_database_refuses_rather_than_disabling_login() {
         .send()
         .await
         .unwrap();
-    assert_eq!(token.status(), 404);
-    assert_eq!(
-        token.json::<Value>().await.unwrap()["error"],
-        "GitHub username recording is not configured."
-    );
+    assert_eq!(token.status(), 200);
+    let token_body = token.json::<Value>().await.unwrap();
+    assert!(token_body.get("token").and_then(Value::as_str).is_some());
 
     let session = client
         .get(format!("{base}/api/session"))
@@ -345,7 +344,12 @@ async fn an_unopenable_account_database_refuses_rather_than_disabling_login() {
         .unwrap();
     assert_eq!(
         session,
-        json!({"signedIn": false, "loginRequired": false, "maxDurationMin": MAX_DURATION_MIN}),
+        json!({
+            "signedIn": false,
+            "loginRequired": false,
+            "guestModeAvailable": true,
+            "maxDurationMin": MAX_DURATION_MIN
+        }),
         "nothing to sign in to, and the lobby has to be told so"
     );
 
@@ -507,13 +511,13 @@ async fn github_callback_sets_session_and_clears_oauth_state() {
 /// `verified_cookie_value` with its `verify_hs256` deleted, and nothing in the
 /// whole crate's suite failed.
 ///
-/// The routes are two on purpose. `/api/session` is what the page believes
-/// about who it is talking to, and `/api/token` is a live LiveKit credential,
-/// so a forged cookie that reached either would be a different kind of loss.
+/// The routes are two on purpose. `/api/session` must not treat a forged
+/// cookie as a signed-in session. `/api/token` may still issue a guest token,
+/// but a forged cookie must never grant signed-in credentials.
 #[tokio::test]
 async fn a_forged_session_cookie_is_not_a_session() {
     let (config, cookie, db_path) = signed_in_web_config("forged-session");
-    let (base, server) = spawn_web_server(config).await;
+    let (base, server) = spawn_web_server_with_guest_dispatcher(config).await;
     let client = http_client();
 
     // The payload out of the genuine cookie, so every forgery below names a
@@ -560,7 +564,14 @@ async fn a_forged_session_cookie_is_not_a_session() {
             .send()
             .await
             .unwrap();
-        assert_eq!(token.status(), 401, "{why} bought a LiveKit credential");
+        assert_eq!(
+            token.status(),
+            200,
+            "{why} should only receive guest access"
+        );
+
+        let token_body = token.json::<Value>().await.unwrap();
+        assert!(token_body.get("token").and_then(Value::as_str).is_some());
     }
 
     // And the cookie the server signed still works, so the four refusals are a
@@ -581,11 +592,10 @@ async fn a_forged_session_cookie_is_not_a_session() {
     remove_database(db_path).await;
 }
 
-/// The rate limit is keyed by address. If anonymous callers could spend it, a
-/// stranger on the same NAT could lock the signed-in candidate out of their own
-/// interview without ever holding a session.
+/// Guest and signed-in token requests use separate IP-based rate limits,
+/// so anonymous traffic cannot consume a signed-in candidate's budget.
 #[tokio::test]
-async fn anonymous_requests_cannot_spend_the_signed_in_budget() {
+async fn anonymous_requests_do_not_consume_the_signed_in_ip_budget() {
     let path = std::env::temp_dir().join(format!(
         "codetrial-token-budget-{}-{}.db",
         std::process::id(),
@@ -611,14 +621,20 @@ async fn anonymous_requests_cannot_spend_the_signed_in_budget() {
     config.github_client_secret = Some("secret".to_string());
     config.session_secret = Some("session-secret".to_string());
     config.db_path = Some(path.clone());
-    let (base, server) = spawn_web_server(config).await;
+    let (base, server) = spawn_web_server_with_guest_dispatcher(config).await;
     let url = format!("{base}/api/token");
     let client = http_client();
 
-    // Twice the whole budget, all of it unauthenticated.
-    for _ in 0..(TOKEN_RATE_LIMIT * 2) {
-        let refused = client.post(&url).json(&json!({})).send().await.unwrap();
-        assert_eq!(refused.status(), 401);
+    // Guest requests consume their own IP-based token budget.
+    for _ in 0..TOKEN_RATE_LIMIT {
+        let response = client.post(&url).json(&json!({})).send().await.unwrap();
+        assert_eq!(response.status(), 200);
+    }
+
+    // Further guest requests are rate-limited.
+    for _ in 0..TOKEN_RATE_LIMIT {
+        let response = client.post(&url).json(&json!({})).send().await.unwrap();
+        assert_eq!(response.status(), 429);
     }
 
     let signed_in = client
@@ -638,7 +654,7 @@ async fn anonymous_requests_cannot_spend_the_signed_in_budget() {
     assert_eq!(
         signed_in.status(),
         200,
-        "the candidate's budget was spent by people who never signed in"
+        "guest requests must not consume the signed-in token budget"
     );
 
     server.shutdown().await;
@@ -702,7 +718,7 @@ async fn account_reports_are_scoped_to_the_signed_in_user() {
     config.github_client_secret = Some("secret".to_string());
     config.session_secret = Some("session-secret".to_string());
     config.db_path = Some(path.clone());
-    let (base, server) = spawn_web_server(config).await;
+    let (base, server) = spawn_web_server_with_guest_dispatcher(config).await;
     let client = http_client();
     let user_one_cookie = format!(
         "codetrial_session={}",
@@ -850,7 +866,8 @@ async fn account_reports_are_scoped_to_the_signed_in_user() {
         .unwrap();
     assert_eq!(
         signed_out,
-        json!({"signedIn": false, "loginRequired": true, "maxDurationMin": MAX_DURATION_MIN}),
+        json!({"signedIn": false, "loginRequired": true,
+                "guestModeAvailable": true, "maxDurationMin": MAX_DURATION_MIN}),
         "accounts exist here, so the browser has to know to demand a sign-in"
     );
 

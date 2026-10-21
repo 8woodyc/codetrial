@@ -51,7 +51,13 @@ after(async () => {
 /// for a case that has to stop the page's timers.
 async function interviewPage(
   t,
-  { started = true, media = false, params = {}, clock = false } = {},
+  {
+    started = true,
+    media = false,
+    params = {},
+    clock = false,
+    session = null,
+  } = {},
 ) {
   if (!browser) {
     t.skip("playwright chromium unavailable");
@@ -65,6 +71,15 @@ async function interviewPage(
     problem: "chargeback-pair-match",
     ...params,
   });
+  if (session) {
+    await page.route("**/api/session", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(session),
+      }),
+    );
+  }
   await page.goto(`${base}/interview.html?${query}`, {
     waitUntil: "domcontentloaded",
   });
@@ -191,6 +206,7 @@ test("offline reports apply execution preferences only to editor interviews", as
   for (const mode of ["coding", "whiteboard"]) {
     const ctx = await interviewPage(t, {
       params: { mode, editorExecution: "0" },
+      session: { signedIn: true, user: { login: "test-user" } },
     });
     if (!ctx) return;
     const { page, errors } = ctx;

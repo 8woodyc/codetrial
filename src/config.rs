@@ -67,6 +67,8 @@ pub const DEFAULT_WEB_DIR: &str = "web";
 pub const DEFAULT_WEB_ADDR: &str = "127.0.0.1:3000";
 pub const DEFAULT_COMPILER_EXPLORER_ENABLED: bool = true;
 pub const DEFAULT_GEMINI_CANDIDATE_VIDEO_ENABLED: bool = false;
+/// Guest interviews require explicit operator opt-in.
+pub const DEFAULT_GUEST_MODE_ENABLED: bool = false;
 /// Off until measured in real interviews: a short spoken acknowledgement
 /// played while a tool round holds the reply back. See `gemini::tool_ack_clip`.
 pub const DEFAULT_GEMINI_TOOL_ACK: bool = false;
@@ -979,6 +981,10 @@ fn parse_bool(value: Option<&str>, default: bool) -> bool {
 
 pub fn compiler_explorer_enabled(value: Option<&str>) -> bool {
     parse_bool(value, DEFAULT_COMPILER_EXPLORER_ENABLED)
+}
+
+pub fn guest_mode_enabled(value: Option<&str>) -> bool {
+    parse_bool(value, DEFAULT_GUEST_MODE_ENABLED)
 }
 
 pub fn gemini_candidate_video_enabled(value: Option<&str>) -> bool {

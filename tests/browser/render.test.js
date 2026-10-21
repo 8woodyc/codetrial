@@ -730,6 +730,10 @@ test("report markup states every save outcome without hiding Download", () => {
     [{ local: "failed", account: "saved" }, "Saved to your account"],
     [{ local: "failed", account: "failed" }, "Report was not saved"],
     [{ local: "failed", account: "skipped" }, "Report was not saved"],
+    [
+      { local: "saved", account: "guest" },
+      "Temporary guest report. Download it before leaving.",
+    ],
   ]) {
     const body = reportMarkup({ ...session, saveResult });
     assert.match(
@@ -758,6 +762,10 @@ test("report markup states every save outcome without hiding Download", () => {
   assert.deepEqual(reportSaveStatus({ local: "saved", account: "failed" }), {
     message: "Saved on this device only",
     className: "muted small",
+  });
+  assert.deepEqual(reportSaveStatus({ local: "saved", account: "guest" }), {
+    message: "Temporary guest report. Download it before leaving.",
+    className: "critical small",
   });
 });
 

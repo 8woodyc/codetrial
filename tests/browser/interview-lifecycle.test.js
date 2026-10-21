@@ -231,6 +231,127 @@ test("the Leave button releases the warning before tearing down the session", ()
   assert.equal(target.removed, 1);
 });
 
+test("guest reports are not persisted across sessions", async () => {
+  const source = read("web/interview.js");
+  const guardStates = [];
+  let saveCalls = 0;
+
+  const state = {
+    report: null,
+    reportId: null,
+    interviewId: "interview-guest",
+    language: "javascript",
+    reportPersisted: true,
+    isGuest: true,
+  };
+
+  const saveReportHistory = async (_entry, options) => {
+    saveCalls += 1;
+    return options?.persistAccount === false
+      ? { local: "skipped", account: "guest" }
+      : { local: "saved", account: "saved" };
+  };
+
+  const updateBeforeUnloadGuard = () => {
+    guardStates.push(state.reportPersisted);
+  };
+
+  const body = functionBody(source, "saveHistory");
+  const saveHistory = new Function(
+    "state",
+    "randomId",
+    "problem",
+    "whiteboard",
+    "durationMin",
+    "interviewLoop",
+    "mode",
+    "sessionPromise",
+    "saveReportHistory",
+    "reportIsPersisted",
+    "updateBeforeUnloadGuard",
+    `let saveGeneration = 0;\n${body}\n}\nreturn saveHistory;`,
+  )(
+    state,
+    () => "unused",
+    { page: "two-sum", title: "Two Sum", difficulty: "Easy" },
+    false,
+    45,
+    "coding_only",
+    "whiteboard",
+    Promise.resolve({ signedIn: false, guestModeAvailable: true }),
+    saveReportHistory,
+    reportIsPersisted,
+    updateBeforeUnloadGuard,
+  );
+
+  const result = await saveHistory({ summary: "guest report" });
+
+  assert.deepEqual(result, { local: "skipped", account: "guest" });
+  assert.equal(saveCalls, 1, "guest reports must skip persistent history");
+  assert.equal(state.reportPersisted, false);
+  assert.deepEqual(guardStates, [false]);
+});
+
+test("report is saved locally when session state is unavailable", async () => {
+  const source = read("web/interview.js");
+  const guardStates = [];
+  let saveCalls = 0;
+
+  const state = {
+    report: null,
+    reportId: null,
+    interviewId: "interview-unknown-session",
+    language: "javascript",
+    reportPersisted: true,
+  };
+
+  const saveReportHistory = async () => {
+    saveCalls += 1;
+    return { local: "saved", account: "saved" };
+  };
+
+  const updateBeforeUnloadGuard = () => {
+    guardStates.push(state.reportPersisted);
+  };
+
+  const body = functionBody(source, "saveHistory");
+  const saveHistory = new Function(
+    "state",
+    "randomId",
+    "problem",
+    "whiteboard",
+    "durationMin",
+    "interviewLoop",
+    "mode",
+    "saveReportHistory",
+    "reportIsPersisted",
+    "updateBeforeUnloadGuard",
+    `let saveGeneration = 0;\n${body}\n}\nreturn saveHistory;`,
+  )(
+    state,
+    () => "attempt-unknown-session",
+    { page: "two-sum", title: "Two Sum", difficulty: "Easy" },
+    false,
+    45,
+    "coding_only",
+    "whiteboard",
+    saveReportHistory,
+    () => true,
+    updateBeforeUnloadGuard,
+  );
+
+  const result = await saveHistory({ summary: "temporary report" });
+
+  assert.deepEqual(result, { local: "saved", account: "saved" });
+  assert.equal(
+    saveCalls,
+    1,
+    "local persistence must be attempted without session state",
+  );
+  assert.equal(state.reportPersisted, true);
+  assert.deepEqual(guardStates, [false, true]);
+});
+
 test("only the newest overlapping report save can release the warning", async () => {
   const source = read("web/interview.js");
   const pending = [];
@@ -254,6 +375,7 @@ test("only the newest overlapping report save can release the warning", async ()
     "durationMin",
     "interviewLoop",
     "mode",
+    "sessionPromise",
     "saveReportHistory",
     "reportIsPersisted",
     "updateBeforeUnloadGuard",
@@ -266,6 +388,7 @@ test("only the newest overlapping report save can release the warning", async ()
     45,
     "coding_only",
     "whiteboard",
+    Promise.resolve({ signedIn: true }),
     saveReportHistory,
     reportIsPersisted,
     updateBeforeUnloadGuard,
@@ -273,6 +396,8 @@ test("only the newest overlapping report save can release the warning", async ()
 
   const provisional = saveHistory({ summary: "provisional" });
   const final = saveHistory({ summary: "final" });
+  // saveHistory now awaits the session check before starting persistence.
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(pending.length, 2);
   assert.equal(pending[0].entry.interviewMode, "whiteboard");
   assert.equal(pending[0].entry.interviewLoop, "coding_only");

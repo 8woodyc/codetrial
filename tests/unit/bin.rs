@@ -546,3 +546,24 @@ fn recording_needs_both_oauth_credentials_or_it_refuses_to_start() {
     assert!(error.contains("GITHUB_CLIENT_ID"));
     assert!(error.contains("GITHUB_CLIENT_SECRET"));
 }
+
+#[test]
+fn guest_mode_setting_respects_environment_values() {
+    assert!(!super::guest_mode_enabled(&values(&[])));
+    assert!(super::guest_mode_enabled(&values(&[(
+        "CODETRIAL_GUEST_MODE_ENABLED",
+        "true"
+    ),])));
+    assert!(!super::guest_mode_enabled(&values(&[(
+        "CODETRIAL_GUEST_MODE_ENABLED",
+        "false"
+    ),])));
+}
+
+#[test]
+fn guest_mode_recording_conflict_requires_both_settings() {
+    assert!(!super::guest_mode_recording_conflict(false, false));
+    assert!(!super::guest_mode_recording_conflict(false, true));
+    assert!(!super::guest_mode_recording_conflict(true, false));
+    assert!(super::guest_mode_recording_conflict(true, true));
+}

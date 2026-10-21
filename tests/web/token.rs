@@ -665,7 +665,11 @@ async fn token_api_matches_frontend_contract_over_http() {
     let body: Value = response.json().await.unwrap();
     let mut keys = body.as_object().unwrap().keys().collect::<Vec<_>>();
     keys.sort();
-    assert_eq!(keys, ["durationMin", "roomName", "serverUrl", "token"]);
+    assert_eq!(
+        keys,
+        ["durationMin", "guest", "roomName", "serverUrl", "token"]
+    );
+    assert_eq!(body["guest"], false);
     assert_eq!(body["serverUrl"], "wss://example.livekit.cloud");
     assert!(body["roomName"].as_str().unwrap().starts_with("interview-"));
 
@@ -1191,11 +1195,43 @@ async fn token_api_fails_closed_with_frontend_error_shape_without_livekit_creden
     remove_database(db_path).await;
 }
 
-/// Hiding the start button proves nothing: /interview is a URL anyone can open,
-/// and the token is a live LiveKit credential. Where accounts exist, the
-/// credential is what has to refuse.
+/// Guest mode is opt-in, but signed-in users can still obtain tokens.
 #[tokio::test]
-async fn token_requires_a_session_once_accounts_exist() {
+async fn token_rejects_guest_when_guest_mode_is_disabled() {
+    let (mut config, cookie, db_path) = signed_in_web_config("guest-disabled");
+    config.guest_mode_enabled = false;
+    let (base, server) = spawn_web_server(config).await;
+    let url = format!("{base}/api/token");
+    let body = json!({"problemId": "two-sum", "durationMin": 45});
+
+    let guest = http_client().post(&url).json(&body).send().await.unwrap();
+    assert_eq!(guest.status(), 401);
+    let guest_body: Value = guest.json().await.unwrap();
+    assert_eq!(
+        guest_body["error"],
+        "Enter your GitHub username to start an interview."
+    );
+
+    let signed_in = http_client()
+        .post(&url)
+        .header("cookie", &cookie)
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(signed_in.status(), 200);
+    assert!(signed_in.json::<Value>().await.unwrap()["token"].is_string());
+
+    server.shutdown().await;
+    remove_database(db_path).await;
+}
+
+/// When recording is disabled, guests may obtain an interview token even if
+/// accounts exist. Guest traffic has its own IP token limit, and guest tokens
+/// must not grant access to observer tokens.
+#[tokio::test]
+async fn token_allows_guest_when_accounts_exist_and_recording_is_disabled() {
     let path = std::env::temp_dir().join(format!(
         "codetrial-token-gate-{}-{}.db",
         std::process::id(),
@@ -1217,23 +1253,51 @@ async fn token_requires_a_session_once_accounts_exist() {
     }
 
     let mut config = web_config();
+    config.guest_mode_enabled = true;
     config.github_client_id = Some("client".to_string());
     config.github_client_secret = Some("secret".to_string());
     config.session_secret = Some("session-secret".to_string());
     config.db_path = Some(path.clone());
-    let (base, server) = spawn_web_server(config).await;
+    let (base, server) = spawn_web_server_with_guest_dispatcher(config).await;
     let url = format!("{base}/api/token");
     let body = json!({"problemId": "two-sum", "durationMin": 45});
 
-    let anonymous = http_client().post(&url).json(&body).send().await.unwrap();
-    assert_eq!(anonymous.status(), 401);
-    assert!(
-        anonymous.json::<Value>().await.unwrap()["error"]
-            .as_str()
-            .unwrap()
-            .contains("GitHub username"),
-        "the refusal has to say what to do about it"
-    );
+    let mut guest_room_name = None;
+
+    for attempt in 1..=TOKEN_RATE_LIMIT {
+        let response = http_client().post(&url).json(&body).send().await.unwrap();
+
+        assert_eq!(
+            response.status(),
+            200,
+            "guest request {attempt} should be allowed"
+        );
+
+        let response_body = response.json::<Value>().await.unwrap();
+        assert_eq!(response_body["guest"], true);
+        assert!(response_body["token"].is_string());
+        assert!(response_body["roomName"].is_string());
+
+        if attempt == 1 {
+            guest_room_name = Some(response_body["roomName"].as_str().unwrap().to_string());
+        }
+    }
+
+    let guest_room_name = guest_room_name.unwrap();
+
+    let blocked_guest = http_client().post(&url).json(&body).send().await.unwrap();
+
+    assert_eq!(blocked_guest.status(), 429);
+    assert_eq!(blocked_guest.headers().get("retry-after").unwrap(), "60");
+
+    // A guest can join an interview but cannot obtain observer privileges.
+    let observer = http_client()
+        .post(format!("{base}/api/observer-token"))
+        .json(&json!({"roomName": guest_room_name}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(observer.status(), 401);
 
     let signed_in = http_client()
         .post(&url)
@@ -1248,16 +1312,23 @@ async fn token_requires_a_session_once_accounts_exist() {
         .send()
         .await
         .unwrap();
-    assert_eq!(signed_in.status(), 200);
-    assert!(signed_in.json::<Value>().await.unwrap()["token"].is_string());
+    assert_eq!(
+        signed_in.status(),
+        200,
+        "guest requests must not spend the signed-in token budget"
+    );
+    assert!(
+        signed_in.json::<Value>().await.unwrap()["token"].is_string(),
+        "a signed-in candidate must still receive a token"
+    );
 
     server.shutdown().await;
     remove_database(path).await;
 }
 
-/// Interview LiveKit credentials always belong to a signed-in GitHub user.
+/// Recorded interviews require a signed-in GitHub user.
 #[tokio::test]
-async fn token_requires_recorded_github_login() {
+async fn token_requires_github_login_when_recording_is_enabled() {
     let path = std::env::temp_dir().join(format!(
         "codetrial-token-record-login-{}-{}.db",
         std::process::id(),
@@ -1270,6 +1341,7 @@ async fn token_requires_recorded_github_login() {
     let mut config = web_config();
     config.session_secret = Some("secret".to_string());
     config.db_path = Some(path.clone());
+    config.recording = Some(recording_config());
     let (base, server) = spawn_web_server(config).await;
     let client = http_client();
 
@@ -1281,17 +1353,6 @@ async fn token_requires_recorded_github_login() {
         .unwrap();
 
     assert_eq!(anonymous.status(), 401);
-
-    let session_cookie = record_login(&client, &base, "octocat").await;
-    let signed_in = client
-        .post(format!("{base}/api/token"))
-        .header("cookie", session_cookie)
-        .json(&json!({"problemId": "two-sum", "durationMin": 45}))
-        .send()
-        .await
-        .unwrap();
-
-    assert_eq!(signed_in.status(), 200);
     server.shutdown().await;
     remove_database(path).await;
 }
@@ -1404,4 +1465,27 @@ fn token_resolves_voice_and_accent_independently() {
         serde_json::from_str(claims(&response.token)["metadata"].as_str().unwrap()).unwrap();
     assert!(metadata.get("interviewerVoice").is_none());
     assert!(metadata.get("interviewerAccent").is_none());
+}
+
+/// Guest mode must remain unavailable when no dispatcher supports admission.
+#[tokio::test]
+async fn token_rejects_guest_when_dispatcher_does_not_support_guest_admission() {
+    let mut config = web_config();
+    config.guest_mode_enabled = true;
+
+    // This helper starts the server without a guest-capable dispatcher.
+    let (base, server) = spawn_web_server(config).await;
+
+    let response = http_client()
+        .post(format!("{base}/api/token"))
+        .json(&json!({"problemId": "two-sum", "durationMin": 45}))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 403);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["error"], "Guest interviews are disabled.");
+
+    server.shutdown().await;
 }

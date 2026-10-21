@@ -709,7 +709,7 @@ async function loadAccount(generation) {
     }
     loginResult = null;
     nodes.loginLink.textContent = "Use GitHub";
-    if (session.loginRequired) {
+    if (session.loginRequired && !session.guestModeAvailable) {
       nodes.accountStatus.textContent = unconfirmedLogin
         ? signedOutMessage
         : "Enter your GitHub username to start.";

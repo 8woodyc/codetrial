@@ -69,6 +69,8 @@ pub struct WebServerConfig {
     pub fixed_room_name: Option<String>,
     pub production: bool,
     pub compiler_explorer_enabled: bool,
+    /// Guest interviews require explicit operator opt-in.
+    pub guest_mode_enabled: bool,
     /// Number of trusted reverse proxies in front of this server. Zero, the
     /// default, keys rate limiting on the TCP peer. Anything higher reads the
     /// client from `X-Forwarded-For`, which is only safe once every request is
@@ -126,6 +128,7 @@ impl fmt::Debug for WebServerConfig {
             fixed_room_name,
             production,
             compiler_explorer_enabled,
+            guest_mode_enabled,
             trusted_proxy_hops,
             recording,
             pool,
@@ -150,6 +153,7 @@ impl fmt::Debug for WebServerConfig {
             .field("fixed_room_name", fixed_room_name)
             .field("production", production)
             .field("compiler_explorer_enabled", compiler_explorer_enabled)
+            .field("guest_mode_enabled", guest_mode_enabled)
             .field("trusted_proxy_hops", trusted_proxy_hops)
             .field("recording", recording)
             .field("pool", pool)
@@ -182,7 +186,10 @@ pub(crate) struct AppState {
     /// wherever `config.recording` is `None`, which is every deployment that
     /// has not provisioned it.
     recorder: Option<crate::recording::Recorder>,
+    /// Token requests made by signed-in candidates.
     token_limit: TokenRateLimit,
+    /// Anonymous traffic must not spend a signed-in candidate's allowance.
+    guest_token_limit: TokenRateLimit,
 
     /// Every timer this server started, held only so they stop when it does.
     /// Never read. Why that matters is on `BackgroundTasks`.
@@ -487,6 +494,7 @@ pub(crate) fn web_router(
             dispatcher,
             recorder,
             token_limit: TokenRateLimit::with_limit(token::TOKEN_RATE_LIMIT),
+            guest_token_limit: TokenRateLimit::with_limit(token::TOKEN_RATE_LIMIT),
             login_limit: TokenRateLimit::with_limit(token::TOKEN_RATE_LIMIT),
             replay_limit: TokenRateLimit::with_limit(interviews::REPLAY_RATE_LIMIT),
             read_limit: TokenRateLimit::with_limit(recordings::READ_RATE_LIMIT),
@@ -498,6 +506,17 @@ pub(crate) fn web_router(
 }
 
 impl AppState {
+    /// Whether this deployment allows callers to use guest mode.
+    fn guest_mode_available(&self) -> bool {
+        self.config.guest_mode_enabled
+            && self.config.recording.is_none()
+            && (!self.accounts_required || self.accounts.is_some())
+            && self
+                .dispatcher
+                .as_ref()
+                .is_some_and(|dispatcher| dispatcher.supports_guest_admission())
+    }
+
     /// The response for a request that needed accounts when there are none.
     /// Not configured and configured-but-unreachable are different operator
     /// problems and must not answer alike.
@@ -539,6 +558,22 @@ pub trait RoomDispatcher: Send + Sync + 'static {
         room_name: &str,
         provider: &crate::config::Provider,
     ) -> Result<(), DispatchRefusal>;
+
+    /// Whether this dispatcher enforces guest-specific admission limits.
+    ///
+    /// Custom dispatchers must opt in only when they enforce those limits.
+    fn supports_guest_admission(&self) -> bool {
+        false
+    }
+
+    fn ensure_guest_agent(
+        &self,
+        _room_name: &str,
+        _provider: &crate::config::Provider,
+    ) -> Result<(), DispatchRefusal> {
+        // Never route a guest through an unrestricted signed-in path.
+        Err(DispatchRefusal::AtCapacity)
+    }
 }
 
 /// Why no interviewer will come. The two answer the candidate differently: a
