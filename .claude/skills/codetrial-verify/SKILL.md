@@ -1,6 +1,6 @@
 ---
 name: codetrial-verify
-description: How a CodeTrial change is validated - scripts/test.sh as the credential-free gate, which generated artifacts have to be regenerated before it passes, the checks that need credentials or a browser and therefore sit outside it, the browser and mutation lanes, and how to bring the server up for a live look without taking the maintainer's port. Use before calling work done, when a gate fails on drift rather than on a bug, when adding a test, or when a fix needs to be seen working in the app.
+description: How a CodeTrial change is validated - scripts/test.sh as the credential-free gate, which generated artifacts have to be regenerated before it passes, the checks that need credentials or a browser and therefore sit outside it, the browser and mutation lanes, and how to bring the server up for a live look without taking the maintainer's port. Use before calling work done, when a gate fails on drift rather than on a bug, when adding a test, when a fix needs to be seen working in the app, when reviewing a diff or an open pull request against the contracts in docs/ (review.md), or after editing a skill or anything a skill names (skill-refs.sh).
 ---
 
 # Validating a CodeTrial change
@@ -8,9 +8,19 @@ description: How a CodeTrial change is validated - scripts/test.sh as the creden
 One gate needs no credentials and is the thing to run:
 
 ```sh
-./scripts/test.sh     # the gate CI's `check` job runs
-make check            # the same, plus a live Gemini credential check
+./scripts/test.sh         # every gate, as CI's three lanes run them
+./scripts/test.sh browser # one lane: rust, portable or browser
+make check                # every gate, plus a live Gemini credential check
 ```
+
+CI runs one `gates (<lane>)` job per lane in parallel: `gates (rust)`,
+`gates (portable)` and `gates (browser)`. The `check` job only collects their
+results and `mutation` does the same for the mutant shards, so neither log
+says what failed: open the failing lane. On a pull request the portable lane
+checks the commit messages first, and a bad message skips the rest of that
+lane only. A gate names its lane where it is declared, one naming none is
+portable, and a test proves the three lanes together cover the full run.
+Reproduce a failure with the same lane locally.
 
 `scripts/test.sh` is a list of named gates that all run before it reports, so
 one failure does not hide the next; the summary line names every gate that
@@ -32,10 +42,12 @@ fixed. It cannot list a Rust test that skips itself, such as the retention test
 without sqlite3: `cargo test` keeps a passing test's output to itself, so
 locally that skip shows nowhere. With `CI=true` the summary fails the run, and
 those Rust tests fail instead of skipping; CI installs every tool, so there a
-skip means a check stopped running. The drift checks always run. That skipping is why a green local run is weaker
-evidence than a green CI run, and so is what this script leaves out: CI also
-holds a pull request's own commit messages to the rules, mutation-tests the diff
-in its own job, and builds release binaries for three targets.
+skip means a check stopped running. The drift checks always run. That skipping
+is why a green local run is weaker evidence than a green CI run, and so is what
+this script leaves out: on a pull request CI also holds its own commit messages
+to the rules and mutation-tests the diff in its own job. Release binaries for
+three targets are built only after a merge to `main`, so no pull request
+proves them.
 
 The `indent` gate is the one that surprises people. `scripts/indent.sh --check`
 copies the tree, runs the whole formatter chain over the copy, and diffs:
@@ -86,6 +98,8 @@ scripts/report-parity-check.sh         # the credentialed rust browser-check pre
 scripts/visual-parity-check.sh         # Playwright + Chromium; no service credentials
 scripts/recording-provision-check.sh   # gcloud credentials and the CODETRIAL_RECORDING_* values checked at its start
 scripts/recording-integration.sh       # --help lists per-phase credentials, tools and required --phase
+scripts/interview-behavior-check.sh    # GOOGLE_API_KEY from the selected config; makes Gemini requests
+scripts/evidence-replay-check.sh       # no credentials; the one cargo test the gate also runs, for a quick rerun
 ```
 
 Read the script's validation or usage block before a credentialed run; it is
@@ -135,9 +149,11 @@ writing follows from what the test needs to see:
 Browser tests go in `tests/browser/*.test.js` under `node --test`, Python tests
 in `tests/test_*.py` under `scripts/run-python-tests.py`, which runs a file's
 cases across a thread pool; a suite added there must keep every case owning its
-own sandbox, or it races. The golden fixtures in `tests/golden/` are the
-compatibility contract: a diff there is a claim that the observable output
-changed on purpose, and it belongs in the commit body.
+own sandbox, or it races. The compatibility promise is the versioned contract
+in `docs/interview-contract-versions.md`; the prompt and report goldens in
+`tests/golden/` are how a change to it gets noticed, so a diff there claims the
+output changed on purpose, comes with that version bump, and is explained in
+the commit body. The other fixtures there answer to the tests that own them.
 
 A test that passes without running anything is the failure mode this tree has
 already been bitten by, hence commits like "Prove an empty test run is not a
@@ -174,3 +190,32 @@ make build
 Port 3000 is the maintainer's own instance. Never bind, restart or kill it;
 pass `--web-addr` with another port and name that port in the report. Running
 from the checkout picks up `web/` edits with no environment variable set.
+
+## Before saying it works
+
+Each claim needs evidence from the head being pushed, gathered after the last
+rebase or amend:
+
+| Claim | Evidence | Not evidence |
+| --- | --- | --- |
+| fixed | the original reproduction now behaves | the code changed |
+| tests pass | `./scripts/test.sh` at this head, its skips read | an earlier run |
+| CI is green | `gh pr checks` naming this head | a local pass |
+| review addressed | each open thread reread at this head | a pushed commit |
+| the agent did it | `git diff` shows the change | the agent's summary |
+
+"Should", "probably" and "seems" go out only with the check that would settle
+them.
+
+## Reviewing a change
+
+A passing gate is not a review; reviewing a diff, one's own or an open pull
+request, follows [review.md](review.md).
+
+A skill names gates, lanes, scripts, flags, make targets and documents, and
+each one can move. After changing either side, run
+`.claude/skills/codetrial-verify/skill-refs.sh`: it prints every reference a
+skill makes that no longer resolves, and every check script this skill does
+not list. It catches a
+rename, not a change of meaning, so a changed rule still needs the skill
+reread.
