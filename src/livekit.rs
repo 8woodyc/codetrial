@@ -1334,9 +1334,10 @@ async fn finish_phase_judgment(
 /// one more is asked for anything said since, within one shared bound.
 ///
 /// Only the end waits in the room loop. Waiting stops the loop forwarding the
-/// candidate's audio, whose queue holds about a tenth of a second, so anything
-/// said meanwhile never reaches the interviewer; at the end nothing more is
-/// owed a reply, but the round transition is held instead, see
+/// candidate's audio. Its queue holds about forty seconds (see
+/// `candidate_audio_stream`), so speech meanwhile is delayed rather than lost,
+/// but it reaches the interviewer only after the wait; at the end nothing more
+/// is owed a reply, but the round transition is held instead, see
 /// `defers_round_transition`.
 async fn settle_phase_judge(context: &mut GeminiEventContext<'_>, interview: InterviewContext<'_>) {
     let deadline = Instant::now() + PHASE_JUDGE_SETTLE;

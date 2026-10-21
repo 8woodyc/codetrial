@@ -824,7 +824,7 @@ pub(super) fn frame_to_rgba(frame: &BoxVideoFrame) -> Result<(Vec<u8>, u16, u16)
     // under-allocate the buffer `to_argb` writes into in release.
     let Some((jpeg_width, jpeg_height, rgba_len)) = jpeg_frame_geometry(width, height) else {
         return Err(format!(
-            "frame {width}x{height} is outside JPEG limits (each side at most 65535, at most 8192x8192 pixels)"
+            "frame {width}x{height} is outside JPEG limits (each side at most 65535, and at most 64 MiB unpacked: 16777216 pixels in all)"
         ));
     };
     let mut rgba = vec![0; rgba_len];
