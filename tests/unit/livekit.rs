@@ -449,7 +449,11 @@ fn a_pending_reply_is_what_the_advisory_reads_as_in_flight() {
 
     // Cleared when the turn is cut, and the same advisory is then due.
     let (mut output_audio, _frames) = test_output_audio();
-    cut_off_turn(&mut activity, &mut output_audio);
+    cut_off_turn(
+        &mut RuntimeState::default(),
+        &mut activity,
+        &mut output_audio,
+    );
     assert!(!activity.reply_in_flight(), "a cut turn owes nothing");
     assert!(deferred.take_if_due(
         activity.floor,
@@ -1046,7 +1050,11 @@ fn the_reply_latency_stamp_is_armed_and_cleared_by_the_floor() {
     // is talking again, so nobody is waiting.
     let (mut output_audio, _frames) = test_output_audio();
     output_audio.playout_deadline = Instant::now() + Duration::from_secs(3);
-    cut_off_turn(&mut activity, &mut output_audio);
+    cut_off_turn(
+        &mut RuntimeState::default(),
+        &mut activity,
+        &mut output_audio,
+    );
     assert_eq!(
         activity.awaiting_reply_since, None,
         "a cut turn leaves nothing to measure"
@@ -1092,7 +1100,10 @@ fn a_greeting_and_a_goodbye_survive_an_interruption() {
 
     assert!(
         session::cut_unless_protected(
-            &greeting_only,
+            &mut RuntimeState {
+                transcript: (greeting_only).to_vec(),
+                ..RuntimeState::default()
+            },
             Interruptible::Yes,
             &mut activity,
             &mut output_audio,
@@ -1111,7 +1122,10 @@ fn a_greeting_and_a_goodbye_survive_an_interruption() {
         ),
     ];
     let unplayed = session::cut_unless_protected(
-        &answered,
+        &mut RuntimeState {
+            transcript: (answered).to_vec(),
+            ..RuntimeState::default()
+        },
         Interruptible::Yes,
         &mut activity,
         &mut output_audio,
@@ -1126,7 +1140,10 @@ fn a_greeting_and_a_goodbye_survive_an_interruption() {
     closing_audio.playout_deadline = Instant::now() + Duration::from_secs(10);
     assert!(
         session::cut_unless_protected(
-            &answered,
+            &mut RuntimeState {
+                transcript: (answered).to_vec(),
+                ..RuntimeState::default()
+            },
             Interruptible::No,
             &mut activity,
             &mut closing_audio,
@@ -1157,7 +1174,11 @@ fn a_cut_off_turn_stamps_the_moment_it_was_cut_not_when_it_would_have_ended() {
     activity.last_agent_speech = output_audio.playout_deadline;
     activity.floor = Floor::Speaking;
 
-    let unplayed = cut_off_turn(&mut activity, &mut output_audio);
+    let unplayed = cut_off_turn(
+        &mut RuntimeState::default(),
+        &mut activity,
+        &mut output_audio,
+    );
 
     assert!(unplayed >= Duration::from_secs(14), "reports {unplayed:?}");
     assert!(cut.is_cancelled(), "queued frames must be dropped");
@@ -3968,7 +3989,11 @@ fn a_thinking_hold_cancels_a_model_requested_close_after_its_audio_was_cut() {
         0.0,
     );
     let (mut output_audio, _frames) = test_output_audio();
-    cut_off_turn(&mut activity, &mut output_audio);
+    cut_off_turn(
+        &mut RuntimeState::default(),
+        &mut activity,
+        &mut output_audio,
+    );
     assert!(!activity.socket.tool_response_outstanding);
     assert!(!ready_to_close(&state, &activity));
     crate::agent::apply_data_event(
@@ -4812,7 +4837,11 @@ fn a_late_interrupted_turn_complete_does_not_settle_new_work() {
         );
         assert_eq!(dispatch, !discarded);
         if dispatch {
-            cut_off_turn(&mut activity, &mut output_audio);
+            cut_off_turn(
+                &mut RuntimeState::default(),
+                &mut activity,
+                &mut output_audio,
+            );
         }
         activity.note_candidate_finished(start, false);
         assert!(!accept_gemini_event(
@@ -5545,7 +5574,10 @@ fn apply_debt_step(
                 let spoken = ["Candidate: wait, one thing".to_string()];
                 assert!(
                     session::cut_unless_protected(
-                        &spoken,
+                        &mut RuntimeState {
+                            transcript: (spoken).to_vec(),
+                            ..RuntimeState::default()
+                        },
                         Interruptible::Yes,
                         activity,
                         output_audio,
@@ -7490,7 +7522,7 @@ fn a_pause_keeps_a_hold_discard_until_the_old_generation_ends() {
     let (mut audio, _frames) = test_output_audio();
     let mut activity = RuntimeActivity::new(start);
     activity.note_output(start);
-    session::cut_off_for_hold(&mut activity, &mut audio);
+    session::cut_off_for_hold(&mut RuntimeState::default(), &mut activity, &mut audio);
     assert!(activity.socket.discarding_output);
     let mut state = RuntimeState {
         paused: true,
@@ -7893,4 +7925,201 @@ fn the_interview_length_is_counted_in_minutes() {
     };
     let minutes = interview.elapsed_min();
     assert!((1.5..1.6).contains(&minutes), "{minutes}");
+}
+
+#[test]
+fn delivery_uncertainty_is_shared_by_hold_pause_and_socket_handoff() {
+    for cut in ["hold", "pause", "handoff"] {
+        let mut state = RuntimeState {
+            transcript: vec!["Interviewer: Explain the map.".into()],
+            ..RuntimeState::default()
+        };
+        let mut activity = RuntimeActivity::new(Instant::now());
+        activity.generating = true;
+        let (mut output, _) = test_output_audio();
+        output.playout_deadline = Instant::now() + Duration::from_secs(60);
+        state.interviewer_delivery.transcript(0);
+        state.interviewer_delivery.audio(output.playout_deadline);
+        match cut {
+            "hold" => session::cut_off_for_hold(&mut state, &mut activity, &mut output),
+            "pause" => {
+                state.paused = true;
+                update_pause_activity(&mut state, &mut activity, &mut output, Instant::now());
+            }
+            "handoff" => {
+                hand_over(&mut state, &mut activity, &mut output);
+            }
+            _ => unreachable!(),
+        }
+        assert!(state.interviewer_delivery.uncertain.contains(&0), "{cut}");
+        assert_eq!(state.transcript[0], "Interviewer: Explain the map.");
+        state.interviewer_delivery.transcript(1);
+        assert_eq!(
+            state.interviewer_delivery.uncertain.contains(&1),
+            cut != "handoff",
+            "{cut}"
+        );
+    }
+}
+
+// A line whose audio already played is delivered, however the floor is taken
+// afterwards. The same open line with completed output still playing may be
+// that output's trailing words, and is marked.
+#[test]
+fn delivery_uncertainty_marks_an_open_line_only_when_its_cut_stops_audio() {
+    for (cut, playing) in ["hold", "pause", "handoff"]
+        .into_iter()
+        .flat_map(|cut| [(cut, false), (cut, true)])
+    {
+        let mut state = RuntimeState {
+            transcript: vec!["Interviewer: Explain the map.".into()],
+            ..RuntimeState::default()
+        };
+        let mut activity = RuntimeActivity::new(Instant::now());
+        let (mut output, _) = test_output_audio();
+        state.interviewer_delivery.transcript(0);
+        state.interviewer_delivery.audio(Instant::now());
+        if playing {
+            output.playout_deadline = Instant::now() + Duration::from_secs(60);
+        }
+        assert_eq!(output.is_playing(), playing);
+        match cut {
+            "hold" => session::cut_off_for_hold(&mut state, &mut activity, &mut output),
+            "pause" => {
+                state.paused = true;
+                update_pause_activity(&mut state, &mut activity, &mut output, Instant::now());
+            }
+            "handoff" => {
+                hand_over(&mut state, &mut activity, &mut output);
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            state.interviewer_delivery.uncertain.contains(&0),
+            playing,
+            "{cut} playing={playing}"
+        );
+        assert_eq!(
+            state.interviewer_delivery.accepts(0),
+            !playing,
+            "{cut} playing={playing}"
+        );
+
+        // A replaced socket sends nothing of the cut output, so its window
+        // ends.
+        state.interviewer_delivery.transcript(1);
+        assert_eq!(
+            state.interviewer_delivery.uncertain.contains(&1),
+            playing && cut != "handoff",
+            "{cut} playing={playing}"
+        );
+    }
+}
+
+// A hold that cuts a running generation seals its line, so the reply after the
+// release is not written into text every reader omits.
+#[test]
+fn delivery_uncertainty_seals_the_line_a_hold_cut() {
+    let mut state = RuntimeState {
+        transcript: vec!["Interviewer: Explain the map.".into()],
+        ..RuntimeState::default()
+    };
+    let mut activity = RuntimeActivity::new(Instant::now());
+    activity.generating = true;
+    let (mut output, _) = test_output_audio();
+    state.interviewer_delivery.transcript(0);
+    session::cut_off_for_hold(&mut state, &mut activity, &mut output);
+    assert!(state.interviewer_delivery.uncertain.contains(&0));
+    assert!(!state.interviewer_delivery.accepts(0));
+    state.interviewer_delivery.complete();
+    assert!(!state.interviewer_delivery.accepts(0));
+    state.interviewer_delivery.transcript(1);
+    assert!(!state.interviewer_delivery.uncertain.contains(&1));
+}
+
+// A stalled generation's completion may never come, so cutting it must not
+// leave a window that marks the next, delivered reply until its own end.
+#[test]
+fn delivery_uncertainty_after_a_stalled_hold_ends_at_the_next_audio() {
+    let mut state = RuntimeState {
+        transcript: vec!["Interviewer: Explain the map.".into()],
+        ..RuntimeState::default()
+    };
+    let now = Instant::now();
+    let mut activity = RuntimeActivity::new(now);
+    activity.generating = true;
+    activity.last_output_at = Some(now - PROMPT_STALL);
+    assert!(activity.generation_stalled(now));
+    let (mut output, _) = test_output_audio();
+    state.interviewer_delivery.transcript(0);
+    session::cut_off_for_hold(&mut state, &mut activity, &mut output);
+    assert!(state.interviewer_delivery.uncertain.contains(&0));
+    state.interviewer_delivery.audio(Instant::now());
+    state.interviewer_delivery.transcript(1);
+    assert!(!state.interviewer_delivery.uncertain.contains(&1));
+}
+
+// A review that already read a line before it was cut is not taken back: the
+// cursor stays where it was and the next window starts after it.
+#[test]
+fn delivery_uncertainty_does_not_rewind_an_interim_review() {
+    let config = crate::config::load_from_pairs([
+        ("LIVEKIT_URL", "wss://example.livekit.cloud"),
+        ("LIVEKIT_API_KEY", "devkey"),
+        ("LIVEKIT_API_SECRET", "devsecret"),
+        ("GOOGLE_API_KEY", "google"),
+    ])
+    .unwrap();
+    let boot = crate::runtime::bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+    let mut state = RuntimeState {
+        transcript: vec![
+            "Candidate: I use a map.".into(),
+            "Interviewer: Use the queued hint.".into(),
+        ],
+        ..RuntimeState::default()
+    };
+    assert!(take_interim_review_window(&mut state, &boot).contains("queued hint"));
+    state.interviewer_delivery.uncertain.insert(1);
+    state
+        .transcript
+        .push("Candidate: I compare the keys.".into());
+    let next = take_interim_review_window(&mut state, &boot);
+    assert_eq!(state.interim_transcript_lines, 3);
+    assert!(next.contains("I compare the keys."));
+    assert!(!next.contains(crate::agent::CANCELLED_INTERVIEWER_OUTPUT));
+    assert!(!next.contains("queued hint"));
+}
+
+#[test]
+fn delivery_uncertainty_reaches_interim_and_phase_judge_windows() {
+    let config = crate::config::load_from_pairs([
+        ("LIVEKIT_URL", "wss://example.livekit.cloud"),
+        ("LIVEKIT_API_KEY", "devkey"),
+        ("LIVEKIT_API_SECRET", "devsecret"),
+        ("GOOGLE_API_KEY", "google"),
+    ])
+    .unwrap();
+    let boot = crate::runtime::bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+    let mut state = RuntimeState {
+        transcript: vec![
+            "Candidate: I use a map.".into(),
+            "Interviewer: Use the secret cancelled hint.".into(),
+            "Candidate: I compare the keys.".into(),
+        ],
+        interim_transcript_lines: 1,
+        ..RuntimeState::default()
+    };
+    state.interviewer_delivery.uncertain.insert(1);
+    for window in [
+        take_interim_review_window(&mut state, &boot),
+        crate::agent::take_phase_judge_window(&mut state, boot.problem),
+    ] {
+        assert!(window.contains(crate::agent::CANCELLED_INTERVIEWER_OUTPUT));
+        assert!(!window.contains("secret cancelled hint"));
+        assert!(window.contains("I compare the keys."));
+    }
+    assert_eq!(
+        state.transcript[1],
+        "Interviewer: Use the secret cancelled hint."
+    );
 }

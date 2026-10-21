@@ -952,12 +952,14 @@ fn stamp_report_debrief(
     // null when they were but nothing judged them: a report that never came, or
     // one that left the entry out, has not shown that the follow-up went
     // unasked. Nor has a "not raised" read from a transcript whose opening was
-    // cut, since the follow-up may have been asked in the part left out.
+    // cut, or whose interviewer output was cancelled: the follow-up may have
+    // been asked in material whose delivery cannot be established.
     let judged = report
         .as_object_mut()
         .and_then(|object| object.remove("followUps"));
     let released = crate::agent::coding_round_complete(state);
-    let cut = crate::agent::report_transcript_cut(&crate::agent::report_transcript_lines(state));
+    let cut = crate::agent::report_transcript_cut(&crate::agent::report_transcript_lines(state))
+        || !state.interviewer_delivery.uncertain.is_empty();
     let judgment = |number: usize| {
         judged
             .as_ref()

@@ -76,7 +76,7 @@ pub(super) async fn settle_hold(
             );
         }
         let had_floor = context.activity.floor != Floor::Listening;
-        session::cut_off_for_hold(context.activity, context.output_audio);
+        session::cut_off_for_hold(context.state, context.activity, context.output_audio);
         if had_floor {
             // Owed until a prompt that carries it is sent: the note below can
             // fail to send, and a resumed socket keeps the partial reply.
