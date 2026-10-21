@@ -4417,3 +4417,29 @@ fn a_silent_completion_is_classified_before_the_accept_settles_it() {
     assert_eq!(owed, None);
     assert!(activity.reply_in_flight());
 }
+
+#[test]
+fn closing_both_turns_counts_each_before_anything_is_published() {
+    let mut state = RuntimeState::default();
+    let mut turns = SpeakerTurns::default();
+    turns
+        .candidate
+        .record(&mut state.transcript, CANDIDATE_SPEAKER, "Wait,");
+    turns
+        .interviewer
+        .record(&mut state.transcript, INTERVIEWER_SPEAKER, "Go ahead.");
+    let closing = close_both_turns(&mut turns, &mut state.evidence_ledger, 1);
+
+    // In transcript order, and both already counted: a publish that fails after
+    // this cannot leave a closed turn out of the report's counts.
+    let speakers: Vec<_> = closing.iter().map(|(speaker, ..)| *speaker).collect();
+    assert_eq!(speakers, ["candidate", "interviewer"]);
+    assert_eq!(closing[0].1, "Wait,");
+    assert_eq!(state.evidence_ledger.conversation.candidate_turns, 1);
+    assert_eq!(state.evidence_ledger.conversation.interviewer_turns, 1);
+    assert!(!turns.candidate.is_open() && !turns.interviewer.is_open());
+
+    // Nothing open, nothing to publish or count.
+    assert!(close_both_turns(&mut turns, &mut state.evidence_ledger, 2).is_empty());
+    assert_eq!(state.evidence_ledger.conversation.candidate_turns, 1);
+}

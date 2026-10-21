@@ -1223,7 +1223,7 @@ async fn on_output_transcript(
         let whole = turn
             .record(&mut context.state.transcript, INTERVIEWER_SPEAKER, text)
             .to_string();
-        publish_transcript(room, &whole, turn.segment_id("interviewer"), false, None).await?;
+        publish_transcript(room, &whole, turn.segment_id("interviewer"), false, None).await;
     }
     Ok(())
 }
@@ -1321,7 +1321,7 @@ async fn on_input_transcript(
             false,
             Some(identity),
         )
-        .await?;
+        .await;
     }
     Ok(())
 }
@@ -1542,7 +1542,7 @@ async fn on_turn_complete(
 
     // Gemini finishing its turn also means the candidate utterance it answered
     // is over, so both sides close here.
-    close_turns(room, context).await?;
+    close_turns(room, context).await;
     context
         .activity
         .settle_completed_turn(context.output_audio.is_playing());
@@ -1648,7 +1648,7 @@ async fn on_interruption(
     // says appends to the abandoned turn under its segment id, so the panel
     // would glue two separate utterances into one row and the report prompt
     // would read them as one line.
-    close_turns(room, context).await?;
+    close_turns(room, context).await;
 
     set_agent_state(room, context.agent_state, AGENT_STATE_LISTENING);
     Ok(())
@@ -2375,20 +2375,28 @@ async fn publish_framework_progress(
     Ok(())
 }
 
+/// Best effort, like every publish the interview does not depend on. The
+/// transcript is already recorded when this runs, and the report is written
+/// from that record, so a segment the panel misses is cosmetic. Propagating
+/// the error ended the room loop instead, and with it the report: a signal
+/// reconnect under one fragment cost the whole interview.
 async fn publish_transcript(
     room: &Room,
     text: &str,
     segment_id: String,
     final_segment: bool,
     sender_identity: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    room.local_participant()
+) {
+    if let Err(error) = room
+        .local_participant()
         .send_text(
             text,
             transcript_stream_options(segment_id, final_segment, sender_identity),
         )
-        .await?;
-    Ok(())
+        .await
+    {
+        eprintln!("publishing a transcript segment failed ({error}); continuing the interview");
+    }
 }
 
 /// `lk.segment_id` is what lets the browser patch one row per turn instead of
@@ -2612,27 +2620,46 @@ fn take_stale_playout(
 
 /// Republishes each open turn once as final, so the browser can stop showing
 /// it as in-progress, then opens fresh segment ids for the next turn.
-pub(super) async fn close_turns(
-    room: &Room,
-    context: &mut GeminiEventContext<'_>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+///
+/// Both turns are counted in the ledger before either is published. The count
+/// is what the report reads; the publish only tells the panel, and a failed
+/// one used to leave the other speaker's closed turn uncounted.
+pub(super) async fn close_turns(room: &Room, context: &mut GeminiEventContext<'_>) {
     let candidate_identity = context.media.identity.clone();
+    let closing = close_both_turns(
+        context.turns,
+        &mut context.state.evidence_ledger,
+        crate::current_epoch_millis(),
+    );
+    for (speaker, whole, segment_id) in closing {
+        // Only the candidate's own speech is attributed to them; the
+        // interviewer publishes as the agent participant.
+        let identity = (speaker == "candidate")
+            .then_some(candidate_identity.as_deref())
+            .flatten();
+        publish_transcript(room, &whole, segment_id, true, identity).await;
+    }
+}
 
+/// The room-free half of `close_turns`: finishes each open turn, counts it in
+/// the ledger, and returns what has to be published, in publishing order.
+pub(super) fn close_both_turns(
+    turns: &mut SpeakerTurns,
+    ledger: &mut crate::agent::EvidenceLedger,
+    receipt_timestamp_ms: u64,
+) -> Vec<(&'static str, String, String)> {
     let order = closing_order(
-        context.turns.interviewer.transcript_line(),
-        context.turns.candidate.transcript_line(),
+        turns.interviewer.transcript_line(),
+        turns.candidate.transcript_line(),
     );
     let mut closing = [
         (
             "interviewer",
-            close_turn(&mut context.turns.interviewer, "interviewer"),
+            close_turn(&mut turns.interviewer, "interviewer"),
         ),
-        (
-            "candidate",
-            close_turn(&mut context.turns.candidate, "candidate"),
-        ),
+        ("candidate", close_turn(&mut turns.candidate, "candidate")),
     ];
-    let receipt_timestamp_ms = crate::current_epoch_millis();
+    let mut out = Vec::with_capacity(2);
     for speaker in order {
         let Some((whole, segment_id)) = closing
             .iter_mut()
@@ -2641,19 +2668,10 @@ pub(super) async fn close_turns(
         else {
             continue;
         };
-        context
-            .state
-            .evidence_ledger
-            .record_conversation_turn(receipt_timestamp_ms, speaker);
-
-        // Only the candidate's own speech is attributed to them; the
-        // interviewer publishes as the agent participant.
-        let identity = (speaker == "candidate")
-            .then_some(candidate_identity.as_deref())
-            .flatten();
-        publish_transcript(room, &whole, segment_id, true, identity).await?;
+        ledger.record_conversation_turn(receipt_timestamp_ms, speaker);
+        out.push((speaker, whole, segment_id));
     }
-    Ok(())
+    out
 }
 
 /// Ends the turn and hands back what has to be published as final, or `None`

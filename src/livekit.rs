@@ -725,7 +725,7 @@ async fn replace_gemini_session(
     // gap, and the gap starts here. Connect and setup are bounded at fifteen
     // seconds each, and for that long the candidate is talking to a socket that
     // is gone.
-    publish_interviewer_state(room, &interviewer_state(true)).await?;
+    publish_control(room, &interviewer_state(true), "the reconnect notice").await;
 
     // Closes the writer half and the reader task. A socket that is already gone
     // errors on the close, and that error says nothing the caller can act on;
@@ -818,9 +818,9 @@ async fn replace_gemini_session(
         prompt_fields(context.state, context.activity),
         interview.boot.room_name
     );
-    close_turns(room, context).await?;
+    close_turns(room, context).await;
     set_agent_state(room, context.agent_state, AGENT_STATE_LISTENING);
-    publish_interviewer_state(room, &interviewer_state(false)).await?;
+    publish_control(room, &interviewer_state(false), "the reconnected notice").await;
     let spoke = if let Some(handoff) = speech_handoff {
         if resumed {
             eprintln!("Gemini session resumed; the interview continues where it left off");
@@ -2968,8 +2968,16 @@ async fn handle_room_event(
         RoomEvent::ParticipantConnected(participant)
             if is_duplicate_agent(&participant, agent_identity) =>
         {
-            evict_duplicate_agent(config, room_name, &participant.identity().0, now_seconds)
-                .await?;
+            // Best effort: a duplicate left in place costs some confusion in
+            // the room, while ending this loop over it cost the report.
+            if let Err(error) =
+                evict_duplicate_agent(config, room_name, &participant.identity().0, now_seconds)
+                    .await
+            {
+                eprintln!(
+                    "removing the duplicate agent failed ({error}); continuing the interview"
+                );
+            }
         }
         RoomEvent::ParticipantDisconnected(participant)
             if participant.identity().0 == candidate_identity =>
@@ -3091,6 +3099,15 @@ async fn publish_interviewer_state(
         .publish_data(browser_packet(TOPIC_CONTROL, notice)?)
         .await?;
     Ok(())
+}
+
+/// A control message the page shows and the interview does not depend on,
+/// sent best effort. The state it describes is already in effect, and a failed
+/// publish used to end the room loop and with it the report.
+async fn publish_control(room: &Room, notice: &serde_json::Value, what: &str) {
+    if let Err(error) = publish_interviewer_state(room, notice).await {
+        eprintln!("publishing {what} failed ({error}); continuing the interview");
+    }
 }
 
 /// What the interview needs from whoever joined. Assembled in one place because
@@ -3566,7 +3583,7 @@ async fn apply_data_packet(
     let grace = thinking_transcript_grace(interview.boot.silence_ms);
     let effects = settle_hold(context, &result, &mut reply, packet_at, grace).await;
     if effects.cut_off {
-        close_turns(room, context).await?;
+        close_turns(room, context).await;
         set_agent_state(room, context.agent_state, AGENT_STATE_LISTENING);
     }
 
@@ -3597,12 +3614,9 @@ async fn apply_data_packet(
         }
     }
     if let Some(paused) = result.pause_changed {
-        room.local_participant()
-            .publish_data(browser_packet(
-                TOPIC_CONTROL,
-                &serde_json::json!({ "type": "pause_state", "paused": paused }),
-            )?)
-            .await?;
+        // The state changes first. It is what stops the interviewer, and a
+        // publish that fails or stalls ahead of it left the queue playing under
+        // a page that may already say paused.
         update_pause_activity(
             context.state,
             context.activity,
@@ -3617,19 +3631,25 @@ async fn apply_data_packet(
                 timing::TimingOutcome::Paused,
                 &mut std::io::stderr().lock(),
             );
-            close_turns(room, context).await?;
+            close_turns(room, context).await;
             set_agent_state(room, context.agent_state, AGENT_STATE_LISTENING);
         }
+        publish_control(
+            room,
+            &serde_json::json!({ "type": "pause_state", "paused": paused }),
+            "the pause state",
+        )
+        .await;
     }
     if let Some(status) = result.round_changed {
-        room.local_participant()
-            .publish_data(browser_packet(
-                TOPIC_CONTROL,
-                &serde_json::json!({
-                    "type": "round_state", "round": "behavioral", "status": status
-                }),
-            )?)
-            .await?;
+        publish_control(
+            room,
+            &serde_json::json!({
+                "type": "round_state", "round": "behavioral", "status": status
+            }),
+            "the round state",
+        )
+        .await;
     }
 
     // Every result the browser reports, reacted to or not: one inside the
@@ -3722,14 +3742,11 @@ async fn apply_data_packet(
     // can add is the skips a started behavioral round leaves to it, and the
     // report scores those steps as unassessed with or without them.
     //
-    // Not `?`, and neither is anything else between here and
-    // `publish_with_recovery`. The turns go out as a LiveKit text stream and
-    // the report as a data packet, so the one failing says nothing about the
-    // other, and a final segment the panel never saw is cosmetic where a
-    // missing report is not.
-    if let Err(error) = close_turns(room, context).await {
-        eprintln!("closing the last turns failed ({error}); writing the report anyway");
-    }
+    // Nothing between here and `publish_with_recovery` propagates an error. The
+    // turns go out as a LiveKit text stream and the report as a data packet, so
+    // the one failing says nothing about the other, and a final segment the
+    // panel never saw is cosmetic where a missing report is not.
+    close_turns(room, context).await;
 
     // The board the browser sent just before ending can still be on its way;
     // see `BOARD_FINAL_WAIT`. Copied out rather than borrowed: the farewell
@@ -3761,9 +3778,7 @@ async fn apply_data_packet(
         // The goodbye is the last turn there will be. Closing here keeps the
         // panel from leaving it rendered as still-in-progress for the rest of
         // the page's life, and costs one publish.
-        if let Err(error) = close_turns(room, context).await {
-            eprintln!("closing the goodbye failed ({error}); writing the report anyway");
-        }
+        close_turns(room, context).await;
     };
     let (generated, ()) = tokio::join!(
         generate_report_bounded(
