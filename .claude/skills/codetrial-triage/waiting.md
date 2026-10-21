@@ -37,7 +37,9 @@ The four sweep lists are the queue, and each one has a fixed next move:
   with removing Pause if no contrary evidence arrives. Read the latest
   disposition first. When a linked PR merges or the facts change while a
   reminder is pending, rescope the request and keep its deadline. The closing
-  comment names the fact again and says that posting it reopens the issue. An
+  comment names the fact again and says a maintainer reopens the issue once it
+is posted, since a comment alone does not reopen it and the sweep reads only
+open issues. An
   issue a maintainer opened is left out of `waiting`, because its author already
   knows the rule.
 - `linked`, with `merged` set: a merged pull request referenced the issue after

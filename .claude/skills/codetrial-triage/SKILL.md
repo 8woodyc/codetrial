@@ -343,11 +343,11 @@ What the shapes add:
   the claim is stale (#94).
 - Reminding a reporter: one short paragraph, addressed with an @mention, that
   repeats the open question and the date it was asked, and names the deadline
-  and what happens then: closing as not planned, with posting afterwards
-  reopening it, or proceeding as already decided (#136). Never a second
-  wording of the question.
+  and what happens then: closing as not planned, with a maintainer reopening it
+  once the fact is posted, or proceeding as already decided (#136). Never a
+  second wording of the question.
 - Closing for no reply: say what was asked and when, that the report could not
-  be acted on without it, and the exact thing to post to reopen it. Not a
+  be acted on without it, and the exact thing to post to have it reopened. Not a
   verdict on the report.
 - Asking for a retest after a merge: name the PR and its merge commit, ask for
   a build from source of `main` at or after it, and say what each result
