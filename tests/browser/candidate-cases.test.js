@@ -112,8 +112,8 @@ test("candidate cases run when session storage cannot be written", async (t) => 
     );
     assert.equal(await page.locator("#candidate-case-input").inputValue(), "");
 
+    await page.locator("#language-select").selectOption("javascript");
     await page.evaluate(() => {
-      document.querySelector('[data-language="javascript"]').click();
       document.querySelector("#run-tests").click();
     });
     await page.waitForFunction(() =>
@@ -145,9 +145,9 @@ test("candidate cases run when session storage cannot be reached", async (t) => 
       waitUntil: "domcontentloaded",
     });
     await candidateCasesReady(page);
+    await page.locator("#language-select").selectOption("javascript");
     await page.evaluate(() => {
       document.querySelector("#candidate-case-input").value = "[[2,7,11,15],9]";
-      document.querySelector('[data-language="javascript"]').click();
       document.querySelector("#run-tests").click();
     });
     await page.waitForFunction(() =>
@@ -234,7 +234,7 @@ test("adding then running during judge load shares one addition", async (t) => {
     // test is holding. Retry the click instead and let the guard report its
     // own readiness, because `addCandidateCase` disables the button before its
     // first await, so a click that took is proof `bindEvents` has run. That
-    // function is synchronous, so the language tabs and the run button are
+    // function is synchronous, so the language selector and the run button are
     // bound by then too.
     await page.waitForFunction(() => {
       const add = document.querySelector("#candidate-case-add");
@@ -243,8 +243,8 @@ test("adding then running during judge load shares one addition", async (t) => {
       add.click();
       return add.disabled;
     });
+    await page.locator("#language-select").selectOption("javascript");
     await page.evaluate(() => {
-      document.querySelector('[data-language="javascript"]').click();
       document.querySelector("#run-tests").click();
     });
     releaseJudge();
@@ -310,9 +310,9 @@ test("a malformed candidate case stops the run it was typed into", async (t) => 
     // what they typed. The reason is asserted to be the one the add path
     // wrote, because `runTests` used to recover it by reading the status line
     // back out, so rewording that line changed which runs were blocked.
+    await page.locator("#language-select").selectOption("javascript");
     await page.evaluate(() => {
       document.querySelector("#candidate-case-input").value = "not json";
-      document.querySelector('[data-language="javascript"]').click();
       document.querySelector("#run-tests").click();
     });
     await page.waitForFunction(() => {
@@ -367,9 +367,9 @@ test("a sixth candidate case is refused without blocking the run", async (t) => 
       );
     }
 
+    await page.locator("#language-select").selectOption("javascript");
     await page.evaluate(() => {
       document.querySelector("#candidate-case-input").value = "[[9,9,9,9],18]";
-      document.querySelector('[data-language="javascript"]').click();
       document.querySelector("#run-tests").click();
     });
     await page.waitForFunction(() =>
@@ -541,10 +541,10 @@ test("a case cannot be removed while tests are running", async (t) => {
       () =>
         document.querySelector("#candidate-case-list").children.length === 2,
     );
+    await page.locator("#language-select").selectOption("javascript");
     await page.evaluate(() => {
       document.querySelector("#candidate-case").open = true;
       document.querySelector("#candidate-case-input").value = "[[2,7],9]";
-      document.querySelector('[data-language="javascript"]').click();
       document.querySelector("#run-tests").click();
     });
     // A removal re-renders the list, so the rows still being there alongside
@@ -608,9 +608,12 @@ async function holdJudge(page) {
 }
 
 /// Clicks a tab even when it is disabled, and answers whether it took.
-async function clickSelects(tab) {
-  await tab.evaluate((button) => button.click());
-  return tab.evaluate((button) => button.classList.contains("selected"));
+async function selectLanguage(page, language) {
+  const select = page.locator("#language-select");
+  const option = page.locator(`#language-select option[value="${language}"]`);
+  if (await option.isDisabled()) return false;
+  await select.selectOption(language);
+  return (await select.inputValue()) === language;
 }
 
 async function withHeldRequestedC(body) {
@@ -649,21 +652,34 @@ test("disabled compiled runners cannot be selected while the judge loads", async
       () => document.querySelector('[data-language="c"]').disabled,
     );
     for (const language of COMPILED_LANGUAGES) {
-      const tab = page.locator(`[data-language="${language}"]`);
-      assert.equal(await tab.isDisabled(), true);
-      assert.match(await tab.getAttribute("title"), /disabled by this server/);
-      assert.equal(await clickSelects(tab), false);
+      const option = page.locator(
+        `#language-select option[value="${language}"]`,
+      );
+      assert.equal(await option.isDisabled(), true);
+      assert.match(
+        await option.textContent(),
+        /unavailable: disabled by server/,
+      );
+      assert.match(
+        await option.getAttribute("title"),
+        /disabled by this server/,
+      );
+      assert.equal(await selectLanguage(page, language), false);
     }
     releaseJudge();
     await candidateCasesReady(page);
     for (const language of ["python", "javascript"]) {
-      const tab = page.locator(`[data-language="${language}"]`);
-      assert.equal(await tab.isDisabled(), false);
-      assert.equal(await clickSelects(tab), true);
+      const option = page.locator(
+        `#language-select option[value="${language}"]`,
+      );
+      assert.equal(await option.isDisabled(), false);
+      assert.equal(await selectLanguage(page, language), true);
     }
     for (const language of COMPILED_LANGUAGES) {
       assert.equal(
-        await page.locator(`[data-language="${language}"]`).isDisabled(),
+        await page
+          .locator(`#language-select option[value="${language}"]`)
+          .isDisabled(),
         true,
       );
     }
@@ -686,31 +702,35 @@ test("C stays unavailable until a function-style judge has loaded", async (t) =>
       const page = await browser.newPage();
       let releaseJudge = () => {};
       try {
+        const c = page.locator('#language-select option[value="c"]');
         releaseJudge = await holdJudge(page);
         await page.goto(`${enabled.base}/interview.html?problem=${problem}`, {
           waitUntil: "domcontentloaded",
         });
-        const c = page.locator('[data-language="c"]');
         await page.waitForFunction(
           () => document.querySelector('[data-language="c"]').disabled,
         );
+        assert.match(await c.textContent(), /unavailable: waiting for judge/);
         assert.match(
           await c.getAttribute("title"),
-          /only after function-style tests load/,
+          /function-style tests load/,
         );
-        assert.equal(await clickSelects(c), false);
+        assert.equal(await selectLanguage(page, "c"), false);
         releaseJudge();
         await candidateCasesReady(page);
         assert.equal(await c.isDisabled(), classStyle);
-        if (classStyle)
-          assert.match(
-            await c.getAttribute("title"),
-            /only builds function judges/,
-          );
-        else assert.equal(await clickSelects(c), true);
+        if (classStyle) {
+          assert.match(await c.textContent(), /unavailable: class problem/);
+          assert.match(await c.getAttribute("title"), /class/);
+        } else {
+          assert.equal(await selectLanguage(page, "c"), true);
+          assert.equal(await c.getAttribute("title"), "");
+        }
         for (const language of ["python", "javascript", "cpp", "java"]) {
           assert.equal(
-            await page.locator(`[data-language="${language}"]`).isDisabled(),
+            await page
+              .locator(`#language-select option[value="${language}"]`)
+              .isDisabled(),
             false,
           );
         }
@@ -910,14 +930,10 @@ test("candidate cases are preserved on page reload", async (t) => {
 test("a requested C tab is restored after its judge loads", async (t) => {
   if (!browser) return t.skip("playwright chromium unavailable");
   await withHeldRequestedC(async (page, releaseJudge) => {
-    const c = page.locator('[data-language="c"]');
-    assert.match(
-      await page.locator('[data-language="python"]').getAttribute("class"),
-      /\bselected\b/,
-    );
+    assert.equal(await page.locator("#language-select").inputValue(), "python");
     releaseJudge();
     await candidateCasesReady(page);
-    assert.match(await c.getAttribute("class"), /\bselected\b/);
+    assert.equal(await page.locator("#language-select").inputValue(), "c");
   });
 });
 
@@ -931,10 +947,7 @@ test("editing before a requested C judge loads keeps Python", async (t) => {
     }, edited);
     releaseJudge();
     await candidateCasesReady(page);
-    assert.match(
-      await page.locator('[data-language="python"]').getAttribute("class"),
-      /\bselected\b/,
-    );
+    assert.equal(await page.locator("#language-select").inputValue(), "python");
     assert.equal(await page.locator("#editor").inputValue(), edited);
   });
 });
@@ -942,11 +955,13 @@ test("editing before a requested C judge loads keeps Python", async (t) => {
 test("choosing JavaScript before a requested C judge loads keeps JavaScript", async (t) => {
   if (!browser) return t.skip("playwright chromium unavailable");
   await withHeldRequestedC(async (page, releaseJudge) => {
-    const javascript = page.locator('[data-language="javascript"]');
-    assert.equal(await clickSelects(javascript), true);
+    assert.equal(await selectLanguage(page, "javascript"), true);
     releaseJudge();
     await candidateCasesReady(page);
-    assert.match(await javascript.getAttribute("class"), /\bselected\b/);
+    assert.equal(
+      await page.locator("#language-select").inputValue(),
+      "javascript",
+    );
   });
 });
 
@@ -964,10 +979,7 @@ test("ending before a requested C judge loads keeps Python", async (t) => {
     );
     releaseJudge();
     await candidateCasesReady(page);
-    assert.match(
-      await page.locator('[data-language="python"]').getAttribute("class"),
-      /\bselected\b/,
-    );
+    assert.equal(await page.locator("#language-select").inputValue(), "python");
   });
 });
 
@@ -980,9 +992,6 @@ test("running before a requested C judge loads keeps Python", async (t) => {
     );
     releaseJudge();
     await candidateCasesReady(page);
-    assert.match(
-      await page.locator('[data-language="python"]').getAttribute("class"),
-      /\bselected\b/,
-    );
+    assert.equal(await page.locator("#language-select").inputValue(), "python");
   });
 });

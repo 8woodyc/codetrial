@@ -193,7 +193,7 @@ test("Run tests shares one toolbar row with the languages on a laptop", async (t
         return box.top + box.height / 2;
       };
       return {
-        language: middle('.language-button[data-language="python"]'),
+        language: middle("#language-select"),
         run: middle("#run-tests"),
         theme: middle("#editor-theme-toggle"),
       };

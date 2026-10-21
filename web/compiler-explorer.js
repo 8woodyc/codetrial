@@ -113,37 +113,52 @@ export const compiledTestsEnabled = () =>
   globalThis.CODETRIAL_COMPILER_EXPLORER_ENABLED !== false &&
   Boolean(compilerExplorerBaseUrl());
 
-/// Why this judge cannot be run in this language, in a sentence a candidate can
-/// read, or null when it can. The tab row disables from it and shows it as the
-/// tooltip, so the reason a tab is dead cannot drift from the rule that killed
-/// it; a second withheld pair is a second case here rather than a second place
-/// to remember.
+/// Why this judge cannot be run, in a sentence the candidate can read, and
+/// the short reason shown in the language menu. Keeping both beside the rule
+/// that withholds a language prevents its explanation and label from drifting.
 ///
-/// C has no classes, so `generateHarness` refuses a class judge for it and a
+/// C has no classes, so generateHarness refuses a class judge for it and a
 /// candidate would otherwise find that out by writing a whole solution and
 /// pressing run.
-export function harnessGap(language, spec, execution = true) {
+export function harnessAvailability(language, spec, execution = true) {
   if (
     execution &&
     !compiledTestsEnabled() &&
     COMPILED_LANGUAGES.includes(language)
   ) {
-    return "Compiled language tests are disabled by this server. Choose Python or JavaScript to run tests.";
+    return {
+      message:
+        "Compiled language tests are disabled by this server. Choose Python or JavaScript to run tests.",
+      reason: "disabled by server",
+    };
   }
   if (language === "c" && !spec) {
-    return "C is available only after function-style tests load. Choose another language or reload to retry.";
+    return {
+      message:
+        "C is available only after function-style tests load. Choose another language or reload to retry.",
+      reason: "waiting for judge",
+    };
   }
   if (language === "c" && spec.kind === "class") {
-    return "This problem asks for a class, and the C harness only builds function judges.";
+    return {
+      message:
+        "This problem asks for a class, and the C harness only builds function judges.",
+      reason: "class problem",
+    };
   }
   return null;
+}
+
+/// The runner needs the candidate-facing explanation without the menu label.
+export function harnessGap(language, spec, execution = true) {
+  return harnessAvailability(language, spec, execution)?.message ?? null;
 }
 
 /// Withhold C until the judge proves it is function-style, so a slow fetch
 /// cannot let a candidate start a class problem in an untestable language.
 export function languagesFor(spec, execution = true) {
   return ALL_LANGUAGES.filter(
-    (language) => !harnessGap(language, spec, execution),
+    (language) => !harnessAvailability(language, spec, execution),
   );
 }
 

@@ -53,11 +53,10 @@ test("an interview loads only selected grammars and Enter works during a switch"
     await download;
     await route.continue();
   });
-  const select = (language) =>
-    page.evaluate((language) => {
-      document.querySelector(`[data-language="${language}"]`).click();
-      document.querySelector("#editor").focus();
-    }, language);
+  const select = async (language) => {
+    await page.locator("#language-select").selectOption(language);
+    await page.locator("#editor").focus();
+  };
   const setCode = (value) =>
     page.evaluate(async (value) => {
       const editor = document.querySelector("#editor");
@@ -82,7 +81,12 @@ test("an interview loads only selected grammars and Enter works during a switch"
     });
     await closeSetupCheck(page);
     // C becomes selectable only after the judge callback has run.
-    await page.waitForSelector('[data-language="c"]:not([disabled])');
+    await page.waitForFunction(() => {
+      const option = document.querySelector(
+        '#language-select [data-language="c"]',
+      );
+      return option && !option.disabled;
+    });
     await page.waitForSelector("#editor:not([disabled])");
     await page.evaluate(async () => {
       const { prepareLanguage } = await import("/syntax-parser.js");
@@ -222,11 +226,11 @@ test("a grammar completing after a switch does not repaint the active language",
     await closeSetupCheck(page);
     await page.waitForSelector("#editor:not([disabled])");
     const code = 'text = """\n/*\n"""\nif True:';
+    await page.locator("#language-select").selectOption("javascript");
+    await page.locator("#language-select").selectOption("python");
     await page.evaluate(async (code) => {
       const { prepareLanguage } = await import("/syntax-parser.js");
       await prepareLanguage("python");
-      document.querySelector('[data-language="javascript"]').click();
-      document.querySelector('[data-language="python"]').click();
       await prepareLanguage("python");
       const editor = document.querySelector("#editor");
       editor.value = code;
@@ -264,10 +268,7 @@ test("a grammar completing after a switch does not repaint the active language",
       await page.locator("#editor-highlight .tok-string").textContent(),
       '"""\n/*\n"""',
     );
-    assert.match(
-      await page.locator('[data-language="python"]').getAttribute("class"),
-      /\bselected\b/,
-    );
+    assert.equal(await page.locator("#language-select").inputValue(), "python");
   } finally {
     release();
     await page.close();
@@ -287,8 +288,8 @@ test("a failed grammar download leaves highlighting, Enter and undo usable", asy
     await closeSetupCheck(page);
     await page.waitForSelector("#editor:not([disabled])");
     const code = "const text = `\n/*\n`;\n    if (ready) {";
+    await page.locator("#language-select").selectOption("javascript");
     await page.evaluate(async (code) => {
-      document.querySelector('[data-language="javascript"]').click();
       const { prepareLanguage } = await import("/syntax-parser.js");
       await prepareLanguage("javascript").catch(() => {});
       const editor = document.querySelector("#editor");
@@ -341,7 +342,12 @@ test("highlighting and Enter share comment and string regions in every language"
       waitUntil: "domcontentloaded",
     });
     await closeSetupCheck(page);
-    await page.waitForSelector('[data-language="c"]:not([disabled])');
+    await page.waitForFunction(() => {
+      const option = document.querySelector(
+        '#language-select [data-language="c"]',
+      );
+      return option && !option.disabled;
+    });
     for (const [language, declaration, literal, comment] of [
       ["python", "text = ", '"""\n/*\n"""', "# if ready:"],
       ["javascript", "const text = ", "`\n/*\n`", "/*\n    if (ready) {"],
@@ -350,9 +356,9 @@ test("highlighting and Enter share comment and string regions in every language"
       ["java", "String text = ", '"""\n/*\n"""', "/*\n    if (ready) {"],
     ]) {
       const code = declaration + literal + ";\n    " + comment;
+      await page.locator("#language-select").selectOption(language);
       await page.evaluate(
         async ({ code, language }) => {
-          document.querySelector(`[data-language="${language}"]`).click();
           const { prepareLanguage } = await import("/syntax-parser.js");
           await prepareLanguage(language);
           const editor = document.querySelector("#editor");

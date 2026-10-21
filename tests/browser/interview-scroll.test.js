@@ -271,7 +271,8 @@ test("a short interview viewport can scroll to the test results", async (t) => {
     await openInterview(page);
     // Locator clicks scroll clipped ancestors programmatically, which a
     // candidate's mouse wheel cannot do for overflow: hidden.
-    await page.mouse.move(1260, 180);
+    const panel = await page.locator(".editor-panel").boundingBox();
+    await page.mouse.move(panel.x + panel.width - 8, panel.y + 12);
     await page.mouse.wheel(0, 2000);
     await page.waitForFunction(
       () =>
