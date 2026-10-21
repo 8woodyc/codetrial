@@ -2634,3 +2634,7 @@ fn parse_server_message(text: &str) -> ServerMessage {
 #[cfg(test)]
 #[path = "../tests/unit/gemini.rs"]
 pub(crate) mod tests;
+
+#[cfg(test)]
+#[path = "../tests/unit/gemini.report_eval.rs"]
+mod report_eval;
