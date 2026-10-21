@@ -291,7 +291,7 @@ fn continuity_eligible(state: &RuntimeState) -> bool {
         && state.context_cut_plausible
         && !state.ended
         && !state.end_requested
-        && !state.floor_held()
+        && !state.interviewer_silenced()
 }
 
 fn continuity_input_for<'a>(
@@ -816,7 +816,7 @@ pub(super) async fn handle_gemini_event(
             now,
             context.media.audio.is_some(),
         ) {
-            if !context.state.floor_held() {
+            if !context.state.interviewer_silenced() {
                 if active {
                     context.activity.latency.voice_start();
                 } else {
@@ -851,7 +851,7 @@ pub(super) async fn handle_gemini_event(
             .observe_turn_complete(context.state.context_compression);
         context.activity.sync_cut_plausible(context.state);
     }
-    let held = context.state.floor_held();
+    let held = context.state.interviewer_silenced();
     let discarding = context.activity.discarding_output;
     let (accepted, interruption_debt, silent_owed) =
         accept_event_noting_silence(&event, context.activity, held, Instant::now());
@@ -956,7 +956,7 @@ pub(super) async fn handle_gemini_event(
         && !context.state.end_requested
         && !context.state.ended
         && !context.state.paused
-        && !context.state.floor_held()
+        && !context.state.interviewer_silenced()
         && !context.activity.incoming_speech_active(now)
     {
         let prompt = crate::agent::with_timer(
@@ -1002,7 +1002,7 @@ fn observe_voice_activity(
     if observed {
         activity.note_candidate_voice_activity(active, now);
     }
-    if !state.floor_held() && !activity.discarding_output {
+    if !state.interviewer_silenced() && !activity.discarding_output {
         if active {
             activity.turn_timing.note_activity_start(now);
         } else {
@@ -1041,7 +1041,7 @@ async fn on_tool_calls(
     {
         context.board.settle_for_read(context.state).await;
     }
-    let timed = !context.state.floor_held() && !context.activity.discarding_output;
+    let timed = !context.state.interviewer_silenced() && !context.activity.discarding_output;
     let reviewed_revision = context.activity.substantive_revision_at_last_review;
     let tool_started = Instant::now();
     let answers = execute_timed_tool_batch(
@@ -1089,7 +1089,7 @@ async fn on_tool_calls(
 
     // Gemini resumes the moment the responses land, so serializing them again
     // for the lines below waits until after the send.
-    if !context.activity.discarding_output && !context.state.floor_held() {
+    if !context.activity.discarding_output && !context.state.interviewer_silenced() {
         let batch_ms = crate::agent::saturating_ms(tool_started.elapsed());
         let mut timing =
             context
@@ -1214,7 +1214,7 @@ pub(super) fn tool_ack_fits(
     calls: &[GeminiFunctionCall],
     now: Instant,
 ) -> bool {
-    !state.floor_held()
+    !state.interviewer_silenced()
         && output_audio.idle_at(now)
         && !calls.iter().any(|call| call.name == TOOL_END_INTERVIEW)
 }
@@ -1261,7 +1261,7 @@ async fn on_input_transcript(
         context
             .activity
             .note_candidate_finished(Instant::now(), context.output_audio.is_playing());
-        if context.state.floor_held() {
+        if context.state.interviewer_silenced() {
             context.activity.turn_timing.reset();
         }
 
@@ -1286,7 +1286,7 @@ async fn on_input_transcript(
                 crate::current_epoch_millis(),
             );
         }
-        if !context.state.floor_held() {
+        if !context.state.interviewer_silenced() {
             context
                 .activity
                 .note_latency_transcript(transcript_received_at);
@@ -1796,7 +1796,7 @@ fn has_tool_continuity(name: &str) -> bool {
 pub(super) fn editor_review_allowed(state: &RuntimeState) -> bool {
     !state.ended
         && !state.end_requested
-        && !state.floor_held()
+        && !state.interviewer_silenced()
         && !state.behavioral_round_started
         && !state.interview_mode.is_whiteboard()
         && state.evidence_ledger.code.parser_observation

@@ -1480,7 +1480,7 @@ impl RuntimeActivity {
     ) -> Option<String> {
         let (due, _) = self.thinking_reply_fallback.as_ref()?;
         if now < *due
-            || state.floor_held()
+            || state.interviewer_silenced()
             || state.ended
             || self.floor != Floor::Listening
             || self.generating
@@ -1509,7 +1509,7 @@ impl RuntimeActivity {
     /// The reply `defer_thinking_reply` held back is due: its discard has
     /// ended and nothing has put the floor back on hold. Taken once.
     pub(super) fn claim_thinking_reply(&mut self, state: &RuntimeState) -> bool {
-        if self.discarding_output || state.floor_held() || state.ended {
+        if self.discarding_output || state.interviewer_silenced() || state.ended {
             return false;
         }
         std::mem::take(&mut self.reply_after_thinking_discard)
@@ -1750,7 +1750,7 @@ impl RuntimeActivity {
 
         // The behavioral round has no reviews, so once its one nudge is spent
         // there is nothing left to watch for.
-        if state.floor_held() || (behavioral && self.behavioral_nudged) {
+        if state.interviewer_silenced() || (behavioral && self.behavioral_nudged) {
             return None;
         }
         let completed_coding = !behavioral

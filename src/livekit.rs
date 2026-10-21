@@ -1080,7 +1080,7 @@ async fn send_recovery_brief(
     // would be dropped; ending it asks for it instead, on either kind of
     // socket.
     let owed = replacement.owed();
-    let held = state.floor_held();
+    let held = state.interviewer_silenced();
     if owed && held {
         hold_owed_reply(state, owed_prompt);
     }
@@ -2157,7 +2157,7 @@ fn note_candidate_audio_frame(
     now: Instant,
 ) -> bool {
     let voiced = !state.paused && frame.is_some_and(media::frame_has_voice);
-    if voiced && !state.floor_held() {
+    if voiced && !state.interviewer_silenced() {
         activity.turn_timing.note_voice(now);
         activity.latency.voice(now);
     }
@@ -2187,7 +2187,7 @@ fn reply_watch(
     if !activity.reply_unfinished() {
         return ReplyWatch::Settled;
     }
-    let watched = !state.floor_held() && !state.end_requested;
+    let watched = !state.interviewer_silenced() && !state.end_requested;
     if watched && activity.reply_timed_out(now, audio_playing) {
         return ReplyWatch::Recover;
     }
@@ -3289,7 +3289,7 @@ pub(super) fn browser_packet(
 fn ready_to_close(state: &RuntimeState, activity: &RuntimeActivity) -> bool {
     state.end_requested
         && !state.ended
-        && !state.floor_held()
+        && !state.interviewer_silenced()
         && !activity.tool_response_outstanding
 }
 

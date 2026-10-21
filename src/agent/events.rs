@@ -888,7 +888,7 @@ fn control_pause(
     // re-grounded before it is told to carry on: the fixed line below assumes a
     // Jim who remembers the conversation, and after a cold restart there is
     // none to continue from.
-    let can_reply = !state.floor_held();
+    let can_reply = !state.interviewer_silenced();
     DataEventResult {
         pause_changed: Some(paused),
         generate_reply: can_reply.then(|| {
