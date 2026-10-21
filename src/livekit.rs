@@ -61,6 +61,7 @@ use crate::agent::{
 use crate::config::AgentConfig;
 use crate::runtime::TOPIC_CONTROL;
 use packets::{apply_data_packet, end_through_control, handle_data_packet};
+use room_link::RoomLink;
 
 /// How long past the interview's nominal duration the agent waits before ending
 /// it itself. The browser normally ends the interview; this only has to catch
@@ -102,6 +103,7 @@ mod latency;
 mod media;
 mod packets;
 mod report;
+mod room_link;
 mod room_service;
 mod rooms;
 mod session;
@@ -115,9 +117,9 @@ mod turn;
 pub use session::execute_tool_call;
 use session::{
     ContinuityScope, GeminiEventContext, TestRunLine, TurnCause, close_turns, cut_off_turn,
-    handle_gemini_event, log_clock, prompt_fields, prompt_line, send_model_context,
-    send_model_context_scoped, send_model_text, send_model_text_scoped, send_wrap_up_and_wait,
-    set_agent_state,
+    handle_gemini_event, log_clock, prompt_fields, prompt_line, publish_control,
+    send_model_context, send_model_context_scoped, send_model_text, send_model_text_scoped,
+    send_wrap_up_and_wait, set_agent_state,
 };
 
 use board::{Board, MAX_BOARD_BYTES, handle_board_event};
@@ -495,7 +497,7 @@ fn runtime_activity(config: &AgentConfig, started_at: Instant, session_id: u64) 
 async fn open_cold_session(
     interview: InterviewContext<'_>,
     restarts: &mut usize,
-    room: Option<&Room>,
+    room: Option<&RoomLink>,
 ) -> Result<GeminiLiveSession, Box<dyn std::error::Error + Send + Sync>> {
     retry_cold_open(
         interview.keys,
@@ -660,7 +662,7 @@ impl LiveOutcome {
 /// The reason the socket closed came over it and is logged by the reader task.
 /// The lines below tie that to the room.
 async fn replace_gemini_session(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     interview: InterviewContext<'_>,
     loops: &mut RoomLoop,
@@ -670,7 +672,7 @@ async fn replace_gemini_session(
     // Neither a resume nor a cold open on the same key can get past a project
     // that cannot pay, so the budget is not spent learning that twice more.
     session::finish_turn_timing(
-        room.name().as_str(),
+        room.name(),
         context.activity,
         &log_clock(context.state),
         timing::TimingOutcome::Replaced,
@@ -901,7 +903,7 @@ async fn replace_gemini_session(
 /// ends it, with no goodbye to ask for. Already-ended sessions are not ended
 /// twice; the room is left all the same.
 async fn end_without_interviewer(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     interview: InterviewContext<'_>,
     loops: &mut RoomLoop,
@@ -909,9 +911,12 @@ async fn end_without_interviewer(
     // A replacement that gave up after announcing itself would leave the
     // reconnecting notice up over the report. Not `?`: the report matters more
     // than the notice.
-    if let Err(error) = publish_interviewer_state(room, &interviewer_state(false)).await {
-        eprintln!("clearing the reconnecting notice failed ({error}); writing the report anyway");
-    }
+    publish_control(
+        room,
+        &interviewer_state(false),
+        "the reconnecting notice's end",
+    )
+    .await;
     if context.state.ended {
         leave_room(room).await;
     } else {
@@ -1508,7 +1513,7 @@ fn take_interim_review_window(state: &mut RuntimeState, boot: &RuntimeBootstrap<
 /// alongside the values they point at would be borrowing itself. `'a` is the
 /// caller's, carried only by `boot`.
 struct OpenSession<'a> {
-    room: Room,
+    room: RoomLink,
     events: tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<RoomEvent>>,
     agent_identity: String,
     candidate_identity: String,
@@ -1539,6 +1544,7 @@ async fn open_session<'a>(
 ) -> Result<Option<OpenSession<'a>>, Box<dyn std::error::Error + Send + Sync>> {
     let agent_identity = agent_identity(room_name);
     let (room, mut events) = join_room(config, room_name, &agent_identity, now_seconds).await?;
+    let room = RoomLink::live(room);
     let mut agent_state = session::AgentState::default();
     session::publish_opening_attributes(&room, &mut agent_state, config.gemini_silence_ms).await?;
 
@@ -1546,7 +1552,7 @@ async fn open_session<'a>(
     // until someone joins.
     let mut deferred_events = Vec::new();
     let Some((candidate_identity, candidate_metadata)) =
-        candidate_metadata(&room, &mut events, &mut deferred_events).await?
+        candidate_metadata(room.connected(), &mut events, &mut deferred_events).await?
     else {
         eprintln!("no candidate joined room={room_name}; leaving it");
         return Ok(None);
@@ -1599,7 +1605,8 @@ async fn open_session<'a>(
     let (mut output_audio, mut gemini) = tokio::try_join!(
         async {
             isolate_local_agent(config, room_name, &agent_identity, now_seconds).await?;
-            let published = publish_output_audio(&room, GEMINI_OUTPUT_AUDIO_SAMPLE_RATE).await;
+            let published =
+                publish_output_audio(room.connected(), GEMINI_OUTPUT_AUDIO_SAMPLE_RATE).await;
             room_ready = setup_began.elapsed();
             published
         },
@@ -1650,7 +1657,7 @@ async fn open_session<'a>(
         transcripts: Default::default(),
     };
     turn.activity.latency.bind(
-        &room.name(),
+        room.name(),
         session_id,
         turn.activity.live_socket,
         config.gemini_silence_ms,
@@ -1725,7 +1732,7 @@ struct RoomLoop {
 
 /// The interview reached the deadline the server holds for it.
 async fn on_hard_deadline(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     loops: &mut RoomLoop,
     interview: InterviewContext<'_>,
@@ -1749,7 +1756,7 @@ async fn on_hard_deadline(
 
 /// Reconcile compressed context as soon as usage and output boundaries permit.
 /// The watch tick retries when candidate speech or queued output holds it.
-async fn maybe_refresh_context(room: &Room, context: &mut GeminiEventContext<'_>) {
+async fn maybe_refresh_context(room: &RoomLink, context: &mut GeminiEventContext<'_>) {
     // Runs after every Gemini event, most of them audio. Nothing pending is the
     // common case, and the gates below read the candidate's open turn to say
     // no, so it is answered first.
@@ -1796,7 +1803,7 @@ async fn maybe_refresh_context(room: &Room, context: &mut GeminiEventContext<'_>
 
 /// One watch tick: the candidate's absence, the interim review, and the nudge.
 async fn on_watch_tick(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     loops: &mut RoomLoop,
     interview: InterviewContext<'_>,
@@ -2309,7 +2316,7 @@ async fn send_watched_prompt<E>(
 
 /// One Gemini event, plus the two restarts only this arm can decide.
 async fn on_gemini_event(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     event: Option<GeminiEvent>,
     loops: &mut RoomLoop,
@@ -2448,7 +2455,7 @@ async fn on_gemini_event(
 /// Spends a held `GoAway` if the floor has settled, and names what let it go.
 /// Every place that hands the floor back asks this.
 async fn spend_deferred_restart(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     loops: &mut RoomLoop,
     interview: InterviewContext<'_>,
@@ -2533,7 +2540,7 @@ async fn wait_for_playout(floor: Floor, deadline: Instant) {
 }
 
 async fn on_playout_settled(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     loops: &mut RoomLoop,
     interview: InterviewContext<'_>,
@@ -2841,7 +2848,7 @@ pub(crate) async fn run_room_with_slot(
     }
     .await;
     session::finish_turn_timing(
-        room.name().as_str(),
+        room.name(),
         &mut turn.activity,
         &log_clock(&turn.state),
         timing::TimingOutcome::Ended,
@@ -2899,7 +2906,7 @@ fn live_usage_line(
 /// `Break` means the interview is over: the browser asked to end it, and the
 /// report has already been published by the time this returns.
 async fn handle_room_event(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     presence: &mut CandidatePresence,
     interview: InterviewContext<'_>,
@@ -3077,7 +3084,7 @@ fn is_duplicate_agent(participant: &RemoteParticipant, local_identity: &str) -> 
 /// for what happens rather than for what the call is called, because every
 /// caller is deciding whether to abandon an interview, and "close the room"
 /// reads like the room goes with it.
-async fn leave_room(room: &Room) {
+async fn leave_room(room: &RoomLink) {
     if let Err(error) = room.close().await {
         eprintln!("leaving the room failed, ignoring: {error}");
     }
@@ -3091,11 +3098,10 @@ async fn leave_room(room: &Room) {
 /// seconds of that is possible, which is long enough that saying nothing reads
 /// as the interviewer ignoring them.
 async fn publish_interviewer_state(
-    room: &Room,
+    room: &RoomLink,
     notice: &serde_json::Value,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    room.local_participant()
-        .publish_data(browser_packet(TOPIC_CONTROL, notice)?)
+    room.publish_data(browser_packet(TOPIC_CONTROL, notice)?)
         .await?;
     Ok(())
 }
@@ -3105,15 +3111,6 @@ async fn publish_interviewer_state(
 /// cannot take them in this long will not take the report either, and the
 /// report has its own recovery.
 const TRANSCRIPT_FLUSH_LIMIT: Duration = Duration::from_secs(2);
-
-/// A control message the page shows and the interview does not depend on,
-/// sent best effort. The state it describes is already in effect, and a failed
-/// publish used to end the room loop and with it the report.
-async fn publish_control(room: &Room, notice: &serde_json::Value, what: &str) {
-    if let Err(error) = publish_interviewer_state(room, notice).await {
-        eprintln!("publishing {what} failed ({error}); continuing the interview");
-    }
-}
 
 /// What the interview needs from whoever joined. Assembled in one place because
 /// the candidate can be found two ways, already in the room or arriving, and
@@ -3223,6 +3220,13 @@ struct InterviewContext<'a> {
     candidate_identity: &'a str,
     events: &'a tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<RoomEvent>>,
     slot: Option<&'a crate::dispatch::Slot>,
+}
+
+impl InterviewContext<'_> {
+    /// Minutes since the interview started, as the report states its length.
+    fn elapsed_min(&self) -> f64 {
+        self.started_at.elapsed().as_secs_f64() / 60.0
+    }
 }
 
 /// The interview's starting state, from the plan the token was minted for.

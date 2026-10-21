@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use ::livekit::data_stream::api::StreamTextOptions;
-use ::livekit::prelude::Room;
 
 use crate::agent::{
     CANDIDATE_SPEAKER, INTERVIEWER_SPEAKER, ModelInputKind, RecordOutcome, RuntimeState,
@@ -34,6 +33,7 @@ use crate::runtime::{
 use super::board::{self, Board};
 use super::latency::{self, Boundary};
 use super::media::{CandidateMedia, OutputAudio};
+use super::room_link::RoomLink;
 use super::timing::TimingOutcome;
 use super::transcripts::Segment;
 use super::turn::{
@@ -602,14 +602,14 @@ fn output_disposition(event: &GeminiEvent, discarding: bool, held: bool) -> Outp
 
 /// Logs and sums every usage observation the socket recorded and the room
 /// never reached, for a socket being let go.
-pub(super) fn drain_live_usage(room: &Room, context: &mut GeminiEventContext<'_>) {
+pub(super) fn drain_live_usage(room: &RoomLink, context: &mut GeminiEventContext<'_>) {
     for usage in context.gemini.drain_usage() {
         record_live_usage(room, context, usage);
     }
 }
 
 fn record_live_usage(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     usage: crate::gemini::TokenUsage,
 ) {
@@ -618,7 +618,7 @@ fn record_live_usage(
         .latency
         .observe_usage(usage.prompt, usage.tool_use_prompt);
     let line = context.activity.account_live_usage(
-        room.name().as_str(),
+        room.name(),
         &super::log_clock(context.state),
         context.gemini.input_cause,
         context.state.context_compression,
@@ -797,7 +797,7 @@ fn accept_event_noting_silence(
 /// undo have no step in common, and reading either one used to mean scrolling
 /// past the other five.
 pub(super) async fn handle_gemini_event(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     event: GeminiEvent,
     interruptible: Interruptible,
@@ -885,7 +885,10 @@ pub(super) async fn handle_gemini_event(
         }
         match event {
             GeminiEvent::ToolCall(calls) => on_tool_calls(room, context, calls).await,
-            GeminiEvent::OutputTranscript(text) => on_output_transcript(room, context, &text).await,
+            GeminiEvent::OutputTranscript(text) => {
+                on_output_transcript(room, context, &text);
+                Ok(())
+            }
             GeminiEvent::InputTranscript(text) => {
                 on_input_transcript(room, context, &text, interruptible).await
             }
@@ -1025,7 +1028,7 @@ pub(super) fn settle_hold_at_turn_end(state: &mut RuntimeState, activity: &mut R
 /// Answers every call in the batch in one message, and republishes the
 /// checklist once when any of them moved it.
 async fn on_tool_calls(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     calls: Vec<GeminiFunctionCall>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -1221,11 +1224,7 @@ pub(super) fn tool_ack_fits(
 }
 
 /// What the interviewer said, as it is said.
-async fn on_output_transcript(
-    room: &Room,
-    context: &mut GeminiEventContext<'_>,
-    text: &str,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn on_output_transcript(room: &RoomLink, context: &mut GeminiEventContext<'_>, text: &str) {
     // `text` is passed whole, not the trimmed form: fragments have to be
     // concatenated exactly as received. The trimmed view only decides whether
     // this event carried anything at all.
@@ -1240,12 +1239,11 @@ async fn on_output_transcript(
         };
         context.transcripts.publish(room, segment);
     }
-    Ok(())
 }
 
 /// What the candidate said, and the playout it cuts short.
 async fn on_input_transcript(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     text: &str,
     interruptible: Interruptible,
@@ -1294,7 +1292,7 @@ async fn on_input_transcript(
         }
         if !was_thinking && context.state.thinking_hold.is_active() {
             finish_turn_timing(
-                room.name().as_str(),
+                room.name(),
                 context.activity,
                 &log_clock(context.state),
                 TimingOutcome::Held,
@@ -1370,7 +1368,7 @@ pub(super) fn log_turn_timing(
 
 /// A chunk of the interviewer's voice, queued for the room.
 async fn on_generated_audio(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     bytes: &[u8],
     mime_type: &str,
@@ -1433,7 +1431,7 @@ async fn on_generated_audio(
         .note_audio(Instant::now(), captured)
     {
         log_turn_timing(
-            room.name().as_str(),
+            room.name(),
             context.activity,
             &log_clock(context.state),
             summary,
@@ -1490,33 +1488,35 @@ pub(super) fn thinking_state_message(thinking: bool) -> serde_json::Value {
     serde_json::json!({"type": "thinking_state", "thinking": thinking})
 }
 
-/// Tells the page what `take_thinking_notice` holds, if anything. Not `?`: a
-/// page left showing the wrong button is corrected by the next click, and is no
-/// reason to end the interview.
-pub(super) async fn flush_thinking_notice(room: &Room, state: &mut RuntimeState) {
-    if let Some(thinking) = state.take_thinking_notice()
-        && let Err(error) = publish_thinking_state(room, thinking).await
-    {
-        eprintln!("publishing thinking state failed ({error}); continuing the interview");
+/// Tells the page what `take_thinking_notice` holds, if anything. A page left
+/// showing the wrong button is corrected by the next click.
+pub(super) async fn flush_thinking_notice(room: &RoomLink, state: &mut RuntimeState) {
+    if let Some(thinking) = state.take_thinking_notice() {
+        publish_control(
+            room,
+            &thinking_state_message(thinking),
+            "the thinking state",
+        )
+        .await;
     }
 }
 
-async fn publish_thinking_state(
-    room: &Room,
-    thinking: bool,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    room.local_participant()
-        .publish_data(browser_packet(
-            TOPIC_CONTROL,
-            &thinking_state_message(thinking),
-        )?)
-        .await?;
-    Ok(())
+/// A control message the page shows and the interview does not depend on,
+/// sent best effort. The state it describes is already in effect, and a failed
+/// publish used to end the room loop and with it the report.
+pub(super) async fn publish_control(room: &RoomLink, notice: &serde_json::Value, what: &str) {
+    let sent = match browser_packet(TOPIC_CONTROL, notice) {
+        Ok(packet) => room.publish_data(packet).await,
+        Err(error) => Err(error.into()),
+    };
+    if let Err(error) = sent {
+        eprintln!("publishing {what} failed ({error}); continuing the interview");
+    }
 }
 
 /// Gemini finished the turn. The room has not: the queue is still draining.
 async fn on_turn_complete(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // The reply's last chunk rarely ends on a frame. Its tail goes out padded,
@@ -1526,7 +1526,7 @@ async fn on_turn_complete(
         on_generated_audio(room, context, &padding, "audio/pcm", Interruptible::No).await?;
     }
     finish_turn_timing(
-        room.name().as_str(),
+        room.name(),
         context.activity,
         &log_clock(context.state),
         TimingOutcome::NoAudio,
@@ -1593,7 +1593,7 @@ fn settle_interruption_debt(
 
 /// Gemini cut its own turn, because it heard the candidate start one.
 async fn on_interruption(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     interruptible: Interruptible,
     owed: Option<ReplyDebt>,
@@ -1635,7 +1635,7 @@ async fn on_interruption(
         return on_turn_complete(room, context).await;
     };
     finish_turn_timing(
-        room.name().as_str(),
+        room.name(),
         context.activity,
         &log_clock(context.state),
         TimingOutcome::Interrupted,
@@ -1687,14 +1687,14 @@ impl AgentState {
     }
 }
 
-pub(super) fn set_agent_state(room: &Room, state: &mut AgentState, next: &'static str) {
+pub(super) fn set_agent_state(room: &RoomLink, state: &mut AgentState, next: &'static str) {
     if state.current == next {
         return;
     }
     state.current = next;
     let writer = state.writer.get_or_insert_with(|| {
         let (writer, mut latest) = tokio::sync::watch::channel("");
-        let participant = room.local_participant();
+        let participant = room.participant();
         tokio::spawn(async move {
             // Ends with the interview, when its state is dropped.
             while latest.changed().await.is_ok() {
@@ -1722,11 +1722,11 @@ pub(super) const TURN_WINDOW_ATTRIBUTE: &str = "codetrial.silence_ms";
 /// The agent's first attributes, listening and the turn window, in the one
 /// round trip the room pays before it waits for the candidate.
 pub(super) async fn publish_opening_attributes(
-    room: &Room,
+    room: &RoomLink,
     current: &mut AgentState,
     silence_ms: u32,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let participant = room.local_participant();
+    let participant = room.participant();
     let attributes = agent_state_attributes(participant.attributes(), AGENT_STATE_LISTENING);
     participant
         .set_attributes(turn_window_attributes(attributes, silence_ms))
@@ -2355,7 +2355,7 @@ pub(super) fn framework_progress_unpublished(state: &RuntimeState) -> Option<Vec
 /// Called where evidence can change, after tool calls and data packets, and
 /// on the watch tick for a judgment collected, a rejoined page or a retry; not
 /// on every turn of the room loop, which runs for every audio frame.
-pub(super) async fn flush_framework_progress(room: &Room, state: &mut RuntimeState) {
+pub(super) async fn flush_framework_progress(room: &RoomLink, state: &mut RuntimeState) {
     let Some(phases) = framework_progress_unpublished(state) else {
         return;
     };
@@ -2374,18 +2374,17 @@ pub(super) async fn flush_framework_progress(room: &Room, state: &mut RuntimeSta
 /// has already banked is not a secret. The summary, confidence and source stay
 /// server-side, because those are the reading rather than the fact.
 async fn publish_framework_progress(
-    room: &Room,
+    room: &RoomLink,
     phases: &[&'static str],
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    room.local_participant()
-        .publish_data(browser_packet(
-            TOPIC_CONTROL,
-            &serde_json::json!({
-                "type": "framework_state",
-                "phases": phases,
-            }),
-        )?)
-        .await?;
+    room.publish_data(browser_packet(
+        TOPIC_CONTROL,
+        &serde_json::json!({
+            "type": "framework_state",
+            "phases": phases,
+        }),
+    )?)
+    .await?;
     Ok(())
 }
 
@@ -2424,7 +2423,7 @@ pub(super) fn goodbye_heard(activity: &RuntimeActivity, audio_playing: bool) -> 
 }
 
 pub(super) async fn send_wrap_up_and_wait(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     reason: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -2483,7 +2482,7 @@ pub(super) async fn send_wrap_up_and_wait(
 /// sides before setting this floor, and closing again would split one utterance
 /// across two transcript segments.
 async fn drop_stale_playout(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     interruptible: Interruptible,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -2627,7 +2626,7 @@ fn take_stale_playout(
 /// Both turns are counted in the ledger before either is published. The count
 /// is what the report reads; the publish only tells the panel, and a failed
 /// one used to leave the other speaker's closed turn uncounted.
-pub(super) fn close_turns(room: &Room, context: &mut GeminiEventContext<'_>) {
+pub(super) fn close_turns(room: &RoomLink, context: &mut GeminiEventContext<'_>) {
     let closing = close_both_turns(
         context.turns,
         &mut context.state.evidence_ledger,

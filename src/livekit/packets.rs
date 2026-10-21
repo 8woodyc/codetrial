@@ -157,7 +157,7 @@ pub(super) async fn settle_hold(
 /// an interview that has already ended it would return having published
 /// nothing, and the caller would stop just the same.
 pub(super) async fn end_through_control(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     interview: InterviewContext<'_>,
     reason: &str,
@@ -187,7 +187,7 @@ pub(super) async fn end_through_control(
 /// Applies one decoded data packet. `Break` means the interview is over and the
 /// report has been published.
 pub(super) async fn handle_data_packet(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     interview: InterviewContext<'_>,
     topic: &str,
@@ -253,7 +253,7 @@ pub(super) fn reduce_data_packet(
 /// Applies a packet after any judgment wait has been settled. Released round
 /// transitions enter here so new speech or a slow judge cannot renew the hold.
 pub(super) async fn apply_data_packet(
-    room: &Room,
+    room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     interview: InterviewContext<'_>,
     topic: &str,
@@ -297,7 +297,7 @@ pub(super) async fn apply_data_packet(
         .finish_thinking_change(Instant::now(), result.thinking_changed)
     {
         session::log_turn_timing(
-            room.name().as_str(),
+            room.name(),
             context.activity,
             &log_clock(context.state),
             summary,
@@ -349,7 +349,7 @@ pub(super) async fn apply_data_packet(
         );
         if paused {
             session::finish_turn_timing(
-                room.name().as_str(),
+                room.name(),
                 context.activity,
                 &log_clock(context.state),
                 timing::TimingOutcome::Paused,
@@ -379,14 +379,7 @@ pub(super) async fn apply_data_packet(
     // Every result the browser reports, reacted to or not: one inside the
     // reaction cooldown updates the record without Jim saying anything, and a
     // later prompt that describes it is otherwise unexplained.
-    if topic == crate::runtime::TOPIC_TEST_RESULTS {
-        let judged = TestRunLine {
-            run: context.state.last_test_run.as_ref(),
-            note: result.test_run,
-            credited_run_is_current: crate::agent::tested_code_is_current(context.state),
-            reacted: reply.is_some(),
-            ended: context.state.ended,
-        };
+    if let Some(judged) = test_run_line(topic, context.state, &result, reply.is_some()) {
         eprintln!(
             "tests: at={} {judged} room={}",
             log_clock(context.state),
@@ -437,7 +430,7 @@ pub(super) async fn apply_data_packet(
             Err(error) => {
                 // A failed resume is owed by `record_event_prompt`; the debt it
                 // carried is still in the state, unpaid, for the next socket.
-                if result.carries_thinking_debt && result.pause_changed != Some(false) {
+                if owes_failed_reply(&result) {
                     context
                         .activity
                         .mark_prompted(Instant::now(), Some(&prompt), false);
@@ -482,7 +475,7 @@ pub(super) async fn apply_data_packet(
     let assessment = freeze_assessment(
         interview.boot,
         context.state,
-        interview.started_at.elapsed().as_secs_f64() / 60.0,
+        interview.elapsed_min(),
         context.board.report_boards(),
     );
     let report_boards = assessment.report_boards();
@@ -536,7 +529,7 @@ pub(super) async fn apply_data_packet(
         },
         generated,
         &mut recovery_events,
-        room,
+        room.connected(),
         close_live,
     )
     .await?;
@@ -545,4 +538,30 @@ pub(super) async fn apply_data_packet(
     // nothing the candidate has not acknowledged or stopped listening for.
     leave_room(room).await;
     Ok(ControlFlow::Break(()))
+}
+
+/// The `tests:` log line for a packet, which only a test-results packet has:
+/// every one is logged, reacted to or not, since one inside the reaction
+/// cooldown updates the record without the interviewer saying anything.
+pub(super) fn test_run_line<'a>(
+    topic: &str,
+    state: &'a RuntimeState,
+    result: &crate::agent::DataEventResult,
+    reacted: bool,
+) -> Option<TestRunLine<'a>> {
+    (topic == crate::runtime::TOPIC_TEST_RESULTS).then(|| TestRunLine {
+        run: state.last_test_run.as_ref(),
+        note: result.test_run,
+        credited_run_is_current: crate::agent::tested_code_is_current(state),
+        reacted,
+        ended: state.ended,
+    })
+}
+
+/// Whether a reply this packet asked for, and that failed to send, is still
+/// owed. Only one that carried a thinking hold's debt is: the debt stays in
+/// the state for the next socket. A resume is owed by `record_event_prompt`
+/// instead, which moves its debt onto the activity itself.
+pub(super) fn owes_failed_reply(result: &crate::agent::DataEventResult) -> bool {
+    result.carries_thinking_debt && result.pause_changed != Some(false)
 }

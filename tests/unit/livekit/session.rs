@@ -11,6 +11,7 @@ use crate::agent::{ThinkingHold, record_framework_evidence};
 
 // The room half's test module owns the audio fixture, because the room half
 // owns the track it is a stand-in for.
+use crate::livekit::GEMINI_OUTPUT_AUDIO_SAMPLE_RATE;
 use crate::livekit::tests::{observed_source, receive_test_run, test_output_audio};
 
 #[tokio::test]
@@ -4456,4 +4457,124 @@ fn closing_both_turns_counts_each_before_anything_is_published() {
     // Nothing open, nothing to publish or count.
     assert!(close_both_turns(&mut turns, &mut state.evidence_ledger, 2, None).is_empty());
     assert_eq!(state.evidence_ledger.conversation.candidate_turns, 1);
+}
+
+/// One room loop's worth of state, around a room that records what it is
+/// sent and a Gemini socket that never answers, so the handlers themselves
+/// can be driven: the same `handle_gemini_event` the loop calls, in the order
+/// a provider sends its events.
+struct Harness {
+    turn: TurnState,
+    output: OutputAudio,
+    queued: tokio::sync::mpsc::Receiver<crate::livekit::media::QueuedOutputFrame>,
+    gemini: GeminiLiveSession,
+    board: crate::livekit::board::Board,
+    media: CandidateMedia,
+    room: RoomLink,
+    sent: std::sync::Arc<crate::livekit::room_link::Recorder>,
+}
+
+impl Harness {
+    async fn new() -> Self {
+        let (gemini, _server) = crate::livekit::tests::fake_socket(None).await;
+        let (output, queued) = test_output_audio();
+        let (room, sent) = RoomLink::recording("room-test");
+        let mut media = CandidateMedia::new();
+        media.identity = Some("candidate".into());
+        Self {
+            turn: crate::livekit::tests::hold_turn(RuntimeState::default()),
+            output,
+            queued,
+            gemini,
+            board: crate::livekit::board::Board::new(),
+            media,
+            room,
+            sent,
+        }
+    }
+
+    async fn event(&mut self, event: GeminiEvent) {
+        let mut context = self.turn.context(
+            &mut self.output,
+            &mut self.gemini,
+            &mut self.board,
+            &mut self.media,
+        );
+        handle_gemini_event(&self.room, &mut context, event, Interruptible::Yes)
+            .await
+            .unwrap();
+    }
+
+    /// The transcript segments the page was sent, once the writer has sent
+    /// everything queued.
+    async fn segments(&mut self) -> Vec<(String, bool)> {
+        self.turn.transcripts.flush(Duration::from_secs(1)).await;
+        self.sent
+            .take()
+            .into_iter()
+            .filter_map(|sent| match sent {
+                crate::livekit::room_link::Sent::Text {
+                    text, attributes, ..
+                } => Some((text, attributes["lk.transcription_final"] == "true")),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
+fn reply_audio() -> GeminiEvent {
+    GeminiEvent::Audio {
+        bytes: vec![0; GEMINI_OUTPUT_AUDIO_SAMPLE_RATE as usize / 100 * 2],
+        mime_type: format!("audio/pcm;rate={GEMINI_OUTPUT_AUDIO_SAMPLE_RATE}"),
+    }
+}
+
+// What a provider interruption does to words already recorded, through the
+// handlers rather than the steps they call. The cut-off line stays in the
+// transcript as said and goes to the page as a finished turn, with nothing
+// marking that its audio was cancelled before it played. Characterized, not
+// endorsed: it is the evidence gap a transcript policy would have to close.
+#[tokio::test]
+async fn an_interruption_keeps_the_cut_words_as_an_ordinary_finished_turn() {
+    let mut harness = Harness::new().await;
+    harness
+        .event(GeminiEvent::InputTranscript("I will use a map.".into()))
+        .await;
+    harness.event(GeminiEvent::TurnComplete).await;
+    for fragment in ["Could you explain", " the space complexity?"] {
+        harness
+            .event(GeminiEvent::OutputTranscript(fragment.into()))
+            .await;
+    }
+    harness.event(reply_audio()).await;
+    assert_eq!(harness.output.queued_frames(), 1);
+    assert_eq!(harness.turn.agent_state.current(), AGENT_STATE_SPEAKING);
+    // Model a playout backlog without a wall-clock race on a loaded runner.
+    harness.output.playout_deadline = Instant::now() + Duration::from_secs(60);
+
+    harness.event(GeminiEvent::Interrupted).await;
+
+    let frame = harness.queued.try_recv().unwrap();
+    assert!(frame.output_cancellation.is_cancelled());
+    let speech = "Could you explain the space complexity?";
+    assert_eq!(
+        harness.turn.state.transcript,
+        [
+            format!("{CANDIDATE_SPEAKER}: I will use a map."),
+            format!("{INTERVIEWER_SPEAKER}: {speech}"),
+        ]
+    );
+    assert!(!harness.turn.turns.interviewer.is_open());
+    assert_eq!(harness.turn.agent_state.current(), AGENT_STATE_LISTENING);
+    let segments = harness.segments().await;
+    assert_eq!(segments.last(), Some(&(speech.to_string(), true)));
+    assert_eq!(
+        harness
+            .turn
+            .state
+            .evidence_ledger
+            .conversation
+            .interviewer_turns,
+        1
+    );
 }

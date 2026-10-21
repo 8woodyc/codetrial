@@ -65,3 +65,26 @@ async fn flushing_a_writer_that_never_sent_returns_at_once() {
     .await
     .expect("nothing queued, nothing to wait for");
 }
+
+#[tokio::test]
+async fn a_flush_behind_queued_segments_returns_once_they_are_sent() {
+    let (room, recorder) = crate::livekit::room_link::RoomLink::recording("room");
+    let mut writer = TranscriptWriter::default();
+    writer.publish(&room, segment("candidate-1", "I will", false));
+    writer.publish(&room, segment("candidate-1", "I will use a map", true));
+    tokio::time::timeout(
+        Duration::from_millis(500),
+        writer.flush(Duration::from_secs(5)),
+    )
+    .await
+    .expect("the flush is answered once the queue is out, not at its limit");
+    let sent: Vec<_> = recorder
+        .take()
+        .into_iter()
+        .filter_map(|sent| match sent {
+            crate::livekit::room_link::Sent::Text { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sent.last().map(String::as_str), Some("I will use a map"));
+}

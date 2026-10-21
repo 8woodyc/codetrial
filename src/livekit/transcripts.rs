@@ -17,11 +17,10 @@
 //! updates and the two speakers' turns go out in the order they were closed.
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use ::livekit::prelude::{LocalParticipant, Room};
-use tokio::sync::Notify;
+use super::room_link::{ParticipantLink, RoomLink};
+use tokio::sync::{mpsc, oneshot};
 
 /// One segment as the page shows it: the whole turn so far, under its id.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,46 +59,24 @@ impl Pending {
         self.queue.pop_front()
     }
 
+    #[cfg(test)]
     pub(super) fn is_empty(&self) -> bool {
         self.queue.is_empty()
     }
 }
 
-#[derive(Default)]
-struct Queue {
-    pending: Pending,
-    /// A segment has been taken off the queue and is still being sent.
-    sending: bool,
-    /// The interview's writer is gone; the task sends what is left and ends.
-    closed: bool,
-}
-
-#[derive(Default)]
-struct Shared {
-    queue: Mutex<Queue>,
-    /// Something was queued, or the writer closed.
-    work: Notify,
-    /// The queue ran empty with nothing in flight.
-    drained: Notify,
-}
-
-impl Shared {
-    fn lock(&self) -> std::sync::MutexGuard<'_, Queue> {
-        // Nothing a panic could leave half-done is held under this lock.
-        self.queue.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    fn idle(&self) -> bool {
-        let queue = self.lock();
-        queue.pending.is_empty() && !queue.sending
-    }
+/// What the loop hands the writer task.
+enum Message {
+    Segment(Segment),
+    /// Answered once everything queued before it has been sent.
+    Flush(oneshot::Sender<()>),
 }
 
 /// The interview's transcript writer. Started on the first segment, and its
 /// task ends once this is dropped and the queue has been sent.
 #[derive(Default)]
 pub(crate) struct TranscriptWriter {
-    shared: Option<Arc<Shared>>,
+    task: Option<mpsc::UnboundedSender<Message>>,
 }
 
 impl TranscriptWriter {
@@ -107,14 +84,14 @@ impl TranscriptWriter {
     /// send is logged by the task: the transcript is already recorded, and the
     /// report is written from that record, so a segment the page misses is
     /// cosmetic.
-    pub(super) fn publish(&mut self, room: &Room, segment: Segment) {
-        let shared = self.shared.get_or_insert_with(|| {
-            let shared = Arc::new(Shared::default());
-            tokio::spawn(send_segments(room.local_participant(), Arc::clone(&shared)));
-            shared
+    pub(super) fn publish(&mut self, room: &RoomLink, segment: Segment) {
+        let task = self.task.get_or_insert_with(|| {
+            let (task, messages) = mpsc::unbounded_channel();
+            tokio::spawn(send_segments(room.participant(), messages));
+            task
         });
-        shared.lock().pending.push(segment);
-        shared.work.notify_one();
+        // The task only ends once this sender is dropped, so this cannot fail.
+        let _ = task.send(Message::Segment(segment));
     }
 
     /// Waits, at most `limit`, for everything queued to have been sent. The
@@ -122,19 +99,12 @@ impl TranscriptWriter {
     /// turns before it is handed the report, as it did when each publish was
     /// awaited in place.
     pub(super) async fn flush(&self, limit: Duration) {
-        let Some(shared) = &self.shared else { return };
-        let drained = async {
-            loop {
-                let notified = shared.drained.notified();
-                tokio::pin!(notified);
-                notified.as_mut().enable();
-                if shared.idle() {
-                    return;
-                }
-                notified.await;
-            }
-        };
-        if tokio::time::timeout(limit, drained).await.is_err() {
+        let Some(task) = &self.task else { return };
+        let (done, sent) = oneshot::channel();
+        if task.send(Message::Flush(done)).is_err() {
+            return;
+        }
+        if tokio::time::timeout(limit, sent).await.is_err() {
             eprintln!(
                 "transcript segments still unsent after {:.1}s; going on without them",
                 limit.as_secs_f64()
@@ -143,32 +113,27 @@ impl TranscriptWriter {
     }
 }
 
-impl Drop for TranscriptWriter {
-    fn drop(&mut self) {
-        if let Some(shared) = &self.shared {
-            shared.lock().closed = true;
-            shared.work.notify_one();
-        }
-    }
-}
-
-async fn send_segments(participant: LocalParticipant, shared: Arc<Shared>) {
+async fn send_segments(
+    participant: ParticipantLink,
+    mut messages: mpsc::UnboundedReceiver<Message>,
+) {
+    let mut pending = Pending::default();
+    let mut flushes: Vec<oneshot::Sender<()>> = Vec::new();
+    let mut open = true;
     loop {
-        let next = {
-            let mut queue = shared.lock();
-            let next = queue.pending.pop();
-            queue.sending = next.is_some();
-            if next.is_none() && queue.closed {
+        let Some(segment) = pending.pop() else {
+            // Answered before waiting again: a flush queued behind segments is
+            // owed its answer once they are out, not on the next message.
+            for flush in flushes.drain(..) {
+                let _ = flush.send(());
+            }
+            if !open {
                 return;
             }
-            next
-        };
-        let Some(segment) = next else {
-            shared.drained.notify_waiters();
-
-            // `notify_one` keeps a permit when nobody is waiting, so a segment
-            // queued between the check above and this wait still wakes it.
-            shared.work.notified().await;
+            match messages.recv().await {
+                Some(message) => take(message, &mut pending, &mut flushes),
+                None => return,
+            }
             continue;
         };
         let options = super::session::transcript_stream_options(
@@ -176,9 +141,35 @@ async fn send_segments(participant: LocalParticipant, shared: Arc<Shared>) {
             segment.final_segment,
             segment.identity.as_deref(),
         );
-        if let Err(error) = participant.send_text(&segment.text, options).await {
-            eprintln!("publishing a transcript segment failed ({error}); continuing the interview");
+        let send = participant.send_text(&segment.text, options);
+        tokio::pin!(send);
+
+        // Taken in while the send is under way, not after it, so a send the
+        // room holds for seconds leaves the newest view of each segment queued
+        // rather than every fragment said meanwhile.
+        loop {
+            tokio::select! {
+                sent = &mut send => {
+                    if let Err(error) = sent {
+                        eprintln!(
+                            "publishing a transcript segment failed ({error}); continuing the interview"
+                        );
+                    }
+                    break;
+                }
+                message = messages.recv(), if open => match message {
+                    Some(message) => take(message, &mut pending, &mut flushes),
+                    None => open = false,
+                },
+            }
         }
+    }
+}
+
+fn take(message: Message, pending: &mut Pending, flushes: &mut Vec<oneshot::Sender<()>>) {
+    match message {
+        Message::Segment(segment) => pending.push(segment),
+        Message::Flush(done) => flushes.push(done),
     }
 }
 

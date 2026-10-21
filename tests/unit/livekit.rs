@@ -3,7 +3,10 @@
 //! unit
 //! test and not an integration test: private items are in scope.
 
-use super::packets::{HoldEffects, begin_button_hold, reduce_data_packet, settle_hold};
+use super::packets::{
+    HoldEffects, begin_button_hold, owes_failed_reply, reduce_data_packet, settle_hold,
+    test_run_line,
+};
 use super::session::accept_gemini_event;
 use super::*;
 use crate::agent::ThinkingHold;
@@ -2845,7 +2848,7 @@ async fn fake_resumed_socket() -> (
 /// The same fake, resumed from `handle` or opened cold without one. It never
 /// sends a model event, which is the silent socket the reply watchdog exists
 /// for: setup succeeds, and nothing ever answers.
-async fn fake_socket(
+pub(super) async fn fake_socket(
     handle: Option<&str>,
 ) -> (
     GeminiLiveSession,
@@ -4061,7 +4064,7 @@ async fn settle(
 }
 
 /// A `TurnState` for `settle_hold`, which reads the room loop's whole context.
-fn hold_turn(state: RuntimeState) -> TurnState {
+pub(super) fn hold_turn(state: RuntimeState) -> TurnState {
     TurnState {
         state,
         agent_state: Default::default(),
@@ -7779,4 +7782,115 @@ fn a_replacement_drops_every_wait_the_old_socket_owed() {
     assert_eq!(activity.socket, turn::SocketWork::default());
     assert!(!state.end_requested);
     assert!(state.thinking_hold.is_declared());
+}
+
+/// The interview a packet handler is given, for a room that never connected.
+fn packet_config() -> AgentConfig {
+    load_from_pairs([
+        ("LIVEKIT_URL", "wss://example.livekit.cloud"),
+        ("LIVEKIT_API_KEY", "devkey"),
+        ("LIVEKIT_API_SECRET", "devsecret"),
+        ("GOOGLE_API_KEY", "packet-test-key"),
+    ])
+    .unwrap()
+}
+
+#[tokio::test]
+async fn a_resume_through_the_packet_handler_owes_the_paused_event_and_tells_the_page() {
+    let config = packet_config();
+    let keys = Arc::new(GeminiKeys::from_config(&config));
+    let boot = candidate_bootstrap(&config, "room-test", None);
+    let (_room_events, events) = tokio::sync::mpsc::unbounded_channel();
+    let events = tokio::sync::Mutex::new(events);
+    let interview = InterviewContext {
+        config: &config,
+        keys: &keys,
+        boot: &boot,
+        started_at: Instant::now(),
+        candidate_identity: "candidate",
+        events: &events,
+        slot: None,
+    };
+    let mut turn = hold_turn(RuntimeState {
+        paused: true,
+        owed_reply_on_resume: Some(Some(REACTION.into())),
+        ..RuntimeState::default()
+    });
+    let (mut gemini, server) = fake_socket(None).await;
+    let (mut output_audio, _queued) = test_output_audio();
+    let mut board = board::Board::new();
+    let mut media = CandidateMedia::new();
+    let (room, sent) = room_link::RoomLink::recording("room-test");
+    {
+        let mut context = turn.context(&mut output_audio, &mut gemini, &mut board, &mut media);
+        let flow = apply_data_packet(
+            &room,
+            &mut context,
+            interview,
+            crate::runtime::TOPIC_CONTROL,
+            &serde_json::json!({"type": "pause_interview", "paused": false}),
+            true,
+        )
+        .await
+        .unwrap();
+        assert!(flow.is_continue());
+    }
+
+    // What is owed is the event the pause cut off, not the resume line that
+    // asked for it, and the page is told the interview is running again.
+    assert!(!turn.state.paused);
+    assert_eq!(turn.activity.prompt_text.as_deref(), Some(REACTION));
+    assert!(sent.take().contains(&room_link::Sent::Data {
+        topic: Some(TOPIC_CONTROL.into()),
+        message: serde_json::json!({"type": "pause_state", "paused": false}),
+    }));
+
+    // And Gemini is asked for it, framed as the event the pause cut off.
+    let asked = server.await.unwrap().to_string();
+    assert!(asked.contains("BEGIN OWED EVENT"), "{asked}");
+    assert!(asked.contains(REACTION), "{asked}");
+}
+
+#[test]
+fn only_a_failed_reply_that_carried_thinking_debt_stays_owed() {
+    let result = |carries_thinking_debt, pause_changed| crate::agent::DataEventResult {
+        carries_thinking_debt,
+        pause_changed,
+        ..crate::agent::DataEventResult::default()
+    };
+    assert!(owes_failed_reply(&result(true, None)));
+    assert!(owes_failed_reply(&result(true, Some(true))));
+    // A resume's debt is moved by `record_event_prompt` instead.
+    assert!(!owes_failed_reply(&result(true, Some(false))));
+    assert!(!owes_failed_reply(&result(false, None)));
+}
+
+#[test]
+fn only_a_test_results_packet_is_logged_as_a_test_run() {
+    let state = RuntimeState::default();
+    let result = crate::agent::DataEventResult::default();
+    let line = test_run_line(crate::runtime::TOPIC_TEST_RESULTS, &state, &result, true)
+        .expect("a test results packet is always logged");
+    assert!(line.reacted && !line.ended);
+    assert!(test_run_line(TOPIC_CONTROL, &state, &result, true).is_none());
+}
+
+#[test]
+fn the_interview_length_is_counted_in_minutes() {
+    let config = packet_config();
+    let keys = Arc::new(GeminiKeys::from_config(&config));
+    let boot = candidate_bootstrap(&config, "room-test", None);
+    let (_room_events, events) = tokio::sync::mpsc::unbounded_channel();
+    let events = tokio::sync::Mutex::new(events);
+    let interview = InterviewContext {
+        config: &config,
+        keys: &keys,
+        boot: &boot,
+        started_at: Instant::now().checked_sub(Duration::from_secs(90)).unwrap(),
+        candidate_identity: "candidate",
+        events: &events,
+        slot: None,
+    };
+    let minutes = interview.elapsed_min();
+    assert!((1.5..1.6).contains(&minutes), "{minutes}");
 }
