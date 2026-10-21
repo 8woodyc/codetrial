@@ -124,7 +124,7 @@ pub(super) async fn settle_hold(
             )
             .await?;
             context.activity.defer_thinking_reply(prompt);
-            if !context.activity.discarding_output {
+            if !context.activity.socket.discarding_output {
                 context.activity.arm_thinking_reply_fallback(at, prompt);
             }
             *reply = None;

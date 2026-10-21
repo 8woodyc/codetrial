@@ -223,7 +223,7 @@ fn voice_observations_preserve_runtime_and_timing_hold_filters() {
                 state.thinking_hold = ThinkingHold::Held { since: start };
             }
             let mut activity = RuntimeActivity::new(start);
-            activity.discarding_output = discarding;
+            activity.socket.discarding_output = discarding;
             activity.note_candidate_voice(start);
             activity.turn_timing.note_voice(start);
             let observed = observe_voice_activity(
@@ -464,7 +464,7 @@ fn obsolete_completion_does_not_close_the_new_turn_timing() {
         .turn_timing
         .finish(start + Duration::from_secs(1), TimingOutcome::Interrupted);
     activity.note_candidate_finished(start + Duration::from_secs(2), false);
-    activity.stale_turn_pending = true;
+    activity.socket.stale_turn_pending = true;
     assert!(!accept_gemini_event(
         &GeminiEvent::TurnComplete,
         &mut activity,
@@ -1854,7 +1854,7 @@ fn a_spoken_hold_cuts_generation_so_the_next_reply_is_tracked_as_its_own() {
     assert!(activity.generating);
     cut_off_for_hold(&mut activity, &mut output_audio);
     assert!(!activity.generating);
-    assert!(activity.discarding_output);
+    assert!(activity.socket.discarding_output);
     assert_eq!(activity.floor, Floor::Listening);
     activity.mark_prompted(Instant::now(), Some("Continue"), false);
     assert!(!activity.prompt_behind_turn);
@@ -1874,14 +1874,14 @@ fn output_dropped_by_a_hold_is_disowned_when_the_hold_ends() {
     state.paused = true;
     drop_output(&mut state, &mut activity);
     assert!(!state.thinking_unheard_reply, "a pause owes nothing here");
-    assert!(!activity.discarding_output);
+    assert!(!activity.socket.discarding_output);
     state.paused = false;
     state.thinking_hold = ThinkingHold::Held {
         since: std::time::Instant::now(),
     };
     drop_output(&mut state, &mut activity);
     assert!(state.thinking_unheard_reply);
-    assert!(activity.discarding_output);
+    assert!(activity.socket.discarding_output);
 }
 
 #[test]
@@ -1981,24 +1981,27 @@ fn a_hold_cuts_a_live_turn_and_spares_a_stalled_one() {
     let mut live = RuntimeActivity::new(start);
     live.note_output(Instant::now());
     cut_off_for_hold(&mut live, &mut output_audio);
-    assert!(live.discarding_output);
-    assert!(!live.stale_turn_pending);
+    assert!(live.socket.discarding_output);
+    assert!(!live.socket.stale_turn_pending);
 
     let mut stalled = RuntimeActivity::new(start);
     stalled.note_output(start - super::super::turn::PROMPT_STALL);
     cut_off_for_hold(&mut stalled, &mut output_audio);
-    assert!(!stalled.discarding_output);
-    assert!(stalled.stale_turn_pending);
+    assert!(!stalled.socket.discarding_output);
+    assert!(stalled.socket.stale_turn_pending);
 
     let mut idle = RuntimeActivity::new(start);
     cut_off_for_hold(&mut idle, &mut output_audio);
-    assert!(!idle.discarding_output);
-    assert!(!idle.stale_turn_pending);
+    assert!(!idle.socket.discarding_output);
+    assert!(!idle.socket.stale_turn_pending);
 
     let mut discarding = RuntimeActivity::new(start);
-    discarding.discarding_output = true;
+    discarding.socket.discarding_output = true;
     cut_off_for_hold(&mut discarding, &mut output_audio);
-    assert!(discarding.discarding_output, "a discard under way is kept");
+    assert!(
+        discarding.socket.discarding_output,
+        "a discard under way is kept"
+    );
 }
 
 /// A turn's end, dispatched or swallowed, confirms a spoken request for
@@ -3692,7 +3695,7 @@ fn tools_from_a_stalled_generation_during_a_hold_do_not_claim_the_resume_reply()
     let mut activity = RuntimeActivity::new(start);
     activity.latency.voice(start);
     activity.latency.boundary(Boundary::Held, start);
-    activity.stale_turn_pending = true;
+    activity.socket.stale_turn_pending = true;
     let calls = GeminiEvent::ToolCall(vec![GeminiFunctionCall {
         id: "old".into(),
         name: "read_editor".into(),
@@ -4181,7 +4184,7 @@ fn a_provider_cut_of_a_discard_keeps_the_deferred_thinking_reply() {
     let start = Instant::now();
     for candidate in [false, true] {
         let mut activity = RuntimeActivity::new(start);
-        activity.discarding_output = true;
+        activity.socket.discarding_output = true;
         activity.defer_thinking_reply("resume reply");
         if candidate {
             activity.note_candidate_voice_activity(true, start);
@@ -4325,7 +4328,7 @@ fn silent_completion_kind_classifies_debt_in_precedence_order() {
         silent_completion_kind(&complete, &activity),
         Some("optional_prompt")
     );
-    activity.tool_response_outstanding = true;
+    activity.socket.tool_response_outstanding = true;
     assert_eq!(
         silent_completion_kind(&complete, &activity),
         Some("tool_continuation")
@@ -4350,11 +4353,11 @@ fn silent_completion_kind_classifies_debt_in_precedence_order() {
     // A thinking release silences every other kind, including the prompt
     // `defer_thinking_reply` records beside it.
     activity.generating = false;
-    activity.reply_after_thinking_discard = true;
+    activity.socket.reply_after_thinking_discard = true;
     assert_eq!(silent_completion_kind(&complete, &activity), None);
     let mut activity = RuntimeActivity::new(now);
     activity.mark_prompted(now, None, false);
-    activity.reply_after_thinking_discard = true;
+    activity.socket.reply_after_thinking_discard = true;
     assert_eq!(silent_completion_kind(&complete, &activity), None);
 }
 
@@ -4376,7 +4379,7 @@ fn a_silent_completion_is_classified_before_the_accept_settles_it() {
             "candidate_turn" => activity.note_candidate_finished(now, false),
             "required_prompt" => activity.mark_prompted(now, None, false),
             "optional_prompt" => activity.mark_prompted(now, None, true),
-            "tool_continuation" => activity.tool_response_outstanding = true,
+            "tool_continuation" => activity.socket.tool_response_outstanding = true,
             _ => unreachable!(),
         }
         let (accepted, _, owed) = accept_event_noting_silence(&complete, &mut activity, false, now);
@@ -4396,7 +4399,7 @@ fn a_silent_completion_is_classified_before_the_accept_settles_it() {
     // A thinking release stays owed, so neither the log nor the timing treats
     // the completion as its answer.
     let mut activity = RuntimeActivity::new(now);
-    activity.reply_after_thinking_discard = true;
+    activity.socket.reply_after_thinking_discard = true;
     let (accepted, _, owed) = accept_event_noting_silence(&complete, &mut activity, false, now);
     assert!(accepted);
     assert_eq!(owed, None);
@@ -4411,7 +4414,7 @@ fn a_silent_completion_is_classified_before_the_accept_settles_it() {
     // A completion the accept swallows is no silence at all.
     let mut activity = RuntimeActivity::new(now);
     activity.note_candidate_finished(now, false);
-    activity.stale_turn_pending = true;
+    activity.socket.stale_turn_pending = true;
     let (accepted, _, owed) = accept_event_noting_silence(&complete, &mut activity, false, now);
     assert!(!accepted);
     assert_eq!(owed, None);

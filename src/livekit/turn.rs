@@ -156,75 +156,14 @@ pub(super) struct ReplyDebt {
     tool_ack_owed: bool,
 }
 
-pub(super) struct RuntimeActivity {
-    pub(super) turn_timing: super::timing::TurnTiming,
-    pub(super) latency: super::latency::ReplyLatency,
-    pub(super) last_code_change: Instant,
-    /// The substantive revision and language last delivered silently or in a
-    /// briefing; the code itself is `RuntimeState::code_shown`.
-    pub(super) silent_editor_delivery: Option<(u64, String)>,
-    pub(super) last_user_speech: Instant,
-    /// When the candidate stopped talking and started waiting, if they have and
-    /// the reply has not begun: the candidate reply's deadline origin, which
-    /// generation cuts and speech boundaries may rebase. Read as liveness; see
-    /// `reply_in_flight`.
-    pub(super) awaiting_reply_since: Option<Instant>,
-    /// When a prompt went out that Gemini has produced nothing for yet. The
-    /// other half of what the interviewer owes: `awaiting_reply_since` covers a
-    /// candidate who finished speaking, this covers a test result, nudge or
-    /// briefing sent in text. Outlives the stall release in `settle_stalls`,
-    /// which gives the floor back without pretending the reply arrived.
-    pub(super) prompted_at: Option<Instant>,
-    /// The prompt behind `prompted_at` is a recovery, a replacement's briefing
-    /// or a reply check, which `expired_reply_wait` gives at least the default
-    /// first-output deadline.
-    recovery_prompt: bool,
-    /// Required prompt still awaiting its first audio chunk.
-    pub(super) unvoiced_prompt_at: Option<Instant>,
-    /// The prompt behind `prompted_at` accepts silence as an answer, as an
-    /// editor review does. It still holds the floor until output or a stall,
-    /// but a replacement socket does not owe the candidate anything for it.
-    pub(super) prompt_allows_silence: bool,
-    /// The prompt behind `prompted_at` went out while an earlier generation
-    /// was still producing, so the output that follows belongs to that one
-    /// until its turn ends. Without this, the tail of Jim's previous sentence
-    /// settles a test result he has not reacted to yet.
-    pub(super) prompt_behind_turn: bool,
-    /// The text of the prompt behind `prompted_at`, so a replacement asked to
-    /// give the reply it owed is told which one. Kept past the teardown that
-    /// clears `prompted_at`, since that is exactly when it is read.
-    pub(super) prompt_text: Option<String>,
-    /// Gemini has produced output in the turn now under way. Set by output and
-    /// cleared at a turn boundary, which is what "an earlier generation is
-    /// still producing" means; the floor alone cannot say it, since a prompt
-    /// takes the floor before anything is produced.
-    pub(super) generating: bool,
-    /// Progress within a turn that has not completed, distinct from its debt.
-    pub(super) last_output_at: Option<Instant>,
-    /// When the tool response behind `tool_response_outstanding` went out, so
-    /// a continuation Gemini never produces stalls like a prompt does.
-    pub(super) tool_response_at: Option<Instant>,
-    /// How many prompts have gone out in this interview, so a replacement's
-    /// log line can name the one it found still owed. The briefing that asks a
-    /// new socket for that reply is a prompt too and gets its own number.
-    pub(super) prompt_sequence: u64,
-    pub(super) last_agent_speech: Instant,
-    pub(super) last_nudge: Instant,
-    completed_coding_nudges: u8,
-    last_successful_completed_nudge: Option<Instant>,
-    pub(super) last_review: Instant,
-    pub(super) last_interjection: Instant,
-    pub(super) last_test_reaction: Instant,
-    pub(super) substantive_revision_at_last_review: u64,
-    /// The evidence lines the last watch prompt of this Live session left the
-    /// model holding, so the next sends only the lines that differ. The session
-    /// keeps its earlier turns, and a line repeated unchanged every prompt was
-    /// paid for every prompt. `None` on a session shown none, which a cold
-    /// replacement is: it has heard nothing before, so it gets them all.
-    pub(super) evidence_shown: Option<Vec<String>>,
-    /// What the last watch prompt moved. See [`Self::unsend_watch_prompt`].
-    pub(super) unsent_watch: Option<UnsentWatch>,
-    pub(super) floor: Floor,
+/// What only the socket that started it can settle: each of these waits on an
+/// event that socket owes. A replacement starts with all of it cleared, since
+/// a closed socket will never send the event, and carrying the wait across
+/// makes the new interviewer discard output or wait on work it did not
+/// create. Grouped so that clearing is one assignment, and a wait added here
+/// is cleared with the rest without anyone remembering to.
+#[derive(Debug, Default, PartialEq)]
+pub(super) struct SocketWork {
     /// A pause can arrive between Gemini producing a reply and this loop
     /// receiving its final event. Drop that old turn after resume too.
     pub(super) discarding_output: bool,
@@ -257,60 +196,20 @@ pub(super) struct RuntimeActivity {
     /// the reply watchdog nothing to recover; taken this way, a silent answer
     /// keeps the prompt owed until the watchdog asks again.
     pub(super) stale_turn_pending: bool,
-    /// When Gemini last completed a turn that said something, which
-    /// `LATE_TRANSCRIPT_GRACE` is measured from. Not stamped by an
-    /// interruption, where speech is the barge-in itself, nor by a turn that
-    /// produced nothing: a candidate pausing on "um," gets a silent completion,
-    /// and what they say next is the answer still owed a reply.
-    pub(super) turn_completed_at: Option<Instant>,
-    /// When a pause was last read into. Sized against `INTERIM_COOLDOWN`.
-    pub(super) last_interim: Instant,
-    /// The quota is fixed when the interview starts. A later config reload
-    /// must not change how much of this interview may spend the report model.
-    pub(super) max_interim_reviews: usize,
-    pub(super) interim_reviews: usize,
-    /// When the phase judge was last started, and how many times; see
-    /// `claim_phase_judge`.
-    pub(super) last_phase_judge: Option<Instant>,
-    pub(super) phase_judges: usize,
-    /// How many of them the editor alone asked for; see
-    /// `MAX_EDITOR_PHASE_JUDGES`.
-    pub(super) editor_phase_judges: usize,
-    /// The judgment in flight, kept here rather than beside the interim review
-    /// because every way the interview ends reaches this, and the end waits
-    /// briefly for it.
-    pub(super) phase_judge: super::SideCall,
-    /// A round transition held for the phase judge; see
-    /// `defers_round_transition`.
-    pub(super) pending_round_transition: Option<ParkedPacket>,
-    /// Armed by the candidate's words and spent by an acknowledgement, so a
-    /// reply held back by several tool rounds, or a wait rebased across an
-    /// interruption, plays it once per thing the candidate said.
-    pub(super) tool_ack_owed: bool,
-    /// Fixed when the interview starts, like the review quota.
-    pub(super) reply_timeout: Duration,
-    /// Fixed with `reply_timeout`, and held to it: see `expired_reply_wait`.
-    pub(super) first_output_deadline: Duration,
     /// A tool response went out on this socket and its generation has not come
     /// back. Distinct from `awaiting_reply_since`, which a barge-in also stamps
     /// while Gemini owes nothing: this is generation already paid for, and
     /// replacing the transport under it throws the answer away on a socket
     /// nothing will ever read.
     pub(super) tool_response_outstanding: bool,
-    /// The behavioral round gets one silence nudge. Repeating it every
-    /// cooldown would keep inviting a candidate who has declined or finished.
-    pub(super) behavioral_nudged: bool,
-    /// Observed Live usage summed over every socket in this interview. Provider
-    /// counters are not an invoice. Logged at the end; never model input.
-    pub(super) live_usage: crate::gemini::TokenUsage,
-    /// Which of this interview's sockets the next usage line belongs to.
-    pub(super) live_socket: u64,
-    /// The epoch second this room loop started. On every usage line, so two
-    /// runs that shared a room name are not summed as one.
-    pub(super) live_session_id: u64,
-    /// Why the room loop let the interview go when that was not an error
-    /// return, for the summary line's `outcome`.
-    pub(super) live_exit: super::LiveOutcome,
+}
+
+/// The prompt-token counts a context cut is judged from. Only a heuristic:
+/// the provider reports no compression event, so a cut is read off a drop in
+/// the prompt count between completed turns, with tool turns, whose totals sum
+/// several invocations, kept as spend and upper bounds rather than readings.
+#[derive(Debug, Default)]
+pub(super) struct PromptTokenWatch {
     /// The latest prompt count observed since the last completed turn, and the
     /// largest since then, the completed turn's own count included. A turn's
     /// usage may arrive on frames other than the one completing it, so the
@@ -334,156 +233,9 @@ pub(super) struct RuntimeActivity {
     /// single-generation turn. Only a total below a prior comparable count
     /// can prove a cut; it never becomes the next comparison's baseline.
     tool_usage_this_turn: bool,
-    /// When the candidate's microphone last carried more than room noise. The
-    /// transcript is no guide here: it arrives after the speech it transcribes,
-    /// and a checkpoint sent in that gap lands in the middle of an utterance.
-    pub(super) candidate_voice_at: Option<Instant>,
-    /// Whether the open socket has transcribed the candidate yet. Until it
-    /// has, it may not be hearing them at all, as a socket on its way to a
-    /// 1011 does not, so their voice on the track stamps `last_user_speech`.
-    pub(super) transcribed_on_socket: bool,
-    pub(super) candidate_voice_active: bool,
-    candidate_voice_ended_at: Option<Instant>,
-    voiced_pcm_at: Option<Instant>,
-    rebased_voiced_pcm_at: Option<Instant>,
-    incoming_speech_owed: bool,
 }
 
-/// How long the microphone has to stay quiet before a checkpoint may go out:
-/// above the default one-second end-of-speech silence, so a pause between two
-/// sentences is not taken for the end of the turn.
-pub(super) const CHECKPOINT_VOICE_QUIET: Duration = Duration::from_secs(2);
-
-/// How long a provider speech-start may stand with no fresh evidence, from the
-/// microphone or the provider, before its missing end is assumed. Voiced
-/// frames renew it, so it never ends real speech; it bounds how long one lost
-/// `ACTIVITY_END` can hold back checkpoints, phase judgments and nudges.
-pub(super) const STALE_VOICE_ACTIVITY: Duration = Duration::from_secs(10);
-
-/// A prompt the watcher wants spoken, and whether delivering it spends the
-/// behavioral round's one silence nudge. Carried with the text so the sender
-/// records the prompt it sent rather than inferring it from the round.
-pub(super) struct WatchPrompt {
-    pub(super) text: String,
-    pub(super) behavioral_nudge: bool,
-    pub(super) completed_coding_nudge: bool,
-    /// An editor review, which may rightly get no answer at all.
-    pub(super) allows_silence: bool,
-}
-
-/// What a watch tick found stalled. See `RuntimeActivity::settle_stalls`.
-#[derive(Debug, PartialEq, Eq)]
-pub(super) struct Stalls {
-    /// A prompt got no output in time and the floor went back to the
-    /// candidate.
-    pub(super) prompt_released: bool,
-    /// A held `GoAway` may be spent now rather than waiting on output.
-    pub(super) spend_restart: bool,
-}
-
-/// Whether a pause landing now leaves output still on its way.
-///
-/// Only a turn still being produced can deliver more events. Once it is
-/// complete and merely draining, its `TurnComplete` has already been and gone,
-/// so arming the discard on that state leaves it armed: nothing arrives to
-/// disarm it, and the first reply after the resume is swallowed whole.
-///
-/// A generation or tool continuation that has produced nothing for
-/// `PROMPT_STALL` is not on its way either, the way `settle_stalls` stops
-/// counting a prompt then. A live one ends when the resume prompt reaches
-/// Gemini, which interrupts it and so ends the discard; a dead one never ends,
-/// and a discard armed on it dropped the answer to the resume prompt until the
-/// watchdog asked again. That covers the floor too: audio a stalled generation
-/// already delivered took `Floor::Speaking`, and only its `TurnComplete` would
-/// have handed the floor back.
-pub(super) fn pause_leaves_output_in_flight(activity: &RuntimeActivity, now: Instant) -> bool {
-    let continuation_live = activity.tool_response_outstanding
-        && activity
-            .tool_response_at
-            .is_some_and(|at| now.saturating_duration_since(at) < PROMPT_STALL);
-    ((activity.floor == Floor::Speaking || activity.generating)
-        && !activity.generation_stalled(now))
-        || continuation_live
-}
-
-/// Who holds the conversation. `agent_busy` + `agent_turn_complete` encoded
-/// this as two bools, but only three of the four combinations were reachable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Floor {
-    /// The candidate has the floor.
-    Listening,
-    /// A prompt is in flight; Gemini is still producing the turn.
-    Speaking,
-    /// The turn is complete but queued audio is still draining.
-    AwaitingPlayout,
-}
-
-impl RuntimeActivity {
-    /// Whether a pending checkpoint may go out now, for an interview still
-    /// running: one that has ended, or asked to, owes the model no context.
-    pub(super) fn checkpoint_due(
-        &self,
-        state: &RuntimeState,
-        audio_playing: bool,
-        candidate_open: bool,
-        now: Instant,
-    ) -> bool {
-        !state.ended
-            && !state.end_requested
-            && self.can_refresh_context(state.paused, audio_playing, candidate_open, now)
-    }
-
-    /// A pending checkpoint implies a compression window: only
-    /// `observe_turn_complete` sets it, and only under one.
-    pub(super) fn can_refresh_context(
-        &self,
-        paused: bool,
-        audio_playing: bool,
-        candidate_open: bool,
-        now: Instant,
-    ) -> bool {
-        self.context_refresh_pending
-            && !paused
-            && !candidate_open
-            && !self.candidate_voice_active
-            && self
-                .candidate_voice_at
-                .is_none_or(|at| now.saturating_duration_since(at) >= CHECKPOINT_VOICE_QUIET)
-            && !self.generating
-            && !self.owes_reply()
-            && super::output_settled(self.floor, audio_playing)
-    }
-
-    /// Adds one usage observation to the interview's sum and the compression
-    /// watch, and returns its log line. `cause` is the last platform input
-    /// that asked for a reply, or `None` when nothing did since the previous
-    /// completed turn, which is the candidate's speech. A label for where turns
-    /// come from, not a causal record: speech overlapping a platform input is
-    /// credited to the input.
-    pub(super) fn account_live_usage(
-        &mut self,
-        room: &str,
-        clock: &str,
-        cause: Option<&str>,
-        compression: Option<crate::config::GeminiContextCompression>,
-        usage: crate::gemini::TokenUsage,
-    ) -> String {
-        let line = format!(
-            "codetrial live_turn_usage room={room} session={} at={clock} socket={} usage_event={} cause={} {}",
-            self.live_session_id,
-            self.live_socket,
-            self.live_usage.samples + 1,
-            cause.unwrap_or("candidate"),
-            usage.log_fields()
-        );
-        if cause == Some("tool") {
-            self.mark_tool_usage();
-        }
-        self.observe_prompt_tokens(compression, usage.prompt);
-        self.live_usage.add(usage);
-        line
-    }
-
+impl PromptTokenWatch {
     /// Comparable observations, periodic or not; a zero says nothing about
     /// context. Tool-turn totals remain spend counters and upper bounds only.
     pub(super) fn observe_prompt_tokens(
@@ -583,13 +335,7 @@ impl RuntimeActivity {
         self.context_refresh_pending || measured == 0 || bound >= trigger - band / 2
     }
 
-    /// Mirrors [`Self::context_cut_plausible`] onto the state the send paths
-    /// read, at each place its inputs change.
-    pub(super) fn sync_cut_plausible(&self, state: &mut RuntimeState) {
-        state.context_cut_plausible = self.context_cut_plausible(state.context_compression);
-    }
-
-    fn mark_tool_usage(&mut self) {
+    pub(super) fn mark_tool_usage(&mut self) {
         if !self.tool_usage_this_turn {
             self.tool_prompt_tokens = self.latest_prompt_tokens.take().unwrap_or(0);
 
@@ -599,6 +345,301 @@ impl RuntimeActivity {
         }
         self.tool_usage_this_turn = true;
         self.latest_prompt_tokens = None;
+    }
+
+    /// What a replacement keeps: only a resumed socket's baseline, for the
+    /// reason `RuntimeActivity::reset_context_observations` gives.
+    pub(super) fn reset(&mut self, resumed: bool) {
+        let kept = resumed.then_some((
+            self.peak_prompt_tokens,
+            self.comparable_prompt_tokens,
+            self.tool_prompt_bound,
+        ));
+        *self = Self::default();
+        if let Some((peak, comparable, bound)) = kept {
+            self.peak_prompt_tokens = peak;
+            self.comparable_prompt_tokens = comparable;
+            self.tool_prompt_bound = bound;
+        }
+    }
+}
+
+pub(super) struct RuntimeActivity {
+    pub(super) turn_timing: super::timing::TurnTiming,
+    pub(super) latency: super::latency::ReplyLatency,
+    pub(super) last_code_change: Instant,
+    /// The substantive revision and language last delivered silently or in a
+    /// briefing; the code itself is `RuntimeState::code_shown`.
+    pub(super) silent_editor_delivery: Option<(u64, String)>,
+    pub(super) last_user_speech: Instant,
+    /// When the candidate stopped talking and started waiting, if they have and
+    /// the reply has not begun: the candidate reply's deadline origin, which
+    /// generation cuts and speech boundaries may rebase. Read as liveness; see
+    /// `reply_in_flight`.
+    pub(super) awaiting_reply_since: Option<Instant>,
+    /// When a prompt went out that Gemini has produced nothing for yet. The
+    /// other half of what the interviewer owes: `awaiting_reply_since` covers a
+    /// candidate who finished speaking, this covers a test result, nudge or
+    /// briefing sent in text. Outlives the stall release in `settle_stalls`,
+    /// which gives the floor back without pretending the reply arrived.
+    pub(super) prompted_at: Option<Instant>,
+    /// The prompt behind `prompted_at` is a recovery, a replacement's briefing
+    /// or a reply check, which `expired_reply_wait` gives at least the default
+    /// first-output deadline.
+    recovery_prompt: bool,
+    /// Required prompt still awaiting its first audio chunk.
+    pub(super) unvoiced_prompt_at: Option<Instant>,
+    /// The prompt behind `prompted_at` accepts silence as an answer, as an
+    /// editor review does. It still holds the floor until output or a stall,
+    /// but a replacement socket does not owe the candidate anything for it.
+    pub(super) prompt_allows_silence: bool,
+    /// The prompt behind `prompted_at` went out while an earlier generation
+    /// was still producing, so the output that follows belongs to that one
+    /// until its turn ends. Without this, the tail of Jim's previous sentence
+    /// settles a test result he has not reacted to yet.
+    pub(super) prompt_behind_turn: bool,
+    /// The text of the prompt behind `prompted_at`, so a replacement asked to
+    /// give the reply it owed is told which one. Kept past the teardown that
+    /// clears `prompted_at`, since that is exactly when it is read.
+    pub(super) prompt_text: Option<String>,
+    /// Gemini has produced output in the turn now under way. Set by output and
+    /// cleared at a turn boundary, which is what "an earlier generation is
+    /// still producing" means; the floor alone cannot say it, since a prompt
+    /// takes the floor before anything is produced.
+    pub(super) generating: bool,
+    /// Progress within a turn that has not completed, distinct from its debt.
+    pub(super) last_output_at: Option<Instant>,
+    /// When the tool response behind `tool_response_outstanding` went out, so
+    /// a continuation Gemini never produces stalls like a prompt does.
+    pub(super) tool_response_at: Option<Instant>,
+    /// How many prompts have gone out in this interview, so a replacement's
+    /// log line can name the one it found still owed. The briefing that asks a
+    /// new socket for that reply is a prompt too and gets its own number.
+    pub(super) prompt_sequence: u64,
+    pub(super) last_agent_speech: Instant,
+    pub(super) last_nudge: Instant,
+    completed_coding_nudges: u8,
+    last_successful_completed_nudge: Option<Instant>,
+    pub(super) last_review: Instant,
+    pub(super) last_interjection: Instant,
+    pub(super) last_test_reaction: Instant,
+    pub(super) substantive_revision_at_last_review: u64,
+    /// The evidence lines the last watch prompt of this Live session left the
+    /// model holding, so the next sends only the lines that differ. The session
+    /// keeps its earlier turns, and a line repeated unchanged every prompt was
+    /// paid for every prompt. `None` on a session shown none, which a cold
+    /// replacement is: it has heard nothing before, so it gets them all.
+    pub(super) evidence_shown: Option<Vec<String>>,
+    /// What the last watch prompt moved. See [`Self::unsend_watch_prompt`].
+    pub(super) unsent_watch: Option<UnsentWatch>,
+    pub(super) floor: Floor,
+    /// What only the current Gemini socket can settle; see [`SocketWork`].
+    pub(super) socket: SocketWork,
+    /// When Gemini last completed a turn that said something, which
+    /// `LATE_TRANSCRIPT_GRACE` is measured from. Not stamped by an
+    /// interruption, where speech is the barge-in itself, nor by a turn that
+    /// produced nothing: a candidate pausing on "um," gets a silent completion,
+    /// and what they say next is the answer still owed a reply.
+    pub(super) turn_completed_at: Option<Instant>,
+    /// When a pause was last read into. Sized against `INTERIM_COOLDOWN`.
+    pub(super) last_interim: Instant,
+    /// The quota is fixed when the interview starts. A later config reload
+    /// must not change how much of this interview may spend the report model.
+    pub(super) max_interim_reviews: usize,
+    pub(super) interim_reviews: usize,
+    /// When the phase judge was last started, and how many times; see
+    /// `claim_phase_judge`.
+    pub(super) last_phase_judge: Option<Instant>,
+    pub(super) phase_judges: usize,
+    /// How many of them the editor alone asked for; see
+    /// `MAX_EDITOR_PHASE_JUDGES`.
+    pub(super) editor_phase_judges: usize,
+    /// The judgment in flight, kept here rather than beside the interim review
+    /// because every way the interview ends reaches this, and the end waits
+    /// briefly for it.
+    pub(super) phase_judge: super::SideCall,
+    /// A round transition held for the phase judge; see
+    /// `defers_round_transition`.
+    pub(super) pending_round_transition: Option<ParkedPacket>,
+    /// Armed by the candidate's words and spent by an acknowledgement, so a
+    /// reply held back by several tool rounds, or a wait rebased across an
+    /// interruption, plays it once per thing the candidate said.
+    pub(super) tool_ack_owed: bool,
+    /// Fixed when the interview starts, like the review quota.
+    pub(super) reply_timeout: Duration,
+    /// Fixed with `reply_timeout`, and held to it: see `expired_reply_wait`.
+    pub(super) first_output_deadline: Duration,
+    /// The behavioral round gets one silence nudge. Repeating it every
+    /// cooldown would keep inviting a candidate who has declined or finished.
+    pub(super) behavioral_nudged: bool,
+    /// Observed Live usage summed over every socket in this interview. Provider
+    /// counters are not an invoice. Logged at the end; never model input.
+    pub(super) live_usage: crate::gemini::TokenUsage,
+    /// Which of this interview's sockets the next usage line belongs to.
+    pub(super) live_socket: u64,
+    /// The epoch second this room loop started. On every usage line, so two
+    /// runs that shared a room name are not summed as one.
+    pub(super) live_session_id: u64,
+    /// Why the room loop let the interview go when that was not an error
+    /// return, for the summary line's `outcome`.
+    pub(super) live_exit: super::LiveOutcome,
+    /// The prompt-token readings a context cut is judged from; see
+    /// [`PromptTokenWatch`].
+    pub(super) tokens: PromptTokenWatch,
+    /// When the candidate's microphone last carried more than room noise. The
+    /// transcript is no guide here: it arrives after the speech it transcribes,
+    /// and a checkpoint sent in that gap lands in the middle of an utterance.
+    pub(super) candidate_voice_at: Option<Instant>,
+    /// Whether the open socket has transcribed the candidate yet. Until it
+    /// has, it may not be hearing them at all, as a socket on its way to a
+    /// 1011 does not, so their voice on the track stamps `last_user_speech`.
+    pub(super) transcribed_on_socket: bool,
+    pub(super) candidate_voice_active: bool,
+    candidate_voice_ended_at: Option<Instant>,
+    voiced_pcm_at: Option<Instant>,
+    rebased_voiced_pcm_at: Option<Instant>,
+    incoming_speech_owed: bool,
+}
+
+/// How long the microphone has to stay quiet before a checkpoint may go out:
+/// above the default one-second end-of-speech silence, so a pause between two
+/// sentences is not taken for the end of the turn.
+pub(super) const CHECKPOINT_VOICE_QUIET: Duration = Duration::from_secs(2);
+
+/// How long a provider speech-start may stand with no fresh evidence, from the
+/// microphone or the provider, before its missing end is assumed. Voiced
+/// frames renew it, so it never ends real speech; it bounds how long one lost
+/// `ACTIVITY_END` can hold back checkpoints, phase judgments and nudges.
+pub(super) const STALE_VOICE_ACTIVITY: Duration = Duration::from_secs(10);
+
+/// A prompt the watcher wants spoken, and whether delivering it spends the
+/// behavioral round's one silence nudge. Carried with the text so the sender
+/// records the prompt it sent rather than inferring it from the round.
+pub(super) struct WatchPrompt {
+    pub(super) text: String,
+    pub(super) behavioral_nudge: bool,
+    pub(super) completed_coding_nudge: bool,
+    /// An editor review, which may rightly get no answer at all.
+    pub(super) allows_silence: bool,
+}
+
+/// What a watch tick found stalled. See `RuntimeActivity::settle_stalls`.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct Stalls {
+    /// A prompt got no output in time and the floor went back to the
+    /// candidate.
+    pub(super) prompt_released: bool,
+    /// A held `GoAway` may be spent now rather than waiting on output.
+    pub(super) spend_restart: bool,
+}
+
+/// Whether a pause landing now leaves output still on its way.
+///
+/// Only a turn still being produced can deliver more events. Once it is
+/// complete and merely draining, its `TurnComplete` has already been and gone,
+/// so arming the discard on that state leaves it armed: nothing arrives to
+/// disarm it, and the first reply after the resume is swallowed whole.
+///
+/// A generation or tool continuation that has produced nothing for
+/// `PROMPT_STALL` is not on its way either, the way `settle_stalls` stops
+/// counting a prompt then. A live one ends when the resume prompt reaches
+/// Gemini, which interrupts it and so ends the discard; a dead one never ends,
+/// and a discard armed on it dropped the answer to the resume prompt until the
+/// watchdog asked again. That covers the floor too: audio a stalled generation
+/// already delivered took `Floor::Speaking`, and only its `TurnComplete` would
+/// have handed the floor back.
+pub(super) fn pause_leaves_output_in_flight(activity: &RuntimeActivity, now: Instant) -> bool {
+    let continuation_live = activity.socket.tool_response_outstanding
+        && activity
+            .tool_response_at
+            .is_some_and(|at| now.saturating_duration_since(at) < PROMPT_STALL);
+    ((activity.floor == Floor::Speaking || activity.generating)
+        && !activity.generation_stalled(now))
+        || continuation_live
+}
+
+/// Who holds the conversation. `agent_busy` + `agent_turn_complete` encoded
+/// this as two bools, but only three of the four combinations were reachable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Floor {
+    /// The candidate has the floor.
+    Listening,
+    /// A prompt is in flight; Gemini is still producing the turn.
+    Speaking,
+    /// The turn is complete but queued audio is still draining.
+    AwaitingPlayout,
+}
+
+impl RuntimeActivity {
+    /// Whether a pending checkpoint may go out now, for an interview still
+    /// running: one that has ended, or asked to, owes the model no context.
+    pub(super) fn checkpoint_due(
+        &self,
+        state: &RuntimeState,
+        audio_playing: bool,
+        candidate_open: bool,
+        now: Instant,
+    ) -> bool {
+        !state.ended
+            && !state.end_requested
+            && self.can_refresh_context(state.paused, audio_playing, candidate_open, now)
+    }
+
+    /// A pending checkpoint implies a compression window: only
+    /// `observe_turn_complete` sets it, and only under one.
+    pub(super) fn can_refresh_context(
+        &self,
+        paused: bool,
+        audio_playing: bool,
+        candidate_open: bool,
+        now: Instant,
+    ) -> bool {
+        self.tokens.context_refresh_pending
+            && !paused
+            && !candidate_open
+            && !self.candidate_voice_active
+            && self
+                .candidate_voice_at
+                .is_none_or(|at| now.saturating_duration_since(at) >= CHECKPOINT_VOICE_QUIET)
+            && !self.generating
+            && !self.owes_reply()
+            && super::output_settled(self.floor, audio_playing)
+    }
+
+    /// Adds one usage observation to the interview's sum and the compression
+    /// watch, and returns its log line. `cause` is the last platform input
+    /// that asked for a reply, or `None` when nothing did since the previous
+    /// completed turn, which is the candidate's speech. A label for where turns
+    /// come from, not a causal record: speech overlapping a platform input is
+    /// credited to the input.
+    pub(super) fn account_live_usage(
+        &mut self,
+        room: &str,
+        clock: &str,
+        cause: Option<&str>,
+        compression: Option<crate::config::GeminiContextCompression>,
+        usage: crate::gemini::TokenUsage,
+    ) -> String {
+        let line = format!(
+            "codetrial live_turn_usage room={room} session={} at={clock} socket={} usage_event={} cause={} {}",
+            self.live_session_id,
+            self.live_socket,
+            self.live_usage.samples + 1,
+            cause.unwrap_or("candidate"),
+            usage.log_fields()
+        );
+        if cause == Some("tool") {
+            self.tokens.mark_tool_usage();
+        }
+        self.tokens.observe_prompt_tokens(compression, usage.prompt);
+        self.live_usage.add(usage);
+        line
+    }
+
+    /// Mirrors [`PromptTokenWatch::context_cut_plausible`] onto the state the
+    /// send paths read, at each place its inputs change.
+    pub(super) fn sync_cut_plausible(&self, state: &mut RuntimeState) {
+        state.context_cut_plausible = self.tokens.context_cut_plausible(state.context_compression);
     }
 
     /// A replacement's briefing already carries the local state a checkpoint
@@ -611,16 +652,10 @@ impl RuntimeActivity {
         self.latency
             .close(super::latency::Boundary::SocketReplaced, Instant::now());
         self.latency.set_socket(self.live_socket);
-        self.tool_usage_this_turn = false;
-        self.tool_prompt_tokens = 0;
+        self.tokens.reset(resumed);
         if !resumed {
             self.latency.forget_context();
-            self.peak_prompt_tokens = 0;
-            self.comparable_prompt_tokens = 0;
-            self.tool_prompt_bound = 0;
         }
-        self.latest_prompt_tokens = None;
-        self.context_refresh_pending = false;
         self.transcribed_on_socket = false;
         self.clear_candidate_voice_activity();
     }
@@ -761,27 +796,15 @@ impl RuntimeActivity {
             evidence_shown: None,
             unsent_watch: None,
             floor: Floor::Listening,
-            discarding_output: false,
-            thinking_ignore_input_until: None,
-            thinking_reply_fallback: None,
-            reply_after_thinking_discard: false,
-            interrupted_turn_pending: false,
+            socket: SocketWork::default(),
+            tokens: PromptTokenWatch::default(),
             turn_completed_at: None,
-            stale_turn_pending: false,
-            tool_response_outstanding: false,
             behavioral_nudged: false,
             live_usage: crate::gemini::TokenUsage::default(),
             live_socket: 1,
             live_session_id: 0,
             latency: super::latency::ReplyLatency::default(),
             live_exit: super::LiveOutcome::Ok,
-            latest_prompt_tokens: None,
-            peak_prompt_tokens: 0,
-            comparable_prompt_tokens: 0,
-            tool_prompt_tokens: 0,
-            tool_prompt_bound: 0,
-            context_refresh_pending: false,
-            tool_usage_this_turn: false,
             candidate_voice_at: None,
             transcribed_on_socket: false,
             candidate_voice_active: false,
@@ -870,7 +893,7 @@ impl RuntimeActivity {
         }
         self.tool_response_at = self
             .tool_response_at
-            .filter(|_| self.tool_response_outstanding || self.generating)
+            .filter(|_| self.socket.tool_response_outstanding || self.generating)
             .map(|at| at.max(now));
         self.last_output_at = self
             .last_output_at
@@ -880,11 +903,11 @@ impl RuntimeActivity {
 
     /// A tool response just went out, and Gemini owes its continuation.
     pub(super) fn note_tool_response(&mut self, now: Instant) {
-        if self.discarding_output {
+        if self.socket.discarding_output {
             return;
         }
-        self.tool_response_outstanding = true;
-        self.mark_tool_usage();
+        self.socket.tool_response_outstanding = true;
+        self.tokens.mark_tool_usage();
         self.tool_response_at = Some(now);
         if self.generating {
             // Keep the generation progress clock current while waiting on the
@@ -924,7 +947,7 @@ impl RuntimeActivity {
     /// wrap-up before the continuation finishes.
     pub(super) fn note_output(&mut self, now: Instant) {
         self.generating = true;
-        self.thinking_reply_fallback = None;
+        self.socket.thinking_reply_fallback = None;
         self.last_output_at = Some(now);
         self.tool_response_at = None;
         if !self.prompt_behind_turn {
@@ -964,7 +987,7 @@ impl RuntimeActivity {
         self.generating
             && self.reply_in_flight()
             && !self.prompt_behind_turn
-            && !self.discarding_output
+            && !self.socket.discarding_output
     }
 
     /// Whether a replaced socket leaves the interviewer owing a reply: the
@@ -973,8 +996,8 @@ impl RuntimeActivity {
     pub(super) fn owes_reply(&self) -> bool {
         self.reply_in_flight()
             || self.owes_prompt()
-            || self.tool_response_outstanding
-            || self.reply_after_thinking_discard
+            || self.socket.tool_response_outstanding
+            || self.socket.reply_after_thinking_discard
     }
 
     /// The debt a turn completed with nothing in it settles, which is what
@@ -984,13 +1007,13 @@ impl RuntimeActivity {
     /// straight after, and the prompt `defer_thinking_reply` records beside it
     /// would otherwise read as a required one.
     pub(super) fn debt_silence_answers(&self) -> Option<&'static str> {
-        if self.reply_after_thinking_discard {
+        if self.socket.reply_after_thinking_discard {
             None
         } else if self.reply_in_flight() {
             Some("candidate_turn")
         } else if self.owes_prompt() {
             Some("required_prompt")
-        } else if self.tool_response_outstanding {
+        } else if self.socket.tool_response_outstanding {
             Some("tool_continuation")
         } else if self.prompted_at.is_some() {
             Some("optional_prompt")
@@ -1041,10 +1064,10 @@ impl RuntimeActivity {
         // finish, with the watchdog standing aside for the close and nothing
         // left to provoke the event that acts on it.
         let started_and_stalled = !audio_playing && self.generation_stalled(now);
-        let tool_released = self.tool_response_outstanding
+        let tool_released = self.socket.tool_response_outstanding
             && (stalled(self.tool_response_at) || started_and_stalled);
         if tool_released {
-            self.tool_response_outstanding = false;
+            self.socket.tool_response_outstanding = false;
             if let Some(at) = self.tool_response_at
                 && !self.owes_prompt()
             {
@@ -1210,7 +1233,7 @@ impl RuntimeActivity {
             self.awaiting_reply_since,
             self.prompted_at.filter(|_| !self.prompt_allows_silence),
             self.tool_response_at
-                .filter(|_| self.tool_response_outstanding),
+                .filter(|_| self.socket.tool_response_outstanding),
         ]
         .into_iter()
         .flatten()
@@ -1235,7 +1258,7 @@ impl RuntimeActivity {
     /// while they are speaking again, which it would talk over.
     pub(super) fn take_tool_ack(&mut self, now: Instant) -> bool {
         let due = self.tool_ack_owed
-            && !self.discarding_output
+            && !self.socket.discarding_output
             && !self.candidate_interrupting(now)
             && !self.incoming_speech_active(now);
         if due {
@@ -1263,7 +1286,7 @@ impl RuntimeActivity {
     /// arrived; the floor waits on the queue, or is the candidate's already
     /// when nothing is left to play.
     pub(super) fn settle_completed_turn(&mut self, audio_playing: bool) {
-        self.tool_response_outstanding = false;
+        self.socket.tool_response_outstanding = false;
         self.floor = Floor::AwaitingPlayout;
         if !audio_playing {
             self.mark_listening();
@@ -1321,7 +1344,7 @@ impl RuntimeActivity {
 
         // More speech gets its own native reply; asking as well would answer
         // twice, or over the candidate.
-        self.thinking_reply_fallback = None;
+        self.socket.thinking_reply_fallback = None;
         if self.floor == Floor::AwaitingPlayout && !audio_playing {
             self.mark_listening();
         }
@@ -1369,7 +1392,7 @@ impl RuntimeActivity {
         // utterance. But Gemini may already be answering it, and the hold has
         // been dropping that answer: its discard runs to the turn's end, so
         // nothing of it would be heard. The reply is asked for once it ends.
-        self.reply_after_thinking_discard |= self.discarding_output;
+        self.socket.reply_after_thinking_discard |= self.socket.discarding_output;
     }
 
     /// Thinking was chosen at `at`. Gemini transcribes an utterance when it
@@ -1387,13 +1410,14 @@ impl RuntimeActivity {
     /// that one; see `thinking_transcript_grace`. Extending on arrival is what
     /// let an answer given straight after the click be swallowed.
     pub(super) fn ignore_input_before_hold(&mut self, at: Instant, window: Duration) {
-        self.thinking_ignore_input_until = Some(at + window);
+        self.socket.thinking_ignore_input_until = Some(at + window);
     }
 
     /// Monotonic, unlike the epoch receipt: a wall-clock step inside the
     /// window would otherwise end it early or stretch it.
     fn predates_hold(&self, at: Instant) -> bool {
-        self.thinking_ignore_input_until
+        self.socket
+            .thinking_ignore_input_until
             .is_some_and(|until| at < until)
     }
 
@@ -1420,14 +1444,14 @@ impl RuntimeActivity {
         receipt: u64,
     ) {
         if state.settle_stale_request(now, receipt) {
-            self.reply_after_thinking_discard = false;
+            self.socket.reply_after_thinking_discard = false;
             self.latency.close(super::latency::Boundary::Held, now);
         }
     }
 
     /// A confirmed request replaces debt caused only by a tentative hold.
     fn declared_request(&mut self, state: &mut RuntimeState, now: Instant, receipt: u64) {
-        self.reply_after_thinking_discard = false;
+        self.socket.reply_after_thinking_discard = false;
         state.declare_thinking(now, receipt);
         self.latency.close(super::latency::Boundary::Held, now);
     }
@@ -1447,9 +1471,9 @@ impl RuntimeActivity {
             return;
         }
         if state.thinking_hold.is_declared() {
-            self.reply_after_thinking_discard = false;
+            self.socket.reply_after_thinking_discard = false;
         } else if result.yield_turn || result.finish_interview.is_some() {
-            self.reply_after_thinking_discard |= self.discarding_output;
+            self.socket.reply_after_thinking_discard |= self.socket.discarding_output;
         }
     }
 
@@ -1458,15 +1482,16 @@ impl RuntimeActivity {
     /// owed that reply, so it is asked for once the discarded turn ends; see
     /// `claim_thinking_reply`.
     pub(super) fn defer_thinking_reply(&mut self, prompt: &str) {
-        if self.discarding_output {
-            self.reply_after_thinking_discard = true;
+        if self.socket.discarding_output {
+            self.socket.reply_after_thinking_discard = true;
             self.owe_prompt(Instant::now(), Some(prompt.to_string()));
         }
     }
 
     /// See `thinking_reply_fallback`.
     pub(super) fn arm_thinking_reply_fallback(&mut self, now: Instant, prompt: &str) {
-        self.thinking_reply_fallback = Some((now + THINKING_REPLY_FALLBACK, prompt.to_string()));
+        self.socket.thinking_reply_fallback =
+            Some((now + THINKING_REPLY_FALLBACK, prompt.to_string()));
     }
 
     /// The release's reply, when Gemini has produced nothing for it by its
@@ -1478,7 +1503,7 @@ impl RuntimeActivity {
         state: &RuntimeState,
         now: Instant,
     ) -> Option<String> {
-        let (due, _) = self.thinking_reply_fallback.as_ref()?;
+        let (due, _) = self.socket.thinking_reply_fallback.as_ref()?;
         if now < *due
             || state.interviewer_silenced()
             || state.ended
@@ -1487,7 +1512,8 @@ impl RuntimeActivity {
         {
             return None;
         }
-        self.thinking_reply_fallback
+        self.socket
+            .thinking_reply_fallback
             .take()
             .map(|(_, prompt)| prompt)
     }
@@ -1500,19 +1526,19 @@ impl RuntimeActivity {
     /// no reply of its own: that speech gets Gemini's native answer, and asking
     /// again would talk over them.
     pub(super) fn end_discard(&mut self, interrupted: bool) {
-        self.discarding_output = false;
+        self.socket.discarding_output = false;
         if interrupted {
-            self.reply_after_thinking_discard = false;
+            self.socket.reply_after_thinking_discard = false;
         }
     }
 
     /// The reply `defer_thinking_reply` held back is due: its discard has
     /// ended and nothing has put the floor back on hold. Taken once.
     pub(super) fn claim_thinking_reply(&mut self, state: &RuntimeState) -> bool {
-        if self.discarding_output || state.interviewer_silenced() || state.ended {
+        if self.socket.discarding_output || state.interviewer_silenced() || state.ended {
             return false;
         }
-        std::mem::take(&mut self.reply_after_thinking_discard)
+        std::mem::take(&mut self.socket.reply_after_thinking_discard)
     }
 
     /// Whether this pause is worth spending an idle-window review on.
@@ -1648,7 +1674,7 @@ impl RuntimeActivity {
                 < planned
             && self.floor == Floor::Listening
             && !self.reply_in_flight()
-            && !self.tool_response_outstanding
+            && !self.socket.tool_response_outstanding
             && now.duration_since(self.last_user_speech) >= INTERIM_IDLE
             && now.duration_since(self.last_interim) >= INTERIM_COOLDOWN
             && candidate_lines(&state.transcript[unreviewed_from(state)..]) >= INTERIM_MIN_NEW_TURNS

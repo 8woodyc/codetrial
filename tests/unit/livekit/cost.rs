@@ -495,7 +495,7 @@ async fn benchmark_response_with_transcript(
                         // Settled as a completed turn is, or the continuation
                         // still owed would refuse every later checkpoint.
                         if let Some(activity) = activity.as_deref_mut() {
-                            activity.tool_response_outstanding = false;
+                            activity.socket.tool_response_outstanding = false;
                             activity.note_turn_boundary(std::time::Instant::now());
                             activity.mark_listening();
                         }
@@ -519,7 +519,7 @@ async fn benchmark_response_with_transcript(
                     total.add(observation);
                 }
                 if let Some(activity) = activity.as_deref_mut() {
-                    activity.observe_prompt_tokens(state.context_compression, observation.prompt);
+                    activity.tokens.observe_prompt_tokens(state.context_compression, observation.prompt);
                 }
                 usage.add(observation);
             }
@@ -607,8 +607,8 @@ async fn benchmark_response_with_transcript(
                         continue;
                     }
                     if let Some(activity) = activity.as_deref_mut() {
-                        activity.observe_turn_complete(state.context_compression);
-                        activity.tool_response_outstanding = false;
+                        activity.tokens.observe_turn_complete(state.context_compression);
+                        activity.socket.tool_response_outstanding = false;
                         activity.note_turn_boundary(std::time::Instant::now());
                         activity.mark_listening();
                     }
@@ -761,14 +761,14 @@ async fn compression_trial(
                 latencies.push(latency);
             }
             eprintln!("codetrial live_turn_usage room={label} session={session_id} socket={sockets} usage_event={} {}", turn + 2, usage.log_fields());
-            rows.push(json!({"prompt": usage.prompt, "response": usage.response, "reader_delay_ms": latency, "refresh_pending_after_response": activity.context_refresh_pending, "samples": usage.samples, "completion_samples": usage.turn_complete_samples}));
+            rows.push(json!({"prompt": usage.prompt, "response": usage.response, "reader_delay_ms": latency, "refresh_pending_after_response": activity.tokens.context_refresh_pending, "samples": usage.samples, "completion_samples": usage.turn_complete_samples}));
             if total.prompt + total.response > BENCHMARK_TOKEN_LIMIT {
                 return Err(io::Error::other("benchmark token budget exhausted").into());
             }
             if activity.can_refresh_context(state.paused, false, false, std::time::Instant::now()) {
                 let checkpoint = crate::agent::with_timer(&state, crate::agent::compressed_context(&state));
                 send_model_context(&mut session, &mut state, ModelInputKind::Turn, &checkpoint, None).await?;
-                activity.context_refresh_pending = false;
+                activity.tokens.context_refresh_pending = false;
                 refreshes += 1;
             }
 
@@ -1727,8 +1727,8 @@ async fn live_compression_continuity_quality() {
             let restarted = restarted_interview(&answer);
             rows.push(json!({"turn": turn, "answer": answer, "restarted": restarted, "prompt_tokens": usage.prompt,
                 "response_tokens": usage.response, "usage_samples": usage.samples, "first_audio_ms": latency,
-                "refresh_pending": activity.context_refresh_pending}));
-            eprintln!("continuity probe turn={turn} prompt={} latency_ms={latency} refresh_pending={} restarted={restarted}", usage.prompt, activity.context_refresh_pending);
+                "refresh_pending": activity.tokens.context_refresh_pending}));
+            eprintln!("continuity probe turn={turn} prompt={} latency_ms={latency} refresh_pending={} restarted={restarted}", usage.prompt, activity.tokens.context_refresh_pending);
             state.transcript.push(format!("Interviewer: {answer}"));
             if latency == 0 || usage.samples == 0 {
                 return Err(io::Error::other("continuity probe did not receive a spoken response with usage").into());
@@ -1746,7 +1746,7 @@ async fn live_compression_continuity_quality() {
                 } else {
                     send_model_context(&mut session, &mut state, ModelInputKind::Turn, &checkpoint, None).await?;
                 }
-                activity.context_refresh_pending = false;
+                activity.tokens.context_refresh_pending = false;
                 refreshes += 1;
             }
             paced_live_wait(&mut session, Duration::from_millis((usage.prompt * 60_000 / 300_000).max(5000))).await?;
@@ -1938,11 +1938,11 @@ async fn live_spoken_compression_continuity_quality() {
             if turn == 0 && initial_text {
                 state.transcript.push(format!("Interviewer: {answer}"));
             }
-            if activity.context_refresh_pending {
+            if activity.tokens.context_refresh_pending {
                 cuts += 1;
                 let checkpoint = crate::agent::with_timer(&state,crate::agent::compressed_context(&state));
                 send_model_context(&mut session,&mut state,ModelInputKind::Turn,&checkpoint,None).await?;
-                activity.context_refresh_pending = false;
+                activity.tokens.context_refresh_pending = false;
             }
             if total.prompt + total.response > 250_000 {
                 return Err(io::Error::other("spoken probe token cap exceeded").into());

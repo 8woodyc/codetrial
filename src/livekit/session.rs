@@ -644,16 +644,16 @@ pub(super) fn accept_gemini_event(
     held: bool,
     now: Instant,
 ) -> bool {
-    if activity.stale_turn_pending && ends_turn(event) {
+    if activity.socket.stale_turn_pending && ends_turn(event) {
         // An `Interrupted` is followed by the same turn's `TurnComplete`, which
         // ends the wait.
-        activity.stale_turn_pending = matches!(event, GeminiEvent::Interrupted);
+        activity.socket.stale_turn_pending = matches!(event, GeminiEvent::Interrupted);
         return false;
     }
     if matches!(event, GeminiEvent::Interrupted) {
-        activity.interrupted_turn_pending = true;
+        activity.socket.interrupted_turn_pending = true;
         activity.turn_completed_at = None;
-    } else if answers_prompt(event) && !activity.discarding_output && !held {
+    } else if answers_prompt(event) && !activity.socket.discarding_output && !held {
         // Not under a hold, even for a tool call, which is still delivered then
         // and counted as output below. The generation a hold cut off can keep
         // calling tools, and those calls are no sign that a newer turn began;
@@ -661,16 +661,16 @@ pub(super) fn accept_gemini_event(
         // falls on a newer turn under a hold that only calls tools: its ending
         // is swallowed, and `generating` stays set until the stall check clears
         // it.
-        activity.interrupted_turn_pending = false;
-        activity.stale_turn_pending = false;
+        activity.socket.interrupted_turn_pending = false;
+        activity.socket.stale_turn_pending = false;
     }
     if matches!(event, GeminiEvent::TurnComplete)
-        && std::mem::take(&mut activity.interrupted_turn_pending)
+        && std::mem::take(&mut activity.socket.interrupted_turn_pending)
     {
         activity.end_discard(false);
         return false;
     }
-    match output_disposition(event, activity.discarding_output, held) {
+    match output_disposition(event, activity.socket.discarding_output, held) {
         OutputDisposition::Drop => false,
         OutputDisposition::EndsTheDiscard => {
             activity.end_discard(
@@ -681,7 +681,7 @@ pub(super) fn accept_gemini_event(
         OutputDisposition::Deliver => {
             // Old tool calls still need responses, but their generation cannot
             // answer the resume prompt or refresh its progress clock.
-            if !activity.discarding_output {
+            if !activity.socket.discarding_output {
                 if answers_prompt(event) {
                     activity.note_output(now);
                     match event {
@@ -747,7 +747,7 @@ fn observe_latency_event(
 ) -> Option<serde_json::Value> {
     // Audio is stamped where it is accepted; tools from a locally cut
     // generation still need answers but cannot start a new measured reply.
-    if activity.discarding_output || held {
+    if activity.socket.discarding_output || held {
         return None;
     }
     match event {
@@ -848,11 +848,12 @@ pub(super) async fn handle_gemini_event(
     if matches!(event, GeminiEvent::TurnComplete) {
         context
             .activity
+            .tokens
             .observe_turn_complete(context.state.context_compression);
         context.activity.sync_cut_plausible(context.state);
     }
     let held = context.state.interviewer_silenced();
-    let discarding = context.activity.discarding_output;
+    let discarding = context.activity.socket.discarding_output;
     let (accepted, interruption_debt, silent_owed) =
         accept_event_noting_silence(&event, context.activity, held, Instant::now());
     let handled = if accepted {
@@ -1002,7 +1003,7 @@ fn observe_voice_activity(
     if observed {
         activity.note_candidate_voice_activity(active, now);
     }
-    if !state.interviewer_silenced() && !activity.discarding_output {
+    if !state.interviewer_silenced() && !activity.socket.discarding_output {
         if active {
             activity.turn_timing.note_activity_start(now);
         } else {
@@ -1041,7 +1042,7 @@ async fn on_tool_calls(
     {
         context.board.settle_for_read(context.state).await;
     }
-    let timed = !context.state.interviewer_silenced() && !context.activity.discarding_output;
+    let timed = !context.state.interviewer_silenced() && !context.activity.socket.discarding_output;
     let reviewed_revision = context.activity.substantive_revision_at_last_review;
     let tool_started = Instant::now();
     let answers = execute_timed_tool_batch(
@@ -1089,7 +1090,7 @@ async fn on_tool_calls(
 
     // Gemini resumes the moment the responses land, so serializing them again
     // for the lines below waits until after the send.
-    if !context.activity.discarding_output && !context.state.interviewer_silenced() {
+    if !context.activity.socket.discarding_output && !context.state.interviewer_silenced() {
         let batch_ms = crate::agent::saturating_ms(tool_started.elapsed());
         let mut timing =
             context
@@ -1389,14 +1390,14 @@ async fn on_generated_audio(
     // reply behind it.
     if context.output_audio.prepare_reply(bytes, mime_type) {
         drop_stale_playout(room, context, interruptible).await?;
-        if !context.activity.discarding_output {
+        if !context.activity.socket.discarding_output {
             context
                 .activity
                 .latency
                 .output(received_at(context.gemini), false);
         }
         let accepted_at = Instant::now();
-        if !context.activity.discarding_output
+        if !context.activity.socket.discarding_output
             && context.output_audio.fills_frame(bytes)
             && let Some(mut record) = context.activity.latency.audio(accepted_at)
         {
@@ -1478,7 +1479,7 @@ fn speech_release_briefing(state: &RuntimeState, withdrawn: bool) -> String {
 /// resumed interview gets its own line and owes nothing for it here.
 fn drop_output(state: &mut RuntimeState, activity: &mut RuntimeActivity) {
     if state.thinking_hold.is_active() {
-        activity.discarding_output = true;
+        activity.socket.discarding_output = true;
         state.thinking_unheard_reply = true;
     }
 }
@@ -2517,8 +2518,8 @@ pub(super) fn cut_off_generation(
     boundary: Boundary,
     now: Instant,
 ) {
-    activity.discarding_output |= pause_leaves_output_in_flight(activity, now);
-    activity.stale_turn_pending |= activity.generating && !activity.discarding_output;
+    activity.socket.discarding_output |= pause_leaves_output_in_flight(activity, now);
+    activity.socket.stale_turn_pending |= activity.generating && !activity.socket.discarding_output;
     cut_off_turn(activity, output_audio);
     activity.latency.close(boundary, now);
 }
@@ -2561,7 +2562,7 @@ pub(super) fn cut_off_turn(
     activity.last_output_at = None;
 
     // The generation this was waiting for died with the turn.
-    activity.tool_response_outstanding = false;
+    activity.socket.tool_response_outstanding = false;
     unplayed
 }
 

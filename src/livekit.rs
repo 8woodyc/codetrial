@@ -457,7 +457,7 @@ impl DeferredRestart {
         self.take_if_due(
             activity.floor,
             audio_playing,
-            activity.tool_response_outstanding,
+            activity.socket.tool_response_outstanding,
         )
     }
 }
@@ -959,7 +959,7 @@ fn hand_over(
     let debt = format!(
         "candidate={} prompt={prompt} tool={} generating={}",
         activity.reply_in_flight(),
-        activity.tool_response_outstanding,
+        activity.socket.tool_response_outstanding,
         activity.generating,
     );
     let owed = activity.reply_unfinished();
@@ -1186,18 +1186,12 @@ fn hold_owed_reply(state: &mut RuntimeState, owed_prompt: Option<&str>) {
 /// not create.
 fn clear_abandoned_socket_work(state: &mut RuntimeState, activity: &mut RuntimeActivity) {
     activity.turn_timing.reset();
-    activity.discarding_output = false;
+    activity.socket = turn::SocketWork::default();
     state.recovery_reply_pending = false;
 
     // A provisional request waits on its utterance's end, which the closed
     // socket will not send. A declared hold is the candidate's and survives.
     state.withdraw_thinking_request();
-    activity.reply_after_thinking_discard = false;
-    activity.thinking_reply_fallback = None;
-    activity.thinking_ignore_input_until = None;
-    activity.interrupted_turn_pending = false;
-    activity.stale_turn_pending = false;
-    activity.tool_response_outstanding = false;
     state.end_requested = false;
 }
 
@@ -1759,7 +1753,7 @@ async fn maybe_refresh_context(room: &Room, context: &mut GeminiEventContext<'_>
     // Runs after every Gemini event, most of them audio. Nothing pending is the
     // common case, and the gates below read the candidate's open turn to say
     // no, so it is answered first.
-    if !context.activity.context_refresh_pending {
+    if !context.activity.tokens.context_refresh_pending {
         return;
     }
     if context.activity.checkpoint_due(
@@ -1784,7 +1778,7 @@ async fn maybe_refresh_context(room: &Room, context: &mut GeminiEventContext<'_>
         .await
         {
             Ok(()) => {
-                context.activity.context_refresh_pending = false;
+                context.activity.tokens.context_refresh_pending = false;
                 context.activity.sync_cut_plausible(context.state);
                 eprintln!(
                     "codetrial context_refresh room={} session={} bytes={}",
@@ -2133,7 +2127,7 @@ fn completed_live_reply(
 ) -> bool {
     matches!(event, GeminiEvent::TurnComplete)
         && activity.generating
-        && !activity.discarding_output
+        && !activity.socket.discarding_output
         && !state.paused
 }
 
@@ -2373,7 +2367,7 @@ async fn on_gemini_event(
                 || context
                     .activity
                     .candidate_transcription_pending(Instant::now()),
-            context.activity.tool_response_outstanding,
+            context.activity.socket.tool_response_outstanding,
         ) {
             eprintln!(
                 "goaway held: at={} floor={:?} playing={} reply_pending={} tool_owed={} room={}",
@@ -2381,7 +2375,7 @@ async fn on_gemini_event(
                 context.activity.floor,
                 context.output_audio.is_playing(),
                 context.activity.reply_in_flight(),
-                context.activity.tool_response_outstanding,
+                context.activity.socket.tool_response_outstanding,
                 interview.boot.room_name
             );
             return Ok(ControlFlow::Continue(()));
@@ -2467,7 +2461,7 @@ async fn spend_deferred_restart(
         .deferred_restart
         .handoff_due(context.activity, Instant::now())
         && output_settled(context.activity.floor, context.output_audio.is_playing())
-        && !context.activity.tool_response_outstanding
+        && !context.activity.socket.tool_response_outstanding
     {
         let handoff = session::finalize_speech_handoff(
             context.gemini,
@@ -3293,7 +3287,7 @@ fn ready_to_close(state: &RuntimeState, activity: &RuntimeActivity) -> bool {
     state.end_requested
         && !state.ended
         && !state.interviewer_silenced()
-        && !activity.tool_response_outstanding
+        && !activity.socket.tool_response_outstanding
 }
 
 #[cfg(test)]
