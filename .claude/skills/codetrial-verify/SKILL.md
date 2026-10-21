@@ -16,7 +16,8 @@ make check                # every gate, plus a live Gemini credential check
 CI runs one `gates (<lane>)` job per lane in parallel: `gates (rust)`,
 `gates (portable)` and `gates (browser)`. The `check` job only collects their
 results and `mutation` does the same for the mutant shards, so neither log
-says what failed: open the failing lane. On a pull request the portable lane
+says what failed: open the failing lane, or the failing `mutants` shard when
+`mutation` is the red one. On a pull request the portable lane
 checks the commit messages first, and a bad message skips the rest of that
 lane only. A gate names its lane where it is declared, one naming none is
 portable, and a test proves the three lanes together cover the full run.

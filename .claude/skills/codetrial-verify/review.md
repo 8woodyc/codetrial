@@ -34,13 +34,19 @@ Read what the PR already carries before judging it:
 ```sh
 gh pr view "$pr" --repo sysprog21/codetrial \
   --json headRefOid,commits,reviews,comments
-gh api --paginate "repos/sysprog21/codetrial/pulls/$pr/comments" \
-  --jq '.[] | [.user.login, .path, (.line // .original_line), .body] | @tsv'
+gh api graphql -F n="$pr" -f query='query($n: Int!) {
+  repository(owner: "sysprog21", name: "codetrial") { pullRequest(number: $n) {
+    reviewThreads(first: 100) { nodes { isResolved path line
+      comments(first: 1) { nodes { author { login } body } } } } } } }' \
+  --jq '.data.repository.pullRequest.reviewThreads.nodes[]
+    | [.isResolved, .path, .line, .comments.nodes[0].author.login,
+       .comments.nodes[0].body] | @tsv'
 ```
 
-A finding an open thread or a cubic comment already raises is cited, not
-raised again. The commit series is part of the review, since merges keep it as
-pushed: name commits to fold and messages that say nothing.
+A finding an unresolved thread or a cubic comment already raises is cited, not
+raised again; a resolved one is raised again only if the head reintroduced it.
+The commit series is part of the review, since merges keep it as pushed: name
+commits to fold and messages that say nothing.
 
 Done when every changed file sits in exactly one area and the accepted scope is
 in hand, or its absence is itself a finding.
