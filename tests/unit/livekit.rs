@@ -3,6 +3,7 @@
 //! unit
 //! test and not an integration test: private items are in scope.
 
+use super::packets::{HoldEffects, begin_button_hold, reduce_data_packet, settle_hold};
 use super::session::accept_gemini_event;
 use super::*;
 use crate::agent::ThinkingHold;
@@ -1300,7 +1301,7 @@ fn the_browser_escape_hatch_outlasts_the_report_deadline() {
 /// standing in for it, and a report goes out only through the receipt wait.
 #[test]
 fn the_ending_leaves_only_after_the_report_delivery_settles() {
-    let source = include_str!("../../src/livekit.rs");
+    let source = include_str!("../../src/livekit/packets.rs");
     // To the next item at column zero, as the source tests above read a body.
     let ending = source
         .split("async fn apply_data_packet(")
@@ -6375,7 +6376,11 @@ async fn a_held_round_transition_waits_for_its_judgment_or_its_deadline() {
 /// and the watch tick applies a held transition after collecting the judgment.
 #[test]
 fn the_room_loop_settles_the_end_and_holds_the_transition_before_applying_them() {
-    let source = include_str!("../../src/livekit.rs");
+    // The loop and the packet handlers it calls, read as one text.
+    let source = concat!(
+        include_str!("../../src/livekit.rs"),
+        include_str!("../../src/livekit/packets.rs")
+    );
     let body = |name: &str| {
         source
             .split(name)
