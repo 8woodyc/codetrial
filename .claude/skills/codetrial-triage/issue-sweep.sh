@@ -7,7 +7,9 @@
 #
 # Prints one JSON object:
 #   maintainers_known  false when the collaborators listing failed, leaving
-#               only comment badges to tell a maintainer
+#               only comment badges to tell a maintainer; a COLLABORATOR badge
+#               also marks read-only collaborators, so the listing decides
+#               whenever it is available
 #   unanswered  issues no maintainer other than the author has commented on,
 #               oldest first, so a collaborator's own follow-up is not an answer;
 #               the viewer's own issues and a deleted account's are left out,
@@ -82,23 +84,24 @@ if logins=$(gh api --paginate "repos/$repo/collaborators?permission=push" \
     --jq '.[].login' 2> /dev/null); then
     pushers=$(printf '%s\n' "$logins" | jq -Rn '[inputs | select(length > 0)]')
 else
-    pushers='[]'
+    pushers=null
 fi
 
 pages=$(gh api graphql --paginate -F owner="${repo%/*}" -F name="${repo#*/}" \
     -f query="$query")
 
-# A maintainer is whoever may push or GitHub marks as a member, owner or
-# collaborator; a bot's comment never asks the reporter for anything. The
-# reporter answering by editing the body counts, since the bug form and
-# maintainers both ask for that.
+# A maintainer is whoever may push. The COLLABORATOR badge also marks
+# collaborators with read or triage access, students among them, so the badge
+# counts only when the push listing could not be read. A bot's comment never
+# asks the reporter for anything. The reporter answering by editing the body
+# counts, since the bug form and maintainers both ask for that.
 printf '%s\n' "$pages" | jq -s --argjson days "$days" --arg repo "$repo" \
     --argjson pushers "$pushers" --arg me "$me" '
 def ts: if . == null then 0 else fromdateiso8601 end;
 def days: (now - .) / 86400 | floor;
 def age: ts | days;
-def staff: (.authorAssociation | IN("MEMBER", "OWNER", "COLLABORATOR"))
-  or (.author.login | IN($pushers[]));
+def staff: if $pushers != null then .author.login | IN($pushers[])
+  else .authorAssociation | IN("MEMBER", "OWNER", "COLLABORATOR") end;
 def human: .author != null and .author.__typename != "Bot";
 # Counted by code point: scan, splits and gsub over a whole body cost time
 # quadratic in their matches, seconds for one long report, and the sweep reads
@@ -140,7 +143,7 @@ def gaps: (.body // "") as $b
           and ($said | test("codetrial [0-9.]+ \\([0-9a-f]{7,40}\\)|\\b(?=[0-9a-f]*[0-9])(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\\b") | not))
         | "no_revision") ];
 def claim: . as $i | maint as $m
-  | ($pushers + [$m[].author.login]
+  | (($pushers // []) + [$m[].author.login]
       + [if staff then .author.login else empty end]) as $staff
   | .assignees.nodes[].login as $a | select($a | IN($staff[]) | not)
   | [$i | prs[] | select(.source.author.login == $a)] as $xrefs
@@ -162,7 +165,7 @@ def claim: . as $i | maint as $m
        end)};
 [$issues[] | claim] as $claims |
 {
-  maintainers_known: ($pushers | length > 0),
+  maintainers_known: ($pushers != null),
   unanswered: [$issues[] | select(.author != null) | .author.login as $a
     | select($a != $me and all(maint[]; .author.login == $a))
     | {issue: .number, author: $a, age_days: (.createdAt | age)}]

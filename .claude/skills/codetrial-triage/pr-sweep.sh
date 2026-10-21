@@ -6,6 +6,8 @@
 # Usage: pr-sweep.sh [repo] [stale-days] (default sysprog21/codetrial, 7)
 #
 # Prints one JSON object:
+#   maintainers_known  false when the push listing failed and the COLLABORATOR
+#             badge, which read-only collaborators also carry, stood in for it
 #   approve   runs waiting for approval on the current head of an open PR, and
 #             whether its author is a first-time contributor
 #   outdated  unresolved review threads whose lines the PR no longer touches
@@ -16,17 +18,10 @@
 #             unless the latest verdict is an approval, it is the rebase
 #             request on a PR that still conflicts, or the activity was cut
 #             off at 100
-#   rebase    non-draft PRs against the default branch that conflict with it
-#             and whose head moved since the last rebase request, or that never
-#             got one; a changes-requested review on the current head that
-#             mentions rebase in any other wording also counts as the request
-#   hide      earlier rebase requests that a newer one supersedes, including
-#             every one on a PR in rebase, which gets a new request, and on a
-#             conflicting PR every one left on an older head once any rebase
-#             request sits on the current head
-#   hide_ask  other changes-requested reviews mentioning rebase on a PR that
-#             has or is about to get the fixed one: hand-written ones, and
-#             fixed-text ones with inline comments; they may carry more
+#   rebase    conflicting PRs with no current rebase request, to ask
+#   hide      superseded rebase requests in a known wording, to hide
+#   hide_ask  other rebase requests, to confirm before hiding
+#             (all three: pulls.md, "Conflicting branches")
 #   unknown   PRs whose mergeability GitHub has not computed yet; rerun
 #   prs       number, title, updatedAt, head, author, closing issues and files
 #             of every open PR, for judging overlap that shares no issue and
@@ -36,20 +31,38 @@ set -eu
 
 repo=${1:-sysprog21/codetrial}
 days=${2:-7}
+
+# No fallback when /user cannot be read, unlike issue-sweep.sh: an unknown
+# viewer would put the viewer's own pull requests in rebase, a list a sweep
+# posts to without asking.
 me=$(gh api user --jq .login)
+
+# Who may push, which is who may ask for a rebase. The COLLABORATOR badge also
+# marks read-only collaborators, so it stands in only when this listing, which
+# needs push access, fails; gh prints a refusal's body to stdout, so only a
+# successful call is read.
+if logins=$(gh api --paginate "repos/$repo/collaborators?permission=push" \
+    --jq '.[].login' 2> /dev/null); then
+    pushers=$(printf '%s\n' "$logins" | jq -Rn '[inputs | select(length > 0)]')
+else
+    pushers=null
+fi
 text=$(dirname "$0")/rebase.md
 
-# The short request maintainers write by hand asks for a subset of rebase.md, so
-# it counts as a rebase request too where the default branch is the main it
-# names, but the sweep never posts it.
+# Shorter wordings maintainers type by hand for the request rebase.md makes;
+# matched, like rebase.md, after trimming and dropping a final period.
 # shellcheck disable=SC2016
-short='Rebase latest `main` branch and resolve conflicts.'
+known='["Rebase latest `main` and resolve conflicts",
+  "Rebase latest `main` branch"]'
 
 # A thread reply is a review by its writer, so author replies show up in
 # reviews. A review records the head it was left on, so a head that moved since
-# says exactly that someone pushed after it. pushedDate is always null now, and
-# a commit date says when a commit was made rather than pushed, so the latest
-# force push or commit date is only the fallback after a plain comment.
+# says exactly that someone pushed after it. pushedDate is always null now, so
+# after a plain comment the push is dated by GitHub's clock: the head commit's
+# first check suite, created when the push reached a workflow or app, or the
+# latest force push. The commit date, which the contributor's clock sets and
+# which can run ahead and make every later request look stale, is used only for
+# a head with no check suite.
 # shellcheck disable=SC2016
 query='query($owner: String!, $name: String!, $endCursor: String) {
   repository(owner: $owner, name: $name) {
@@ -62,18 +75,25 @@ query='query($owner: String!, $name: String!, $endCursor: String) {
         author { login }
         closingIssuesReferences(first: 100) { totalCount nodes { number } }
         files(first: 100) { totalCount nodes { path } }
-        commits(last: 1) { nodes { commit { committedDate } } }
+        commits(last: 1) {
+          nodes { commit { committedDate
+            checkSuites(first: 10) { nodes { createdAt } } } }
+        }
         reviews(last: 100) {
           totalCount
           nodes {
-            id author { __typename login } state submittedAt isMinimized body
+            id author { __typename login } authorAssociation state
+            submittedAt isMinimized body
             commit { oid }
             comments { totalCount }
           }
         }
         comments(last: 100) {
           totalCount
-          nodes { author { __typename login } createdAt }
+          nodes {
+            id author { __typename login } authorAssociation createdAt
+            isMinimized body
+          }
         }
         reviewThreads(first: 100) {
           totalCount
@@ -104,42 +124,44 @@ runs=$(gh api --paginate \
       head_repo: .head_repository.full_name, actor: .actor.login}')
 runs=$(printf '%s\n' "$runs" | jq -s .)
 
-# A rebase request is a visible changes-requested review from someone other than
-# the author whose body is exactly rebase.md or the short request and which
-# carries no inline comments, since hiding a review collapses what it carries.
-# Any other review that mentions rebase may ask for more, so it only ever lands
-# in hide_ask, but one left on the current head still keeps the PR out of
-# rebase: it already asked, and a second request only adds a notification.
-# GitHub refuses a review of one's own PR, so the viewer's PRs are never in
-# rebase, and rebase.md names the default branch, so a PR stacked on another
-# branch is left to its reviewer.
+# What counts as a rebase request, when it is current, and which copies are
+# hidden or only offered for hiding: pulls.md, "Conflicting branches".
 printf '%s\n%s\n' "$prs" "$runs" | jq -s --argjson days "$days" --arg me "$me" \
-    --arg base "$base" --rawfile text "$text" --arg short "$short" '
+    --arg base "$base" --rawfile text "$text" --argjson known "$known" \
+    --argjson pushers "$pushers" '
 def human: .author != null and .author.__typename != "Bot";
 def ts: if . == null then 0 else fromdateiso8601 end;
-def pushed: [.commits.nodes[0].commit.committedDate,
-  .timelineItems.nodes[0].createdAt] | map(ts) | max;
+def pushed: .commits.nodes[0].commit as $c
+  | [([$c.checkSuites.nodes[].createdAt | ts] | min) // ($c.committedDate | ts),
+     (.timelineItems.nodes[0].createdAt | ts)] | max;
 def trim: gsub("^\\s+|\\s+$"; "");
-def whole: .reviews.totalCount <= 100;
+def norm: trim | sub("\\.$"; "");
+def whole: .reviews.totalCount <= 100 and .comments.totalCount <= 100;
 def nudgeable: .author != null and .author.login != $me;
-.[0] as $prs | .[1] as $runs | ($text | trim) as $fixed |
-def requests: .author.login as $a | [.reviews.nodes[]
-  | select(human and .author.login != $a and .state == "CHANGES_REQUESTED"
-      and (.isMinimized | not))];
-def fixed_only: .comments.totalCount == 0
-  and (.body | trim | . == $fixed or ($base == "main" and . == $short));
-def asks_rebase: [requests[] | select(fixed_only)]
-  | sort_by(.submittedAt | ts);
-def mentions_rebase: .body | test("\\brebase"; "i");
-def asked_here: .headRefOid as $head | any(requests[];
-  .commit.oid == $head and mentions_rebase);
+def staff: if $pushers != null then .author.login | IN($pushers[])
+  else .authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR") end;
+.[0] as $prs | .[1] as $runs | ([$text | norm] + $known) as $wordings |
+def requests: .author.login as $a | .headRefOid as $head | pushed as $p |
+  [(.reviews.nodes[]
+     | select(.state == "CHANGES_REQUESTED"
+         and (.body | test("\\brebase"; "i")))
+     | {at: .submittedAt, inline: .comments.totalCount,
+        current: (.commit.oid == $head)} + .),
+   (.comments.nodes[]
+     | select(.body | test("^\\s*(@[\\w-]+[,:]?\\s+)*rebase\\b"; "i"))
+     | {at: .createdAt, inline: 0, current: ((.createdAt | ts) >= $p)} + .)]
+  | map(select(human and staff and .author.login != $a and (.isMinimized | not))
+      | {id, by: .author.login, at, body, inline, current});
+def fixed_only: .inline == 0 and (.body | norm | IN($wordings[]));
+def asks_rebase: [requests[] | select(fixed_only)] | sort_by(.at | ts);
+def asked_here: any(requests[]; .current);
 # A conflicting PR whose only request on its current head is hand-written:
-# that review is the standing request, so no fixed one is kept beside it and
-# it is never offered for hiding.
-def hand_asked: .headRefOid as $head | .mergeable == "CONFLICTING"
-  and asked_here and all(asks_rebase[]; .commit.oid != $head);
+# that request is the standing one, so no fixed one is kept beside it and it
+# is never offered for hiding.
+def hand_asked: .mergeable == "CONFLICTING"
+  and asked_here and all(asks_rebase[]; .current | not);
 def needs_rebase: .mergeable == "CONFLICTING" and (.isDraft | not)
-  and .baseRefName == $base
+  and .baseRefName == $base and $base == "main"
   and nudgeable and whole
   and (asked_here | not);
 {
@@ -159,10 +181,10 @@ def needs_rebase: .mergeable == "CONFLICTING" and (.isDraft | not)
        | select(IN($b.closingIssuesReferences.nodes[].number))] as $shared
     | select($shared | length > 0)
     | {a: $a.number, b: $b.number, issues: $shared}],
-  stale: [$prs[] | select(nudgeable and whole and .comments.totalCount <= 100)
+  stale: [$prs[] | select(nudgeable and whole)
     | .author.login as $author
-    | ([(.reviews.nodes[] | select(.isMinimized | not)), .comments.nodes[]]
-       | map(select(human))) as $acts
+    | ([.reviews.nodes[], .comments.nodes[]]
+       | map(select(human and (.isMinimized | not)))) as $acts
     | ([$acts[] | select(.author.login != $author
           and (.state == "APPROVED" or .state == "CHANGES_REQUESTED"))]
        | max_by(.submittedAt | ts).state) as $verdict
@@ -177,7 +199,7 @@ def needs_rebase: .mergeable == "CONFLICTING" and (.isDraft | not)
        else pushed > $at end) as $pushed_since
     | select($review != null and $verdict != "APPROVED"
         and ((.mergeable == "CONFLICTING"
-          and any(requests[]; .id == $review.id and mentions_rebase)) | not)
+          and any(requests[]; .id == $review.id)) | not)
         and $at > $mine and ($pushed_since | not)
         and now - $at > $days * 86400)
     | {pr: .number, author: $author, review_by: $review.by,
@@ -185,14 +207,15 @@ def needs_rebase: .mergeable == "CONFLICTING" and (.isDraft | not)
   rebase: [$prs[] | select(needs_rebase) | {pr: .number, author: .author.login}],
   hide: [$prs[] | .number as $n | select(whole)
     | asks_rebase as $r
-    | (if needs_rebase or hand_asked then $r else $r[:-1] end)[]
-    | {pr: $n, review: .id, at: .submittedAt}],
+    | ($r | map(.current) | rindex(true) // -1) as $keep
+    | (if needs_rebase or hand_asked then $r else $r | del(.[$keep]) end)[]
+    | {pr: $n, id, at, by}],
   hide_ask: [$prs[] | .number as $n
     | select(whole and (needs_rebase
         or (asks_rebase | length > 0) and (hand_asked | not)))
-    | requests[] | select((fixed_only | not) and mentions_rebase)
-    | {pr: $n, review: .id, at: .submittedAt, by: .author.login,
-       body: (.body | .[0:300])}],
+    | requests[] | select(fixed_only | not)
+    | {pr: $n, id, at, by, body}],
+  maintainers_known: ($pushers != null),
   unknown: [$prs[] | select(.mergeable == "UNKNOWN") | .number],
   prs: [$prs[] | {number, title, updatedAt, head: .headRefOid,
     author: .author.login, isDraft, authorAssociation,
