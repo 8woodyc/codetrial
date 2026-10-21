@@ -41,7 +41,9 @@ export function initAvatarStage(deps) {
   if (nodes) throw new Error("the avatar stage is initialized once");
   ({ nodes } = deps);
   if (deps.loadModel) loadModel = deps.loadModel;
-  nodes.hideAvatar.addEventListener("click", () => disableAvatar(null));
+  nodes.hideAvatar.addEventListener("click", () =>
+    avatarHidden ? showAvatar() : disableAvatar(null),
+  );
   // Read once here and observed after, never per frame: reading clientWidth
   // flushes pending layout, which vrm.js already had to take out of the typing
   // path. The observer is also how a stage that was narrow comes back, so it
@@ -89,16 +91,21 @@ export function setStageCovered(covered) {
   if (!covered) resumeAvatar();
 }
 
-/// Retired for the rest of the page, by the candidate or by load. Never turned
-/// back on: a stage that kept re-testing whether it could compete with audio
-/// would take the audio away again each time it tried.
-let avatarDisabled = false;
+/// Automatic retirement lasts for the rest of the page. A candidate's Hide is
+/// different: it releases the renderer, but the same button can start it again.
+let avatarRetired = false;
+let avatarHidden = false;
 const renderBudget = createRenderBudget();
 const playout = createPlayoutWatch({
   currentTrack: () => jimTrack,
   onLate: (ms) => disableAvatar("playout_delayed", `${ms}ms`),
 });
 let avatar = null;
+/// The current model's `settled` until it resolves: its load has finished,
+/// whether it succeeded, failed or was abandoned by Hide, and a model nobody
+/// adopted has been disposed. Outlives `avatar`, which a Hide clears at once
+/// while the parse it started may run on; `startAvatar` waits on it.
+let modelLoad = null;
 let avatarFrame = null;
 /// When the next frame is due, for the 30 fps cap. Null while paused, so the
 /// first frame after a pause draws at once.
@@ -111,11 +118,12 @@ let jimAnalyserSamples = null;
 /// throws on `AudioContext` loses lip sync, and must not also lose the one
 /// signal that sees his voice arriving late.
 let jimTrack = null;
+let jimParticipant = null;
 let jimAnalyserContext = null;
 const jimAnalyserPeaks = [];
 
 export function startAvatar() {
-  if (avatar || avatarDisabled) return;
+  if (avatar || avatarRetired || avatarHidden) return;
   // Below the breakpoint the stage is hidden and nothing is built, but the
   // candidate can cross it at any time by widening the window or undocking
   // devtools. The width observer retries while this is wanted, so an interview
@@ -131,23 +139,56 @@ export function startAvatar() {
     window.getComputedStyle(nodes.jimAvatar).display === "none"
   )
     return;
+  // A model Hide gave up on may still be parsing: the abort reaches the
+  // download and the renderer import, but `loadVrm` has already built its
+  // WebGL context and awaits the parse without the signal. Building another
+  // beside it would run two parses and two contexts, one more per toggle, on
+  // the CPU Hide was pressed to give back. So wait for it, and for its model to
+  // be disposed, not merely for the loader to return: disposal comes after, so
+  // a waiter woken by the loader would build while that context still lived.
+  // Once per wish: every waiter re-checks that a model is still wanted, and
+  // the `avatar` guard above keeps a second waiter from building twice.
+  if (modelLoad) {
+    void modelLoad.then(() => {
+      if (avatarWanted) startAvatar();
+    });
+    return;
+  }
   const reducedMotion =
     window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
   avatar = createAvatar({
     mount: nodes.jimAvatar,
     reducedMotion,
-    // Hide is offered only while there is something to hide, and every change
-    // of state passes through here, so this is its one writer. The panel says
+    // Hide is offered while there is something to hide, and Show after the
+    // candidate's own Hide. This decides the button on every change of state;
+    // the Hide itself and a final `stopAvatar` write it too, because after
+    // either one there is no model left to report a state. The panel says
     // which of the two things happened, because "Jim is here by voice" under a
     // blank box is indistinguishable from a broken page.
     onState: (next) => {
-      nodes.hideAvatar.hidden = !(next === "loading" || next === "ready");
+      const offered =
+        next === "loading" ||
+        next === "ready" ||
+        (next === "stopped" && avatarHidden);
+      nodes.hideAvatar.hidden = !offered;
+      if (next === "loading" || next === "ready")
+        nodes.hideAvatar.textContent = "Hide avatar";
+      else if (avatarHidden) nodes.hideAvatar.textContent = "Show avatar";
       if (next !== "unavailable") return;
       nodes.jimAvatarNote.textContent =
         "Jim is here by voice; his avatar is unavailable in this browser.";
     },
     loadModel: (signal) => loadModel(nodes.jimAvatar, signal),
   });
+  const { settled } = avatar;
+  modelLoad = settled;
+  // Registered before any waiter, so a waiter woken by this model already sees
+  // it gone and builds rather than waiting on it again.
+  void settled.then(() => {
+    if (modelLoad === settled) modelLoad = null;
+  });
+  if (avatarExpression !== null) avatar.setExpression(avatarExpression);
+  if (avatarSpeaking !== null) avatar.setSpeaking(avatarSpeaking);
   // Started only once something can actually render. Pumping regardless meant
   // every session without a model, which is all of them today, ran a 60 Hz
   // loop that read the analyser and threw the result away.
@@ -266,21 +307,49 @@ document.addEventListener("visibilitychange", resumeAvatar);
 /// `measured` is the number that decided, logged so a real session can say
 /// how close to the line it was.
 function disableAvatar(reason, measured) {
-  if (avatarDisabled) return;
-  // Asked before the teardown hides the button, which would drop focus to the
-  // body for a keyboard user whose focus was on it.
+  if (avatarRetired || (avatarHidden && !reason)) return;
+  // Asked before the teardown, which for an automatic retirement hides the
+  // button and would drop focus to the body for a keyboard user on it.
   const hadFocus = document.activeElement === nodes.hideAvatar;
-  avatarDisabled = true;
-  stopAvatar(reason ? "degraded" : "stopped");
+  if (reason) avatarRetired = true;
+  else avatarHidden = true;
+  stopAvatar(reason ? "degraded" : "stopped", !reason);
   const note = reason
     ? "Jim is here by voice; his avatar was turned off to keep the interview responsive."
     : "Jim is here by voice; his avatar is turned off.";
   nodes.jimAvatarNote.textContent = note;
   if (reason) console.warn(`codetrial avatar_${reason} ${measured}`);
+  // The candidate's own Hide leaves the button where it was, now as Show, so
+  // focus stays on it and the same key undoes it. Moving focus to the note made
+  // a keyboard user tab back to find the control they had just pressed, and
+  // with focus unmoved the status region is what says the avatar went away.
+  if (!reason) {
+    nodes.hideAvatar.hidden = false;
+    nodes.hideAvatar.textContent = "Show avatar";
+    nodes.jimAvatarStatus.textContent = note;
+    return;
+  }
   // Focus says it once. The status region says it only when focus did not
   // move, since a note both focused and announced is read twice.
-  if (!reason || hadFocus) nodes.jimAvatarNote.focus({ preventScroll: true });
+  if (hadFocus) nodes.jimAvatarNote.focus({ preventScroll: true });
   else nodes.jimAvatarStatus.textContent = note;
+}
+
+function showAvatar() {
+  if (!avatarHidden || avatarRetired) return;
+  avatarHidden = false;
+  nodes.jimAvatarNote.textContent = "Jim is here by voice.";
+  nodes.jimAvatarStatus.textContent = "";
+  // Said here rather than left to `onState`: when an abandoned load is still
+  // settling, `startAvatar` waits for it and no state arrives yet, and the
+  // button must not go on offering Show for a model that is already wanted.
+  nodes.hideAvatar.textContent = "Hide avatar";
+  startAvatar();
+  // Straight to the analyser, not back through the page's `playRemoteAudio`:
+  // the audio never stopped, so re-attaching it and re-selecting the output
+  // only repeated work, and a refusal there would have lost the track. The
+  // participant was checked when the track was kept.
+  if (jimTrack) bindAnalyser(jimTrack, jimParticipant);
 }
 
 /// Jim's own track, never the candidate's. `createMediaElementSource` would be
@@ -291,8 +360,22 @@ export function attachAvatarAnalyser(track, participant) {
   // to take whichever arrived first: a second participant, or a stray hosted
   // agent of the kind scripts/browser-check.cjs already has to isolate, would
   // have driven the mouth. Never the candidate, who is never subscribed here.
-  if (avatarDisabled || !isAgent(participant)) return;
-  if (!track?.mediaStreamTrack || track === jimTrack) return;
+  if (!isAgent(participant)) return;
+  if (avatarRetired || !track?.mediaStreamTrack) return;
+  if (avatarHidden) {
+    jimTrack = track;
+    jimParticipant = participant;
+    return;
+  }
+  if (track === jimTrack) return;
+  bindAnalyser(track, participant);
+}
+
+/// Builds the analyser on a track already known to be Jim's. Separate from
+/// `attachAvatarAnalyser` so Show can rebuild on the kept track without going
+/// back through the page, while the page still reaches the analyser from one
+/// place, `playRemoteAudio`, where his track arrives.
+function bindAnalyser(track, participant) {
   // A new publication replaces the old analyser rather than being ignored.
   // Bailing out on `jimAnalyser` alone left the analyser bound to the track
   // that had just been replaced, and LiveKit does not promise the unsubscribe
@@ -301,6 +384,7 @@ export function attachAvatarAnalyser(track, participant) {
   // and nothing rebuilt it, so lip sync died for the rest of the session.
   releaseAnalyserNodes();
   jimTrack = track;
+  jimParticipant = participant;
   try {
     jimAnalyserContext ||= new (
       window.AudioContext || window.webkitAudioContext
@@ -335,6 +419,7 @@ export function attachAvatarAnalyser(track, participant) {
 export function releaseAvatarAnalyser() {
   releaseAnalyserNodes();
   jimTrack = null;
+  jimParticipant = null;
 }
 
 function releaseAnalyserNodes() {
@@ -398,12 +483,17 @@ export function jimAmplitude() {
 /// A load still running is aborted there, before the renderer is imported or a
 /// context is built: hiding is how a candidate under load asks for their CPU
 /// back, and a load that ran to the end only to be disposed spent it anyway.
-export function stopAvatar(final) {
+export function stopAvatar(final, preserveTrack = false) {
   avatarWanted = false;
   pauseAvatar();
   avatar?.destroy(final);
   avatar = null;
-  releaseAvatarAnalyser();
+  if (!preserveTrack) {
+    avatarHidden = false;
+    nodes.hideAvatar.hidden = true;
+  }
+  if (preserveTrack) releaseAnalyserNodes();
+  else releaseAvatarAnalyser();
   void jimAnalyserContext?.close?.().catch(() => {});
   jimAnalyserContext = null;
 }
@@ -416,10 +506,20 @@ export function isAvatarAnalyserTrack(track) {
   return track === jimTrack;
 }
 
+/// The page reports Jim's state on change, not on a tick, so a model built
+/// after the last report would never hear it: one rebuilt by Show, or one first
+/// built when a stage that started narrow widens. Kept here and handed to each
+/// new model in `startAvatar`. Null until the page says anything, so a model
+/// built before then keeps `createAvatar`'s own open-mouth default.
+let avatarSpeaking = null;
+let avatarExpression = null;
+
 export function setAvatarSpeaking(speaking) {
+  avatarSpeaking = speaking;
   avatar?.setSpeaking(speaking);
 }
 
 export function setAvatarExpression(value) {
+  avatarExpression = value;
   avatar?.setExpression(value);
 }

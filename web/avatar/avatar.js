@@ -229,8 +229,10 @@ export function createAvatar({
   // rest of the interview burning one of the browser's ~16 contexts, with its
   // canvas under a neutral panel whose whole claim is that no canvas exists.
   // Chained after `ready` so it observes the adoption decision rather than
-  // racing it.
-  void ready
+  // racing it. Kept as `settled` because the loader finishing is not the end
+  // of this avatar's claim on a context: a caller that starts the next model
+  // when the loader settles starts it while this one is still undisposed.
+  const settled = ready
     .then(() => loading)
     .then((loaded) => {
       if (loaded && loaded !== model) loaded.dispose?.();
@@ -347,6 +349,9 @@ export function createAvatar({
     frame,
     destroy,
     ready,
+    // Resolves once the load has finished and a model nobody adopted has been
+    // disposed; it never rejects.
+    settled,
     state: () => phase,
     // Renders actually issued, which is not the same as frames requested: the
     // browser check needs to distinguish a live loop from an abandoned canvas.
