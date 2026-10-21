@@ -54,6 +54,9 @@ test("real autoplay denial is visible and a gesture starts native audio", async 
           });
           playback.setRoom(room, 'playback');
           window.audio = new Audio('/audio/test-voice.wav');
+          // Loop the short fixture so the !paused wait below cannot
+          // miss it after the clip ends on a slow runner.
+          window.audio.loop = true;
           document.body.append(window.audio);
           await playback.play(window.audio);
           window.playbackReady = true;
@@ -77,6 +80,11 @@ test("interview reconnect wiring recovers blocked Jim audio and clears on discon
   t.after(() => page.close());
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  // The final check never runs when an earlier step fails; report the
+  // page errors anyway, since they usually explain that failure.
+  t.after(() => {
+    for (const error of errors) t.diagnostic(`page error: ${error}`);
+  });
   await page.addInitScript(() => {
     const nativePlay = HTMLMediaElement.prototype.play;
     window.blockJim = true;
@@ -147,6 +155,9 @@ test("interview reconnect wiring recovers blocked Jim audio and clears on discon
     window.testTrack = {
       kind: "audio",
       attach: (audio) => {
+        // A live track never ends; loop the short fixture so it does not
+        // report paused again before the wait after resume sees it.
+        audio.loop = true;
         audio.src = "/audio/test-voice.wav";
       },
       detach: () => [document.querySelector("#jim-audio")],
