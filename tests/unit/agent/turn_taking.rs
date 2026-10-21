@@ -34,6 +34,9 @@ fn explicit_requests_keep_the_floor() {
         "Let me think. Hmm.",
         "let me think um",
         "Okay, give me a minute. Uh, okay.",
+        "Let me think about it for a moment.",
+        "Let me think about that for a minute.",
+        "I need to think about this for a second",
     ] {
         assert!(requests_thinking_time(request), "{request}");
     }
@@ -57,6 +60,8 @@ fn explicit_requests_keep_the_floor() {
         "Can you give me a bit more?",
         "Could you give me a bit more detail",
         "Let me think. Hmm, a hash map would work",
+        "Let me think about it for each node",
+        "Let me think about it for a moment, okay, I would use a hash map",
     ] {
         assert!(!requests_thinking_time(answer), "{answer}");
     }

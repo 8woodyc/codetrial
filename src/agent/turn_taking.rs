@@ -375,13 +375,22 @@ fn skip_lead_ins<'a, 'b>(words: &'a [&'b str]) -> &'a [&'b str] {
     &words[start..]
 }
 
-/// Nothing but one of `TAILS`, or the first words of one, and perhaps a
-/// closing "please".
+/// What a request may say it is about before saying how long: "let me think
+/// about it for a moment".
+const OBJECTS: &[&str] = &["about it", "about this", "about that"];
+
+/// Nothing but one of `TAILS`, or the first words of one, perhaps after one of
+/// `OBJECTS`, and perhaps a closing "please".
 fn is_tail(rest: &[&str]) -> bool {
     let rest = rest.strip_suffix(&["please"]).unwrap_or(rest);
-    TAILS.iter().any(|tail| {
-        let mut parts = words(tail);
-        rest.iter().all(|word| parts.next() == Some(*word))
+    let after_object = OBJECTS
+        .iter()
+        .filter_map(|object| strip_phrase(rest, object));
+    std::iter::once(rest).chain(after_object).any(|rest| {
+        TAILS.iter().any(|tail| {
+            let mut parts = words(tail);
+            rest.iter().all(|word| parts.next() == Some(*word))
+        })
     })
 }
 
