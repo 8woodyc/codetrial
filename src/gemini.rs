@@ -780,6 +780,7 @@ pub(crate) async fn generate_report_with_keys(
             material,
             budget: ReportCallBudget::new(),
             backoff: REPORT_RETRY_BACKOFF,
+            observer: None,
             run,
         },
         prompt,
@@ -811,6 +812,9 @@ async fn generate_report_with_keys_at(
     )
     .await?;
     if let Some(line) = salvaged {
+        if let Some(observer) = calls.observer.as_deref_mut() {
+            observer.salvaged()?;
+        }
         eprintln!("{}", calls.keys.redact(&line));
     }
     Ok(report)
@@ -852,6 +856,28 @@ pub(crate) struct ReportMaterial<'a> {
     pub boards: &'a [(&'a str, &'a [u8])],
 }
 
+/// Evaluation can reserve and record each HTTP call without changing normal
+/// report policy. A veto returns before retry classification; missing usage is
+/// observable even when a decoded response contains no text.
+trait ReportAttemptObserver: Send {
+    fn before(&mut self) -> Result<(), io::Error>;
+    fn after(
+        &mut self,
+        response: Option<&Value>,
+        failure: Option<ReportAttemptFailure>,
+    ) -> Result<(), io::Error>;
+    fn salvaged(&mut self) -> Result<(), io::Error>;
+}
+
+/// Where a report attempt failed, and the HTTP status when the provider
+/// answered with one. Only the evaluation observer, a test, reads the fields.
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(not(test), expect(dead_code))]
+struct ReportAttemptFailure {
+    stage: &'static str,
+    status: Option<u16>,
+}
+
 struct ReportCalls<'a> {
     keys: &'a GeminiKeys,
     url: String,
@@ -859,6 +885,7 @@ struct ReportCalls<'a> {
     budget: ReportCallBudget,
     backoff: Duration,
     run: ReportRun<'a>,
+    observer: Option<&'a mut dyn ReportAttemptObserver>,
 }
 
 impl ReportTransport for ReportCalls<'_> {
@@ -877,6 +904,7 @@ impl ReportTransport for ReportCalls<'_> {
                 &mut self.budget,
                 self.backoff,
                 self.run.scope,
+                &mut self.observer,
             )
             .await
         }
@@ -1111,6 +1139,7 @@ async fn generate_report_transport(
     budget: &mut ReportCallBudget,
     first_backoff: Duration,
     scope: &str,
+    observer: &mut Option<&mut dyn ReportAttemptObserver>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let mut api_key = keys.select_report()?;
 
@@ -1120,7 +1149,15 @@ async fn generate_report_transport(
     loop {
         let call = budget.spend()?;
         let what = http_usage_label("report", scope, call, failures);
-        let error = match generate_report_once(&api_key, url, request, &what).await {
+        if let Some(observer) = observer.as_deref_mut() {
+            observer.before()?;
+        }
+        let response =
+            post_generate_content(&api_key, url, request, REPORT_ATTEMPT_TIMEOUT, &what).await;
+        if let Some(observer) = observer.as_deref_mut() {
+            observer.after(response.as_ref().ok(), report_attempt_failure(&response))?;
+        }
+        let error = match response.and_then(|response| response_text(&response, &what)) {
             Ok(report) => return Ok(report),
             Err(error) => error,
         };
@@ -1566,10 +1603,10 @@ fn observe_http_failure(
 
 /// One `generateContent` call, with no opinion about retries.
 ///
-/// Both callers post the same envelope to the same URL with the same header and
-/// read the same text out of the answer; only the deadline, the config and the
-/// name in the error differ. Written twice, an auth-header change or a
-/// different reading of a text-less response lands in one of them.
+/// The report transport makes the same two calls itself, so an attempt observer
+/// can see the decoded response before its text is read. Both share
+/// `post_generate_content` and `response_text`: written twice, an auth-header
+/// change or a different reading of a text-less response lands in one of them.
 async fn generate_content_once(
     api_key: &str,
     url: &str,
@@ -1578,7 +1615,14 @@ async fn generate_content_once(
     what: &str,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let response = post_generate_content(api_key, url, request, timeout, what).await?;
-    gemini_text(&response).ok_or_else(|| {
+    response_text(&response, what)
+}
+
+fn response_text(
+    response: &Value,
+    what: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    gemini_text(response).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
             format!("Gemini {what} response had no text"),
@@ -1624,13 +1668,24 @@ async fn post_generate_content(
     Ok(response)
 }
 
-async fn generate_report_once(
-    api_key: &str,
-    url: &str,
-    request: &Value,
-    what: &str,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    generate_content_once(api_key, url, request, REPORT_ATTEMPT_TIMEOUT, what).await
+fn report_attempt_failure(
+    response: &Result<Value, Box<dyn std::error::Error + Send + Sync>>,
+) -> Option<ReportAttemptFailure> {
+    let (stage, status) = match response {
+        Err(error) => match error.downcast_ref::<ApiFailure>() {
+            Some(failure) => ("http_status", Some(failure.status)),
+            None if error
+                .downcast_ref::<reqwest::Error>()
+                .is_some_and(reqwest::Error::is_decode) =>
+            {
+                ("decode", None)
+            }
+            None => ("send_or_timeout", None),
+        },
+        Ok(value) if gemini_text(value).is_none() => ("no_text", None),
+        Ok(_) => return None,
+    };
+    Some(ReportAttemptFailure { stage, status })
 }
 
 pub(crate) async fn open_live_session_at(

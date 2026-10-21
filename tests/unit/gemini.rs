@@ -8,7 +8,7 @@ use crate::config::load_from_pairs;
 use crate::runtime::bootstrap;
 
 /// An editor interview's report material: the editor's rules, nothing attached.
-const EDITOR: ReportMaterial<'static> = ReportMaterial {
+pub(crate) const EDITOR: ReportMaterial<'static> = ReportMaterial {
     example_drawing_enabled: false,
     drawing_received: false,
     mode: InterviewMode::Coding,
@@ -318,6 +318,7 @@ async fn report_transport_fixture_with_body(
         &mut budget,
         backoff,
         "test-room",
+        &mut None,
     )
     .await;
     server.abort();
@@ -429,6 +430,7 @@ async fn a_key_ruled_out_during_the_backoff_is_not_retried() {
         &mut budget,
         REPORT_RETRY_BACKOFF,
         "test-room",
+        &mut None,
     )
     .await;
     server.abort();
@@ -989,6 +991,7 @@ pub(crate) async fn generate_report_at(
         material: EDITOR,
         budget: ReportCallBudget::new(),
         backoff,
+        observer: None,
         run,
     };
     generate_report_with_keys_at(calls, prompt, problem, rounds(true)).await
@@ -3976,10 +3979,11 @@ async fn quota_regeneration_waits_until_the_whole_key_rotation_can_make_a_call()
         axum::serve(listener, app).await.unwrap();
     });
     assert_eq!(
-        generate_report_once(
+        generate_content_once(
             &selected,
             &url,
             &generate_report_request("same frozen prompt", EDITOR, GENERATION_SEED),
+            REPORT_ATTEMPT_TIMEOUT,
             "quota-regeneration",
         )
         .await
@@ -4076,6 +4080,7 @@ async fn concurrent_quota_exhaustion_keeps_its_delay_after_a_report_503() {
         &mut budget,
         Duration::ZERO,
         "concurrent-quota",
+        &mut None,
     )
     .await
     .unwrap_err();

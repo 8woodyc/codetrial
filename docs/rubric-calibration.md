@@ -60,3 +60,6 @@ version, adjudication log, and contract tuple. A failed or sparse result keeps t
 product formative. The synthetic passing/failing/malformed fixtures exist only to
 regress the analyzer and are regenerated with
 `python3 scripts/gen-calibration-fixtures.py`; they can never change this status.
+The synthetic report-stability probe in `tests/fixtures/report-eval/` measures
+how much a report moves under repeats and controlled edits. It is not a human
+rating set and can never change this status either.

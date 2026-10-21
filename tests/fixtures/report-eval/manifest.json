@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "synthetic": true,
   "items": [
     {
@@ -148,7 +148,10 @@
           "patch": {
             "transcript": "Candidate: My name is Alex.\nInterviewer: Walk me through the problem.\nCandidate: I need two distinct indices whose values sum to the target. For [2,7,11,15] and 9, I return [0,1]; duplicates such as [3,3] must work. I will scan once and store prior values by index, which is linear time and linear space.\nCandidate: I expect the ordinary and duplicate cases to pass.\nInterviewer: Tell me about a debugging disagreement.\nCandidate: On a release, I owned a failing cache test. I reproduced it, proposed invalidation on writes, and paired with my teammate to test it. The incidents stopped in the following releases.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: Two positions ... target ... check ..."
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": [
+            "two positions ... target ... check"
+          ]
         },
         {
           "id": "unrelated",
@@ -156,7 +159,11 @@
           "patch": {
             "transcript": "Candidate: My name is Alex.\nInterviewer: Walk me through the problem.\nCandidate: I need two distinct indices whose values sum to the target. For [2,7,11,15] and 9, I return [0,1]; duplicates such as [3,3] must work. I will scan once and store prior values by index, which is linear time and linear space.\nCandidate: I expect the ordinary and duplicate cases to pass.\nInterviewer: Tell me about a debugging disagreement.\nCandidate: On a release, I owned a failing cache test. I reproduced it, proposed invalidation on writes, and paired with my teammate to test it. The incidents stopped in the following releases.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The coat cupboard computes purple invoices."
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": [
+            "coat cupboard",
+            "purple invoices"
+          ]
         },
         {
           "id": "inconsistent",
@@ -164,7 +171,11 @@
           "patch": {
             "transcript": "Candidate: My name is Alex.\nInterviewer: Walk me through the problem.\nCandidate: I need two distinct indices whose values sum to the target. For [2,7,11,15] and 9, I return [0,1]; duplicates such as [3,3] must work. I will scan once and store prior values by index, which is linear time and linear space.\nCandidate: I expect the ordinary and duplicate cases to pass.\nInterviewer: Tell me about a debugging disagreement.\nCandidate: On a release, I owned a failing cache test. I reproduced it, proposed invalidation on writes, and paired with my teammate to test it. The incidents stopped in the following releases.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The hash map sorts itself in constant negative time."
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": [
+            "hash map sorts itself",
+            "constant negative time"
+          ]
         },
         {
           "id": "empty",
@@ -172,7 +183,8 @@
           "patch": {
             "transcript": ""
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": []
         },
         {
           "id": "phase",
@@ -328,7 +340,10 @@
           "patch": {
             "transcript": "Candidate: My name is Alex.\nCandidate: I will use a one-pass map in linear time. Before coding, [3,3] with target 6 should return both distinct positions. Restating the goal, I return indices, not values. After coding I would also test a negative target; the approach is already asymptotically optimal.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: Two positions ... target ... check ..."
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": [
+            "two positions ... target ... check"
+          ]
         },
         {
           "id": "unrelated",
@@ -336,7 +351,11 @@
           "patch": {
             "transcript": "Candidate: My name is Alex.\nCandidate: I will use a one-pass map in linear time. Before coding, [3,3] with target 6 should return both distinct positions. Restating the goal, I return indices, not values. After coding I would also test a negative target; the approach is already asymptotically optimal.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The coat cupboard computes purple invoices."
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": [
+            "coat cupboard",
+            "purple invoices"
+          ]
         },
         {
           "id": "inconsistent",
@@ -344,7 +363,11 @@
           "patch": {
             "transcript": "Candidate: My name is Alex.\nCandidate: I will use a one-pass map in linear time. Before coding, [3,3] with target 6 should return both distinct positions. Restating the goal, I return indices, not values. After coding I would also test a negative target; the approach is already asymptotically optimal.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The hash map sorts itself in constant negative time."
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": [
+            "hash map sorts itself",
+            "constant negative time"
+          ]
         },
         {
           "id": "empty",
@@ -352,7 +375,8 @@
           "patch": {
             "transcript": ""
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": []
         },
         {
           "id": "phase",
@@ -508,7 +532,10 @@
           "patch": {
             "transcript": "Candidate: My name is Alex.\nCandidate: The duplicate case failed because I inserted before checking and reused one index. I will reverse those operations and rerun it.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: Two positions ... target ... check ..."
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": [
+            "two positions ... target ... check"
+          ]
         },
         {
           "id": "unrelated",
@@ -516,7 +543,11 @@
           "patch": {
             "transcript": "Candidate: My name is Alex.\nCandidate: The duplicate case failed because I inserted before checking and reused one index. I will reverse those operations and rerun it.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The coat cupboard computes purple invoices."
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": [
+            "coat cupboard",
+            "purple invoices"
+          ]
         },
         {
           "id": "inconsistent",
@@ -524,7 +555,11 @@
           "patch": {
             "transcript": "Candidate: My name is Alex.\nCandidate: The duplicate case failed because I inserted before checking and reused one index. I will reverse those operations and rerun it.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The hash map sorts itself in constant negative time."
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": [
+            "hash map sorts itself",
+            "constant negative time"
+          ]
         },
         {
           "id": "empty",
@@ -532,7 +567,8 @@
           "patch": {
             "transcript": ""
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": []
         },
         {
           "id": "phase",
@@ -688,7 +724,10 @@
           "patch": {
             "transcript": "Candidate: My name is Alex.\nCandidate: I am finishing the implementation and checking the duplicate case now.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: Two positions ... target ... check ..."
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": [
+            "two positions ... target ... check"
+          ]
         },
         {
           "id": "unrelated",
@@ -696,7 +735,11 @@
           "patch": {
             "transcript": "Candidate: My name is Alex.\nCandidate: I am finishing the implementation and checking the duplicate case now.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The coat cupboard computes purple invoices."
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": [
+            "coat cupboard",
+            "purple invoices"
+          ]
         },
         {
           "id": "inconsistent",
@@ -704,7 +747,11 @@
           "patch": {
             "transcript": "Candidate: My name is Alex.\nCandidate: I am finishing the implementation and checking the duplicate case now.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The hash map sorts itself in constant negative time."
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": [
+            "hash map sorts itself",
+            "constant negative time"
+          ]
         },
         {
           "id": "empty",
@@ -712,7 +759,8 @@
           "patch": {
             "transcript": ""
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": []
         },
         {
           "id": "phase",
@@ -868,7 +916,10 @@
           "patch": {
             "transcript": "Candidate: My name is Alex.\nInterviewer: Tell me about a production bug your team handled.\nCandidate: We had an outage and we fixed it quickly. The service recovered.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: Two positions ... target ... check ..."
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": [
+            "two positions ... target ... check"
+          ]
         },
         {
           "id": "unrelated",
@@ -876,7 +927,11 @@
           "patch": {
             "transcript": "Candidate: My name is Alex.\nInterviewer: Tell me about a production bug your team handled.\nCandidate: We had an outage and we fixed it quickly. The service recovered.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The coat cupboard computes purple invoices."
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": [
+            "coat cupboard",
+            "purple invoices"
+          ]
         },
         {
           "id": "inconsistent",
@@ -884,7 +939,11 @@
           "patch": {
             "transcript": "Candidate: My name is Alex.\nInterviewer: Tell me about a production bug your team handled.\nCandidate: We had an outage and we fixed it quickly. The service recovered.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The hash map sorts itself in constant negative time."
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": [
+            "hash map sorts itself",
+            "constant negative time"
+          ]
         },
         {
           "id": "empty",
@@ -892,7 +951,8 @@
           "patch": {
             "transcript": ""
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": []
         },
         {
           "id": "phase",
@@ -1048,7 +1108,10 @@
           "patch": {
             "transcript": "Candidate: My name is Alex.\nInterviewer: Tell me about learning from a mistake.\nCandidate: During a migration I owned the rollout checklist but missed a rollback check. I added a dry-run review and practiced it with the team. We had no numeric metric, but later migrations had a clear rollback owner and the team caught mistakes before deployment.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: Two positions ... target ... check ..."
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": [
+            "two positions ... target ... check"
+          ]
         },
         {
           "id": "unrelated",
@@ -1056,7 +1119,11 @@
           "patch": {
             "transcript": "Candidate: My name is Alex.\nInterviewer: Tell me about learning from a mistake.\nCandidate: During a migration I owned the rollout checklist but missed a rollback check. I added a dry-run review and practiced it with the team. We had no numeric metric, but later migrations had a clear rollback owner and the team caught mistakes before deployment.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The coat cupboard computes purple invoices."
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": [
+            "coat cupboard",
+            "purple invoices"
+          ]
         },
         {
           "id": "inconsistent",
@@ -1064,7 +1131,11 @@
           "patch": {
             "transcript": "Candidate: My name is Alex.\nInterviewer: Tell me about learning from a mistake.\nCandidate: During a migration I owned the rollout checklist but missed a rollback check. I added a dry-run review and practiced it with the team. We had no numeric metric, but later migrations had a clear rollback owner and the team caught mistakes before deployment.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The hash map sorts itself in constant negative time."
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": [
+            "hash map sorts itself",
+            "constant negative time"
+          ]
         },
         {
           "id": "empty",
@@ -1072,7 +1143,8 @@
           "patch": {
             "transcript": ""
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": []
         },
         {
           "id": "phase",
@@ -1228,15 +1300,22 @@
           "patch": {
             "transcript": "Candidate: My name is Alex.\nInterviewer: Could you restate the problem?\nCandidate: I return two distinct positions whose values add to the target.\nInterviewer: Can you walk an example?\nCandidate: For [2,7,11,15] and 9, return [0,1].\nCandidate: The coat cupboard computes purple invoices.\nInterviewer: I may have misheard. Could you repeat that?\nCandidate: Check the map before inserting, so an element pairs only with an earlier position. One pass is O(n) time and O(n) space.\nCandidate: I tested duplicates and negative values; all three cases pass.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: Two positions ... target ... check ..."
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": [
+            "two positions ... target ... check"
+          ]
         },
         {
           "id": "unrelated",
           "family": "asr",
           "patch": {
-            "transcript": "Candidate: My name is Alex.\nInterviewer: Could you restate the problem?\nCandidate: I return two distinct positions whose values add to the target.\nInterviewer: Can you walk an example?\nCandidate: For [2,7,11,15] and 9, return [0,1].\nCandidate: The coat cupboard computes purple invoices.\nInterviewer: I may have misheard. Could you repeat that?\nCandidate: Check the map before inserting, so an element pairs only with an earlier position. One pass is O(n) time and O(n) space.\nCandidate: I tested duplicates and negative values; all three cases pass.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The coat cupboard computes purple invoices."
+            "transcript": "Candidate: My name is Alex.\nInterviewer: Could you restate the problem?\nCandidate: I return two distinct positions whose values add to the target.\nInterviewer: Can you walk an example?\nCandidate: For [2,7,11,15] and 9, return [0,1].\nCandidate: The coat cupboard computes purple invoices.\nInterviewer: I may have misheard. Could you repeat that?\nCandidate: Check the map before inserting, so an element pairs only with an earlier position. One pass is O(n) time and O(n) space.\nCandidate: I tested duplicates and negative values; all three cases pass.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The kettle deploys violet teacups."
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": [
+            "kettle deploys",
+            "violet teacups"
+          ]
         },
         {
           "id": "inconsistent",
@@ -1244,7 +1323,11 @@
           "patch": {
             "transcript": "Candidate: My name is Alex.\nInterviewer: Could you restate the problem?\nCandidate: I return two distinct positions whose values add to the target.\nInterviewer: Can you walk an example?\nCandidate: For [2,7,11,15] and 9, return [0,1].\nCandidate: The coat cupboard computes purple invoices.\nInterviewer: I may have misheard. Could you repeat that?\nCandidate: Check the map before inserting, so an element pairs only with an earlier position. One pass is O(n) time and O(n) space.\nCandidate: I tested duplicates and negative values; all three cases pass.\nCandidate: I used Python.\nCandidate: The editor contains my implementation.\nCandidate: The hash map sorts itself in constant negative time."
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": [
+            "hash map sorts itself",
+            "constant negative time"
+          ]
         },
         {
           "id": "empty",
@@ -1252,7 +1335,8 @@
           "patch": {
             "transcript": ""
           },
-          "expectation": "recognition gap is not communication weakness"
+          "expectation": "recognition gap is not communication weakness",
+          "forbidden_citations": []
         },
         {
           "id": "phase",
@@ -1260,6 +1344,10 @@
           "patch": {},
           "expectation": "authored phase opportunity/answer labels, not calibration"
         }
+      ],
+      "forbidden_citations": [
+        "coat cupboard",
+        "purple invoices"
       ]
     }
   ]
