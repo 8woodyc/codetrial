@@ -45,6 +45,8 @@ const SIGNED_OUT = {
   "account-status": "Signed out",
   start: "Start interview",
   "progress-summary": "Could not load progress saved on this device.",
+  "practice-list-status":
+    "0 problems in your list. Open the problem picker below to check problems. Kept for this visit only; browser storage is unavailable.",
 };
 test("the lobby page loads outside a browser and says what it was given", () => {
   for (const [id, expected] of Object.entries(SIGNED_OUT)) {
