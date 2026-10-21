@@ -2504,10 +2504,23 @@ async fn drop_stale_playout(
 /// generation that had stalled arms no discard, as at a pause, but its late
 /// ending is still kept from settling what the hold's release asks for.
 pub(super) fn cut_off_for_hold(activity: &mut RuntimeActivity, output_audio: &mut OutputAudio) {
-    activity.discarding_output |= pause_leaves_output_in_flight(activity, Instant::now());
+    cut_off_generation(activity, output_audio, Boundary::Held, Instant::now());
+}
+
+/// What a pause and a hold both do to the interviewer's turn: arm a discard
+/// for a generation still producing it, or a stale wait for one that stalled,
+/// then cut what is queued and close the latency measurement at `boundary`.
+/// One place, so the two cannot drift apart on which ending they swallow.
+pub(super) fn cut_off_generation(
+    activity: &mut RuntimeActivity,
+    output_audio: &mut OutputAudio,
+    boundary: Boundary,
+    now: Instant,
+) {
+    activity.discarding_output |= pause_leaves_output_in_flight(activity, now);
     activity.stale_turn_pending |= activity.generating && !activity.discarding_output;
     cut_off_turn(activity, output_audio);
-    activity.latency.close(Boundary::Held, Instant::now());
+    activity.latency.close(boundary, now);
 }
 
 /// The decision and its effect, with no room in sight so a test can reach it.

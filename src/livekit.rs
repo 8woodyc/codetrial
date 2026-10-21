@@ -2216,10 +2216,7 @@ fn update_pause_activity(
             .filter(|_| activity.owes_prompt());
         hold_owed_reply(state, owed_prompt);
     }
-    activity.discarding_output |= pause_leaves_output_in_flight(activity, now);
-    activity.stale_turn_pending |= activity.generating && !activity.discarding_output;
-    cut_off_turn(activity, output_audio);
-    activity.latency.close(latency::Boundary::Paused, now);
+    session::cut_off_generation(activity, output_audio, latency::Boundary::Paused, now);
 }
 
 /// The event a resume owes a reply for, read before the resume prompt is
