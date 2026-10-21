@@ -305,6 +305,14 @@ pub(super) async fn apply_data_packet(
         );
     }
     let grace = thinking_transcript_grace(interview.boot.silence_ms);
+    if result.thinking_changed == Some(true) {
+        session::observe_floor(
+            room.name(),
+            context.activity,
+            context.state,
+            floor::Event::Reset,
+        );
+    }
     let effects = settle_hold(context, &result, &mut reply, packet_at, grace).await;
     if effects.cut_off {
         close_turns(room, context);

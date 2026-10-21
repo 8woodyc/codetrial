@@ -81,13 +81,25 @@ CONFIG_PATH="$TMP/codetrial.env.local"
 
 cleanup()
 {
+    cleanup_status=$?
+    trap - EXIT INT TERM
     if [ "${SERVER_PID:-}" ]; then
         kill "$SERVER_PID" 2> /dev/null || true
         wait "$SERVER_PID" 2> /dev/null || true
     fi
+    if [ "${FLOOR_CAPTURE_PID:-}" ]; then
+        : > "$TMP/floor.done"
+        wait "$FLOOR_CAPTURE_PID" || cleanup_status=1
+    fi
+    if [ "${BROWSER_CHECK_FLOOR_LOG:-}" ]; then
+        echo "Floor diagnostics retained at $BROWSER_CHECK_FLOOR_LOG" >&2
+    fi
     rm -r "$TMP" 2> /dev/null || true
+    exit "$cleanup_status"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 if [ "$BROWSER_CHECK_AGENT" = "rust" ] || [ "$BROWSER_CHECK_AGENT" = "dispatch" ]; then
     CONFIG_ENV=${CODETRIAL_CONFIG_ENV:-}
@@ -182,11 +194,27 @@ if [ "$BROWSER_CHECK_FLOW" = "barge" ] && [ -z "$BARGE_AUDIO_FILE" ]; then
     fi
     say -o "$TMP/barge.aiff" "I need to interrupt now. I am still here. Please stop and listen."
     ffmpeg -hide_banner -loglevel error \
-        -f lavfi -t 6 -i anullsrc=r=48000:cl=mono \
         -i "$TMP/barge.aiff" \
-        -filter_complex "[0:a][1:a]concat=n=2:v=0:a=1,apad=pad_dur=15" \
         -ar 48000 -ac 1 "$TMP/barge.wav"
     BARGE_AUDIO_FILE="$TMP/barge.wav"
+fi
+
+# A dispatched agent logs to the server that spawned it. An external server
+# keeps that log, so the barge check could only time out without its records.
+if [ "$BROWSER_CHECK_FLOW" = barge ] && [ "$BROWSER_CHECK_AGENT" = dispatch ] && [ "${CODETRIAL_WEB_URL:-}" ]; then
+    echo "BROWSER_CHECK_FLOW=barge with dispatch needs this script's own server; unset CODETRIAL_WEB_URL." >&2
+    exit 2
+fi
+
+if [ "$BROWSER_CHECK_AGENT" = rust ] || [ "$BROWSER_CHECK_AGENT" = dispatch ]; then
+    # Outside TMP: failure and signal cleanup must preserve early observations.
+    BROWSER_CHECK_FLOOR_LOG=$(mktemp "${TMPDIR:-/tmp}/codetrial-floor.XXXXXX")
+    export BROWSER_CHECK_FLOOR_LOG
+    # Only a server this script launches writes SERVER_LOG.
+    if [ -z "${CODETRIAL_WEB_URL:-}" ]; then
+        node "$ROOT/scripts/floor-capture.cjs" "$SERVER_LOG" "$BROWSER_CHECK_FLOOR_LOG" "$TMP/floor.done" &
+        FLOOR_CAPTURE_PID=$!
+    fi
 fi
 
 if [ "${CODETRIAL_WEB_URL:-}" ]; then

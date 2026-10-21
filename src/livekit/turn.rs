@@ -365,6 +365,7 @@ impl PromptTokenWatch {
 }
 
 pub(super) struct RuntimeActivity {
+    pub(super) floor_tracker: super::floor::FloorTracker,
     pub(super) turn_timing: super::timing::TurnTiming,
     pub(super) latency: super::latency::ReplyLatency,
     pub(super) last_code_change: Instant,
@@ -765,6 +766,7 @@ impl RuntimeActivity {
 
     pub(super) fn with_interim_review_cap(now: Instant, max_interim_reviews: usize) -> Self {
         Self {
+            floor_tracker: super::floor::FloorTracker::default(),
             turn_timing: super::timing::TurnTiming::default(),
             last_code_change: now,
             silent_editor_delivery: None,

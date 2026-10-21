@@ -99,6 +99,7 @@ use crate::runtime::{AGENT_NAME, RuntimeBootstrap, agent_identity};
 use crate::token::{LivekitTokenInput, livekit_token};
 
 mod board;
+mod floor;
 mod latency;
 mod media;
 mod packets;
@@ -2558,6 +2559,14 @@ async fn on_playout_settled(
     if context.output_audio.is_playing() {
         return Ok(ControlFlow::Continue(()));
     }
+    if !context.activity.generating {
+        session::observe_floor(
+            room.name(),
+            context.activity,
+            context.state,
+            floor::Event::Drained,
+        );
+    }
     context.activity.mark_listening();
     set_agent_state(room, context.agent_state, AGENT_STATE_LISTENING);
     if spend_deferred_restart(room, context, loops, interview, "playout")
@@ -2854,6 +2863,13 @@ pub(crate) async fn run_room_with_slot(
             // since the step that ends the interview leaves the room before
             // this runs.
             session::flush_thinking_notice(&room, &mut turn.state).await;
+            session::reconcile_floor(
+                room.name(),
+                &mut turn.activity,
+                || log_clock(&turn.state),
+                output_audio.is_playing(),
+                &mut std::io::stderr().lock(),
+            );
             session::correct_agent_state(
                 &room,
                 &mut turn.agent_state,
