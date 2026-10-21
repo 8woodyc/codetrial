@@ -28,8 +28,8 @@ check()
             fi
         done
     # shellcheck disable=SC2016
-    grep -oE '`(scripts|docs|src|web|tests|problem-bank|\.github|\.claude)/[^` ]*`' "$md" \
-        | tr -d '`' | grep -v '[*<>{}$]' | sort -u \
+    grep -oE '`(\./)?(scripts|docs|src|web|tests|problem-bank|\.github|\.claude)/[^` ]*' "$md" \
+        | sed 's/^`//; s|^\./||' | grep -v '[*<>{}$]' | sort -u \
         | while IFS= read -r path; do
             [ -e "$path" ] || echo "$md: path $path"
         done
