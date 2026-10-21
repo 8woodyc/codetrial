@@ -34,13 +34,15 @@ Read what the PR already carries before judging it:
 ```sh
 gh pr view "$pr" --repo sysprog21/codetrial \
   --json headRefOid,commits,reviews,comments
-gh api graphql -F n="$pr" -f query='query($n: Int!) {
+gh api graphql --paginate -F n="$pr" -f query='query($n: Int!, $endCursor: String) {
   repository(owner: "sysprog21", name: "codetrial") { pullRequest(number: $n) {
-    reviewThreads(first: 100) { nodes { isResolved path line
-      comments(first: 1) { nodes { author { login } body } } } } } } }' \
+    reviewThreads(first: 100, after: $endCursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes { isResolved path line originalLine
+        comments(first: 1) { nodes { author { login } body } } } } } } }' \
   --jq '.data.repository.pullRequest.reviewThreads.nodes[]
-    | [.isResolved, .path, .line, .comments.nodes[0].author.login,
-       .comments.nodes[0].body] | @tsv'
+    | [.isResolved, .path, (.line // .originalLine),
+       .comments.nodes[0].author.login, .comments.nodes[0].body] | @tsv'
 ```
 
 A finding an unresolved thread or a cubic comment already raises is cited, not
