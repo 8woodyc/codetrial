@@ -496,6 +496,125 @@ struct Node* replicateTopology(struct Node* s) {
     },
   );
 
+  // A non-root NULL must be rejected before any adjacency rows are emitted.
+  for (const [position, nodeValue] of [
+    ["the root node", 1],
+    ["a reachable non-root node", 2],
+  ]) {
+    it(
+      `C Clone Graph harness reports a NULL neighbor on ${position}`,
+      { skip: noCc },
+      async () => {
+        const dir = mkdtempSync(join(tmpdir(), "codetrial-c-graph-null-"));
+        try {
+          const source = join(dir, "clonegraph-null.c");
+          const binary = join(dir, "clonegraph-null");
+          writeFileSync(
+            source,
+            generateHarness(
+              "c",
+              cloneGraphSpec,
+              `static struct Node* copies[101];
+static struct Node* copyNode(struct Node* s) {
+    if (!s) return NULL;
+    if (copies[s->val]) return copies[s->val];
+    struct Node* copy = calloc(1, sizeof(*copy));
+    copy->val = s->val;
+    copies[s->val] = copy;
+    copy->numNeighbors = s->numNeighbors;
+    copy->neighbors = calloc(s->numNeighbors, sizeof(*copy->neighbors));
+    for (int i = 0; i < s->numNeighbors; i++) {
+        if (s->val == ${nodeValue} && i == s->numNeighbors - 1) continue;
+        copy->neighbors[i] = copyNode(s->neighbors[i]);
+    }
+    return copy;
+}
+struct Node* replicateTopology(struct Node* s) {
+    memset(copies, 0, sizeof(copies));
+    return copyNode(s);
+}`,
+            ),
+          );
+          await run("cc", ["-std=c17", source, "-o", binary]);
+          assert.deepEqual(
+            parseCompilerResults(
+              (await run(binary, [], { encoding: "utf8" })).stdout,
+            ).results.map((result) => result.actual),
+            cloneGraphSpec.cases.map((testCase) =>
+              testCase.input[0][nodeValue - 1]?.length
+                ? "Returned graph has a NULL neighbor."
+                : testCase.expected,
+            ),
+          );
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      },
+    );
+  }
+
+  for (const [behavior, nullNeighborValue] of [
+    ["accepts reordered neighbors", null],
+    ["reports a NULL neighbor on the root node", 1],
+    ["reports a NULL neighbor on a reachable non-root node", 2],
+  ]) {
+    it(`C++ Clone Graph harness ${behavior}`, { skip: noGpp }, async () => {
+      const dir = mkdtempSync(join(tmpdir(), "codetrial-cpp-graph-"));
+      try {
+        const source = join(dir, "clonegraph.cpp");
+        const binary = join(dir, "clonegraph");
+        writeFileSync(
+          source,
+          generateHarness(
+            "cpp",
+            cloneGraphSpec,
+            `class Solution {
+    map<Node*, Node*> copies;
+    Node* copyNode(Node* node) {
+        if (!node) return nullptr;
+        if (copies.count(node)) return copies[node];
+        auto* copy = new Node(node->val);
+        copies[node] = copy;
+        copy->neighbors.resize(node->neighbors.size(), nullptr);
+        for (size_t i = 0; i < node->neighbors.size(); i++) {
+            if (node->val == ${nullNeighborValue ?? 0} && i + 1 == node->neighbors.size()) continue;
+            copy->neighbors[i] = copyNode(node->neighbors[node->neighbors.size() - 1 - i]);
+        }
+        return copy;
+    }
+public:
+    Node* replicateTopology(Node* node) { return copyNode(node); }
+};`,
+          ),
+        );
+        await run("g++", ["-std=c++20", source, "-o", binary]);
+        const { results } = parseCompilerResults(
+          (await run(binary, [], { encoding: "utf8" })).stdout,
+        );
+        assert.equal(results.length, cloneGraphSpec.cases.length);
+        cloneGraphSpec.cases.forEach((testCase, index) => {
+          const result = results[index];
+          if (
+            nullNeighborValue !== null &&
+            testCase.input[0][nullNeighborValue - 1]?.length
+          ) {
+            assert.equal(
+              result.error,
+              "Returned graph has a NULL neighbor.",
+              testCase.label,
+            );
+            assert.equal(result.actual, undefined, testCase.label);
+          } else {
+            assert.equal(result.error, undefined, testCase.label);
+            assert.deepEqual(result.actual, testCase.expected, testCase.label);
+          }
+        });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+
   it(
     "C Merge k Sorted Lists harness can produce passing Compiler Explorer JSON",
     { skip: noCc },
