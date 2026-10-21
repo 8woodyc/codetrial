@@ -1,6 +1,6 @@
 ---
 name: codetrial-web
-description: The CodeTrial browser half and the boundary it talks across - why web/ has no build step, how a file reaches the browser embedded or from disk, the vendored checksum-pinned assets, the data-channel topics implemented once in web/lib.js and once against the TOPIC_ constants in src/runtime.rs, in both directions, and the wire fixtures that keep the two agreeing. Use when editing anything under web/, adding or changing a data-channel message, touching src/web/, or wondering why a browser change passed every Rust test and still broke the interview.
+description: The CodeTrial browser half and the boundary it talks across - why web/ has no build step, how a file reaches the browser embedded or from disk, the vendored checksum-pinned assets, the data-channel topics implemented once in web/lib.js and once against the TOPIC_ constants in src/runtime.rs, in both directions, and the wire fixtures that keep the two agreeing. Use when editing anything under web/, adding or changing a data-channel message, touching src/web/, reviewing UI accessibility or interaction states, designing a new page or an explicit redesign, or wondering why a browser change passed every Rust test and still broke the interview.
 ---
 
 # The CodeTrial browser boundary
@@ -100,6 +100,21 @@ The gate cannot see these, and reviews here keep raising them:
   `keyCode === 229` for engines that clear it early), `event.repeat`, and
   modifier chords it does not own; the Cmd/Ctrl+Enter handler in
   `web/interview.js` has all three guards (#144, #277).
+
+## UI behavior and design
+
+For an interface review, walk the changed flow through the checks in
+[ui-review.md](ui-review.md), then verify the behavior with the existing browser
+lanes described in [codetrial-verify](../codetrial-verify/SKILL.md#browser-investigation),
+and report what could not run apart from what failed.
+
+For a new page or an explicitly requested redesign, first name the user's task,
+the visual hierarchy and the layout at narrow and wide widths, and read the
+neighboring pages. The tokens and themes above still apply. A visual brief does
+not call for a framework, a build step, an external font download or a restyle
+of unrelated pages. Review rendered screenshots for hierarchy, readability and
+overflow, then exercise the interactions; a screenshot alone cannot validate
+them.
 
 ## Generated pages
 
