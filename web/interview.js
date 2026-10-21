@@ -885,8 +885,11 @@ let applyingProgrammaticEdit = false;
 function applyEditorEdit(next) {
   const editor = nodes.editor;
   const previous = editor.value;
+  // The temporary edit selection must not move the candidate's active end.
+  const direction =
+    next.start === next.end ? "none" : editor.selectionDirection;
   if (next.value === previous) {
-    editor.setSelectionRange(next.start, next.end);
+    editor.setSelectionRange(next.start, next.end, direction);
     return;
   }
   let head = 0;
@@ -913,7 +916,7 @@ function applyEditorEdit(next) {
     editor.value = next.value;
     editor.dispatchEvent(new Event("input", { bubbles: true }));
   }
-  editor.setSelectionRange(next.start, next.end);
+  editor.setSelectionRange(next.start, next.end, direction);
 }
 
 function bindEvents() {

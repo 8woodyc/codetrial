@@ -107,6 +107,57 @@ test("Ctrl+/ and Cmd+/ toggle a comment on the selected lines", async (t) => {
   }
 });
 
+for (const direction of ["forward", "backward"]) {
+  test(`comment toggling preserves a ${direction} selection and one-step undo`, async (t) => {
+    const ctx = await interviewPage(t);
+    if (!ctx) return;
+    const { page, errors } = ctx;
+    try {
+      for (const { code, end, edited, start, finish } of [
+        {
+          code: "alpha\nbeta\ngamma",
+          end: 10,
+          edited: "# alpha\n# beta\ngamma",
+          start: 2,
+          finish: 14,
+        },
+        {
+          code: "# alpha\n# beta\ngamma",
+          end: 14,
+          edited: "alpha\nbeta\ngamma",
+          start: 0,
+          finish: 10,
+        },
+      ]) {
+        await setBuffer(page, code, direction === "backward" ? end : 0);
+        for (let i = 0; i < end; i++)
+          await page.keyboard.press(
+            direction === "backward" ? "Shift+ArrowLeft" : "Shift+ArrowRight",
+          );
+        const selectionDirection = () =>
+          page
+            .locator("#editor")
+            .evaluate((editor) => editor.selectionDirection);
+        assert.equal(await selectionDirection(), direction);
+        await page.keyboard.press("Control+/");
+        assert.equal(await buffer(page), edited);
+        assert.deepEqual(await selection(page), [start, finish]);
+        assert.equal(await selectionDirection(), direction);
+        await page.keyboard.press("Shift+ArrowRight");
+        assert.deepEqual(await selection(page), [
+          start + (direction === "backward" ? 1 : 0),
+          finish + (direction === "forward" ? 1 : 0),
+        ]);
+        await page.keyboard.press("ControlOrMeta+Z");
+        assert.equal(await buffer(page), code);
+      }
+      assert.deepEqual(errors, []);
+    } finally {
+      await page.close();
+    }
+  });
+}
+
 // The page loads on Python. A toggle that read the language once would go on
 // writing `#` into every other tab.
 test("the comment marker follows the language tab", async (t) => {

@@ -653,6 +653,98 @@ test("disabled auto indentation uses native Enter and retains manual indentation
   }
 });
 
+for (const direction of ["forward", "backward"]) {
+  for (const { command, code, end, edited, start, finish } of [
+    {
+      command: "Tab",
+      code: "alpha\nbeta\ngamma",
+      end: 10,
+      edited: "    alpha\n    beta\ngamma",
+      start: 4,
+      finish: 18,
+    },
+    {
+      command: "Shift+Tab",
+      code: "    alpha\n    beta\ngamma",
+      end: 18,
+      edited: "alpha\nbeta\ngamma",
+      start: 0,
+      finish: 10,
+    },
+    {
+      command: "Shift+Tab",
+      code: "alpha\nbeta\ngamma",
+      end: 10,
+      edited: "alpha\nbeta\ngamma",
+      start: 0,
+      finish: 10,
+    },
+  ]) {
+    test(`${command} preserves a ${direction} selection${code === edited ? " without changing text" : ""}`, async (t) => {
+      const ctx = await editorPage(t);
+      if (!ctx) return;
+      const { page, errors } = ctx;
+      try {
+        await setCode(page, code, direction === "backward" ? end : 0);
+        for (let i = 0; i < end; i++)
+          await page.keyboard.press(
+            direction === "backward" ? "Shift+ArrowLeft" : "Shift+ArrowRight",
+          );
+        const selectionDirection = () =>
+          page
+            .locator("#editor")
+            .evaluate((editor) => editor.selectionDirection);
+        assert.equal(await selectionDirection(), direction);
+        await page.keyboard.press(command);
+        assert.deepEqual(await caretState(page), {
+          value: edited,
+          start,
+          end: finish,
+        });
+        assert.equal(await selectionDirection(), direction);
+        await page.keyboard.press("Shift+ArrowRight");
+        assert.deepEqual(await caretState(page), {
+          value: edited,
+          start: start + (direction === "backward" ? 1 : 0),
+          end: finish + (direction === "forward" ? 1 : 0),
+        });
+        if (code !== edited) {
+          await page.keyboard.press("ControlOrMeta+Z");
+          assert.equal((await caretState(page)).value, code);
+        }
+        assert.deepEqual(errors, []);
+      } finally {
+        await page.close();
+      }
+    });
+  }
+}
+
+test("replacing a backward selection with Enter leaves a collapsed caret", async (t) => {
+  const ctx = await editorPage(t);
+  if (!ctx) return;
+  const { page, errors } = ctx;
+  try {
+    await setCode(page, "alpha\nbeta\ngamma", 10);
+    for (let i = 0; i < 10; i++) await page.keyboard.press("Shift+ArrowLeft");
+    await page.keyboard.press("Enter");
+    assert.deepEqual(await caretState(page), {
+      value: "\n\ngamma",
+      start: 1,
+      end: 1,
+    });
+    assert.notEqual(
+      await page
+        .locator("#editor")
+        .evaluate((editor) => editor.selectionDirection),
+      "backward",
+    );
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
 test("disabled auto indentation retains parsed bracket highlighting", async (t) => {
   const ctx = await editorPage(t, { params: { editorAutoIndent: "0" } });
   if (!ctx) return;
