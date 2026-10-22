@@ -28,6 +28,13 @@ esac
     exit 2
 }
 
+# Slurped, so an empty file fails too: jq reads it as no input, and every later
+# read of the payload would print nothing and succeed.
+jq -se 'map(type) == ["object"]' "$payload" > /dev/null 2>&1 || {
+    echo "review-anchors.sh: $payload is not one JSON object" >&2
+    exit 2
+}
+
 # Every line a comment may anchor to, one "path side line" per row: a context
 # line on both sides, an added line on the right, a deleted line on the left.
 # The --- and +++ lines are headers only before a file's first hunk, since a

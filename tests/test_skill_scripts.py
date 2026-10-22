@@ -31,6 +31,9 @@ ISSUE_SWEEP = SKILLS / "codetrial-triage" / "issue-sweep.sh"
 PR_SWEEP = SKILLS / "codetrial-triage" / "pr-sweep.sh"
 SKILL_REFS = ROOT / "scripts" / "check-skill-refs.py"
 
+# A gh that fails every call, so only a script's own check can refuse first.
+FAKE_GH_FAILS = "#!/bin/sh\nexit 1\n"
+
 # The viewer and the one account with push access. The sweeps ask `gh` for
 # both before the GraphQL page; the runs listing is empty, so no PR is held.
 FAKE_GH = """#!/bin/sh
@@ -823,6 +826,29 @@ class PrSweepTests(SweepCase):
         self.assertIn("name: gates (", workflow)
         self.assertIn('startswith("gates (")', PR_SWEEP.read_text())
 
+    def test_a_previous_file_that_is_not_one_sweep_is_refused(self):
+        # An earlier sweep that failed while redirected leaves the file empty.
+        for previous in (
+            "",
+            " \n\t",
+            "null",
+            "{}",
+            "[]",
+            "broken",
+            "{}\n{}",
+            '{"status": 1}',
+            '{"status": {}}',
+        ):
+            with self.subTest(previous=previous):
+                result = run_fake(
+                    PR_SWEEP,
+                    ["sysprog21/codetrial", "7", "$PREVIOUS"],
+                    FAKE_GH_FAILS,
+                    {"PREVIOUS": previous},
+                )
+                self.assertEqual((result.returncode, result.stdout), (2, ""))
+                self.assertIn("is not an earlier pr-sweep.sh output", result.stderr)
+
     def test_without_a_previous_sweep_moved_and_gone_are_null(self):
         swept = self.run_pulls(pull(1))
         self.assertIsNone(swept["moved"])
@@ -1194,16 +1220,27 @@ class VerifyScriptTests(unittest.TestCase):
                 self.assertIs(json.loads(result.stdout)["stale_base"], stale)
 
     def test_a_checks_lookup_that_fails_is_not_read_as_a_clean_pr(self):
-        # The fake exits 1 with nothing on stdout, as gh does when the API
-        # refuses the call rather than when a check failed.
+        # gh can fail without JSON; whitespace must not count as a response.
+        for checks in ("", " \n\t", "null", "{}", "broken", "[]\n[]"):
+            with self.subTest(checks=checks):
+                result = run_fake(
+                    VERIFY / "ci-failure.sh",
+                    [5],
+                    FAKE_GH_CI,
+                    {"FAKE_CHECKS": checks, "FAKE_LOG": ""},
+                )
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn("could not read the checks of #5", result.stderr)
+
+    def test_a_successful_empty_checks_lookup_is_a_clean_pr(self):
         result = run_fake(
             VERIFY / "ci-failure.sh",
             [5],
             FAKE_GH_CI,
-            {"FAKE_CHECKS": "", "FAKE_LOG": ""},
+            {"FAKE_CHECKS": "[]", "FAKE_LOG": ""},
         )
-        self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn("could not read the checks of #5", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["failing"], [])
 
     def test_a_pr_that_is_not_a_number_is_refused_before_any_call(self):
         for script, args in (
@@ -1214,7 +1251,7 @@ class VerifyScriptTests(unittest.TestCase):
             with self.subTest(script=script):
                 # The fake gh fails every call, so only the script's own
                 # check can produce exit 2 and its message.
-                result = run_fake(VERIFY / script, args, "#!/bin/sh\nexit 1\n", {})
+                result = run_fake(VERIFY / script, args, FAKE_GH_FAILS, {})
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertIn("is not a pull request number", result.stderr)
 
@@ -1280,15 +1317,15 @@ esac
 
 @unittest.skipUnless(shutil.which("jq"), "jq is not installed")
 class PostReviewTests(unittest.TestCase):
-    def post(self, line=11, env=(), event="COMMENT"):
+    def post(self, line=11, env=(), **fields):
         payload = {
-            "event": event,
+            "event": "COMMENT",
             "commit_id": "h1",
             "body": "Notes.",
             "comments": [
                 {"path": "web/a.js", "line": line, "side": "RIGHT", "body": "x"}
             ],
-        }
+        } | fields
         return run_fake(
             VERIFY / "post-review.sh",
             [5, "$FAKE_PAYLOAD", "T1"],
@@ -1302,11 +1339,33 @@ class PostReviewTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("pullrequestreview-h1", result.stdout)
 
-    def test_refuses_a_payload_without_an_event(self):
-        # GitHub would keep it as a pending review only its writer sees.
-        result = self.post(event=None)
-        self.assertEqual((result.returncode, result.stdout), (2, ""))
-        self.assertIn("names no event", result.stderr)
+    def test_refuses_a_payload_without_a_commit_event_or_body(self):
+        # Without an event GitHub would keep a pending review only its writer
+        # sees; without a body it refuses the review.
+        cases = {
+            "commit_id": (None, "names no commit_id"),
+            "event": (None, "names no event"),
+            "body": ("", "has no body"),
+        }
+        for field, (value, said) in cases.items():
+            with self.subTest(field):
+                result = self.post(**{field: value})
+                self.assertEqual((result.returncode, result.stdout), (2, ""))
+                self.assertIn(said, result.stderr)
+
+    def test_refuses_a_payload_that_is_not_one_object(self):
+        # The fake gh fails every call, so only the payload check can produce
+        # exit 2 and its message.
+        for payload in ("", " \n\t", "null", "[]", "broken", "{}\n{}"):
+            with self.subTest(payload=payload):
+                result = run_fake(
+                    VERIFY / "post-review.sh",
+                    [5, "$FAKE_PAYLOAD", "T1"],
+                    FAKE_GH_FAILS,
+                    {"FAKE_PAYLOAD": payload},
+                )
+                self.assertEqual((result.returncode, result.stdout), (2, ""))
+                self.assertIn("is not one JSON object", result.stderr)
 
     def test_refuses_without_posting_when_anything_moved(self):
         cases = {

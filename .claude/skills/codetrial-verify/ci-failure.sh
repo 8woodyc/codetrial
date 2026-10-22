@@ -51,9 +51,10 @@ head=$(printf '%s\n' "$meta" | jq -r .head)
 
 # gh pr checks exits non-zero when a check fails, and still prints them all, so
 # its status says nothing; only an array on stdout says the lookup worked. A PR
-# with no checks at all prints an empty one.
+# with no checks at all prints an empty one. Slurped, so empty output fails too;
+# jq 1.6 -e alone passes it.
 checks=$(gh pr checks "$pr" --repo "$repo" --json name,state,bucket,link || true)
-printf '%s\n' "$checks" | jq -e 'type == "array"' > /dev/null 2>&1 || {
+printf '%s\n' "$checks" | jq -se 'map(type) == ["array"]' > /dev/null 2>&1 || {
     echo "ci-failure.sh: could not read the checks of #$pr" >&2
     exit 1
 }

@@ -63,8 +63,11 @@ repo=${1:-sysprog21/codetrial}
 days=${2:-7}
 prev=${3:-}
 previous=null
+
+# Slurped, so an empty file fails too; jq 1.6 -e alone passes it. Only an array
+# is a status list: moved and gone below iterate it.
 if [ -n "$prev" ]; then
-    previous=$(jq -ce '.status' "$prev" 2> /dev/null) || {
+    previous=$(jq -sce 'select(length == 1) | .[0].status | arrays' "$prev" 2> /dev/null) || {
         echo "pr-sweep.sh: $prev is not an earlier pr-sweep.sh output" >&2
         exit 2
     }
