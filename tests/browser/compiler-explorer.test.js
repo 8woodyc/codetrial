@@ -1580,7 +1580,8 @@ public:
 
   // Compiles a candidate into the named judge's harness and returns its
   // results. The timeout keeps a serializer that walks forever from hanging
-  // the lane.
+  // the lane, and the buffer holds the output of the largest tree the bank
+  // allows.
   async function runJudge(language, id, candidate) {
     const dir = mkdtempSync(join(tmpdir(), `codetrial-${language}-${id}-`));
     try {
@@ -1598,12 +1599,10 @@ public:
           "-o",
           binary,
         ]);
+      const options = { encoding: "utf8", timeout: 10000, maxBuffer: 1 << 24 };
       const { stdout } = await (language === "java"
-        ? run("java", ["-cp", dir, "Main"], {
-            encoding: "utf8",
-            timeout: 10000,
-          })
-        : run(binary, [], { encoding: "utf8", timeout: 10000 }));
+        ? run("java", ["-cp", dir, "Main"], options)
+        : run(binary, [], options));
       return parseCompilerResults(stdout).results;
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -1908,6 +1907,68 @@ public:
         assert.equal(result.error, message, testCase.label);
       });
     });
+  }
+
+  // n nodes take 2n + 1 queue slots. The C queue and the visited set sized
+  // with it start at 64 slots and double from there, so a 2048-node chain
+  // outgrows them several times, and a chain linked back to its root or one
+  // whose last node is also the root's left child repeats a node only after
+  // that growth. The walk stops past 100000 nodes, the largest tree the bank
+  // allows (the subtree lowest-common-ancestor-of-a-binary-tree returns), and
+  // the 100000-node chain pins that bound from below inside a timeout that a
+  // scan of every dequeued node would overrun. The chain replaces the tree on
+  // every case with a root, and the empty case returns nothing to replace.
+  for (const [nodes, link, shape] of [
+    [2048, "", "chain"],
+    [100000, "", "chain"],
+    [100001, "", "chain"],
+    [2048, "last->right = root;", "chain linked back to its root"],
+    [
+      2048,
+      "root->left = last;",
+      "chain whose last node is also the root's left child",
+    ],
+  ]) {
+    const refusal = link
+      ? /Returned tree must not reach a node twice\./
+      : nodes > 100000
+        ? /Returned tree must not have more than 100000 nodes\./
+        : null;
+    it(
+      `c harness ${refusal ? "refuses" : "prints"} a returned ${nodes}-node ${shape}`,
+      { skip: noCc },
+      async () => {
+        const judge = judges["flatten-binary-tree-to-linked-list"];
+        const results = await runJudge(
+          "c",
+          "flatten-binary-tree-to-linked-list",
+          `void linearizeMenu(struct TreeNode* root) {
+    if (!root) return;
+    struct TreeNode* last = root;
+    root->left = NULL;
+    for (int i = 1; i < ${nodes}; i++) {
+        last->right = calloc(1, sizeof(struct TreeNode));
+        last = last->right;
+    }
+    ${link}
+}`,
+        );
+        assert.equal(results.length, judge.cases.length);
+        judge.cases.forEach((testCase, index) => {
+          const result = results[index];
+          if (testCase.input[0].length === 0)
+            assert.deepEqual(result.actual, [], testCase.label);
+          else if (refusal)
+            assert.match(result.error ?? "", refusal, testCase.label);
+          else
+            assert.equal(
+              result.actual?.filter((value) => value !== null).length,
+              nodes,
+              testCase.label,
+            );
+        });
+      },
+    );
   }
 });
 
