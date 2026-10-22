@@ -60,6 +60,7 @@ pub struct GitHubOauth {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignedInUser {
     pub id: i64,
+    pub identity_verified: bool,
     pub login: String,
     pub avatar_url: Option<String>,
     /// The primary verified address GitHub gave us at sign-in, and only that.

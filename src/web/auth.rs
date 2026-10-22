@@ -321,6 +321,7 @@ pub(crate) async fn session_handler(
             StatusCode::OK,
             json!({
                 "signedIn": true,
+                "identityVerified": user.identity_verified,
                 "loginRequired": login_required,
                 "guestModeAvailable": state.guest_mode_available(),
                 "maxDurationMin": max_duration_min,

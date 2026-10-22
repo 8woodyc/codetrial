@@ -1474,3 +1474,193 @@ fn web_server_config_debug_redacts_its_own_secrets() {
         "the client id is public and should stay readable: {printed}"
     );
 }
+
+#[tokio::test]
+async fn typed_handle_does_not_inherit_oauth_identity() {
+    let (github_base, github_server) = spawn_rate_limited_github().await;
+    let path = account_db_path("self-declared-identity");
+    initialize_account_database(&path).unwrap();
+
+    let mut config = web_config();
+    config.github_client_id = Some("client".to_string());
+    config.github_client_secret = Some("secret".to_string());
+    config.session_secret = Some("session-secret".to_string());
+    config.db_path = Some(path.clone());
+    config.github_oauth_base_url = Some(github_base.clone());
+    config.github_api_base_url = Some(github_base);
+    config.recording = None;
+
+    let (base, server) = spawn_web_server(config).await;
+    let client = http_client_builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+
+    let response = client
+        .get(format!("{base}/api/callback?code=ok&state=state-token"))
+        .header(
+            "cookie",
+            format!(
+                "codetrial_oauth_state={}",
+                state_cookie("state-token", "session-secret")
+            ),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 302);
+
+    let oauth_cookie = response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .map(|value| value.to_str().unwrap())
+        .find(|value| value.starts_with("codetrial_session="))
+        .expect("OAuth sign-in should create a session")
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    // A typed handle must not adopt an existing OAuth account with the same
+    // login, or change the identity attached to its existing session.
+    let typed_cookie = record_login(&client, &base, "octocat").await;
+
+    for (label, cookie, expected_verified) in [
+        ("OAuth", oauth_cookie, true),
+        ("typed", typed_cookie, false),
+    ] {
+        let response = client
+            .get(format!("{base}/api/session"))
+            .header("cookie", cookie)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200, "{label} session should be readable");
+
+        let session = response.json::<Value>().await.unwrap();
+        assert_eq!(session["signedIn"], true, "{label} should remain signed in");
+        assert_eq!(
+            session["user"]["login"], "octocat",
+            "{label} should retain its login"
+        );
+        assert_eq!(
+            session["identityVerified"], expected_verified,
+            "{label} session should retain its own identity verification"
+        );
+    }
+
+    server.shutdown().await;
+    github_server.shutdown().await;
+    remove_database(path).await;
+}
+
+#[tokio::test]
+async fn oauth_session_is_identity_verified_without_email() {
+    let (github_base, github_server) = spawn_rate_limited_github().await;
+    let path = account_db_path("oauth-identity-without-email");
+    initialize_account_database(&path).unwrap();
+
+    let mut config = web_config();
+    config.github_client_id = Some("client".to_string());
+    config.github_client_secret = Some("secret".to_string());
+    config.session_secret = Some("session-secret".to_string());
+    config.db_path = Some(path.clone());
+    config.github_oauth_base_url = Some(github_base.clone());
+    config.github_api_base_url = Some(github_base);
+
+    // Without recording, OAuth does not need the email endpoint, which this
+    // stub would answer with 403. Account identity must not depend on email.
+    config.recording = None;
+
+    let (base, server) = spawn_web_server(config).await;
+    let client = http_client_builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+
+    let response = client
+        .get(format!("{base}/api/callback?code=ok&state=state-token"))
+        .header(
+            "cookie",
+            format!(
+                "codetrial_oauth_state={}",
+                state_cookie("state-token", "session-secret")
+            ),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 302);
+
+    let cookie = response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .map(|value| value.to_str().unwrap())
+        .find(|value| value.starts_with("codetrial_session="))
+        .expect("OAuth sign-in should create a session")
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let response = client
+        .get(format!("{base}/api/session"))
+        .header("cookie", cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let session = response.json::<Value>().await.unwrap();
+
+    let email: Option<String> = rusqlite::Connection::open(&path)
+        .unwrap()
+        .query_row("SELECT email FROM users WHERE github_id = 303", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+
+    server.shutdown().await;
+    github_server.shutdown().await;
+    remove_database(path).await;
+
+    assert_eq!(email, None);
+    assert_eq!(session["signedIn"], true);
+    assert_eq!(session["user"]["login"], "octocat");
+    assert_eq!(session["identityVerified"], true);
+}
+
+#[tokio::test]
+async fn zero_github_id_is_not_identity_verified() {
+    let (base, server, path, client) = account_server("zero-github-identity").await;
+    let cookie = record_login(&client, &base, "octocat").await;
+
+    {
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        let updated = connection
+            .execute(
+                "UPDATE users SET github_id = 0 WHERE login = ?1",
+                ["octocat"],
+            )
+            .unwrap();
+        assert_eq!(updated, 1);
+    }
+
+    let response = client
+        .get(format!("{base}/api/session"))
+        .header("cookie", cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+
+    let session = response.json::<Value>().await.unwrap();
+
+    server.shutdown().await;
+    remove_database(path).await;
+
+    assert_eq!(session["signedIn"], true);
+    assert_eq!(session["user"]["login"], "octocat");
+    assert_eq!(session["identityVerified"], false);
+}

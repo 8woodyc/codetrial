@@ -115,7 +115,7 @@ pub fn session_user(
         let now = crate::current_epoch_seconds_i64();
         let mut statement = connection.prepare(
             "
-        SELECT users.id, users.login, users.avatar_url, users.email, users.email_verified
+        SELECT users.id, users.login, users.avatar_url, users.email, users.email_verified, users.github_id
         FROM sessions
         JOIN users ON users.id = sessions.user_id
         WHERE sessions.id = ?1 AND sessions.expires_at > ?2
@@ -132,6 +132,9 @@ pub fn session_user(
         let verified: i64 = row.get(4)?;
         Ok(Some(SignedInUser {
             id: row.get(0)?,
+
+            // Trusted only under create_session's caller invariant.
+            identity_verified: row.get::<_, i64>(5)? > 0,
             login: row.get(1)?,
             avatar_url: row.get(2)?,
             verified_email: row.get::<_, Option<String>>(3)?.filter(|_| verified != 0),
