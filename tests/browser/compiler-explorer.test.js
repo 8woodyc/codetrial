@@ -1186,6 +1186,191 @@ public:
       },
     );
   }
+
+  // Compiles a flatten candidate into the harness and returns its results.
+  // The timeout keeps a serializer that walks forever from hanging the lane.
+  async function runFlatten(language, candidate) {
+    const dir = mkdtempSync(join(tmpdir(), `codetrial-${language}-flatten-`));
+    try {
+      const source = join(
+        dir,
+        language === "java" ? "Main.java" : `flatten.${language}`,
+      );
+      const binary = join(dir, "flatten");
+      writeFileSync(
+        source,
+        generateHarness(
+          language,
+          judges["flatten-binary-tree-to-linked-list"],
+          candidate,
+        ),
+      );
+      if (language === "java") await run("javac", [source]);
+      else
+        await run(language === "c" ? "cc" : "g++", [
+          language === "c" ? "-std=c17" : "-std=c++20",
+          source,
+          "-o",
+          binary,
+        ]);
+      const { stdout } = await (language === "java"
+        ? run("java", ["-cp", dir, "Main"], {
+            encoding: "utf8",
+            timeout: 10000,
+          })
+        : run(binary, [], { encoding: "utf8", timeout: 10000 }));
+      return parseCompilerResults(stdout).results;
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  const flattenLanguages = [
+    ["c", noCc],
+    ["cpp", noGpp],
+    ["java", noJava],
+  ];
+
+  // A Morris-style flatten that leaves its last thread in place links the
+  // chain back to the root. The serializer used to follow that link forever,
+  // so the run timed out or was killed and no case reported anything. The
+  // single-node and empty cases have no thread to leave, so they still pass.
+  const cyclicFlatten = {
+    c: `void linearizeMenu(struct TreeNode* root) {
+    struct TreeNode* last = NULL;
+    for (struct TreeNode* cur = root; cur; cur = cur->right) {
+        if (cur->left) {
+            struct TreeNode* pre = cur->left;
+            while (pre->right) pre = pre->right;
+            pre->right = cur->right;
+            cur->right = cur->left;
+            cur->left = NULL;
+        }
+        last = cur;
+    }
+    if (last && last != root) last->right = root;
+}`,
+    cpp: `class Solution {
+public:
+    void linearizeMenu(TreeNode* root) {
+        TreeNode* last = nullptr;
+        for (TreeNode* cur = root; cur; cur = cur->right) {
+            if (cur->left) {
+                TreeNode* pre = cur->left;
+                while (pre->right) pre = pre->right;
+                pre->right = cur->right;
+                cur->right = cur->left;
+                cur->left = nullptr;
+            }
+            last = cur;
+        }
+        if (last && last != root) last->right = root;
+    }
+};`,
+    java: `class Solution {
+    public void linearizeMenu(TreeNode root) {
+        TreeNode last = null;
+        for (TreeNode cur = root; cur != null; cur = cur.right) {
+            if (cur.left != null) {
+                TreeNode pre = cur.left;
+                while (pre.right != null) pre = pre.right;
+                pre.right = cur.right;
+                cur.right = cur.left;
+                cur.left = null;
+            }
+            last = cur;
+        }
+        if (last != null && last != root) last.right = root;
+    }
+}`,
+  };
+  for (const [language, skip] of flattenLanguages) {
+    it(
+      `${language} harness refuses a returned tree that reaches a node twice`,
+      { skip },
+      async () => {
+        const judge = judges["flatten-binary-tree-to-linked-list"];
+        const results = await runFlatten(language, cyclicFlatten[language]);
+        assert.equal(results.length, judge.cases.length);
+        judge.cases.forEach((testCase, index) => {
+          const result = results[index];
+          if (testCase.input[0].length > 1)
+            assert.match(
+              result.error ?? "",
+              /Returned tree must not reach a node twice\./,
+              testCase.label,
+            );
+          else
+            assert.deepEqual(result.actual, testCase.expected, testCase.label);
+        });
+      },
+    );
+  }
+
+  // A child on both sides of the root is a second parent rather than a cycle,
+  // so a check that only watched the path back to the root would print it.
+  // The same shape built from two distinct nodes holding the root's value must
+  // still print, which keeps the check keyed on the node rather than on val.
+  // Every case with a root gets the shape, and the empty case stays empty.
+  const twinChildren = {
+    c: (shared) => `void linearizeMenu(struct TreeNode* root) {
+    if (!root) return;
+    root->left = calloc(1, sizeof(struct TreeNode));
+    root->left->val = root->val;
+    root->right = ${shared ? "root->left" : "calloc(1, sizeof(struct TreeNode))"};
+    root->right->val = root->val;
+}`,
+    cpp: (shared) => `class Solution {
+public:
+    void linearizeMenu(TreeNode* root) {
+        if (!root) return;
+        root->left = new TreeNode(root->val);
+        root->right = ${shared ? "root->left" : "new TreeNode(root->val)"};
+    }
+};`,
+    java: (shared) => `class Solution {
+    public void linearizeMenu(TreeNode root) {
+        if (root == null) return;
+        root.left = new TreeNode(root.val);
+        root.right = ${shared ? "root.left" : "new TreeNode(root.val)"};
+    }
+}`,
+  };
+  for (const [language, skip] of flattenLanguages) {
+    for (const shared of [true, false]) {
+      it(
+        shared
+          ? `${language} harness refuses a returned tree whose two children are one node`
+          : `${language} harness prints a returned tree whose two children only share a value`,
+        { skip },
+        async () => {
+          const judge = judges["flatten-binary-tree-to-linked-list"];
+          const results = await runFlatten(
+            language,
+            twinChildren[language](shared),
+          );
+          assert.equal(results.length, judge.cases.length);
+          judge.cases.forEach((testCase, index) => {
+            const result = results[index];
+            const [value] = testCase.input[0];
+            if (value === undefined)
+              assert.deepEqual(result.actual, [], testCase.label);
+            else if (shared)
+              assert.match(
+                result.error ?? "",
+                /Returned tree must not reach a node twice\./,
+                testCase.label,
+              );
+            else
+              assert.deepEqual(
+                result.actual,
+                [value, value, value],
+                testCase.label,
+              );
+          });
+        },
+      );
+    }
+  }
 });
 
 test("harness generator handles output parameter and output prefix specs", () => {
