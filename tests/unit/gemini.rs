@@ -835,6 +835,7 @@ fn rounds(behavioral_opened: bool) -> crate::agent::ReportRounds {
     crate::agent::ReportRounds {
         behavioral_opened,
         follow_ups_released: true,
+        candidate_turns: 1,
     }
 }
 
@@ -1911,6 +1912,7 @@ async fn a_misrecognized_turn_neither_appears_in_nor_decides_the_report() {
         evidence: "",
         behavioral_round: crate::agent::BehavioralRound::NeverOpened,
         follow_ups_released: false,
+        candidate_turns: 6,
     });
     let key = std::env::var("CODETRIAL_ENV")
         .ok()

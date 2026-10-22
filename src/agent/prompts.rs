@@ -2802,6 +2802,9 @@ pub struct ReportPromptInput<'a> {
     /// cannot have been raised, so the brief lists none and the debrief says
     /// none was reached without asking the model.
     pub follow_ups_released: bool,
+    /// Trusted server-side candidate transcript turns. This is deliberately
+    /// not inferred from editor activity or browser-owned counters.
+    pub candidate_turns: u32,
 }
 
 /// Where the behavioral round stood when the interview ended, in the three
@@ -2979,6 +2982,15 @@ fn report_brief(input: &ReportPromptInput<'_>) -> String {
             "BEHAVIORAL ROUND: This interview had no behavioral round. {OUT_OF_TURN_BEHAVIORAL}"
         ),
     };
+    let communication_evidence = if input.candidate_turns == 0 {
+        "CANDIDATE TURNS: 0. The server recorded no candidate transcript turns. Return `communicationScore` as `null`, return `communicationFeedback.strengths` as an empty array, and state that communication was not assessed. Code edits and test runs are not spoken responses: use them only for coding assessment and never describe them as something the candidate said, explained, answered, or narrated."
+            .to_string()
+    } else {
+        format!(
+            "CANDIDATE TURNS: {}. Communication may be assessed only from reliable candidate communication in the supplied material.",
+            input.candidate_turns
+        )
+    };
 
     // The surface, in the three places a brief reads differently for it: what
     // the contract is measured by, what the candidate produced, and what
@@ -3029,6 +3041,8 @@ Common pitfalls: {}{reference_notes}
 {rolling_assessment}
 
 {}
+
+{communication_evidence}
 
 HINTS THE INTERVIEWER GAVE: {} total; the candidate reached hint rung {} of 3.
 {} A volunteered hint is evidence
@@ -3206,7 +3220,8 @@ Grounding rules — a real debrief cites evidence:
   mandatory.
 
 Return ONLY the JSON object the response schema defines, no markdown fences:
-codingScore and communicationScore (integers 0-100); decision ("HIRE" or
+codingScore (integer 0-100) and communicationScore (integer 0-100, or `null`
+when the brief says the server recorded zero candidate turns); decision ("HIRE" or
 "NO_HIRE"); summary (3-4 sentences written to the candidate as "you");
 codingFeedback and communicationFeedback, each with strengths and improvements;
 improvementPlan, one item per improvement (below), each with phase, weakness,
@@ -3221,7 +3236,9 @@ grounded in the rolling assessment, the transcript, and {material}, never generi
 filler, and no item may repeat another in the same list. A session with little to praise still holds two
 distinct observations: a clarifying question asked, uncertainty admitted instead
 of guessed at, a decision explained, a boundary noticed, effort sustained under
-time pressure. Name two of those rather than saying one thing twice.
+time pressure. Name two of those rather than saying one thing twice. The sole
+exception is a brief with zero candidate turns: communication strengths must be
+empty, because editor and test activity cannot establish spoken communication.
 
 For `improvementPlan`, take every string in `codingFeedback.improvements` and
 `communicationFeedback.improvements` together and emit one item for each, so the

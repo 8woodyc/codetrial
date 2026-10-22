@@ -97,6 +97,15 @@ fn variant_input(item: &Item, variant: &Variant) -> Value {
     input
 }
 
+fn candidate_turns(input: &Value) -> u32 {
+    input["transcript"]
+        .as_str()
+        .unwrap()
+        .lines()
+        .filter(|line| line.starts_with("Candidate:"))
+        .count() as u32
+}
+
 fn prompt(input: &Value) -> String {
     crate::agent::report_prompt(crate::agent::ReportPromptInput {
         problem: crate::agent::get_problem(input["problem"].as_str()),
@@ -124,6 +133,7 @@ fn prompt(input: &Value) -> String {
             crate::agent::BehavioralRound::NeverOpened
         },
         follow_ups_released: input["follow_ups_released"].as_bool().unwrap(),
+        candidate_turns: candidate_turns(input),
     })
 }
 
@@ -1658,6 +1668,7 @@ mod runner {
                                 follow_ups_released: input["follow_ups_released"]
                                     .as_bool()
                                     .unwrap(),
+                                candidate_turns: candidate_turns(&input),
                             },
                         ),
                     )
@@ -1941,6 +1952,7 @@ mod runner {
             crate::agent::ReportRounds {
                 behavioral_opened: true,
                 follow_ups_released: false,
+                candidate_turns: 1,
             },
         )
         .await

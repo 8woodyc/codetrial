@@ -14,8 +14,8 @@ use ::livekit::prelude::{DataPacket, Room, RoomEvent};
 use std::time::Duration;
 
 use crate::agent::{
-    ModelInputKind, ReportPromptInput, RuntimeState, final_report, format_test_run,
-    framework_evidence_json, interview_contract_json, report_prompt,
+    ModelInputKind, ReportPromptInput, RuntimeState, final_report, final_report_for_round,
+    format_test_run, framework_evidence_json, interview_contract_json, report_prompt,
     report_system_instruction_for_examples, rolling_assessment, transcript_for_report,
 };
 use crate::gemini::{GeminiKeys, ReportMaterial, generate_report_with_keys};
@@ -858,7 +858,15 @@ fn report_value(
     generated: GeneratedReport,
 ) -> serde_json::Value {
     let mut report = match generated {
-        Ok(Ok(raw)) => final_report(Some(&raw), state.hints_used, None, boot.problem),
+        Ok(Ok(raw)) => final_report_for_round(
+            Some(&raw),
+            state.hints_used,
+            None,
+            boot.problem,
+            crate::agent::ReportRounds::of(state),
+            boot.interview_mode,
+            boot.example_drawing_enabled && state.board_snapshots > 0,
+        ),
         Ok(Err(error)) => final_report(
             None,
             state.hints_used,
@@ -1159,6 +1167,7 @@ fn report_prompt_text(
         evidence: &evidence,
         behavioral_round: crate::agent::BehavioralRound::of(state),
         follow_ups_released: crate::agent::coding_round_complete(state),
+        candidate_turns: state.evidence_ledger.conversation.candidate_turns,
     })
 }
 

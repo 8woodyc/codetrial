@@ -657,6 +657,10 @@ fn framework_report_cases_are_grounded_and_keep_the_public_contract() {
                 BehavioralRound::NeverOpened
             },
             follow_ups_released: false,
+            candidate_turns: transcript
+                .lines()
+                .filter(|line| line.starts_with("Candidate:"))
+                .count() as u32,
         }));
 
         assert!(prompt.contains(transcript), "{name}: transcript was lost");

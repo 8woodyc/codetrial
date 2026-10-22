@@ -448,6 +448,7 @@ fn report_brief_states_the_hint_rung() {
         evidence: "",
         behavioral_round: BehavioralRound::Opened,
         follow_ups_released: false,
+        candidate_turns: 1,
     });
     assert!(prompt.contains("candidate reached hint rung 2 of 3"));
     assert!(prompt.contains("1 hint was volunteered rather than requested"));
@@ -484,6 +485,7 @@ fn report_prompt_names_the_practice_level() {
         evidence: "",
         behavioral_round: BehavioralRound::Opened,
         follow_ups_released: false,
+        candidate_turns: 1,
     };
     let selected = report_prompt(base);
     assert!(selected.contains("candidate practiced for intern"));
@@ -495,6 +497,44 @@ fn report_prompt_names_the_practice_level() {
     });
     assert!(absent.contains("PRACTICE LEVEL: Not specified"));
     assert!(absent.contains("Do not invent or mention a practice level"));
+}
+
+#[test]
+fn silent_report_brief_makes_communication_unassessed() {
+    let prompt = report_prompt(ReportPromptInput {
+        problem: get_problem(Some("two-sum")),
+        interview_mode: InterviewMode::Coding,
+        board_attached: false,
+        transcript: "Interviewer: Tell me how you are approaching this.",
+        rolling_assessment: "",
+        final_code: "def match_disputed_charge(nums, target):\n    return [0, 1]\n",
+        language: "python",
+        hints_used: 0,
+        hint_rung: 0,
+        volunteered_hints: 0,
+        duration_min: 45,
+        elapsed_min: 12.0,
+        test_summary: "1/1 passed",
+        practice_level: None,
+        evidence: "",
+        behavioral_round: BehavioralRound::NeverOpened,
+        follow_ups_released: false,
+        candidate_turns: 0,
+    });
+
+    assert!(prompt.contains("CANDIDATE TURNS: 0"), "{prompt}");
+    assert!(
+        prompt.contains("`communicationScore` as `null`"),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains("`communicationFeedback.strengths` as an empty array"),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains("Code edits and test runs are not spoken responses"),
+        "{prompt}"
+    );
 }
 
 /// What the live interviewer holds is the scenario and a way to steer it, not
@@ -590,6 +630,7 @@ fn live_instructions_pose_the_variant_and_hold_no_source_or_walkthrough() {
         evidence: "",
         behavioral_round: BehavioralRound::Opened,
         follow_ups_released: false,
+        candidate_turns: 1,
     });
     assert!(report.contains("Reference notes on approaches"));
     assert!(report.contains("never name the published problem, its title, LeetCode"));
@@ -1382,19 +1423,19 @@ fn interview_contract_versions_are_one_closed_bundle() {
         "the bundle table has no row for {INTERVIEW_CONTRACT_BUNDLE_VERSION}"
     );
 
-    assert_eq!(INTERVIEW_CONTRACT_BUNDLE_VERSION, 41);
+    assert_eq!(INTERVIEW_CONTRACT_BUNDLE_VERSION, 42);
     assert_eq!(LIVE_PROMPT_VERSION, 32);
-    assert_eq!(REPORT_PROMPT_VERSION, 23);
+    assert_eq!(REPORT_PROMPT_VERSION, 24);
     assert_eq!(RUBRIC_VERSION, 1);
-    assert_eq!(REPORT_SCHEMA_VERSION, 3);
+    assert_eq!(REPORT_SCHEMA_VERSION, 4);
     assert_eq!(
         interview_contract_json(),
         json!({
-            "bundleVersion": 41,
+            "bundleVersion": 42,
             "livePromptVersion": 32,
-            "reportPromptVersion": 23,
+            "reportPromptVersion": 24,
             "rubricVersion": 1,
-            "reportSchemaVersion": 3,
+            "reportSchemaVersion": 4,
         })
     );
 }

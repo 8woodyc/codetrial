@@ -84,6 +84,31 @@ fn execution_choice_reaches_report_evidence_without_ledger_entries() {
 }
 
 #[test]
+fn report_prompt_uses_the_server_candidate_turn_count() {
+    let config = report_test_config();
+    let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+    let mut state = RuntimeState::default();
+
+    let silent = report_prompt_text(&boot, &state, 12.0, false);
+    assert!(silent.contains("CANDIDATE TURNS: 0"), "{silent}");
+
+    state
+        .evidence_ledger
+        .record_conversation_turn(1_000, "interviewer");
+    assert!(
+        report_prompt_text(&boot, &state, 12.0, false).contains("CANDIDATE TURNS: 0"),
+        "interviewer speech is not candidate evidence"
+    );
+
+    state
+        .evidence_ledger
+        .record_conversation_turn(2_000, "candidate");
+    let spoken = report_prompt_text(&boot, &state, 12.0, false);
+    assert!(spoken.contains("CANDIDATE TURNS: 1"), "{spoken}");
+    assert!(!spoken.contains("`communicationScore` as `null`"));
+}
+
+#[test]
 fn disabled_execution_reports_explain_why_no_run_exists() {
     let config = report_test_config();
     let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
