@@ -211,14 +211,17 @@ const pageOf = (problemId) =>
   JSON.parse(read("web/problem-pages.json"))[problemId].page;
 const TOPICS_BY_PAGE = JSON.parse(read("web/problem-topics.json"));
 
-const hired = (problemId) => ({
-  problemId,
-  payload: { report: { decision: "HIRE" } },
-});
-const missed = (problemId) => ({
-  problemId,
-  payload: { report: { decision: "NO_HIRE" } },
-});
+const assessed =
+  (decision) =>
+  (problemId, { createdAt, topics } = {}) => ({
+    problemId,
+    ...(createdAt !== undefined && { createdAt }),
+    payload: { report: { decision, ...(topics && { topics }) } },
+  });
+const hired = assessed("HIRE");
+const missed = assessed("NO_HIRE");
+const isFocused = (locator) =>
+  locator.evaluate((node) => node === document.activeElement);
 const savedAttempt = (problemId) => ({
   problemId,
   payload: {
@@ -822,6 +825,203 @@ lobbyTest(
       "Last 3 assessed interviews: 1 passed, 2 missed (33%). 3 of these interviews predate versioned scoring.",
     );
     assert.equal(await page.locator("#recent-performance").isHidden(), false);
+  },
+);
+
+lobbyTest(
+  "weak topics show counts, latest dates and sparse evidence before topic opt-in",
+  async (page) => {
+    reports = [
+      missed(EASY[0], {
+        createdAt: Date.UTC(2026, 9, 20) / 1000,
+        topics: ["Hash Table", "Unknown topic"],
+      }),
+      missed(EASY[0], {
+        createdAt: Date.UTC(2026, 9, 19) / 1000,
+        topics: ["Hash Table"],
+      }),
+      hired(EASY[1], {
+        createdAt: Date.UTC(2026, 9, 18) / 1000,
+        topics: ["Array"],
+      }),
+    ];
+    const requests = [];
+    page.on("request", (request) =>
+      requests.push(new URL(request.url()).pathname),
+    );
+    await lobby(page);
+    const topics = page.locator("#recent-weak-topics");
+    const date = await page.evaluate(() =>
+      new Date(Date.UTC(2026, 9, 20)).toLocaleDateString(undefined, {
+        dateStyle: "medium",
+      }),
+    );
+    assert.match(await topics.textContent(), /Hash Table — missed 2 of 2;/);
+    assert.ok((await topics.textContent()).includes(`latest ${date}.`));
+    assert.equal(await topics.locator(".weak-topic").count(), 2);
+    assert.equal(await topics.locator("button").count(), 0);
+    assert.equal(requests.includes("/problem-topics.json"), false);
+    for (const item of await topics.locator(".weak-topic").all())
+      assert.match(
+        await item.textContent(),
+        /Reminder from few interviews, not a skill measurement/,
+      );
+    await openTopicFilter(page);
+    await page.waitForFunction(() =>
+      document.querySelector("#recent-weak-topics button"),
+    );
+    assert.equal(
+      await topics
+        .getByRole("button", {
+          name: "Filter problems by Hash Table",
+          exact: true,
+        })
+        .count(),
+      1,
+    );
+    assert.equal(
+      await topics.getByRole("button", { name: /Unknown topic/ }).count(),
+      0,
+    );
+    assert.match(await topics.textContent(), /Unknown topic — missed 1 of 1;/);
+  },
+);
+
+lobbyTest(
+  "three topic attempts remove the sparse caveat and keyboard activation filters the grid",
+  async (page) => {
+    const hashTable = { topics: ["Hash Table"] };
+    reports = [
+      missed(EASY[0], { ...hashTable, createdAt: 30 }),
+      missed(EASY[0], { ...hashTable, createdAt: 20 }),
+      hired(EASY[0], { ...hashTable, createdAt: 10 }),
+    ];
+    await lobby(page);
+    const topics = page.locator("#recent-weak-topics");
+    assert.match(await topics.textContent(), /missed 2 of 3/);
+    assert.doesNotMatch(await topics.textContent(), /few interviews/);
+    await openTopicFilter(page);
+    const { levels } = await snapshot(page);
+    await page.click("details.problem-picker summary");
+    const button = topics.getByRole("button", {
+      name: "Filter problems by Hash Table",
+      exact: true,
+    });
+    await page.evaluate(() => {
+      window.topicChanges = 0;
+      document
+        .querySelector("#problem-topic")
+        .addEventListener("change", () => {
+          window.topicChanges += 1;
+        });
+    });
+    for (const key of ["Enter", "Space"]) {
+      const before = await snapshot(page);
+      const alreadySelected =
+        (await page.locator("#problem-topic").inputValue()) === "Hash Table";
+      await button.focus();
+      await page.keyboard.press(key);
+      await page.waitForFunction(
+        () => document.querySelector("#problem-topic").value === "Hash Table",
+      );
+      assert.ok(await isFocused(page.locator("#problem-topic")));
+      assert.equal(await page.evaluate(() => window.topicChanges), 1);
+      const after = await snapshot(page);
+      if (alreadySelected) assert.equal(after.card, before.card);
+      assert.deepEqual(after.levels, levels);
+      assert.equal(
+        await page.locator("details.problem-picker").getAttribute("open"),
+        "",
+      );
+      const visible = await page
+        .locator("[data-problem]:visible")
+        .evaluateAll((nodes) => nodes.map((node) => node.dataset.problem));
+      assert.ok(visible.length > 0);
+      for (const id of visible)
+        assert.ok(TOPICS_BY_PAGE[id].includes("Hash Table"));
+    }
+  },
+);
+
+lobbyTest(
+  "refreshing history preserves weak topic focus or moves it to the picker when removed",
+  async (page) => {
+    reports = [
+      missed(EASY[0], { createdAt: 20, topics: ["Hash Table"] }),
+      missed(EASY[1], { createdAt: 10, topics: ["Stack"] }),
+    ];
+    await lobby(page);
+    await openTopicFilter(page);
+    const button = page.getByRole("button", {
+      name: "Filter problems by Hash Table",
+      exact: true,
+    });
+    await button.focus();
+    reports.push({ ...reports[0], createdAt: 30 });
+    await restore(page);
+    await page.waitForFunction(
+      () =>
+        document.activeElement?.dataset.topic === "Hash Table" &&
+        document
+          .querySelector("#recent-weak-topics")
+          .textContent.includes("missed 2 of 2"),
+    );
+    assert.ok(await isFocused(button));
+    reports.push(
+      hired(EASY[0], { createdAt: 40, topics: ["Hash Table"] }),
+      hired(EASY[0], { createdAt: 50, topics: ["Hash Table"] }),
+    );
+    await restore(page);
+    await page.waitForFunction(
+      () =>
+        !document
+          .querySelector("#recent-weak-topics")
+          .textContent.includes("Hash Table"),
+    );
+    assert.equal(await page.locator("#recent-performance").isHidden(), false);
+    assert.ok(await isFocused(page.locator("details.problem-picker summary")));
+    await page
+      .getByRole("button", { name: "Filter problems by Stack", exact: true })
+      .focus();
+    reports = [];
+    await restore(page);
+    await page.waitForFunction(
+      () => document.querySelector("#recent-performance").hidden,
+    );
+    assert.ok(await isFocused(page.locator("details.problem-picker summary")));
+  },
+);
+
+lobbyTest(
+  "weak topic controls appear only after a failed topic lookup is retried successfully",
+  async (page) => {
+    reports = [missed(EASY[0], { createdAt: 20, topics: ["Hash Table"] })];
+    failing.add("/problem-topics.json");
+    await lobby(page);
+    const weakTopics = page.locator("#recent-weak-topics");
+    assert.match(
+      await weakTopics.textContent(),
+      /Topic filters load when the specific-problem picker opens\.$/,
+    );
+    await page.click("details.problem-picker summary");
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#problem-filter-summary").textContent ===
+        "Topic filters could not be loaded.",
+    );
+    assert.match(
+      await weakTopics.textContent(),
+      /close and reopen the specific-problem picker to retry\.$/,
+    );
+    assert.equal(await page.locator("#recent-weak-topics button").count(), 0);
+    failing.delete("/problem-topics.json");
+    await page.click("details.problem-picker summary");
+    await openTopicFilter(page);
+    await page.waitForFunction(() =>
+      document.querySelector("#recent-weak-topics button"),
+    );
+    assert.equal(await page.locator("#recent-weak-topics button").count(), 1);
+    assert.doesNotMatch(await weakTopics.textContent(), /Topic filters/);
   },
 );
 

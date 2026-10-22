@@ -36,21 +36,27 @@ export function recentPerformance(reports, limit = 8) {
     (entry) => entry.report.decision === "HIRE",
   ).length;
   const topicResults = new Map();
+  // Newest first, so the attempt that creates a topic's row is its latest.
   for (const entry of attempts) {
     for (const topic of new Set(reportTopics(entry.report) ?? [])) {
-      const result = topicResults.get(topic) ?? { passes: 0, misses: 0 };
+      const result = topicResults.get(topic) ?? {
+        passes: 0,
+        misses: 0,
+        lastAt: entry.at,
+      };
       result[entry.report.decision === "HIRE" ? "passes" : "misses"] += 1;
       topicResults.set(topic, result);
     }
   }
-  const weakTopics = [...topicResults]
+  const weakTopicDetails = [...topicResults]
     .filter(([, result]) => result.misses > result.passes)
     .sort(
       ([leftTopic, left], [rightTopic, right]) =>
         right.misses - right.passes - (left.misses - left.passes) ||
         leftTopic.localeCompare(rightTopic),
     )
-    .map(([topic]) => topic);
+    .map(([topic, result]) => ({ topic, ...result }));
+  const weakTopics = weakTopicDetails.map(({ topic }) => topic);
   const latestDecision = attempts[0].report.decision;
   const streak = attempts.findIndex(
     (entry) => entry.report.decision !== latestDecision,
@@ -67,5 +73,6 @@ export function recentPerformance(reports, limit = 8) {
     streak: streak === -1 ? attempts.length : streak,
     latestDecision,
     weakTopics,
+    weakTopicDetails,
   };
 }
