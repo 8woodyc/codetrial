@@ -20,7 +20,9 @@ const report = (problemId, at, decision) => ({
   at,
   report: {
     decision,
-    topics: problems.find((problem) => problem.id === problemId)?.topics ?? [],
+    topics: [
+      ...(problems.find((problem) => problem.id === problemId)?.topics ?? []),
+    ],
   },
 });
 
