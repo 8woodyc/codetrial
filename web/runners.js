@@ -706,7 +706,10 @@ const JS_RUNNER_SOURCE = `
         for (const current of queue) {
           if (!current) continue;
           if (originalGraphNodes.has(current)) throw new TypeError("Returned graph must be a deep copy.");
-          if (byValue.has(current.val)) continue;
+          if (byValue.has(current.val)) {
+            if (byValue.get(current.val) !== current) throw new TypeError("Returned graph must not contain distinct nodes with the same ID.");
+            continue;
+          }
           byValue.set(current.val, current);
           for (const neighbor of current.neighbors || []) queue.push(neighbor);
         }
@@ -1033,6 +1036,8 @@ def _graph_to_adjacency(node):
         if id(current) in _original_graph_nodes:
             raise TypeError("Returned graph must be a deep copy.")
         if current.val in by_value:
+            if by_value[current.val] is not current:
+                raise TypeError("Returned graph must not contain distinct nodes with the same ID.")
             continue
         by_value[current.val] = current
         queue.extend(getattr(current, "neighbors", []) or [])
