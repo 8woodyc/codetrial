@@ -96,7 +96,9 @@ import {
   isYieldShortcut,
   turnCountdown,
   turnWindowMs,
+  unclearLinesOf,
   uncapturedBoardPhases,
+  withUnclearLines,
 } from "./lib.js";
 import {
   attachAvatarAnalyser,
@@ -143,6 +145,7 @@ import {
   dismissCaptions,
   initCaptions,
   showCaptions,
+  unclearLineIds,
   updateCaptions,
 } from "./captions.js";
 import {
@@ -541,6 +544,7 @@ const nodes = {
   audioPlaybackStatus: document.querySelector("#audio-playback-status"),
   captionsBar: document.querySelector("#captions-bar"),
   captionsText: document.querySelector("#captions-text"),
+  captionUnclear: document.querySelector("#caption-unclear"),
   timer: document.querySelector("#timer"),
   frameworkProgress: document.querySelector("#framework-progress"),
   frameworkHint: document.querySelector("#framework-hint"),
@@ -3869,6 +3873,7 @@ function renderReport() {
     exampleDrawing: exampleBoard?.image(),
     boardPhases: [...board.snapshots],
     saveResult: null,
+    unclearLines: unclearLines(),
   });
   mountBehavioralReview(nodes.report, state.transcript.values());
 }
@@ -3885,6 +3890,18 @@ function renderReportSaveStatus(result) {
 // whether the current report is safe to leave behind.
 let saveGeneration = 0;
 
+/// Resolved to text at save time: saved history keeps no transcript, so a
+/// turn id would point at nothing once the report is reopened.
+function unclearLines() {
+  const marked = new Set(unclearLineIds());
+  return unclearLinesOf(
+    state.transcript
+      .values()
+      .filter((row) => marked.has(row.id) && row.text)
+      .map((row) => row.text),
+  );
+}
+
 async function saveHistory(report = state.report) {
   // The interview id travels with the report so the replay page can put the
   // two beside each other. Reports are keyed by their own id and recordings by
@@ -3899,7 +3916,7 @@ async function saveHistory(report = state.report) {
   // No language at a whiteboard: nothing is compiled, the tabs are not on
   // screen, and `state.language` is the default nobody chose. Recorded as one,
   // it would filter the candidate's own history by a choice they never made.
-  const entry = {
+  const base = {
     id: state.reportId,
     date: new Date().toISOString(),
     interviewId: state.interviewId,
@@ -3912,6 +3929,7 @@ async function saveHistory(report = state.report) {
     interviewMode: mode,
     report,
   };
+  const entry = withUnclearLines(base, unclearLines());
   // A later save may replace an earlier report under this same id. Keep the
   // warning active until this save itself confirms that Past attempts can
   // reopen the current copy.
@@ -3943,6 +3961,8 @@ function buildMarkdown(at) {
     transcript: state.transcript.values(),
     at: at.toLocaleString(),
     testHistory: state.testHistory,
+    unclearLines: unclearLines(),
+    unclearIds: unclearLineIds(),
   });
 }
 

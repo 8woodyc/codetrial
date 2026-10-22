@@ -795,3 +795,37 @@ test("retry mode metadata falls back to the original report and defaults safely"
   assert.equal(invalid.interviewLoop, "coding_behavioral");
   assert.equal(invalid.interviewMode, "coding");
 });
+test("an entry at the unclear-line cap keeps every marked line", () => {
+  const lines = Array.from({ length: 10 }, (_, index) => `Line ${index + 1}.`);
+  const attempt = normalizeProgressEntry(
+    entry("cap", "2026-01-02T00:00:00Z", 70, { unclearLines: lines }),
+  );
+  assert.deepEqual(attempt.unclearLines, lines);
+});
+
+test("unclearLines is ignored unless it is an array of strings", () => {
+  for (const unclearLines of [
+    undefined,
+    null,
+    "Line 1.",
+    42,
+    { 0: "Line 1." },
+    ["Line 1.", 2],
+    ["Line 1.", null],
+  ]) {
+    const attempt = normalizeProgressEntry(
+      entry("bad", "2026-01-02T00:00:00Z", 70, { unclearLines }),
+    );
+    assert.deepEqual(attempt.unclearLines, [], String(unclearLines));
+  }
+});
+test("unclearLines past the cap or too long is bounded on read", () => {
+  const lines = Array.from({ length: 12 }, (_, index) => `Line ${index + 1}.`);
+  lines[0] = "x".repeat(5000);
+  const attempt = normalizeProgressEntry(
+    entry("over", "2026-01-02T00:00:00Z", 70, { unclearLines: lines }),
+  );
+  assert.equal(attempt.unclearLines.length, 10);
+  assert.ok(attempt.unclearLines[0].length < 5000);
+  assert.deepEqual(attempt.unclearLines.slice(1), lines.slice(1, 10));
+});

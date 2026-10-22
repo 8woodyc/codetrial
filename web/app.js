@@ -1712,6 +1712,7 @@ function renderAttemptHistory(attempts) {
       problemTitle: attempt.problemTitle,
       language: languageLabel(attempt.language ?? "not recorded"),
       code: "(final code was not saved)",
+      unclearLines: attempt.unclearLines,
     });
     report.querySelector(".report-actions")?.remove();
     report.hidden = true;
@@ -1790,6 +1791,7 @@ function downloadSavedReport(attempt) {
     code: null,
     transcript: null,
     at: new Date(attempt.at).toLocaleString(),
+    unclearLines: attempt.unclearLines,
   });
   downloadMarkdown(
     markdown,

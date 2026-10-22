@@ -5,6 +5,7 @@ import {
   shouldWarnBeforeUnload,
 } from "../../web/before-unload.js";
 import { reportIsPersisted } from "../../web/history.js";
+import { withUnclearLines } from "../../web/lib.js";
 import { functionBody, read } from "./source.js";
 
 function beforeUnloadEvent(target) {
@@ -269,6 +270,8 @@ test("guest reports are not persisted across sessions", async () => {
     "saveReportHistory",
     "reportIsPersisted",
     "updateBeforeUnloadGuard",
+    "unclearLines",
+    "withUnclearLines",
     `let saveGeneration = 0;\n${body}\n}\nreturn saveHistory;`,
   )(
     state,
@@ -282,6 +285,8 @@ test("guest reports are not persisted across sessions", async () => {
     saveReportHistory,
     reportIsPersisted,
     updateBeforeUnloadGuard,
+    () => [],
+    withUnclearLines,
   );
 
   const result = await saveHistory({ summary: "guest report" });
@@ -326,6 +331,8 @@ test("report is saved locally when session state is unavailable", async () => {
     "saveReportHistory",
     "reportIsPersisted",
     "updateBeforeUnloadGuard",
+    "unclearLines",
+    "withUnclearLines",
     `let saveGeneration = 0;\n${body}\n}\nreturn saveHistory;`,
   )(
     state,
@@ -338,6 +345,8 @@ test("report is saved locally when session state is unavailable", async () => {
     saveReportHistory,
     () => true,
     updateBeforeUnloadGuard,
+    () => [],
+    withUnclearLines,
   );
 
   const result = await saveHistory({ summary: "temporary report" });
@@ -379,6 +388,8 @@ test("only the newest overlapping report save can release the warning", async ()
     "saveReportHistory",
     "reportIsPersisted",
     "updateBeforeUnloadGuard",
+    "unclearLines",
+    "withUnclearLines",
     `let saveGeneration = 0;\n${body}\n}\nreturn saveHistory;`,
   )(
     state,
@@ -392,6 +403,8 @@ test("only the newest overlapping report save can release the warning", async ()
     saveReportHistory,
     reportIsPersisted,
     updateBeforeUnloadGuard,
+    () => [],
+    withUnclearLines,
   );
 
   const provisional = saveHistory({ summary: "provisional" });

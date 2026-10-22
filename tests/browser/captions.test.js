@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { functionBody, read } from "./source.js";
+import { MAX_UNCLEAR_LINES } from "../../web/lib.js";
 
 let captionCopies = 0;
 
@@ -670,4 +671,196 @@ test("a pending code edit preserves the candidate idle deadline", async (t) => {
   finishDismissal(t, nodes, jimText);
   t.mock.timers.tick(60000);
   assert.equal(nodes.captionsBar.hidden, true);
+});
+
+function fakeUnclearButton() {
+  return {
+    hidden: true,
+    disabled: false,
+    title: "",
+    attributes: {},
+    click: null,
+    setAttribute(name, value) {
+      this.attributes[name] = value;
+    },
+    addEventListener(type, handler) {
+      if (type === "click") this.click = handler;
+    },
+  };
+}
+
+async function setupUnclear(t) {
+  const captions = await import(
+    `../../web/captions.js?copy=${++captionCopies}`
+  );
+  const button = fakeUnclearButton();
+  const nodes = {
+    captionsText: { textContent: "" },
+    captionsBar: { hidden: true },
+    captionUnclear: button,
+  };
+  captions.initCaptions({ nodes });
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  return { captions, button, nodes };
+}
+
+test("the Unclear button marks and unmarks the current Jim turn", async (t) => {
+  const { captions, button } = await setupUnclear(t);
+
+  captions.updateCaptions("interviewer", "Use a hash map.", "jim-1", {
+    final: true,
+  });
+  assert.equal(button.hidden, false);
+
+  button.click();
+  assert.equal(button.attributes["aria-pressed"], "true");
+  assert.deepEqual(captions.unclearLineIds(), ["jim-1"]);
+
+  button.click();
+  assert.equal(button.attributes["aria-pressed"], "false");
+  assert.deepEqual(captions.unclearLineIds(), []);
+});
+
+test("candidate speech hides the Unclear button and a new Jim turn starts unmarked", async (t) => {
+  const { captions, button } = await setupUnclear(t);
+
+  captions.updateCaptions("interviewer", "Use a hash map.", "jim-1", {
+    final: true,
+  });
+  button.click();
+  captions.updateCaptions("you", "Okay.", "you-1");
+  assert.equal(button.hidden, true);
+
+  captions.updateCaptions("interviewer", "Try sorting.", "jim-2");
+  assert.equal(button.hidden, false);
+  assert.equal(button.attributes["aria-pressed"], "false");
+  assert.deepEqual(captions.unclearLineIds(), ["jim-1"]);
+});
+
+test("the Unclear button stops marking at the cap", async (t) => {
+  const { captions, button } = await setupUnclear(t);
+
+  for (let turn = 1; turn <= MAX_UNCLEAR_LINES; turn++) {
+    captions.updateCaptions("interviewer", `Line ${turn}.`, `jim-${turn}`, {
+      final: true,
+    });
+    button.click();
+  }
+  assert.equal(captions.unclearLineIds().length, MAX_UNCLEAR_LINES);
+
+  captions.updateCaptions("interviewer", "One more line.", "jim-extra", {
+    final: true,
+  });
+  assert.equal(button.attributes["aria-disabled"], "true");
+  button.click();
+  assert.equal(captions.unclearLineIds().length, MAX_UNCLEAR_LINES);
+  assert.ok(!captions.unclearLineIds().includes("jim-extra"));
+});
+
+function focusOn(button, nodes, editor = {}) {
+  const document = { activeElement: button };
+  button.ownerDocument = document;
+  const target = (name, options = {}) => ({
+    isConnected: true,
+    disabled: false,
+    ...options,
+    focus() {
+      document.activeElement = nodes[name];
+    },
+  });
+  nodes.editor = target("editor", editor);
+  nodes.board = target("board");
+  return document;
+}
+
+test("candidate speech moves focus off the Unclear button it hides", async (t) => {
+  const { captions, button, nodes } = await setupUnclear(t);
+  const document = focusOn(button, nodes);
+
+  captions.updateCaptions("interviewer", "Use a hash map.", "jim-1", {
+    final: true,
+  });
+  button.click();
+  assert.equal(document.activeElement, button);
+
+  captions.updateCaptions("you", "Okay.", "you-1");
+  assert.equal(button.hidden, true);
+  assert.equal(document.activeElement, nodes.editor);
+});
+
+test("the cap leaves focus on the Unclear button it marks unavailable", async (t) => {
+  const { captions, button, nodes } = await setupUnclear(t);
+  const document = focusOn(button, nodes);
+
+  for (let turn = 1; turn <= MAX_UNCLEAR_LINES; turn++) {
+    captions.updateCaptions("interviewer", `Line ${turn}.`, `jim-${turn}`, {
+      final: true,
+    });
+    button.click();
+  }
+  assert.equal(document.activeElement, button);
+
+  captions.updateCaptions("interviewer", "One more line.", "jim-extra", {
+    final: true,
+  });
+  assert.equal(button.attributes["aria-disabled"], "true");
+  assert.equal(document.activeElement, button);
+});
+
+test("the idle timeout moves focus off the Unclear button it hides", async (t) => {
+  const { captions, button, nodes } = await setupUnclear(t);
+  const document = focusOn(button, nodes);
+
+  // A Jim turn that never turns final keeps the idle timeout armed.
+  captions.updateCaptions("interviewer", "Go on.", "jim-1");
+  t.mock.timers.tick(12000);
+  assert.equal(nodes.captionsBar.hidden, true);
+  assert.equal(document.activeElement, nodes.editor);
+});
+
+test("a code edit moves focus off the Unclear button it hides", async (t) => {
+  const { captions, button, nodes } = await setupUnclear(t);
+  const document = focusOn(button, nodes);
+
+  captions.updateCaptions("interviewer", "Use a hash map.", "jim-1", {
+    final: true,
+  });
+  t.mock.timers.tick(1000);
+  captions.dismissCaptions();
+  assert.equal(nodes.captionsBar.hidden, true);
+  assert.equal(document.activeElement, nodes.editor);
+});
+
+for (const [name, editor] of [
+  ["disabled", { disabled: true }],
+  ["removed", { isConnected: false }],
+]) {
+  test(`focus skips a ${name} editor for the board`, async (t) => {
+    const { captions, button, nodes } = await setupUnclear(t);
+    const document = focusOn(button, nodes, editor);
+
+    captions.updateCaptions("interviewer", "Go on.", "jim-1", { final: true });
+    captions.updateCaptions("you", "Okay.", "you-1");
+    assert.equal(document.activeElement, nodes.board);
+  });
+}
+
+test("a mouse click on Unclear hands focus back to the editor", async (t) => {
+  const { captions, button, nodes } = await setupUnclear(t);
+  const document = focusOn(button, nodes);
+
+  captions.updateCaptions("interviewer", "Go on.", "jim-1", { final: true });
+  button.click({ detail: 1 });
+  assert.equal(button.attributes["aria-pressed"], "true");
+  assert.equal(document.activeElement, nodes.editor);
+});
+
+test("Space or Enter on Unclear keeps focus on the button", async (t) => {
+  const { captions, button, nodes } = await setupUnclear(t);
+  const document = focusOn(button, nodes);
+
+  captions.updateCaptions("interviewer", "Go on.", "jim-1", { final: true });
+  button.click({ detail: 0 });
+  assert.equal(button.attributes["aria-pressed"], "true");
+  assert.equal(document.activeElement, button);
 });

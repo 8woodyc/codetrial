@@ -105,6 +105,25 @@
   margin-right: 0.375rem;
 }
 
+.captions-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.caption-unclear {
+  font-size: 0.75rem;
+  padding: 0.125rem 0.5rem;
+}
+.caption-unclear[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--page);
+}
+.caption-unclear[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 html,
 body {
   min-height: 100%;

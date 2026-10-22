@@ -4,12 +4,13 @@
 /// Interviewer captions reveal gradually, including final copies. Candidate
 /// captions retain their bounded window and idle timeout.
 
-import { captionWindow } from "./lib.js";
+import { captionWindow, MAX_UNCLEAR_LINES } from "./lib.js";
 
 let nodes = null;
 
 export function initCaptions(deps) {
   ({ nodes } = deps);
+  nodes.captionUnclear?.addEventListener("click", toggleUnclear);
 }
 
 const CAPTION_TICK_MS = 300;
@@ -32,6 +33,8 @@ let interviewerCaption = {
 // Each publish opens a separate stream, so replaced turns can arrive late.
 const retiredInterviewerIds = new Set();
 const retiredCandidateIds = new Set();
+// Marks are the candidate's study notes: kept here, never sent to Jim.
+const unclearIds = new Set();
 let candidateCaption = { id: null, text: "", replaced: false };
 
 export function updateCaptions(
@@ -97,6 +100,7 @@ export function updateCaptions(
     interviewerCaption.timer = null;
   }
   const clipped = captionWindow(text, CAPTION_MAX_CHARS);
+  showUnclearButton(false);
   nodes.captionsText.textContent = `[${speaker === "you" ? "You" : "Jim"}]: ${clipped}`;
   showCaptions();
 }
@@ -112,6 +116,7 @@ export function paceInterviewerCaption() {
     ? caption.text
     : captionWindow(caption.text.slice(0, caption.shown), CAPTION_MAX_CHARS);
   nodes.captionsText.textContent = `[Jim]: ${text}`;
+  showUnclearButton(true);
   if (retained && caption.pendingDismissal) {
     dismissCaptions();
     return;
@@ -135,6 +140,7 @@ export function showCaptions({ persistent = false } = {}) {
   if (persistent) return;
 
   captionIdleTimer = setTimeout(() => {
+    releaseUnclearFocus();
     nodes.captionsBar.hidden = true;
   }, CAPTION_IDLE_HIDE_MS);
 }
@@ -159,6 +165,7 @@ export function dismissCaptions() {
   retireInterviewerCaption();
   clearTimeout(captionIdleTimer);
   captionIdleTimer = null;
+  releaseUnclearFocus();
   if (nodes.captionsBar) nodes.captionsBar.hidden = true;
 }
 
@@ -175,5 +182,62 @@ function retireInterviewerCaption() {
 function retireCandidateCaption() {
   if (candidateCaption.id != null) {
     retiredCandidateIds.add(candidateCaption.id);
+  }
+}
+
+/// The marked interviewer turn ids, for the report to resolve into text.
+export function unclearLineIds() {
+  return [...unclearIds];
+}
+
+function refreshUnclearButton() {
+  const button = nodes.captionUnclear;
+  if (!button) return;
+  const marked = unclearIds.has(interviewerCaption.id);
+  const full = !marked && unclearIds.size >= MAX_UNCLEAR_LINES;
+  button.setAttribute("aria-pressed", String(marked));
+  // aria-disabled rather than disabled: disabling the focused button would
+  // drop keyboard focus to <body>, and toggleUnclear already refuses the cap.
+  button.setAttribute("aria-disabled", String(full));
+  button.title = full ? `Up to ${MAX_UNCLEAR_LINES} lines` : "";
+}
+
+function toggleUnclear(event) {
+  const id = interviewerCaption.id;
+  if (id == null) return;
+  if (unclearIds.has(id)) {
+    unclearIds.delete(id);
+  } else if (unclearIds.size < MAX_UNCLEAR_LINES) {
+    unclearIds.add(id);
+  }
+  refreshUnclearButton();
+  // A click leaves focus on the button, where the candidate's next keystrokes
+  // would land and the first space would undo the mark. Space or Enter
+  // (detail 0) means they came here by keyboard, so focus stays.
+  if (event?.detail > 0) focusWorkspace();
+}
+
+function showUnclearButton(visible) {
+  if (!nodes.captionUnclear) return;
+  if (!visible) releaseUnclearFocus();
+  nodes.captionUnclear.hidden = !visible;
+  if (visible) refreshUnclearButton();
+}
+/// Hiding the focused button, or the bar that holds it, would drop keyboard
+/// focus to the page body, so it moves to the workspace first.
+function releaseUnclearFocus() {
+  const button = nodes.captionUnclear;
+  if (button?.ownerDocument?.activeElement !== button) return;
+  focusWorkspace();
+}
+
+/// The surface in use: the editor unless a whiteboard removed it or a pause or
+/// the behavioral round disabled it, then the board, then Jim's stage.
+function focusWorkspace() {
+  const document = nodes.captionUnclear?.ownerDocument;
+  for (const target of [nodes.editor, nodes.board, nodes.jimStage]) {
+    if (!target?.isConnected || target.disabled) continue;
+    target.focus();
+    if (document?.activeElement === target) return;
   }
 }

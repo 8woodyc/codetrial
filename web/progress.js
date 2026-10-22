@@ -4,6 +4,7 @@ import {
   interviewMode,
   frameworkPhases,
   sanitizeReport,
+  unclearLinesOf,
 } from "./lib.js";
 import { LEVELS } from "./problem-picker.js";
 
@@ -101,6 +102,7 @@ export function normalizeProgressEntry(raw) {
       ? entry.report.decision
       : null,
     report,
+    unclearLines: unclearLinesOf(entry.unclearLines),
   };
 }
 
