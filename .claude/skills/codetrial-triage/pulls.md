@@ -3,22 +3,26 @@
 Five things keep an open PR moving: its checks can run, its review threads show
 what is still open, its author knows about a parallel PR, its author is
 reminded when a review has gone unanswered, and a branch that no longer merges
-is sent back for a rebase. One read-only call gathers all five:
+is sent back for a rebase. One read-only call gathers all five, plus each PR's
+status and merge grade:
 
 ```sh
 .claude/skills/codetrial-triage/pr-sweep.sh "$repo" > "$SCRATCH/sweep.json"
 ```
 
 The second argument overrides the idle threshold, seven days unless the user
-gives another. Report the open PR
+gives another; the third is an earlier output, which adds `moved` and `gone`
+(see [Rank by size and merge
+confidence](#rank-by-size-and-merge-confidence)). Report the open PR
 count, and any PR whose `files_truncated`, `reviews_truncated`,
 `threads_truncated`, `comments_truncated` or `closes_truncated` is set, since
 the lists below miss what was cut. In particular, `overlap` is incomplete when
 `closes_truncated` is set, and `rebase`, `hide`, `hide_ask` and `stale` omit a
 PR when either of `reviews_truncated` or `comments_truncated` is. The action
 lists name a PR `pr`, which the commands below take as `$pr`. A PR in `unknown`
-has no mergeability yet because GitHub computes it on first request; rerun once
-and report any that stay unknown. When `maintainers_known` is false the push
+still has no mergeability after the script's own retry, since GitHub computes it
+on first request and every merge to `main` resets it; rerun once and report any
+that stay unknown. When `maintainers_known` is false the push
 listing failed, so a read-only collaborator's comment may have counted as a
 request: report it, and move every `hide` entry to the confirmed list with its
 author.
@@ -52,7 +56,11 @@ carries the work on, and the three actions go on the confirmed list instead.
   Two triggers escape that rule by running with the base repository's token and
   secrets, so confirm neither is in use: `grep -n
   'pull_request_target\|workflow_run' .github/workflows/*` prints nothing. When
-  it prints something, every approval goes on the confirmed list. Runner time
+  it prints something, every approval goes on the confirmed list. A run whose
+  `touches_workflows` is true is never approved under this rule: it goes on
+  the confirmed list, with its diff read first against the workflow checklist
+  in [review.md](../codetrial-verify/review.md#3-what-the-gate-cannot-see)
+  and the result stated there, whoever wrote it. Runner time
   still matters: skim the diff, and move the approval to the confirmed list when
   code the build or tests execute does something the title does not explain,
   such as a network call or a download it then runs.
@@ -63,7 +71,10 @@ carries the work on, and the three actions go on the confirmed list instead.
   as outdated. The text is fixed in [rebase.md](rebase.md), so the maintainer
   approved it once by writing it, and `hide` holds only requests in a wording
   the maintainers have used for the same thing (listed in `pr-sweep.sh`), with
-  no inline comments; a hidden comment stays one click from readable.
+  no inline comments; a hidden comment stays one click from readable. "Ask the
+  conflicting PRs to rebase" asks for this action alone, as "Approve the held
+  runs" does for approvals; report the conflicting PRs it skips (the account's
+  own, and those holding a current request) so the count matches the banner.
 
 ```sh
 gh api -X POST "repos/$repo/actions/runs/$run/approve"
@@ -90,7 +101,9 @@ also needs confirmation because an unseen file may be a workflow, and so does
 one whose `first_time` is false, since GitHub holding it
 means the repository's approval policy reaches past first-time contributors
 and the maintainer should decide. A pending run on an older SHA is not in
-`approve` at all; it is superseded and needs nothing.
+`approve` at all; it is superseded and needs nothing. GitHub's list of runs
+awaiting approval still shows those, usually dozens beside the current ones;
+report the sweep's `superseded` count rather than approving or cancelling them.
 
 ## Similar pull requests
 
@@ -205,10 +218,11 @@ is told what to do, since review waits for green CI (see
 [collaboration](../codetrial-contribute/collaboration.md#make-ci-green-before-asking-for-review)).
 A failure the branch introduced waits on its author even when no human spoke
 last; a stale base is a rebase request; one `main` shares, or an environment
-limit, is the maintainer's. The sweep does not list these, and
-`gh pr list --repo "$repo" --state open --limit 1000 --json number,statusCheckRollup`
-does. Read the failing `gates (<lane>)` job, not `check` or `mutation`, which
-only collect results ([codetrial-verify](../codetrial-verify/SKILL.md)
+limit, is the maintainer's. The sweep's `status` lists them (`failing:` in
+`why`), and `ci-failure.sh` in
+[codetrial-verify](../codetrial-verify/SKILL.md#failed-github-actions-checks)
+tells those cases apart for one PR in one call. Read the failing
+`gates (<lane>)` job, not `check` or `mutation`, which only collect results ([codetrial-verify](../codetrial-verify/SKILL.md)
 describes the lanes). A failing commit-message check skips the rest of the
 portable lane, so name it first. A second PR
 from the same author for the same change supersedes the first or is superseded
@@ -217,46 +231,15 @@ close to a maintainer. A PR opened from a fork's `main` fails CI on its own
 and needs a new PR from a topic branch, not a comparison. Any comment either
 case calls for goes through the confirmed list.
 
-A failed log runs to thousands of lines, every passing Rust suite prints
-`0 failed`, and the browser lane prints `Error:` for tests that expect one, so
-grepping for "fail" or "error" finds nothing useful. Save the log and grep for
-the markers a real failure leaves:
-
-```sh
-job=$(gh pr view "$pr" --repo "$repo" --json statusCheckRollup --jq \
-  '[.statusCheckRollup[] | select(.conclusion | IN("FAILURE", "CANCELLED",
-     "TIMED_OUT")) | select(.name | IN("check", "mutation") | not)
-     | .detailsUrl // empty | capture("/job/(?<id>[0-9]+)").id]
-   | first // empty')
-if [ -z "$job" ]; then
-  echo "no failing Actions job; read the failing check's detailsUrl instead"
-else
-  gh run view --repo "$repo" --job "$job" --log > "$SCRATCH/ci-$pr.log"
-  grep -nE '✖|test result: FAILED|panicked at|SyntaxError|vulnerabilities found|Crate: |##\[error\]' \
-    "$SCRATCH/ci-$pr.log"
-fi
-```
-
-It reads the first failing lane or shard; with more than one failing, drop
-`first` and read each. Whether the branch caused a failure is settled by the
-same job on `main`'s latest run, read once per sweep; passing there means the
-branch or its stale base did, and failing there means it is the maintainer's:
-
-```sh
-run=$(gh run list --repo "$repo" --branch main --workflow check.yml \
-  --event push --limit 1 --json databaseId --jq '.[0].databaseId')
-gh run view "$run" --repo "$repo" --json jobs \
-  --jq '.jobs[] | [.databaseId, .name, .conclusion] | @tsv'
-```
-
-It reads Actions jobs only. A third-party check run, cubic among them, links
-elsewhere, and a commit status reports `state` rather than `conclusion`, so
-neither is matched; read those from the PR's checks tab.
-
-The job log rather than `--log-failed`, because a job cancelled at its time
-limit has no failed step and `--log-failed` prints nothing for it; #300's was
-cancelled that way, and its log shows the `SyntaxError` that hung every lobby
-test.
+For each failing PR, `ci-failure.sh` in
+[codetrial-verify](../codetrial-verify/SKILL.md#failed-github-actions-checks)
+reads the whole log of every failing, cancelled or timed-out Actions job, keeps
+the lines that mark a failure, names the gates `scripts/test.sh` failed, and
+compares the job with `main`'s latest run: passing there means the branch or
+its stale base did it, failing there means it is the maintainer's. Its header
+says why it reads the whole log rather than `--log-failed`, and which markers
+count. A check outside Actions, cubic among them, comes back with its link
+only; read it from the PR's checks tab.
 
 A `cargo-audit` advisory that `main` also has is the maintainer's, and the PR
 must not carry a lockfile bump to clear it: #304 was told it "needs nothing from
@@ -280,6 +263,59 @@ calling a PR addressed. Reviewing the diff itself follows
 [collaboration reference](../codetrial-contribute/collaboration.md) gives the
 maintainer examples and CI investigation criteria. This review grants no extra
 write permissions beyond the sweep actions above.
+
+## Rank by size and merge confidence
+
+"Pick the N smallest PRs and say how confident a merge is" is read-only, and
+`status` in the sweep already answers its mechanical half, smallest first:
+
+```sh
+jq -r '.status[:10][] | "#\(.pr) \(.size.total) (\(.size.source)/\(.size.tests)) \(.grade): \(.why | join("; "))"' \
+  "$SCRATCH/sweep.json"
+```
+
+`size` splits the lines into source and tests, since a 90-line PR can be a
+2-line fix with its test; say which the table ranks by. A test is a file under
+a `tests/` directory, the browser check, or one named `test_*` or `*.test.*`,
+so a problem file such as `web/problems/tightest-channel-spacing.json` stays
+source, and inline `#[cfg(test)]` code in `src/` counts as source too.
+
+The grade reads only what GitHub records. The table in `grade()` in
+`pr-sweep.sh` is the rule, one row per condition with the grade it caps a PR
+at, and the PR gets the worst row it matches, so adding a problem never raises
+a grade; read the table rather than a summary of it here. `why` lists each
+row's reason. Two readings the rows do not spell out: each maintainer's latest
+review counts, so one approval does not hide another's changes request, and a
+request counts as a rebase only when it opens with the word. `high` includes a
+PR nobody has reviewed yet, so `decision` null with `high` means ready for a
+first review, not approved.
+
+Then read each candidate's non-test diff, which can only lower a grade: a diff
+that leaves the issue's accepted scope, a thread whose finding is a correctness
+bug, or a sibling PR that rewrites the same function. Raise one only with the
+reason named, as when another PR's merge settles a bot finding (#376's
+NULL-neighbor check answered #396's cubic P2). The C, C++ and Java harnesses in
+`web/compiler-explorer.js` are one line per function, so split those lines on
+`; ` to read them.
+
+No gates run means the checks ran on a base older than the gates workflow (#363
+on 9dc74fe), so green there proves less; say so and ask for a rebase or a
+rerun. Two PRs that rewrite the same harness function (#376 and #396 on
+`json_graph`) conflict as soon as one merges: name the order.
+
+Save each sweep and pass it back as the third argument the next time. `moved`
+then lists the PRs whose head, mergeability, decision, grade, checks or threads
+changed, each field as `[before, after]`, plus `{pr, new: true}` for a PR
+opened since. `gone` says which left the open list, merged or closed and at
+which commit, or `UNKNOWN` when that lookup failed. A repeated request then
+costs one call and reports only what moved. A PR that moved to `CONFLICTING`
+right after a merge is one that shared its files (#373 and #396 after #376);
+`rebase` lists it once no current request stands. When `moved` and `gone` are
+empty, say that nothing changed, then say who each PR waits on from its `why`,
+not its grade alone: "held for approval" waits on a maintainer to approve the
+run, "pending" on CI, "changes requested before the last push, or hidden" on a
+re-review, a `high` PR with an empty `why` on a maintainer to review or merge
+it, and any other reason on its author.
 
 ## Apply the comments
 

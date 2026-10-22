@@ -10,7 +10,14 @@ usually ask for a revision or a log within a day, and in most open issues that
 question is still the newest comment. #56 was closed after six silent days
 with "Lost further actions", which told the reporter nothing about what would
 have kept it open.
-The four sweep lists are the queue, and each one has a fixed next move:
+The four sweep lists are the queue, and each one has a fixed next move. An
+`unanswered` or `waiting` entry whose `claimed` entry lists an open PR waits
+on review of that PR, which the PR sweep owns, not on the reporter, once the
+PR is read and does what the issue asks: `open_prs` holds every PR that
+cross-referenced the issue, and a mention alone does not suspend the
+reporter's reminder. Such an entry gets neither a reminder nor a first answer
+on the issue (#370 and #385 sat in
+`unanswered`, #159 and #298 in overdue `waiting`, all with PRs open):
 
 - `unanswered`: no maintainer has spoken. Triage these first, oldest first, with
   [the verdicts](SKILL.md#decide-duplicate-status-and-completeness-separately).
