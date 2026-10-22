@@ -3074,6 +3074,8 @@ body:not([data-recording]) .replay-detail > :not(header) {
     --inset-surface: var(--page);
     --selected-surface: var(--hairline);
     --shadow-card: 0 1px 2px rgb(23 29 45 / 4%), 0 8px 24px rgb(23 29 45 / 6%);
+    --picker-shadow: drop-shadow(0 1px 2px rgb(23 29 45 / 4%))
+      drop-shadow(0 8px 24px rgb(23 29 45 / 6%));
     --shadow-cta: 0 6px 16px rgb(110 43 240 / 24%);
   }
 }
@@ -3089,6 +3091,8 @@ body:not([data-recording]) .replay-detail > :not(header) {
     );
     --practice-tint-edge: #473983;
     --shadow-card: 0 1px 2px rgb(0 0 0 / 30%), 0 8px 24px rgb(0 0 0 / 24%);
+    --picker-shadow: drop-shadow(0 1px 2px rgb(0 0 0 / 30%))
+      drop-shadow(0 8px 24px rgb(0 0 0 / 24%));
     --shadow-cta: 0 6px 16px rgb(116 76 230 / 28%);
   }
 }
@@ -3383,10 +3387,9 @@ body:not([data-recording]) .replay-detail > :not(header) {
   cursor: pointer;
 }
 
-/* The panel is narrower than the page, and a phone narrower than one 16rem
-   card, so a column never asks for more than the width it has. */
+/* Fixed-width cards wrap without stretching; narrow screens still fit one. */
 .lobby .problem-grid {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  grid-template-columns: repeat(auto-fill, min(100%, 17rem));
 }
 
 .lobby .problem-card {
@@ -3687,4 +3690,173 @@ body:not([data-recording]) .replay-detail > :not(header) {
   #results-chevron {
     transition: none;
   }
+}
+
+/* In two columns, cards span the row before the final setup step. */
+.setup-grid > .problem-grid {
+  grid-row: 2;
+  grid-column: 1 / -1;
+}
+
+@media (min-width: 761px) {
+  .setup-grid > .session-panel {
+    grid-row: 1;
+    grid-column: 2;
+  }
+}
+
+@media (min-width: 1101px) {
+  .setup-grid > .start-panel {
+    grid-row: 1;
+    grid-column: 3;
+  }
+}
+
+/* Only the source-title option uses the problem cards' surface. */
+.lobby .problem-picker {
+  margin-top: 2.25rem;
+}
+
+.lobby .problem-picker > summary {
+  font-size: 1rem;
+}
+
+.lobby .problem-picker-controls {
+  margin-top: 0.75rem;
+  min-width: 0;
+}
+
+.lobby .problem-picker-controls .source-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 1rem;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.lobby .problem-picker-controls .source-toggle input {
+  flex: none;
+  margin: 0.2em 0 0;
+}
+
+.lobby .problem-picker-controls .practice-filters {
+  min-width: 0;
+  margin-top: 2rem;
+}
+
+.lobby .problem-picker-controls .practice-filters legend {
+  margin-bottom: 0.5rem;
+}
+
+.lobby .problem-picker-controls .practice-filters > label,
+.lobby .problem-picker-controls .practice-filters > select,
+.lobby .problem-picker-controls #problem-filters-reset {
+  font-size: 0.8125rem;
+}
+
+.lobby .problem-picker-controls select {
+  flex: 1 1 5rem;
+  width: 0;
+  min-width: min(5rem, 100%);
+  max-width: 100%;
+}
+
+.lobby .problem-picker-controls #problem-filters-reset {
+  flex: none;
+  padding-inline: 0.5rem;
+}
+
+/* The measured outline joins Step 1 to its cards without fixed panel heights. */
+.lobby {
+  position: relative;
+  isolation: isolate;
+}
+
+.problem-picker-outline {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.problem-picker-outline path {
+  filter: var(--picker-shadow);
+  fill: var(--surface);
+  stroke: var(--hairline);
+  stroke-width: 1;
+}
+
+.problem-picker-connected .setup-panel:first-child {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.problem-picker-connected .problem-grid {
+  padding: 0.75rem;
+}
+
+/* Let spare row height sit above the filters, without scripted movement. */
+.problem-picker-connected .setup-panel:first-child {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  padding-bottom: 0.75rem;
+}
+
+.problem-picker-connected .problem-picker[open] {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.problem-picker-connected .problem-picker[open]::details-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.problem-picker-connected .problem-picker-controls {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.problem-picker-connected .problem-filter-group {
+  margin-top: auto;
+  padding-top: 2rem;
+}
+
+.problem-picker-connected .problem-filter-group .practice-filters {
+  margin-top: 0;
+}
+
+@media (min-width: 640px) and (max-height: 850px) {
+  .lobby .problem-picker {
+    margin-top: 1rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .lobby .problem-picker-controls .practice-filters > select {
+    font-size: 1rem;
+  }
+}
+
+/* Keep collapsed cards searchable without reserving a row in the setup grid. */
+.setup-grid > .problem-grid[hidden="until-found"] {
+  display: grid !important;
+  content-visibility: hidden;
+  position: absolute;
+  width: 100%;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: clip;
 }

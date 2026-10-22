@@ -491,9 +491,11 @@ lobbyTest(
 
       // And the wall is still reachable, just not in the way.
       await page.click("details.problem-picker summary");
+      await page.locator(".problem-grid").waitFor({ state: "visible" });
       const open = await page.evaluate(() => document.body.scrollHeight);
       assert.ok(open > closed, "opening the picker shows nothing");
       await page.click("details.problem-picker summary");
+      await page.locator(".problem-grid").waitFor({ state: "hidden" });
     }
   },
   { viewport: { width: 1280, height: 800 } },
@@ -5280,3 +5282,437 @@ for (const storage of ["account", "device"]) {
     }
   });
 }
+
+lobbyTest(
+  "problem cards span desktop panels and return home on narrow screens",
+  async (page) => {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await lobby(page);
+    const grid = page.locator(".problem-grid");
+    const picker = page.locator("details.problem-picker");
+    const summary = picker.locator("summary");
+    assert.equal(await grid.isVisible(), false);
+    await openTopicFilter(page);
+    await grid.waitFor({ state: "visible" });
+    assert.ok(
+      await grid.evaluate(
+        (node) =>
+          node.previousElementSibling ===
+            document.querySelector(".setup-panel") &&
+          node.nextElementSibling === document.querySelector(".session-panel"),
+      ),
+    );
+    await page.locator("#problem-filters-reset").focus();
+    await page.keyboard.press("Tab");
+    assert.ok(
+      await grid.evaluate((node) => node.contains(document.activeElement)),
+    );
+    const framesAgree = await page.evaluate(async () => {
+      const picker = document.querySelector("details.problem-picker");
+      const grid = document.querySelector(".problem-grid");
+      const outline = document.querySelector(".problem-picker-outline");
+      const summary = picker.querySelector("summary");
+      for (let index = 0; index < 12; index++) {
+        summary.click();
+        await new Promise(requestAnimationFrame);
+        if (
+          Boolean(grid.hidden) === picker.open ||
+          outline.hasAttribute("hidden") === picker.open ||
+          document
+            .querySelector(".lobby")
+            .classList.contains("problem-picker-connected") !== picker.open
+        )
+          return false;
+      }
+      return picker.open;
+    });
+    assert.ok(
+      framesAgree,
+      "cards and outline must agree with the native picker before paint",
+    );
+    await grid.evaluate((node) => {
+      for (const [index, card] of [
+        ...node.querySelectorAll(".problem-card"),
+      ].entries())
+        card.hidden = index > 0;
+    });
+    await page.waitForFunction(() => {
+      const path = document.querySelector(".problem-picker-outline path");
+      const lobby = document.querySelector(".lobby").getBoundingClientRect();
+      const panel = document
+        .querySelector(".setup-panel")
+        .getBoundingClientRect();
+      const grid = document.querySelector(".problem-grid");
+      const card = grid.querySelector(".problem-card").getBoundingClientRect();
+      const expected =
+        Math.max(
+          panel.right,
+          card.right + parseFloat(getComputedStyle(grid).paddingRight),
+        ) - lobby.left;
+      const bounds = path.getBBox();
+      return Math.abs(bounds.x + bounds.width - expected) < 1;
+    });
+    await grid.evaluate((node) => {
+      for (const card of node.querySelectorAll(".problem-card"))
+        card.hidden = false;
+    });
+    const bounds = await page.evaluate(() => {
+      const setup = document
+        .querySelector(".setup-grid")
+        .getBoundingClientRect();
+      const cards = document
+        .querySelector(".problem-grid")
+        .getBoundingClientRect();
+      return {
+        left: Math.abs(setup.left - cards.left),
+        width: Math.abs(setup.width - cards.width),
+        below: [...document.querySelectorAll(".setup-panel")].every(
+          (panel) => cards.top >= panel.getBoundingClientRect().bottom + 24,
+        ),
+      };
+    });
+    assert.ok(bounds.left < 1 && bounds.width < 1 && bounds.below);
+    assert.equal(
+      await page.locator(".setup-panel:first-child #problem-topic").count(),
+      1,
+    );
+    for (const selector of [".setup-panel", ".session-panel", ".start-panel"]) {
+      const outline = await page
+        .locator(".problem-picker-outline path")
+        .getAttribute("d");
+      await page
+        .locator(selector)
+        .first()
+        .evaluate((node) => {
+          node.style.minHeight = `${node.getBoundingClientRect().height + 600}px`;
+        });
+      await page.waitForFunction(
+        (previous) =>
+          document
+            .querySelector(".problem-picker-outline path")
+            .getAttribute("d") !== previous,
+        outline,
+      );
+      assert.ok(
+        await page.evaluate(() => {
+          const cards = document
+            .querySelector(".problem-grid")
+            .getBoundingClientRect();
+          return [...document.querySelectorAll(".setup-panel")].every(
+            (panel) => cards.top >= panel.getBoundingClientRect().bottom + 24,
+          );
+        }),
+      );
+      await page
+        .locator(selector)
+        .first()
+        .evaluate((node) => node.style.removeProperty("min-height"));
+      await page.evaluate(
+        () =>
+          new Promise((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(resolve)),
+          ),
+      );
+    }
+    const first = grid.locator(".problem-card:visible").first();
+    const id = await first.getAttribute("data-problem");
+    await first.click();
+    assert.equal(
+      await grid.evaluate((node) => {
+        const cards = [...node.querySelectorAll(".problem-card:not([hidden])")];
+        const top = cards[0].getBoundingClientRect().top;
+        return cards.filter(
+          (card) => Math.abs(card.getBoundingClientRect().top - top) < 1,
+        ).length;
+      }),
+      4,
+    );
+    assert.ok(
+      await page.evaluate(() => {
+        const topic = document
+          .querySelector("#problem-topic")
+          .getBoundingClientRect();
+        const reset = document
+          .querySelector("#problem-filters-reset")
+          .getBoundingClientRect();
+        return Math.abs(topic.top - reset.top) < 1;
+      }),
+    );
+    const width = (await first.boundingBox()).width;
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    assert.ok(Math.abs((await first.boundingBox()).width - width) < 1);
+    for (const viewportWidth of [1101, 1100, 1000, 761]) {
+      await page.setViewportSize({ width: viewportWidth, height: 1000 });
+      await page.waitForFunction(() =>
+        document.querySelector(".setup-grid > .problem-grid"),
+      );
+      const layout = await page.locator(".setup-grid").evaluate((node) => {
+        const start = node
+          .querySelector(".start-panel")
+          .getBoundingClientRect();
+        const cards = node
+          .querySelector(".problem-grid")
+          .getBoundingClientRect();
+        return {
+          columns: getComputedStyle(node).gridTemplateColumns.split(" ").length,
+          startAboveCards: start.bottom <= cards.top,
+          startBelowCards: start.top >= cards.bottom,
+        };
+      });
+      assert.equal(layout.columns, viewportWidth > 1100 ? 3 : 2);
+      assert.equal(layout.startAboveCards, viewportWidth > 1100);
+      assert.equal(layout.startBelowCards, viewportWidth <= 1100);
+      assert.ok(
+        await page.evaluate(() => {
+          const setup = document
+            .querySelector(".setup-grid")
+            .getBoundingClientRect();
+          const cards = document
+            .querySelector(".problem-grid")
+            .getBoundingClientRect();
+          const panels = [...document.querySelectorAll(".setup-panel")].slice(
+            0,
+            2,
+          );
+          return (
+            Math.abs(setup.width - cards.width) < 1 &&
+            Math.abs(setup.left - cards.left) < 1 &&
+            panels.every(
+              (panel) => cards.top >= panel.getBoundingClientRect().bottom + 24,
+            ) &&
+            document.documentElement.scrollWidth <= innerWidth
+          );
+        }),
+      );
+    }
+    await first.focus();
+    await page.setViewportSize({ width: 760, height: 1000 });
+    await page.waitForFunction(() =>
+      document.querySelector("details.problem-picker .problem-grid"),
+    );
+    assert.equal(
+      await first.evaluate((node) => node === document.activeElement),
+      true,
+    );
+    assert.equal(
+      await page.locator(`[data-problem="${id}"]`).getAttribute("aria-pressed"),
+      "true",
+    );
+    await summary.click();
+    await grid.waitFor({ state: "hidden" });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.waitForFunction(() =>
+      document.querySelector(".setup-grid > .problem-grid"),
+    );
+    assert.equal(await grid.isVisible(), false);
+    await summary.click();
+    await grid.waitFor({ state: "visible" });
+    assert.equal(await first.getAttribute("aria-pressed"), "true");
+    await page.setViewportSize({ width: 320, height: 800 });
+    await page.waitForFunction(() =>
+      document.querySelector("details.problem-picker .problem-grid"),
+    );
+    assert.ok(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    );
+  },
+  { viewport: { width: 1440, height: 1000 } },
+);
+
+lobbyTest(
+  "picker preserves compact spacing and mobile field sizing",
+  async (page) => {
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await lobby(page);
+    for (const width of [639, 640, 760, 761, 1023, 1024, 1280]) {
+      await page.setViewportSize({ width, height: 800 });
+      assert.equal(
+        await page
+          .locator(".problem-picker")
+          .evaluate((node) => getComputedStyle(node).marginTop),
+        width >= 640 ? "16px" : "36px",
+      );
+    }
+    await page.setViewportSize({ width: 1280, height: 851 });
+    assert.equal(
+      await page
+        .locator(".problem-picker")
+        .evaluate((node) => getComputedStyle(node).marginTop),
+      "36px",
+    );
+    await openTopicFilter(page);
+    await page.locator(".problem-grid").waitFor({ state: "visible" });
+    await page.setViewportSize({ width: 375, height: 800 });
+    await page.waitForFunction(() =>
+      document.querySelector("details.problem-picker .problem-grid"),
+    );
+    assert.equal(
+      await page
+        .locator("#problem-topic")
+        .evaluate((node) => getComputedStyle(node).fontSize),
+      "16px",
+    );
+    assert.deepEqual(errors, []);
+  },
+);
+
+lobbyTest(
+  "picker outline stays aligned after lower content grows",
+  async (page) => {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await lobby(page);
+    await openTopicFilter(page);
+    const path = page.locator(".problem-picker-outline path");
+    await path.waitFor({ state: "visible" });
+    const before = await path.boundingBox();
+    for (const selector of ["#recent-performance", "#history"]) {
+      const previousHeight = await page
+        .locator(".lobby")
+        .evaluate((node) => node.getBoundingClientRect().height);
+      await page.locator(selector).evaluate((node) => {
+        node.hidden = false;
+        node.style.minHeight = `${node.getBoundingClientRect().height + 600}px`;
+      });
+      await page.waitForFunction(
+        (height) =>
+          document.querySelector(".lobby").getBoundingClientRect().height >
+          height + 500,
+        previousHeight,
+      );
+      await page.evaluate(
+        () =>
+          new Promise((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(resolve)),
+          ),
+      );
+      const after = await path.boundingBox();
+      for (const property of ["x", "y", "width", "height"]) {
+        assert.ok(
+          Math.abs(after[property] - before[property]) < 1,
+          `${selector} growth must not change outline ${property}`,
+        );
+      }
+    }
+  },
+);
+
+lobbyTest(
+  "fragment navigation reveals a collapsed problem card",
+  async (page) => {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await lobby(page);
+    // Remove the native until-found skip so the application must hide contents.
+    await page.addStyleTag({
+      content:
+        ':where([hidden="until-found"]) { content-visibility: visible; }',
+    });
+    const picker = page.locator("details.problem-picker");
+    const grid = page.locator(".problem-grid");
+    assert.equal(await picker.evaluate((node) => node.open), false);
+    assert.equal(await grid.getAttribute("hidden"), "until-found");
+    assert.equal(
+      await grid.evaluate((node) => getComputedStyle(node).contentVisibility),
+      "hidden",
+    );
+    assert.equal(
+      await page.evaluate(() => {
+        const selected = document.querySelector("#recommendation").textContent;
+        const title = [
+          ...document.querySelectorAll(
+            ".problem-card:not([hidden]) .problem-title",
+          ),
+        ].find((node) => !selected.includes(node.textContent)).textContent;
+        const found = window.find(title);
+        window.getSelection().removeAllRanges();
+        return found;
+      }),
+      true,
+    );
+    await picker.locator("summary").focus();
+    await page.keyboard.press("Tab");
+    assert.equal(
+      await page.evaluate(
+        () => !!document.activeElement.closest(".session-panel"),
+      ),
+      true,
+    );
+    await page.evaluate(() => {
+      const card = document.querySelector(".problem-card:not([hidden])");
+      card.id = "find-problem-card";
+      const link = document.createElement("a");
+      link.href = "#find-problem-card";
+      link.textContent = "Find collapsed problem";
+      document.querySelector(".lobby").prepend(link);
+    });
+    await page.getByRole("link", { name: "Find collapsed problem" }).click();
+    await page.waitForFunction(
+      () => document.querySelector("details.problem-picker").open,
+    );
+    assert.equal(await grid.getAttribute("hidden"), null);
+    assert.equal(await page.locator("#find-problem-card").isVisible(), true);
+    await picker.locator("summary").click();
+    await page.waitForFunction(
+      () => document.querySelector(".problem-grid").hidden === "until-found",
+    );
+    await page.setViewportSize({ width: 375, height: 800 });
+    await page.waitForFunction(() =>
+      document.querySelector("details.problem-picker .problem-grid"),
+    );
+    assert.equal(await grid.getAttribute("hidden"), null);
+  },
+);
+
+lobbyTest(
+  "picker outline follows mode changes and a late topic error",
+  async (page) => {
+    let releaseTopics;
+    const topicsHeld = new Promise((resolve) => {
+      releaseTopics = resolve;
+    });
+    await page.route("**/problem-topics.json", async (route) => {
+      await topicsHeld;
+      await route.fulfill({ status: 500, body: "nope" });
+    });
+    try {
+      await page.setViewportSize({ width: 1101, height: 1000 });
+      await lobby(page);
+      await page.locator("details.problem-picker summary").click();
+      const aligned = () =>
+        page.waitForFunction(() => {
+          const panel = document
+            .querySelector(".setup-panel")
+            .getBoundingClientRect();
+          const grid = document
+            .querySelector(".problem-grid")
+            .getBoundingClientRect();
+          const outline = document
+            .querySelector(".problem-picker-outline path")
+            .getBoundingClientRect();
+          return (
+            Math.abs(outline.left - panel.left) < 1 &&
+            Math.abs(outline.top - panel.top) < 1 &&
+            Math.abs(outline.bottom - grid.bottom) < 1
+          );
+        });
+      await aligned();
+      await page.locator('[data-mode="whiteboard"]').click();
+      assert.equal(await page.locator("#mode-note").isVisible(), true);
+      await aligned();
+      releaseTopics();
+      await page.waitForFunction(() =>
+        document
+          .querySelector("#problem-filter-summary")
+          .textContent.includes("could not be loaded"),
+      );
+      await aligned();
+      await page.locator('[data-mode="coding"]').click();
+      assert.equal(await page.locator("#mode-note").isVisible(), false);
+      await aligned();
+    } finally {
+      releaseTopics();
+    }
+  },
+);
