@@ -32,11 +32,11 @@ export function mountProblemGrid() {
     const x = top.left - origin.left;
     const y = top.top - origin.top;
     const padding = parseFloat(getComputedStyle(grid).paddingRight);
-    const cards = [...grid.querySelectorAll(".problem-card")]
-      .filter((card) => !card.hidden)
-      .map((card) => card.getBoundingClientRect());
+    const entries = [
+      ...grid.querySelectorAll(":scope > .problem-entry:not([hidden])"),
+    ].map((entry) => entry.getBoundingClientRect());
     const right =
-      Math.max(top.right, ...cards.map((card) => card.right + padding)) -
+      Math.max(top.right, ...entries.map((entry) => entry.right + padding)) -
       origin.left;
     const edge = top.right - origin.left;
     const join = bottom.top - origin.top;
