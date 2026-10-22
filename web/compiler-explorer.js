@@ -487,9 +487,9 @@ function cPrintActual(spec) {
   if (type === "integer") return `printf("%d", ${name});`;
   if (type === "double") return `printf("%.17g", ${name});`;
   if (type === "string") return `json_string(stdout, ${name});`;
-  if (type === "integer[]")
+  if (type === "integer[]" || type === "list<integer>")
     return `json_int_array(stdout, ${name}, ${Number.isInteger(spec.outputParam) ? `${name}Size` : "returnSize"});`;
-  if (type === "double[]")
+  if (type === "double[]" || type === "list<double>")
     return `json_double_array(stdout, ${name}, ${Number.isInteger(spec.outputParam) ? `${name}Size` : "returnSize"});`;
   if (type === "string[]" || type === "list<string>")
     return `json_string_array(stdout, ${name}, ${Number.isInteger(spec.outputParam) ? `${name}Size` : "returnSize"});`;

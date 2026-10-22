@@ -403,6 +403,118 @@ describe("toolchain harnesses", { concurrency: true }, () => {
     },
   );
 
+  // The list<T> spellings reach C through the same pointer-and-returnSize
+  // shape as T[], so a correct solution must print what it returned.
+  for (const [id, solution] of [
+    [
+      "average-of-levels-in-binary-tree",
+      `double* meanReadingPerHop(struct TreeNode* root, int* returnSize) {
+    struct TreeNode* queue[64];
+    double* out = malloc(sizeof(double) * 64);
+    int head = 0, tail = 0;
+    *returnSize = 0;
+    if (root) queue[tail++] = root;
+    while (head < tail) {
+        int count = tail - head;
+        double sum = 0;
+        for (int i = 0; i < count; i++) {
+            struct TreeNode* node = queue[head++];
+            sum += node->val;
+            if (node->left) queue[tail++] = node->left;
+            if (node->right) queue[tail++] = node->right;
+        }
+        out[(*returnSize)++] = sum / count;
+    }
+    return out;
+}`,
+    ],
+    [
+      "spiral-matrix",
+      `int* clockwiseScanOrder(int** matrix, int matrixSize, int* matrixColSize, int* returnSize) {
+    int rows = matrixSize, cols = matrixSize ? matrixColSize[0] : 0;
+    int* out = malloc(sizeof(int) * (rows * cols + 1));
+    int top = 0, bottom = rows - 1, left = 0, right = cols - 1;
+    *returnSize = 0;
+    while (top <= bottom && left <= right) {
+        for (int j = left; j <= right; j++) out[(*returnSize)++] = matrix[top][j];
+        for (int i = top + 1; i <= bottom; i++) out[(*returnSize)++] = matrix[i][right];
+        if (top < bottom)
+            for (int j = right - 1; j >= left; j--) out[(*returnSize)++] = matrix[bottom][j];
+        if (left < right)
+            for (int i = bottom - 1; i > top; i--) out[(*returnSize)++] = matrix[i][left];
+        top++, bottom--, left++, right--;
+    }
+    return out;
+}`,
+    ],
+    [
+      "binary-tree-right-side-view",
+      `int* sidebarLabels(struct TreeNode* root, int* returnSize) {
+    struct TreeNode* queue[64];
+    int* out = malloc(sizeof(int) * 64);
+    int head = 0, tail = 0;
+    *returnSize = 0;
+    if (root) queue[tail++] = root;
+    while (head < tail) {
+        int count = tail - head;
+        for (int i = 0; i < count; i++) {
+            struct TreeNode* node = queue[head++];
+            if (i == count - 1) out[(*returnSize)++] = node->val;
+            if (node->left) queue[tail++] = node->left;
+            if (node->right) queue[tail++] = node->right;
+        }
+    }
+    return out;
+}`,
+    ],
+    [
+      "substring-with-concatenation-of-all-words",
+      `int* findChunkBlockOffsets(char* s, char** words, int wordsSize, int* returnSize) {
+    int length = strlen(s), width = strlen(words[0]);
+    int span = width * wordsSize;
+    int* out = malloc(sizeof(int) * (length + 1));
+    *returnSize = 0;
+    for (int start = 0; start + span <= length; start++) {
+        bool used[64] = {false};
+        int matched = 0;
+        for (int chunk = 0; chunk < wordsSize; chunk++) {
+            const char* piece = s + start + chunk * width;
+            int found = -1;
+            for (int w = 0; w < wordsSize && found < 0; w++)
+                if (!used[w] && strncmp(piece, words[w], width) == 0) found = w;
+            if (found < 0) break;
+            used[found] = true;
+            matched++;
+        }
+        if (matched == wordsSize) out[(*returnSize)++] = start;
+    }
+    return out;
+}`,
+    ],
+  ]) {
+    it(
+      `C harness prints the ${judges[id].returnType} that ${id} returns`,
+      { skip: noCc },
+      async () => {
+        const dir = mkdtempSync(join(tmpdir(), "codetrial-c-"));
+        try {
+          const source = join(dir, "list.c");
+          const binary = join(dir, "list");
+          writeFileSync(source, generateHarness("c", judges[id], solution));
+          await run("cc", ["-std=c17", source, "-o", binary]);
+          assert.deepEqual(
+            parseCompilerResults(
+              (await run(binary, [], { encoding: "utf8" })).stdout,
+            ).results.map((result) => result.actual),
+            judges[id].cases.map((testCase) => testCase.expected),
+          );
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      },
+    );
+  }
+
   // A degree-three node distinguishes rotation from simple reversal.
   const cloneGraphSpec = {
     ...judges["clone-graph"],
