@@ -20,6 +20,15 @@
 #               Actions, its link only. current and on_main are null when the
 #               lookup behind them failed, and gates, errors and excerpt when
 #               the job log could not be read.
+#   stale_base  true when every failing lane failed only gates that read
+#               outside data (the table in the last jq below: cargo-audit
+#               reads the advisory database), on the current head, main's
+#               latest run started after those runs and succeeded in each of
+#               those lanes, nothing is pending or held, no check outside
+#               Actions fails, and the PR changes none of the files those gates
+#               read: main has since moved past the data, and a rebase is the
+#               whole answer. False otherwise, including when a lookup failed.
+#               This is the one definition; the docs point here.
 
 set -eu
 
@@ -32,7 +41,13 @@ case $pr in
         ;;
 esac
 
-head=$(gh pr view "$pr" --repo "$repo" --json headRefOid --jq .headRefOid)
+# The head, and the files the PR changes: a PR that changes what a gate reads
+# may have brought the failure itself, so it is never a stale base. gh reads at
+# most 100 files, and cut says the list may hide one.
+meta=$(gh pr view "$pr" --repo "$repo" --json headRefOid,files,changedFiles --jq \
+    '{head: .headRefOid, files: [.files[].path],
+      cut: (.changedFiles > (.files | length))}')
+head=$(printf '%s\n' "$meta" | jq -r .head)
 
 # gh pr checks exits non-zero when a check fails, and still prints them all, so
 # its status says nothing; only an array on stdout says the lookup worked. A PR
@@ -49,19 +64,29 @@ printf '%s\n' "$checks" | jq -e 'type == "array"' > /dev/null 2>&1 || {
 # opened from its own main, so only a push counts; a run cancelled whole says
 # nothing about its jobs and is passed over. A job counts as failed by the same
 # reading as the PR's checks below, so a lane that times out on both is shared.
+# A lane absent from the failures may also have been skipped or never run, which
+# says nothing about whether main passes, so stale_base below reads the
+# successes from main_jobs itself. A main run older than the PR's says nothing
+# about data published since (a new advisory fails every PR before main runs
+# again), so its start time is kept too.
+main_at=
 if ! main_run=$(gh run list --repo "$repo" --workflow check.yml --branch main \
-    --event push --status completed --limit 10 --json databaseId,conclusion \
-    --jq '[.[] | select(.conclusion != "cancelled")][0].databaseId // empty'); then
-    main_failed=null
+    --event push --status completed --limit 10 \
+    --json databaseId,conclusion,createdAt \
+    --jq '[.[] | select(.conclusion != "cancelled")][0] // empty
+      | "\(.databaseId) \(.createdAt)"'); then
+    main_jobs=null
 elif [ -z "$main_run" ]; then
-    main_failed='[]'
+    main_jobs='[]'
 else
-    main_failed=$(gh run view "$main_run" --repo "$repo" --json jobs \
-        --jq '[.jobs[] | select(.conclusion
-            | IN("failure", "cancelled", "timed_out", "startup_failure"))
-            | .name]') \
-        || main_failed=null
+    main_at=${main_run#* }
+    main_run=${main_run% *}
+    main_jobs=$(gh run view "$main_run" --repo "$repo" --json jobs \
+        --jq '[.jobs[] | {name, conclusion}]') || main_jobs=null
 fi
+main_failed=$(printf '%s\n' "$main_jobs" | jq -c 'if . == null then null
+    else [.[] | select(.conclusion
+      | IN("failure", "cancelled", "timed_out", "startup_failure")) | .name] end')
 
 # Which checks failed, by the same reading as checks in pr-sweep.sh: failed,
 # cancelled or timed out counts, a run held for approval does not (gh files it
@@ -81,7 +106,10 @@ defs='def failed: (.bucket == "fail" or .bucket == "cancel"
 failing=$(printf '%s\n' "$checks" | jq -r "$defs"'.[] | select(failed)
     | job as $id | [.name, $id.run, $id.job] | @tsv' \
     | while IFS="$(printf '\t')" read -r name run job; do
-        sha=$(gh run view "$run" --repo "$repo" --json headSha --jq .headSha || true)
+        ran=$(gh run view "$run" --repo "$repo" --json headSha,createdAt \
+            --jq '.headSha + " " + .createdAt' || true)
+        sha=${ran% *}
+        ran_at=${ran#* }
 
         # Each log line is job, step and a timestamped message; keep the
         # message. A log that cannot be read leaves gates, errors and excerpt
@@ -94,6 +122,7 @@ failing=$(printf '%s\n' "$checks" | jq -r "$defs"'.[] | select(failed)
         log=$(printf '%s\n' "$raw" | cut -f3-)
         printf '%s\n' "$log" | jq -Rs --arg name "$name" --arg run "$run" \
             --arg job "$job" --arg sha "$sha" --arg head "$head" \
+            --arg ran_at "$ran_at" --arg main_at "$main_at" \
             --argjson main "$main_failed" --argjson read "$read_log" '
           # The timestamp goes, and with it the byte order mark the first
           # line of a job log starts with.
@@ -116,14 +145,42 @@ failing=$(printf '%s\n' "$checks" | jq -r "$defs"'.[] | select(failed)
              excerpt: (if $at == null then $lines[-30:]
                else $lines[[$at - 30, 0] | max:$at] end
                | map(select(length > 0)) | join("\n")),
-             on_main: (if $main == null then null else $name | IN($main[]) end)}
+             on_main: (if $main == null then null else $name | IN($main[]) end),
+             before_main: ($ran_at != "" and $main_at != ""
+               and $ran_at < $main_at)}
           | if $read then . else .gates = null | .errors = null | .excerpt = null end'
     done | jq -s .)
 
+# The check job only collects the lanes, so it says nothing of its own. A
+# failing check outside Actions (cubic) has no gates to read, so a rebase is not
+# known to clear it, and it rules a stale base out. Each gate that reads data
+# from outside the tree maps to the files whose change would make the failure
+# the PR's own; a gate added here needs nothing else.
 printf '%s\n' "$checks" | jq --argjson failing "$failing" --arg head "$head" \
-    --argjson pr "$pr" "$defs"'{
+    --argjson pr "$pr" --argjson meta "$meta" --argjson jobs "$main_jobs" \
+    "$defs"'
+  # The gate itself, the CI that installs it and the cargo config it reads
+  # count as well as the lockfile: a PR that changes how the audit runs owns
+  # its failure even when main passes.
+  {"cargo-audit": "(^|/)Cargo\\.(lock|toml)$|^\\.cargo/|^scripts/test\\.sh$|^\\.github/"}
+    as $outside |
+  [($jobs // [])[] | select(.conclusion == "success") | .name] as $passed |
+  [$failing[] | select(.name != "check")] as $lanes |
+  ([$lanes[] | (.gates // [])[]] | unique) as $gates |
+  [.[] | select(failed and ([job] == []))] as $apps |
+{
   pr: $pr, head: $head,
   pending: [.[] | select(.bucket == "pending" and (failed | not)) | .name],
   held: [.[] | select(.state == "ACTION_REQUIRED") | .name],
-  failing: ($failing + [.[] | select(failed and ([job] == [])) | {name, link}])
+  failing: ([$failing[] | del(.before_main)] + [$apps[] | {name, link}]),
+  stale_base: (($meta.cut | not) and ($lanes | length > 0)
+    and ($apps | length == 0)
+    and ([.[] | select((.bucket == "pending" and (failed | not))
+        or .state == "ACTION_REQUIRED")]
+      | length == 0)
+    and all($lanes[]; .current == true and .before_main
+      and (.name | IN($passed[]))
+      and (.gates | length > 0) and all(.gates[]; $outside[.] != null))
+    and all($gates[]; $outside[.] as $re
+      | all($meta.files[]; test($re) | not)))
 }'

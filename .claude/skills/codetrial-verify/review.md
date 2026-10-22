@@ -164,30 +164,35 @@ walkthrough (`CONTRIBUTING.md`, Pull requests): each posted finding is one
 inline comment in plain words, under the GitHub rule in
 [codetrial-conventions](../codetrial-conventions/SKILL.md).
 
-Post through gh-review when it is installed. Otherwise post the approved
-findings as one review, so the author gets one notification. Refetch
-`headRefOid` first and reread any line that moved, then check every anchor
-against the diff, which moves a finding on a line outside every hunk into the
-body instead of letting it fail the whole review:
+When the review ran through gh-review, post through it. A review done here
+posts as one review, so the author gets one notification. Check every anchor
+against the diff first, which moves a finding on a line outside every hunk
+into the body instead of letting it fail the whole review, and show the user
+the checked text, moved findings included, with the PR's `updatedAt`:
 
 ```sh
 .claude/skills/codetrial-verify/review-anchors.sh "$pr" "$SCRATCH/review-$pr.json" \
   > "$SCRATCH/review-$pr.checked.json"
+updated_at=$(gh pr view "$pr" --repo sysprog21/codetrial --json updatedAt --jq .updatedAt)
 ```
 
-Post the checked file. The review is `event:
-"COMMENT"` on `commit_id` (that head), with a one-sentence `body`, which GitHub
-requires, and one entry in `comments` per finding, each with `path`, `line` (the
-line in the file), `side` (`RIGHT` for an added or unchanged line, `LEFT` for a
-deleted one) and its own `body`:
+The review is `event: "COMMENT"` on `commit_id` (the head the findings were
+read at), with a one-sentence `body`, which GitHub requires, and one entry in
+`comments` per finding, each with `path`, `line` (the line in the file), `side`
+(`RIGHT` for an added or unchanged line, `LEFT` for a deleted one) and its own
+`body`. A finding that sits in a moved line reads differently in the body, so
+reword one that leaned on "this line" before showing it. Once the user
+confirms, post the checked file:
 
 ```sh
-gh api -X POST "repos/sysprog21/codetrial/pulls/$pr/reviews" \
-  --input "$SCRATCH/review-$pr.checked.json"
+.claude/skills/codetrial-verify/post-review.sh "$pr" \
+  "$SCRATCH/review-$pr.checked.json" "$updated_at"
 ```
 
-A line outside every hunk is refused with 422, which the anchor check above
-prevents.
+It posts nothing and exits 3 when the head moved, the PR was updated since
+`$updated_at`, or a comment would still land outside the diff. A moved head
+means the findings are read again at the new one; an update at the same head
+means the new comment or edit is read first, since it may answer a finding.
 When posting is not allowed in this run, leave the payload at
 `$SCRATCH/review-$pr.json` and say so.
 

@@ -39,6 +39,8 @@ case "$*" in
   *collaborators*) printf 'maint\\nviewer\\n' ;;
   *actions/runs*) cat "$FAKE_RUNS" ;;
   "api graphql --paginate"*) cat "$FAKE_PAGE" ;;
+  "run list "*) [ -n "${FAKE_MAIN_FAILED:-}" ] || exit 1; echo 500 ;;
+  "run view 500 "*) printf '%s\\n' "$FAKE_MAIN_FAILED" ;;
   "api graphql"*) cat "$FAKE_AGAIN" ;;
   "pr view 404 "*) echo "no such pull request" >&2; exit 1 ;;
   "pr view"*) printf '{"pr":%s,"state":"MERGED","merge":"m%s"}\\n' "$3" "$3" ;;
@@ -223,6 +225,12 @@ class SweepCase(unittest.TestCase):
             "FAKE_AGAIN": json.dumps(list(again)),
         }
         args = ["sysprog21/codetrial"]
+        # ci-failure.sh as the PR sweep runs it: a PR in $STALE is a stale base.
+        files["PR_SWEEP_CI"] = (
+            'case " $STALE " in *" $1 "*) s=true ;; *) s=false ;; esac\n'
+            'printf \'{"pr":%s,"head":"%s","stale_base":%s}\\n\' '
+            '"$1" "${STALE_HEAD:-head$1}" "$s"\n'
+        )
         if previous is not None:
             files["PREVIOUS"] = json.dumps(previous)
             args += ["7", "$PREVIOUS"]
@@ -308,6 +316,39 @@ class IssueSweepTests(SweepCase):
         self.assertIsNone(claim["checked_at"])
         self.assertIsNone(claim["stale"])
 
+    def test_an_open_pr_that_closes_the_issue_is_named_on_its_entry(self):
+        here = {"nameWithOwner": "sysprog21/codetrial"}
+        fork = {"nameWithOwner": "someone/codetrial"}
+        closing = {
+            "nodes": [
+                {"number": 7, "repository": here},
+                {"number": 9, "repository": fork},
+            ]
+        }
+        swept = self.run_issues(
+            issue(1, "Body" + FILLER, closedByPullRequestsReferences=closing),
+            issue(2, "Body" + FILLER, comments=listed(comment("maint", 10))),
+            issue(
+                3,
+                "Body" + FILLER,
+                comments=listed(comment("maint", 10)),
+                closedByPullRequestsReferences=closing,
+            ),
+        )
+        self.assertEqual(
+            {e["issue"]: e["closing_prs"] for e in swept["unanswered"]}, {1: [7]}
+        )
+        self.assertEqual(
+            {e["issue"]: e["closing_prs"] for e in swept["waiting"]}, {2: [], 3: [7]}
+        )
+
+    def test_more_closing_prs_than_read_marks_the_issue_truncated(self):
+        closing = {"totalCount": 11, "nodes": []}
+        swept = self.run_issues(
+            issue(1, "Body" + FILLER, closedByPullRequestsReferences=closing)
+        )
+        self.assertEqual(swept["truncated"], [1])
+
     def test_more_body_edits_than_read_marks_the_issue_truncated(self):
         edits = {"totalCount": 21, "nodes": []}
         swept = self.run_issues(issue(1, "Body" + FILLER, userContentEdits=edits))
@@ -363,6 +404,188 @@ class PrSweepTests(SweepCase):
         for grade, node in cases.items():
             with self.subTest(grade=grade):
                 self.assertEqual(grades[node["number"]], grade)
+
+    def test_waits_on_names_whose_move_it_is_and_review_queues_the_maintainers(self):
+        cases = {
+            1: (pull(1, commits=GREEN), "maintainer"),
+            2: (pull(2, commits=checked(("gates (rust)", "FAILURE"))), "author"),
+            3: (pull(3, commits=checked(("gates (rust)", None))), "ci"),
+            4: (
+                pull(
+                    4,
+                    commits=checked(
+                        ("gates (rust)", "SUCCESS"), ("check", "ACTION_REQUIRED")
+                    ),
+                ),
+                "approval",
+            ),
+            # The author pushed past the changes request: a re-review is owed.
+            5: (
+                pull(5, commits=GREEN, reviewDecision="CHANGES_REQUESTED"),
+                "maintainer",
+            ),
+            6: (pull(6, commits=GREEN, reviewThreads=listed(thread())), "author"),
+            7: (pull(7, commits=GREEN, isDraft=True), "author"),
+            8: (pull(8, commits=GREEN, mergeable="CONFLICTING"), "author"),
+            9: (pull(9, commits=checked(("check", "SUCCESS"))), "author"),
+            12: (pull(12, commits=GREEN, author={"login": "viewer"}), "maintainer"),
+            10: (pull(10, commits=GREEN, mergeable="UNKNOWN"), "ci"),
+            # A held run outranks the conflict: nothing runs until approved.
+            11: (
+                pull(
+                    11,
+                    mergeable="CONFLICTING",
+                    commits=checked(("check", "ACTION_REQUIRED")),
+                ),
+                "approval",
+            ),
+        }
+        swept = self.run_pulls(
+            *(node for node, _ in cases.values()),
+            env={"PR_SWEEP_RETRY_DELAY": "0"},
+        )
+        self.assertEqual(
+            {entry["pr"]: entry["waits_on"] for entry in swept["status"]},
+            {number: who for number, (_, who) in cases.items()},
+        )
+        # The viewer's own PR waits on nobody else's review.
+        self.assertEqual(sorted(swept["review"]), [1, 5])
+
+    def test_a_stale_base_is_asked_to_rebase_under_the_conflicting_limits(self):
+        failing = checked(("gates (portable)", "FAILURE"), ("check", "FAILURE"))
+        swept = self.run_pulls(
+            pull(1, commits=failing),
+            # ci-failure.sh says its failure is its own.
+            pull(2, commits=failing),
+            pull(
+                3, commits=failing, comments=listed(request("C3", 1, "Rebase, please."))
+            ),
+            pull(4, commits=failing, baseRefName="feature"),
+            pull(5, commits=failing, isDraft=True),
+            pull(6, commits=failing, author={"login": "viewer"}),
+            pull(7, commits=failing, comments={"totalCount": 101, "nodes": []}),
+            # Already listed for its conflict, so asked once.
+            pull(8, commits=failing, mergeable="CONFLICTING"),
+            # Green: nothing to rebase for.
+            pull(9, commits=GREEN),
+            env={"STALE": "1 3 4 5 6 7 8 9"},
+        )
+        self.assertEqual(
+            sorted((entry["pr"], entry["reason"]) for entry in swept["rebase"]),
+            [(1, "stale_base"), (8, "conflicts")],
+        )
+
+    def test_a_job_main_also_fails_stays_the_authors_and_says_so(self):
+        # The lane runs several gates, so a shared name is not a shared cause.
+        swept = self.run_pulls(
+            pull(1, commits=checked(("gates (rust)", "FAILURE"), ("check", "FAILURE"))),
+            env={"FAKE_MAIN_FAILED": json.dumps(["gates (rust)", "check"])},
+        )
+        [entry] = swept["status"]
+        self.assertEqual(entry["waits_on"], "author")
+        self.assertIn(
+            "failing: check, gates (rust); main also fails check, gates (rust)",
+            entry["why"],
+        )
+        self.assertEqual(swept["review"], [])
+
+    def test_a_failed_diagnosis_never_asks_for_a_rebase(self):
+        failing = checked(("gates (portable)", "FAILURE"))
+        cases = {
+            # Says stale, then exits non-zero: not trusted.
+            "exit": 'echo \'{"pr":1,"head":"head1","stale_base":true}\'; exit 1\n',
+            # Answers for another PR.
+            "other pr": 'echo \'{"pr":2,"head":"head1","stale_base":true}\'\n',
+            # Diagnosed a head pushed after the sweep read this one.
+            "other head": 'echo \'{"pr":1,"head":"later","stale_base":true}\'\n',
+        }
+        for name, stub in cases.items():
+            with self.subTest(name):
+                page = {
+                    "repository": {
+                        "defaultBranchRef": {"name": "main"},
+                        "pullRequests": {
+                            "pageInfo": {"hasNextPage": False},
+                            "nodes": [pull(1, commits=failing)],
+                        },
+                    }
+                }
+                files = {
+                    "FAKE_PAGE": json.dumps({"data": page}),
+                    "FAKE_RUNS": "",
+                    "FAKE_AGAIN": "[]",
+                    "PR_SWEEP_CI": stub,
+                }
+                result = run_fake(PR_SWEEP, ["sysprog21/codetrial"], FAKE_GH, files)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["rebase"], [])
+
+    def test_moved_names_a_change_of_whose_move_it_is(self):
+        node = pull(1, commits=GREEN)
+        first = self.run_pulls(node)
+        earlier = first | {
+            "status": [entry | {"waits_on": "author"} for entry in first["status"]]
+        }
+        swept = self.run_pulls(node, previous=earlier)
+        self.assertEqual(
+            swept["moved"],
+            [{"pr": 1, "changed": {"waits_on": ["author", "maintainer"]}}],
+        )
+
+    def test_refs_only_lists_issues_the_merge_leaves_open(self):
+        asker = request("C1", 1, "Make the last line `Closes #7`.")
+        outsider = comment("student", 1, "Closes #8 would be better.") | {
+            "id": "C2",
+            "isMinimized": False,
+        }
+        swept = self.run_pulls(
+            pull(1, commits=GREEN, body="Shows the camera.\n\nRefs #141"),
+            # It closes #5, so its Refs #6 stands (CONTRIBUTING.md).
+            pull(
+                2,
+                commits=GREEN,
+                body="Refs #6",
+                closingIssuesReferences=listed({"number": 5}),
+            ),
+            pull(3, commits=GREEN, body="Refs: #7", comments=listed(asker)),
+            pull(4, commits=GREEN, body="Refs #8", comments=listed(outsider)),
+            # Asked about #70, which is not #7.
+            pull(
+                5,
+                commits=GREEN,
+                body="Refs #7",
+                comments=listed(request("C3", 1, "Closes #70")),
+            ),
+            pull(6, commits=GREEN, body=None),
+            pull(
+                7,
+                commits=GREEN,
+                body="Refs sysprog21/codetrial#9\n"
+                "Refs https://github.com/sysprog21/codetrial/issues/10",
+                comments=listed(
+                    request(
+                        "C4",
+                        1,
+                        "Fixes https://github.com/sysprog21/codetrial/issues/10",
+                    )
+                ),
+            ),
+            pull(8, commits=GREEN, body="Refs #11, #12 and #13"),
+        )
+        self.assertEqual(
+            swept["refs_only"],
+            [
+                {"pr": 1, "issue": 141, "asked": False},
+                {"pr": 3, "issue": 7, "asked": True},
+                {"pr": 4, "issue": 8, "asked": False},
+                {"pr": 5, "issue": 7, "asked": False},
+                {"pr": 7, "issue": 9, "asked": False},
+                {"pr": 7, "issue": 10, "asked": True},
+                {"pr": 8, "issue": 11, "asked": False},
+                {"pr": 8, "issue": 12, "asked": False},
+                {"pr": 8, "issue": 13, "asked": False},
+            ],
+        )
 
     def test_human_thread_lowers_the_grade_and_a_bot_thread_only_to_medium(self):
         grades = self.grades(
@@ -499,6 +722,7 @@ class PrSweepTests(SweepCase):
                     "changed": {
                         "mergeable": ["MERGEABLE", "CONFLICTING"],
                         "grade": ["high", "medium"],
+                        "waits_on": ["maintainer", "author"],
                     },
                 }
             ],
@@ -522,7 +746,9 @@ class PrSweepTests(SweepCase):
         first = self.run_pulls(pull(1, commits=waiting, **decided))
         swept = self.run_pulls(pull(1, commits=GREEN, **decided), previous=first)
         self.assertEqual([entry["pr"] for entry in swept["moved"]], [1])
-        self.assertEqual(list(swept["moved"][0]["changed"]), ["checks"])
+        # The grade holds; the move passes from CI to a re-review.
+        self.assertEqual(list(swept["moved"][0]["changed"]), ["waits_on", "checks"])
+        self.assertEqual(swept["moved"][0]["changed"]["waits_on"], ["ci", "maintainer"])
 
     def test_unknown_mergeability_is_asked_again_for_those_prs_only(self):
         swept = self.run_pulls(
@@ -608,7 +834,10 @@ class PrSweepTests(SweepCase):
 
     def test_conflicting_pr_without_a_request_is_asked_to_rebase(self):
         swept = self.run_pulls(pull(1, mergeable="CONFLICTING"))
-        self.assertEqual(swept["rebase"], [{"pr": 1, "author": "contributor"}])
+        self.assertEqual(
+            swept["rebase"],
+            [{"pr": 1, "author": "contributor", "reason": "conflicts"}],
+        )
 
     def test_current_fixed_request_is_not_repeated_or_hidden(self):
         swept = self.run_pulls(
@@ -724,11 +953,18 @@ VERIFY = SKILLS / "codetrial-verify"
 # main also fails, and a check from an app outside GitHub Actions.
 FAKE_GH_CI = """#!/bin/sh
 case "$*" in
-  "pr view 5 "*) echo h1 ;;
+  "pr view 5 "*)
+    while [ "$1" != --jq ]; do shift; done
+    pr=${FAKE_PR:-}
+    [ -n "$pr" ] || pr='{"headRefOid":"h1","files":[],"changedFiles":0}'
+    printf '%s\\n' "$pr" | jq -c "$2" ;;
   "pr checks 5 "*) cat "$FAKE_CHECKS"; exit 1 ;;
-  "run list "*"--event push "*) echo 500 ;;
-  "run view 500 "*) echo '["check"]' ;;
-  "run view 7 --repo sysprog21/codetrial --json headSha"*) echo h1 ;;
+  "run list "*"--event push "*) echo "500 ${FAKE_MAIN_AT:-2026-10-22T05:00:00Z}" ;;
+  "run view 500 "*)
+    if [ -n "${FAKE_MAIN:-}" ]; then printf '%s\\n' "$FAKE_MAIN"
+    else printf '%s\\n' '[{"name":"check","conclusion":"failure"},{"name":"gates (portable)","conclusion":"success"}]'
+    fi ;;
+  "run view 7 --repo sysprog21/codetrial --json headSha"*) echo "h1 2026-10-22T01:00:00Z" ;;
   "run view 7 "*"--job 70 "*) cat "$FAKE_LOG" ;;
   "run view 7 "*"--job 73 "*) printf 'gates (browser)\\tlobby\\t2026-10-22T00:00:00.0Z SyntaxError: Unexpected token\\n' ;;
   "run view 7 "*"--job 74 "*) : ;;
@@ -868,6 +1104,94 @@ class VerifyScriptTests(unittest.TestCase):
         self.assertIn("error: 3 vulnerabilities found!", lane["errors"])
         self.assertEqual((collector["name"], collector["on_main"]), ("check", True))
         self.assertEqual(app, {"name": "cubic", "link": "https://www.cubic.dev/pr/5"})
+        # indent failed beside cargo-audit, so a rebase would not clear it.
+        self.assertIs(found["stale_base"], False)
+
+    def test_an_audit_failure_main_has_fixed_is_a_stale_base(self):
+        checks = [
+            {
+                "name": name,
+                "state": "FAILURE",
+                "bucket": "fail",
+                "link": f"https://github.com/sysprog21/codetrial/actions/runs/7/job/{job}",
+            }
+            for name, job in (("gates (portable)", 70), ("check", 71))
+        ]
+
+        def pr_with(*paths, changed=None):
+            return json.dumps(
+                {
+                    "headRefOid": "h1",
+                    "files": [{"path": path} for path in paths],
+                    "changedFiles": len(paths) if changed is None else changed,
+                }
+            )
+
+        cubic = {
+            "name": "cubic",
+            "state": "FAILURE",
+            "bucket": "fail",
+            "link": "https://www.cubic.dev/pr/5",
+        }
+        # main skipped the lane: absent from its failures, yet not a pass.
+        skipped = json.dumps([{"name": "gates (portable)", "conclusion": "skipped"}])
+        log = CI_LOG.replace("cargo-audit indent", "cargo-audit")
+        cases = {
+            "stale": (checks, {}, True),
+            "touches Cargo": (checks, {"FAKE_PR": pr_with("Cargo.lock")}, False),
+            "changes the gate": (
+                checks,
+                {"FAKE_PR": pr_with("scripts/test.sh")},
+                False,
+            ),
+            "changes CI": (
+                checks,
+                {"FAKE_PR": pr_with(".github/workflows/check.yml")},
+                False,
+            ),
+            # gh read 100 of 101 files, so the lockfile may be the one cut.
+            "more files than read": (
+                checks,
+                {
+                    "FAKE_PR": pr_with(
+                        *(f"web/f{n}.js" for n in range(100)), changed=101
+                    )
+                },
+                False,
+            ),
+            "main skipped the lane": (checks, {"FAKE_MAIN": skipped}, False),
+            "a check outside Actions fails": (checks + [cubic], {}, False),
+            # main last ran before the PR did, so a new advisory fails both.
+            "main ran first": (
+                checks,
+                {"FAKE_MAIN_AT": "2026-10-21T00:00:00Z"},
+                False,
+            ),
+            "a lane is still pending": (
+                checks
+                + [
+                    {
+                        "name": "gates (rust)",
+                        "state": "IN_PROGRESS",
+                        "bucket": "pending",
+                        "link": "",
+                    }
+                ],
+                {},
+                False,
+            ),
+        }
+        for name, (listed_checks, env, stale) in cases.items():
+            with self.subTest(name):
+                result = run_fake(
+                    VERIFY / "ci-failure.sh",
+                    [5],
+                    FAKE_GH_CI,
+                    {"FAKE_CHECKS": json.dumps(listed_checks), "FAKE_LOG": log},
+                    env=env,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIs(json.loads(result.stdout)["stale_base"], stale)
 
     def test_a_checks_lookup_that_fails_is_not_read_as_a_clean_pr(self):
         # The fake exits 1 with nothing on stdout, as gh does when the API
@@ -885,6 +1209,7 @@ class VerifyScriptTests(unittest.TestCase):
         for script, args in (
             ("ci-failure.sh", ["abc"]),
             ("review-anchors.sh", ["abc", "payload.json"]),
+            ("post-review.sh", ["abc", "payload.json", "2026-10-22T00:00:00Z"]),
         ):
             with self.subTest(script=script):
                 # The fake gh fails every call, so only the script's own
@@ -937,6 +1262,67 @@ class VerifyScriptTests(unittest.TestCase):
             checked["body"],
             "Notes.\n\nweb/a.js:40: outside every hunk\n\nweb/a.js:11: starts outside",
         )
+
+
+# The PR as post-review.sh rereads it before posting, and the post itself.
+FAKE_GH_POST = """#!/bin/sh
+case "$*" in
+  "pr view 5 "*) echo "${FAKE_HEAD:-h1} ${FAKE_UPDATED:-T1}" ;;
+  "pr diff 5 "*) cat "$FAKE_DIFF" ;;
+  # Only the checked text on stdin: posting the file again would let a
+  # rewrite after the checks through.
+  "api -X POST repos/sysprog21/codetrial/pulls/5/reviews --input - "*)
+    jq -r '"https://github.com/sysprog21/codetrial/pull/5#pullrequestreview-" + .commit_id' ;;
+  *) echo "unexpected gh call: $*" >&2; exit 1 ;;
+esac
+"""
+
+
+@unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+class PostReviewTests(unittest.TestCase):
+    def post(self, line=11, env=(), event="COMMENT"):
+        payload = {
+            "event": event,
+            "commit_id": "h1",
+            "body": "Notes.",
+            "comments": [
+                {"path": "web/a.js", "line": line, "side": "RIGHT", "body": "x"}
+            ],
+        }
+        return run_fake(
+            VERIFY / "post-review.sh",
+            [5, "$FAKE_PAYLOAD", "T1"],
+            FAKE_GH_POST,
+            {"FAKE_DIFF": DIFF, "FAKE_PAYLOAD": json.dumps(payload)},
+            env=env,
+        )
+
+    def test_posts_when_the_pr_is_where_the_user_read_it(self):
+        result = self.post()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("pullrequestreview-h1", result.stdout)
+
+    def test_refuses_a_payload_without_an_event(self):
+        # GitHub would keep it as a pending review only its writer sees.
+        result = self.post(event=None)
+        self.assertEqual((result.returncode, result.stdout), (2, ""))
+        self.assertIn("names no event", result.stderr)
+
+    def test_refuses_without_posting_when_anything_moved(self):
+        cases = {
+            "head": ({"FAKE_HEAD": "h2"}, 11, "moved from h1 to h2"),
+            # Also what a second run meets after a post: the post itself
+            # moves updatedAt, so a rerun refuses instead of posting twice.
+            "updated": ({"FAKE_UPDATED": "T2"}, 11, "was updated at T2"),
+            "anchor": ({}, 40, "outside the diff"),
+        }
+        for name, (env, line, said) in cases.items():
+            with self.subTest(name):
+                result = self.post(line, env)
+                # The fake answers a post with the URL, so empty stdout means
+                # nothing was posted.
+                self.assertEqual((result.returncode, result.stdout), (3, ""))
+                self.assertIn(said, result.stderr)
 
 
 GOOD_TARGET = """\

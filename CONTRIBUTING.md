@@ -153,8 +153,11 @@ reuses its subject. An issue title names the symptom or the outcome instead:
 
 Issue and pull request bodies are read in a browser, so write each paragraph as
 one line. The 72-column wrap is for commit messages only. A pull request that
-finishes an issue ends with `Closes #N` alone on the last line; one that only
-touches it ends with `Refs #N`.
+finishes an issue ends with `Closes #N` alone on the last line. Avoid `Refs #N`:
+a reference that closes nothing is easy to add to every pull request and tells
+the reviewer little. Use it only beside a `Closes #N`, or in a body that already
+states the motivation and the implementation in full, so the reference adds
+context rather than standing in for it.
 
 A review thread carries a correction, a measurement, or nothing: no pasted
 agent walkthroughs, no severity tables, no re-summarizing a diff that GitHub

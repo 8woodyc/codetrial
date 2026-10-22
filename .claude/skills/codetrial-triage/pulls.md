@@ -37,7 +37,7 @@ Asking to sweep the PRs ("sweep the PRs", "run the PR sweep") authorizes three
 actions, because none carries text drafted during the sweep, each is cheap to
 undo or harmless, and holding them for a confirmation only stalls a
 contributor. A bare "continue" after an issue report is not that request: it
-carries the work on, and the three actions go on the confirmed list instead.
+carries the work on, and these actions go on the confirmed list instead.
 
 - Approving a run in `approve` whose `first_time` is true and whose
   `touches_workflows` and `files_truncated` are false. A run waits there because
@@ -67,14 +67,17 @@ carries the work on, and the three actions go on the confirmed list instead.
 - Resolving a thread in `outdated`. Outdated means the commented lines changed,
   not that the concern was met, so report the resolved threads by PR and path;
   a reviewer who disagrees clicks unresolve.
-- Requesting a rebase on a PR in `rebase`, then hiding every entry in `hide`
-  as outdated. The text is fixed in [rebase.md](rebase.md), so the maintainer
-  approved it once by writing it, and `hide` holds only requests in a wording
-  the maintainers have used for the same thing (listed in `pr-sweep.sh`), with
-  no inline comments; a hidden comment stays one click from readable. "Ask the
-  conflicting PRs to rebase" asks for this action alone, as "Approve the held
-  runs" does for approvals; report the conflicting PRs it skips (the account's
-  own, and those holding a current request) so the count matches the banner.
+- Requesting a rebase on each PR in `rebase`, then hiding every entry in
+  `hide` as outdated. The text is fixed in [rebase.md](rebase.md), so the
+  maintainer approved it once by writing it, and `hide` holds only requests in a
+  wording the maintainers have used for the same thing (listed in
+  `pr-sweep.sh`), with no inline comments; a hidden comment stays one click from
+  readable. Each entry names its `reason`: `conflicts`, or `stale_base` for a PR
+  that merges but fails only where a rebase is the whole answer, as #334 did
+  (the definition is `stale_base` in `ci-failure.sh`). "Ask the conflicting PRs
+  to rebase" asks for the `conflicts` entries alone, as "Approve the held runs"
+  does for approvals; report the conflicting PRs it skips (the account's own,
+  and those holding a current request) so the count matches the banner.
 
 ```sh
 gh api -X POST "repos/$repo/actions/runs/$run/approve"
@@ -153,9 +156,10 @@ SKILL.md does not close for age.
 
 ## Conflicting branches
 
-`rebase` holds the non-draft PRs against the default branch that GitHub reports
-as conflicting (the "This branch has conflicts that must be resolved" banner),
-not opened by the account running the sweep, whose own branches are the
+`rebase` holds, with `reason: "conflicts"`, the non-draft PRs against the
+default branch that GitHub reports as conflicting (the "This branch has
+conflicts that must be resolved" banner), not opened by the account running the
+sweep, whose own branches are the
 maintainer's to rebase. A draft is still being written and is left alone, and a
 PR stacked on another branch is left to its reviewer, since the fixed text
 names `main`; for the same reason `rebase` stays empty on a repository whose
@@ -244,14 +248,11 @@ only; read it from the PR's checks tab.
 A `cargo-audit` advisory that `main` also has is the maintainer's, and the PR
 must not carry a lockfile bump to clear it: #304 was told it "needs nothing from
 you", and #305 to drop its unrelated `Cargo.lock` change. Once `main` lands the
-fix (#331 moved to zip 9), a PR still failing on that advisory has a stale base.
-When it conflicts it is in `rebase` unless its current head already carries a
-request. When it still merges, `rebase` skips it, so read the PR's reviews and
-comments first: a request on the current head in any wording already counts, as
-[Conflicting branches](#conflicting-branches) says, and posting the fixed text
-beside #326's own request sent a second notification for nothing. Only without
-one does the fixed request go on the confirmed list, since the sweep requests a
-rebase without asking only on a conflicting branch.
+fix (#331 moved to zip 9), a PR still failing on that advisory has a stale base,
+and the sweep puts it in `rebase` under the same limits as a conflicting one,
+so a request in any wording on its head, such as #326's own, keeps it out. A
+PR that touches a Cargo file is never a stale base: read whether its lockfile
+change brought the advisory before asking for anything.
 
 A clean merge does not establish readiness. For a dependent draft, check whether
 its prerequisite merged and whether the author still needs to rebase, remove
@@ -303,19 +304,63 @@ on 9dc74fe), so green there proves less; say so and ask for a rebase or a
 rerun. Two PRs that rewrite the same harness function (#376 and #396 on
 `json_graph`) conflict as soon as one merges: name the order.
 
+Each `status` entry carries `waits_on`, read off the same rows as the grade:
+`approval` for a held run, `ci` for a pending check or a mergeability GitHub
+has not computed, `author` for a conflict, a changes request on the head, an
+open thread, a failing check or no gates lane, and `maintainer` otherwise,
+which is a first review, a re-review after a push, or a merge. `review` lists
+those last PRs, not the account's own, smallest first. A failing job whose name
+`main`'s latest run also fails says so in `why`; the lane runs several gates,
+so only `ci-failure.sh` can tell a failure `main` shares, which is the
+maintainer's, from the PR's own in the same lane.
+
 Save each sweep and pass it back as the third argument the next time. `moved`
-then lists the PRs whose head, mergeability, decision, grade, checks or threads
-changed, each field as `[before, after]`, plus `{pr, new: true}` for a PR
+then lists the PRs whose head, mergeability, decision, grade, `waits_on`,
+checks or threads changed, each field as `[before, after]`, plus `{pr, new: true}` for a PR
 opened since. `gone` says which left the open list, merged or closed and at
 which commit, or `UNKNOWN` when that lookup failed. A repeated request then
 costs one call and reports only what moved. A PR that moved to `CONFLICTING`
 right after a merge is one that shared its files (#373 and #396 after #376);
 `rebase` lists it once no current request stands. When `moved` and `gone` are
-empty, say that nothing changed, then say who each PR waits on from its `why`,
-not its grade alone: "held for approval" waits on a maintainer to approve the
-run, "pending" on CI, "changes requested before the last push, or hidden" on a
-re-review, a `high` PR with an empty `why` on a maintainer to review or merge
-it, and any other reason on its author.
+empty, say that nothing changed, then say who each PR waits on from its
+`waits_on`, with the `why` that put it there.
+
+## Closing references
+
+`refs_only` lists each PR that closes no issue and names one with `Refs #N`, so
+its merge closes nothing. CONTRIBUTING.md asks PRs to avoid `Refs`: it stands
+only beside a `Closes #N`, which is why a PR that closes something is left out
+here, or in a body that states the motivation and the implementation in full,
+as #110 does for #257 and #362 for its parent #306. Otherwise, when the PR
+delivers the issue, ask its author to end the body with `Closes #N` (SKILL.md,
+"Superseded by an open pull request"); when it does not, ask for the motivation
+and the implementation in the body, or for the `Refs` line to go. `asked` true
+means a maintainer already asked for `Closes` on that PR, so the next move is
+the author's and nothing is posted again. Either comment needs a judgement of
+the PR, so it goes on the confirmed list.
+
+## Review the queue
+
+`review` is the queue for "review what is waiting on me". Each PR in it gets the
+whole of [review.md](../codetrial-verify/review.md), and they are independent,
+so run one read-only agent per PR in parallel rather than reading them in
+turn. Each agent gets the PR number, its head, the issue it closes, the
+scratch directory, the files it may write there (`pr-$pr-*`), and four rules:
+read-only, no posting, cite rather than repeat a finding already in a thread,
+and return the checklist, the findings by level with `file:line` at the head,
+the commit series, and what was not checked. Name what is particular to each PR in its prompt: the docs/
+owner it likely touches, a sibling PR on the same code, an issue that will
+conflict with it. Verify each finding the report leans on in the code before
+drafting it; an agent's summary is a lead, not evidence.
+
+Merge the reports into one local summary, then draft one review per PR under
+review.md's step 4. Leave out of the drafts what is the maintainer's decision
+rather than the author's work, such as a behavior dropped outside the accepted
+scope or which of two sibling PRs wins, and list those separately for the
+user. Record each PR's `updatedAt` from `prs` when showing the drafts, and post
+each confirmed review with `post-review.sh` in
+[codetrial-verify](../codetrial-verify/review.md#4-report), which refuses when
+the head or `updatedAt` moved.
 
 ## Apply the comments
 

@@ -19,7 +19,12 @@
 #             unless the latest verdict is an approval, it is the rebase
 #             request on a PR that still conflicts, or the activity was cut
 #             off at 100
-#   rebase    conflicting PRs with no current rebase request, to ask
+#   rebase    PRs to send the fixed rebase request, each with its reason:
+#             conflicts, or stale_base when its only failures are what
+#             ci-failure.sh calls a stale base. Neither is a draft, the
+#             viewer's, stacked on another branch, cut off at 100, or already
+#             holding a current request in any wording. PR_SWEEP_CI names the
+#             ci-failure.sh to ask, for tests
 #   hide      superseded rebase requests in a known wording, to hide
 #   hide_ask  other rebase requests, to confirm before hiding
 #             (all three: pulls.md, "Conflicting branches")
@@ -32,11 +37,21 @@
 #             the worst row of the table in grade() that the PR matches, from
 #             blocked, low, medium and medium-high down to high when none
 #             does; draft PRs are set aside. pulls.md, "Rank by size and
-#             merge confidence", says how to read it.
+#             merge confidence", says how to read it. waits_on names whose
+#             move it is (author, maintainer, ci, approval); why names a
+#             failing job main's latest run also fails, which ci-failure.sh
+#             settles
+#   review    the PRs, not the viewer's, whose waits_on is maintainer,
+#             smallest first: nothing recorded blocks them, so they wait on a
+#             first review, a re-review after a push, or a merge
+#   refs_only PRs that close no issue and name one with Refs, which
+#             CONTRIBUTING.md asks PRs to avoid; asked says a maintainer
+#             already asked for Closes #N on that PR
 #   superseded  runs awaiting approval on a head no open PR has any more,
 #             which need nothing
 #   moved     with previous.json, a saved earlier output: the PRs whose head,
-#             mergeability, decision, checks, threads or grade changed
+#             mergeability, decision, checks, threads, grade or waits_on
+#             changed
 #   gone      with previous.json: PRs no longer open, with merged or closed
 #   prs       number, title, updatedAt, head, author, closing issues and files
 #             of every open PR, for judging overlap that shares no issue and
@@ -94,8 +109,8 @@ query='query($owner: String!, $name: String!, $endCursor: String) {
     pullRequests(states: OPEN, first: 50, after: $endCursor) {
       pageInfo { hasNextPage endCursor }
       nodes {
-        number title isDraft authorAssociation headRefOid mergeable baseRefName
-        updatedAt headRefName headRepository { nameWithOwner }
+        number title body isDraft authorAssociation headRefOid mergeable
+        baseRefName updatedAt headRefName headRepository { nameWithOwner }
         additions deletions reviewDecision
         author { login }
         closingIssuesReferences(first: 100) { totalCount nodes { number } }
@@ -171,11 +186,26 @@ runs=$(gh api --paginate \
       head_repo: .head_repository.full_name, actor: .actor.login}')
 runs=$(printf '%s\n' "$runs" | jq -s .)
 
+# The jobs main's latest finished run failed, read once the way ci-failure.sh
+# reads them, so a PR's reason can say main fails the same job. Null when the
+# lookup fails, which names nothing.
+main_failed=null
+if main_run=$(gh run list --repo "$repo" --workflow check.yml --branch main \
+    --event push --status completed --limit 10 --json databaseId,conclusion \
+    --jq '[.[] | select(.conclusion != "cancelled")][0].databaseId // empty' \
+    2> /dev/null) && [ -n "$main_run" ]; then
+    main_failed=$(gh run view "$main_run" --repo "$repo" --json jobs \
+        --jq '[.jobs[] | select(.conclusion
+            | IN("failure", "cancelled", "timed_out", "startup_failure"))
+            | .name]' 2> /dev/null) || main_failed=null
+fi
+
 # What counts as a rebase request, when it is current, and which copies are
 # hidden or only offered for hiding: pulls.md, "Conflicting branches".
 out=$(printf '%s\n%s\n' "$prs" "$runs" | jq -s --argjson days "$days" --arg me "$me" \
     --arg base "$base" --rawfile text "$text" --argjson known "$known" \
-    --argjson pushers "$pushers" --argjson previous "$previous" '
+    --argjson pushers "$pushers" --argjson previous "$previous" \
+    --argjson main_failed "$main_failed" --arg repo "$repo" '
 def human: .author != null and .author.__typename != "Bot";
 def ts: if . == null then 0 else fromdateiso8601 end;
 def pushed: (.commits.nodes[0].commit // {checkSuites: {nodes: []}}) as $c
@@ -210,9 +240,12 @@ def asked_here: any(requests[]; .current);
 # it still conflicts: that request is the standing one, so no fixed one is kept
 # beside it and it is never offered for hiding.
 def hand_asked: asked_here and all(asks_rebase[]; .current | not);
-def needs_rebase: .mergeable == "CONFLICTING" and (.isDraft | not)
-  and .baseRefName == $base and $base == "main"
-  and nudgeable and whole
+# Who the fixed text may go to at all: it names main, so a stacked PR is left
+# to its reviewer; a draft is still being written; and a PR whose history was
+# cut may hold a request past what was read.
+def rebase_eligible: (.isDraft | not) and .baseRefName == $base
+  and $base == "main" and nudgeable and whole;
+def needs_rebase: .mergeable == "CONFLICTING" and rebase_eligible
   and (asked_here | not);
 # A test is anything under a tests/ directory, the browser check, or a file
 # named as one (test_x.py, x.test.js); a substring would also catch problem
@@ -275,53 +308,89 @@ def open_requests: .headRefOid as $head
   | group_by(.author.login) | map(max_by(.submittedAt | ts))
   | [.[] | select(.state == "CHANGES_REQUESTED" and .commit.oid == $head)
     | {rebase: (.body | opens_with_rebase)}];
-# One row per condition: when it holds, the reason it adds and the grade it
-# caps the PR at. The grade is the worst row that holds, so adding a problem
-# never raises it, and the reasons and the grade cannot disagree. A row with
-# no reason only strengthens one that already gave its own.
+# One row per condition: when it holds, the reason it adds, the grade it caps
+# the PR at, and whose move it makes it. The grade is the worst row that holds,
+# so adding a problem never raises it, and the reasons and the grade cannot
+# disagree. A row with no reason only strengthens one that already gave its
+# own. waits_on is read off the same rows, so a new row cannot leave a PR in
+# the review queue while grading it down: a held run outranks a pending check,
+# which outranks anything the author must fix, and a PR no row hands to anyone
+# waits on the maintainer. A failure main shares still reads as one for the author
+# here, since only ci-failure.sh can tell it apart.
 def grade($c; $t): .isDraft as $draft | open_requests as $r
   | (.reviewDecision == "CHANGES_REQUESTED") as $cr
   | ($r | length > 0) as $cr_head
   | any($r[]; .rebase | not) as $cr_work
   | ($t.human | length > 0) as $talk
-  | [{when: (.mergeable == "CONFLICTING"), why: "conflicts", grade: "medium"},
-     {when: $cr_work, why: "changes requested on this head", grade: "blocked"},
+  | [{when: (.mergeable == "CONFLICTING"), why: "conflicts", grade: "medium",
+      who: "author"},
+     {when: $cr_work, why: "changes requested on this head", grade: "blocked",
+      who: "author"},
      {when: ($cr_head and ($cr_work | not)),
-      why: "changes requested on this head (rebase)", grade: "medium"},
+      why: "changes requested on this head (rebase)", grade: "medium",
+      who: "author"},
      {when: ($cr and ($cr_head | not)),
       why: "changes requested before the last push, or hidden",
       grade: "medium-high"},
-     {when: $talk, grade: "low",
+     {when: $talk, grade: "low", who: "author",
       why: "\($t.human | length) open thread(s) by \($t.by | join(", "))"},
      {when: ($talk and (.mergeable == "CONFLICTING" or $cr_head)),
       why: null, grade: "blocked"},
-     {when: ($t.bot | length > 0), grade: "medium",
+     {when: ($t.bot | length > 0), grade: "medium", who: "author",
       why: "\($t.bot | length) open bot thread(s)"},
-     {when: ($c.failing | length > 0), grade: "low",
-      why: "failing: \($c.failing | join(", "))"},
-     {when: ($c.held | length > 0), why: "held for approval", grade: "medium"},
-     {when: ($c.pending | length > 0), grade: "medium-high",
+     # A job main also fails may still fail here for a reason of the PR,
+     # since a lane runs several gates, so the author keeps it and the reason
+     # says main shares the name, for ci-failure.sh to settle.
+     {when: ($c.failing | length > 0), grade: "low", who: "author",
+      why: ("failing: \($c.failing | join(", "))"
+        + ([$c.failing[] | select(IN(($main_failed // [])[]))]
+          | if length > 0 then "; main also fails \(join(", "))" else "" end))},
+     {when: ($c.held | length > 0), why: "held for approval", grade: "medium",
+      who: "approval"},
+     {when: ($c.pending | length > 0), grade: "medium-high", who: "ci",
       why: "pending: \($c.pending | join(", "))"},
-     {when: ($c.gates | not), why: "no gates lane ran", grade: "medium"},
+     {when: ($c.gates | not), why: "no gates lane ran", grade: "medium",
+      who: "author"},
      {when: $c.truncated, why: "more than 50 checks, not all read",
       grade: "medium"},
+     # GitHub is still computing it, which the sweep retries; nobody should
+     # review a PR that may not merge.
      {when: (.mergeable == "UNKNOWN"), why: "mergeability unknown",
-      grade: "medium"},
+      grade: "medium", who: "ci"},
      # Past 100 reviews or threads the newest may be the ones not read, so
      # nothing above can be trusted to have seen them.
      {when: (.reviews.totalCount > 100 or .reviewThreads.totalCount > 100),
       why: "more than 100 reviews or threads, not all read", grade: "medium"}]
   | map(select(.when)) as $hit
   | ["high", "medium-high", "medium", "low", "blocked"] as $ladder
+  | ["maintainer", "author", "ci", "approval"] as $turn
   | {grade: (if $draft then "draft"
       else $ladder[[$hit[].grade as $g | $ladder | index($g)] | max // 0] end),
-     why: [$hit[].why | strings]};
+     why: [$hit[].why | strings],
+     waits_on: (if $draft then "author"
+       else $turn[[$hit[].who | strings as $w | $turn | index($w)] | max // 0]
+       end)};
 def status: checks as $c | threads as $t
   | {pr: .number, title, author: .author.login, head: .headRefOid,
      size: size, files_truncated: (.files.totalCount > 100),
      mergeable, decision: .reviewDecision, checks: $c,
      threads: {human: ($t.human | length), bot: ($t.bot | length), by: $t.by},
      closes: [.closingIssuesReferences.nodes[].number]} + grade($c; $t);
+
+# An issue named as #N, owner/repo#N or its URL, the forms related.sh in
+# codetrial-contribute reads; issue_ref is the regex after a keyword, and
+# captures the number. The dot a repository name may hold is escaped.
+def ref_prefix: ($repo | gsub("\\."; "\\.")) as $r
+  | "(?:#|\($r)#|https://github\\.com/\($r)/issues/)";
+def issue_ref: ref_prefix + "([0-9]+)\\b";
+
+# Issues the body names with Refs, which the merge leaves open, including each
+# of a list such as "Refs #1, #2 and #3".
+def refs: (ref_prefix + "[0-9]+\\b") as $one
+  | [.body // ""
+    | scan("(?i)\\brefs?:?\\s+(\($one)(?:[ \\t]*,?[ \\t]*(?:and\\s+)?\($one))*)")
+    | .[0] | scan(issue_ref) | .[0] | tonumber]
+  | unique;
 ([$prs[] | status] | sort_by(.size.total)) as $status |
 {
   approve: [$prs[] as $p | runs_of($p)
@@ -361,7 +430,28 @@ def status: checks as $c | threads as $t
         and now - $at > $days * 86400)
     | {pr: .number, author: $author, review_by: $review.by,
        review_at: $review.at, idle_days: ((now - $at) / 86400 | floor)}],
-  rebase: [$prs[] | select(needs_rebase) | {pr: .number, author: .author.login}],
+  rebase: [$prs[] | select(needs_rebase)
+    | {pr: .number, author: .author.login, reason: "conflicts"}],
+
+  # Merging cleanly, failing for its author, and otherwise as needs_rebase:
+  # ci-failure.sh decides below whether that failure is a stale base.
+  stale_candidates: [$prs[] | .number as $n
+    | select(.mergeable == "MERGEABLE" and rebase_eligible
+        and (asked_here | not)
+        and any($status[]; .pr == $n and .waits_on == "author"
+          and (.checks.failing | length > 0)))
+    | {pr: .number, author: .author.login, reason: "stale_base",
+       head: .headRefOid}],
+  review: [$status[] | select(.waits_on == "maintainer" and .author != $me)
+    | .pr],
+  refs_only: [$prs[] | . as $p
+    | select(.closingIssuesReferences.totalCount == 0)
+    | refs[] as $n
+    | {pr: $p.number, issue: $n,
+       asked: any($p.reviews.nodes[], $p.comments.nodes[];
+         human and staff and (.isMinimized | not)
+         and (.body // "" | [scan("(?i)\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\\s+" + issue_ref)
+           | .[0] | tonumber] | any(.[]; . == $n)))}],
   hide: [$prs[] | .number as $n | select(whole)
     | asks_rebase as $r
     | ($r | map(.current) | rindex(true) // -1) as $keep
@@ -382,7 +472,8 @@ def status: checks as $c | threads as $t
     | [$status[] | . as $now | $old[.pr | tostring] as $was
       | if $was == null then {pr, new: true}
         else {pr, changed: ([
-            (("head", "mergeable", "decision", "grade", "checks", "threads")
+            (("head", "mergeable", "decision", "grade", "waits_on", "checks",
+              "threads")
               as $k
               | select($was[$k] != $now[$k]) | {($k): [$was[$k], $now[$k]]})]
           | add)}
@@ -410,5 +501,24 @@ states=$(for n in $gone; do
         --jq '{pr: .number, state, mergedAt, merge: .mergeCommit.oid}' \
         || jq -n --argjson n "$n" '{pr: $n, state: "UNKNOWN"}'
 done | jq -s .)
-printf '%s\n' "$out" | jq --argjson states "$states" \
-    'if .gone == null then . else .gone = $states end'
+
+# One ci-failure.sh run per candidate, a handful at most: it reads job logs,
+# which the sweep does not. A run that fails leaves its PR out, since this list
+# posts without asking.
+ci=${PR_SWEEP_CI:-$(dirname "$0")/../codetrial-verify/ci-failure.sh}
+
+# A diagnosis of another head, after a push mid-sweep, says nothing about the
+# head this sweep read, so it is dropped rather than trusted.
+stale=$(printf '%s\n' "$out" | jq -r '.stale_candidates[] | "\(.pr) \(.head)"' \
+    | while read -r n head; do
+        if found=$(sh "$ci" "$n" "$repo" < /dev/null 2> /dev/null); then
+            printf '%s\n' "$found" | jq -c --argjson n "$n" --arg head "$head" \
+                'select(.pr == $n and .head == $head and .stale_base == true)
+                  | .pr' || true
+        fi
+    done | jq -s .)
+printf '%s\n' "$out" | jq --argjson states "$states" --argjson stale "$stale" \
+    'if .gone == null then . else .gone = $states end
+     | .rebase += [.stale_candidates[] | select(.pr | IN($stale[]))
+         | del(.head)]
+     | del(.stale_candidates)'

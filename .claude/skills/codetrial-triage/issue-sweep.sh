@@ -13,11 +13,14 @@
 #   unanswered  issues no maintainer other than the author has commented on,
 #               oldest first, so a collaborator's own follow-up is not an answer;
 #               the viewer's own issues and a deleted account's are left out,
-#               since nobody else answers the first and nobody can the second
+#               since nobody else answers the first and nobody can the second;
+#               closing_prs lists open PRs whose merge closes the issue, which
+#               makes it the PR sweep's once the PR is read (waiting.md)
 #   waiting     issues whose newest maintainer comment is newer than anything
 #               the reporter did since, comment or body edit; overdue once it
 #               is older than wait-days. Issues a maintainer opened are left
-#               out; claimed marks a reporter who also holds the issue
+#               out; claimed marks a reporter who also holds the issue, and
+#               closing_prs is as in unanswered
 #   linked      issues a pull request cross-referenced after the issue opened,
 #               split into merged and still open; a PR from another
 #               repository is left out, since its number means nothing here
@@ -34,8 +37,8 @@
 #               is the newest comment; stale is null when the history is cut,
 #               and idle_days too when none of their acts is in what was read
 #   truncated   issues with more than 100 comments or cross-references, 10
-#               assignees, 20 assignments or 20 body edits, whose lists above
-#               may miss what was cut
+#               assignees, 20 assignments, 20 body edits or 10 closing PRs,
+#               whose lists above may miss what was cut
 
 set -eu
 
@@ -54,6 +57,9 @@ query='query($owner: String!, $name: String!, $endCursor: String) {
           totalCount nodes { editedAt editor { login } }
         }
         assignees(first: 10) { totalCount nodes { login } }
+        closedByPullRequestsReferences(first: 10, includeClosedPrs: false) {
+          totalCount nodes { number repository { nameWithOwner } }
+        }
         assigned: timelineItems(last: 20, itemTypes: [ASSIGNED_EVENT]) {
           totalCount
           nodes { ... on AssignedEvent { createdAt
@@ -125,9 +131,14 @@ def ink: [limit(40; split("\n")[] | select(startswith("#") | not)
 def maint: [.comments.nodes[] | select(human and staff)];
 def cut: .comments.totalCount > 100 or .timelineItems.totalCount > 100
   or .assignees.totalCount > 10 or .assigned.totalCount > 20
-  or .userContentEdits.totalCount > 20;
+  or .userContentEdits.totalCount > 20
+  or (.closedByPullRequestsReferences.totalCount // 0) > 10;
 def prs: [.timelineItems.nodes[] | select(.source.number != null
   and .source.repository.nameWithOwner == $repo)];
+# A PR in another repository may close the issue too; as in prs, its number
+# means nothing here.
+def closing: [.closedByPullRequestsReferences.nodes[]?
+  | select(.repository.nameWithOwner == $repo) | .number];
 def split: {open: [.[] | select(.state == "OPEN") | .number] | unique,
   merged: [.[] | select(.mergedAt != null) | .number] | unique};
 def mine: .author.login as $a | [.comments.nodes[]
@@ -194,7 +205,8 @@ def claim: . as $i | maint as $m
   maintainers_known: ($pushers != null),
   unanswered: [$issues[] | select(.author != null) | .author.login as $a
     | select($a != $me and all(maint[]; .author.login == $a))
-    | {issue: .number, author: $a, age_days: (.createdAt | age)}]
+    | {issue: .number, author: $a, age_days: (.createdAt | age),
+       closing_prs: closing}]
     | sort_by(-.age_days),
   waiting: [$issues[] | select(.author != null and (staff | not))
     | .number as $n | .author.login as $a
@@ -203,7 +215,8 @@ def claim: . as $i | maint as $m
     | {issue: .number, author: .author.login, asked_by: $ask.author.login,
        asked_at: $ask.createdAt, idle_days: ($ask.createdAt | age),
        overdue: (($ask.createdAt | age) >= $days),
-       claimed: any($claims[]; .issue == $n and .assignee == $a)}]
+       claimed: any($claims[]; .issue == $n and .assignee == $a),
+       closing_prs: closing}]
     | sort_by(-.idle_days),
   linked: [$issues[] | (.createdAt | ts) as $born
     | [prs[] | select((.createdAt | ts) >= $born) | .source] as $prs
