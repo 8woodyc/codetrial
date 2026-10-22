@@ -194,6 +194,9 @@ showSources.addEventListener("change", () => {
 void applySources();
 const levels = [...document.querySelectorAll('[name="difficulty"]')];
 let topicLoad;
+// Null until the lookup lands; then the topics the picker offers.
+let loadedTopics = null;
+let topicLoadFailed = false;
 nodes.problemTopic.disabled = true;
 
 // A topic names the technique behind a scenario, so the page does not ship the
@@ -203,20 +206,25 @@ async function loadTopics() {
   topicLoad ??= loadTopicMap()
     .then((mapping) => {
       for (const card of cards) card.topics = mapping?.[card.id] ?? [];
-      for (const topic of availableTopics(cards)) {
+      loadedTopics = new Set(availableTopics(cards));
+      for (const topic of loadedTopics) {
         const option = document.createElement("option");
         option.value = topic;
         option.textContent = topic;
         nodes.problemTopic.append(option);
       }
+      topicLoadFailed = false;
       nodes.problemTopic.disabled = false;
       nodes.problemFilterSummary.textContent = "";
+      renderRecentPerformance();
       return true;
     })
     .catch(() => {
       topicLoad = undefined;
+      topicLoadFailed = true;
       nodes.problemFilterSummary.textContent =
         "Topic filters could not be loaded.";
+      renderRecentPerformance();
       return false;
     });
   return topicLoad;
@@ -1325,11 +1333,46 @@ function showProgress(entries, suffix) {
   renderProgress();
 }
 
+function focusPickerSummary() {
+  nodes.problemPicker.querySelector("summary").focus();
+}
+
+function weakTopicFocused() {
+  return Boolean(
+    document.activeElement &&
+    nodes.recentWeakTopics.contains(document.activeElement),
+  );
+}
+
 function hideRecentPerformance() {
+  if (weakTopicFocused()) focusPickerSummary();
   nodes.recentPerformance.hidden = true;
   nodes.recentPerformanceSummary.textContent = "";
   nodes.recentWeakTopics.textContent = "";
 }
+
+/// Selecting the topic through the picker's own control keeps its listeners in
+/// charge; an already selected topic is left alone so the grid is not redrawn.
+function weakTopicButton(topic) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = topic;
+  button.dataset.topic = topic;
+  button.setAttribute("aria-label", `Filter problems by ${topic}`);
+  button.addEventListener("click", () => {
+    nodes.problemPicker.open = true;
+    if (nodes.problemTopic.value !== topic) {
+      nodes.problemTopic.value = topic;
+      nodes.problemTopic.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    nodes.problemTopic.focus();
+  });
+  return button;
+}
+
+const weakTopicDate = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+});
 
 function renderRecentPerformance() {
   const snapshot = recentPerformance(reports);
@@ -1345,11 +1388,59 @@ function renderRecentPerformance() {
   const legacy = snapshot.legacyAttempts
     ? ` ${snapshot.legacyAttempts} of these interviews predate${snapshot.legacyAttempts === 1 ? "s" : ""} versioned scoring.`
     : "";
-  nodes.recentPerformanceSummary.textContent = `Last ${snapshot.attempts} assessed interview${snapshot.attempts === 1 ? "" : "s"}: ${result} (${snapshot.passRate}%).${streak}${legacy}`;
-  nodes.recentWeakTopics.textContent = snapshot.weakTopics.length
-    ? `Topics to revisit: ${snapshot.weakTopics.slice(0, 5).join(", ")}.`
-    : "No recurring weak topic in these interviews.";
+  const summary = `Last ${snapshot.attempts} assessed interview${snapshot.attempts === 1 ? "" : "s"}: ${result} (${snapshot.passRate}%).${streak}${legacy}`;
+  // A live region: rewriting the same text when the topic lookup lands would
+  // announce the summary again while the candidate is using the picker.
+  if (nodes.recentPerformanceSummary.textContent !== summary)
+    nodes.recentPerformanceSummary.textContent = summary;
+  const focusedTopic = weakTopicFocused()
+    ? document.activeElement.dataset.topic
+    : undefined;
+  let restoredFocus;
+  nodes.recentWeakTopics.replaceChildren();
+  if (!snapshot.weakTopicDetails.length) {
+    nodes.recentWeakTopics.textContent =
+      "No recurring weak topic in these interviews.";
+  } else {
+    nodes.recentWeakTopics.append("Topics to revisit: ");
+    for (const {
+      topic,
+      misses,
+      passes,
+      lastAt,
+    } of snapshot.weakTopicDetails.slice(0, 5)) {
+      const item = document.createElement("span");
+      item.className = "weak-topic";
+      if (loadedTopics?.has(topic)) {
+        const button = weakTopicButton(topic);
+        if (focusedTopic === topic) restoredFocus = button;
+        item.append(button);
+      } else {
+        item.append(topic);
+      }
+      const total = misses + passes;
+      item.append(
+        ` — missed ${misses} of ${total}; latest ${weakTopicDate.format(lastAt)}.`,
+      );
+      if (total < 3) {
+        item.append(" Reminder from few interviews, not a skill measurement.");
+      }
+      nodes.recentWeakTopics.append(item);
+    }
+    if (!loadedTopics) {
+      const note = document.createElement("span");
+      note.className = "weak-topic-note";
+      note.textContent = topicLoadFailed
+        ? "Topic filters could not be loaded; close and reopen the specific-problem picker to retry."
+        : "Topic filters load when the specific-problem picker opens.";
+      nodes.recentWeakTopics.append(note);
+    }
+  }
   nodes.recentPerformance.hidden = false;
+  if (focusedTopic !== undefined) {
+    if (restoredFocus) restoredFocus.focus();
+    else focusPickerSummary();
+  }
 }
 
 /// `attempts` is what `progressModelFrom` already filtered, oldest first.

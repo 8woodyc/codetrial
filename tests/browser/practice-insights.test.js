@@ -60,6 +60,9 @@ test("recent performance summarizes assessed reports newest first", () => {
     streak: 2,
     latestDecision: "HIRE",
     weakTopics: ["Hash Table"],
+    weakTopicDetails: [
+      { topic: "Hash Table", misses: 1, passes: 0, lastAt: 20 },
+    ],
   });
 });
 
@@ -174,4 +177,46 @@ test("contract classification shares the report compatibility policy", () => {
       "unsupported",
     );
   }
+});
+
+test("weak topic details retain ranking, per-topic counts and latest dates in the window", () => {
+  const duplicate = report("a", 30, "NO_HIRE");
+  duplicate.report.topics.push("Hash Table");
+  const snapshot = recentPerformance(
+    [
+      report("a", 1, "NO_HIRE"),
+      report("b", 20, "HIRE"),
+      duplicate,
+      report("a", 10, "NO_HIRE"),
+    ],
+    3,
+  );
+  assert.deepEqual(snapshot.weakTopicDetails, [
+    { topic: "Hash Table", misses: 2, passes: 0, lastAt: 30 },
+    { topic: "Array", misses: 2, passes: 1, lastAt: 30 },
+  ]);
+  assert.deepEqual(
+    snapshot.weakTopicDetails.map(({ topic }) => topic),
+    snapshot.weakTopics,
+  );
+});
+
+test("weak topic details exclude incompatible, incomplete and undated evidence", () => {
+  const future = versionedReport(40, "HIRE", {
+    ...ACTIVE_CONTRACT,
+    bundleVersion: ACTIVE_CONTRACT.bundleVersion + 1,
+  });
+  const incomplete = report("a", 50, "HIRE");
+  incomplete.report.incomplete = true;
+  const undated = report("a", null, "HIRE");
+  assert.deepEqual(
+    recentPerformance(
+      [future, incomplete, undated, report("a", 20, "NO_HIRE")],
+      1,
+    ).weakTopicDetails,
+    [
+      { topic: "Array", misses: 1, passes: 0, lastAt: 20 },
+      { topic: "Hash Table", misses: 1, passes: 0, lastAt: 20 },
+    ],
+  );
 });
