@@ -744,7 +744,9 @@ test("text targets and focus outside the drawing toolbar keep their own undo and
       field.focus();
     }, kind);
     await page.keyboard.type("abc");
-    await page.keyboard.press("Control+z");
+    // The field's own undo follows the host: Chromium on macOS edits text with
+    // Cmd, whatever platform the page is told it runs on.
+    await page.keyboard.press("ControlOrMeta+z");
     assert.equal(await page.evaluate(() => globalThis.keyTaken), false, kind);
     assert.equal(
       await page
@@ -753,7 +755,7 @@ test("text targets and focus outside the drawing toolbar keep their own undo and
       "",
       kind,
     );
-    await page.keyboard.press("Control+Shift+z");
+    await page.keyboard.press("ControlOrMeta+Shift+z");
     assert.equal(await page.evaluate(() => globalThis.keyTaken), false, kind);
     assert.equal(
       await page
@@ -762,6 +764,13 @@ test("text targets and focus outside the drawing toolbar keep their own undo and
       "abc",
       kind,
     );
+    // On a macOS host the presses above are Cmd, which a page told it runs on
+    // Linux never treats as the board's undo, so they prove nothing there.
+    // The board's own chords must still leave a text target alone.
+    for (const chord of ["Control+z", "Control+Shift+z"]) {
+      await page.keyboard.press(chord);
+      assert.equal(await page.evaluate(() => globalThis.keyTaken), false, kind);
+    }
     assert.equal((await inspect(page)).strokes.length, 1);
   }
   await page.locator("#end").focus();
