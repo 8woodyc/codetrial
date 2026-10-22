@@ -200,9 +200,34 @@
             <option value="cpp" data-language="cpp">C++</option>
             <option value="java" data-language="java">Java</option>
           </select>
-          <!-- Display settings and the run button share the right end, so the
-               toolbar stays one row: what you write on the left, how it looks
-               and running it on the right. -->
+          <!-- Starting the language over edits the code, so it sits beside the
+               language it acts on. A press restores at once and Ctrl+Z undoes
+               it. A browser without the editing command, or one that refuses
+               it, could not undo, so there the press only arms it and leaves
+               the code alone: the prompt shows below the button, the status
+               line says what a second press does, and the arm ends when the
+               code is edited, the button loses focus or the language changes. -->
+          <span class="restore-control">
+            <button
+              id="editor-restore-starter"
+              class="font-size-button"
+              type="button"
+              title="Restore the starter code"
+              aria-label="Restore the starter code"
+            >
+              <span aria-hidden="true">&#8634;</span>
+            </button>
+            <span id="editor-restore-prompt" class="restore-prompt" hidden>
+              Press again to replace your code
+            </span>
+          </span>
+          <span
+            id="editor-restore-status"
+            class="visually-hidden"
+            role="status"
+          ></span>
+          <!-- Display settings and the run button share the right end: what you
+               write on the left, how it looks and running it on the right. -->
           <div class="toolbar-end">
             <div class="sync-state"><span></span>Live-synced to Jim</div>
             <div class="editor-view-controls">

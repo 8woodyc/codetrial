@@ -560,6 +560,9 @@ const nodes = {
   editorFontSmaller: document.querySelector("#editor-font-smaller"),
   editorFontLarger: document.querySelector("#editor-font-larger"),
   editorThemeToggle: document.querySelector("#editor-theme-toggle"),
+  restoreStarter: document.querySelector("#editor-restore-starter"),
+  restorePrompt: document.querySelector("#editor-restore-prompt"),
+  restoreStatus: document.querySelector("#editor-restore-status"),
   compileDisclosure: document.querySelector(".compile-disclosure"),
   run: document.querySelector("#run-tests"),
   testDrawer: document.querySelector(".test-drawer"),
@@ -673,6 +676,19 @@ initIntegrity({
   publishIntegrityEvent,
   endInterview,
 });
+
+/// What the first press of the restore control armed it for: the language and
+/// the exact buffer it saw. A second press confirms only if both still hold, so
+/// an edit or a tab change in between makes it a first press again instead of
+/// replacing code the candidate never saw the question about.
+///
+/// The arm has no clock. A screen reader needs as long as it needs to read the
+/// status out, and a prompt that ran out first would be armed again by the
+/// press meant to confirm it. It ends when the candidate edits, leaves the
+/// button, presses Escape or switches language, or when the control is
+/// disabled. Declared above `init()`, which runs `setLanguage` and
+/// `updateRunAvailability` before the rest of the module has evaluated.
+let restoreArmed = null;
 
 init();
 
@@ -901,22 +917,49 @@ function renderRuntimeConfig() {
 let applyingProgrammaticEdit = false;
 
 // Every edit the editor makes on the candidate's behalf -- indentation, bracket
-// pairs, closer type-over, paired deletion -- lands here. Assigning `value`
-// wipes the native undo stack, so one such edit would cost the candidate their
-// whole editing history. Route the change through the browser's editing
-// command instead, over just the span that actually changed.
-function applyEditorEdit(next) {
+// pairs, closer type-over, paired deletion, restoring the starter -- lands here.
+// Assigning `value` wipes the native undo stack, so one such edit would cost the
+// candidate their whole editing history. Route the change through the browser's
+// editing command instead, over just the span that actually changed.
+//
+// A replaced selection that ends in a newline is redone wrongly by Chromium:
+// Ctrl+Shift+Z re-applies the deletion and only the tail of what was inserted,
+// so the first lines of the new text are gone. With `splitNewline` the newline
+// is left out of the selection and removed by a forward delete right after,
+// which Chromium joins into the same undo step. Only the restore asks for it:
+// it is the edit that replaces a whole buffer, and whether another browser
+// records the two commands as one step has not been checked.
+//
+// A browser that refuses the command gets the value assigned, which leaves
+// nothing to undo. With `keepUndo` the buffer is instead left exactly as it was
+// and the call returns false, so the caller can ask before losing the history.
+// An edit the command half did, such as an insert whose forward delete was
+// refused, is undone first.
+function applyEditorEdit(
+  next,
+  { splitNewline = false, keepUndo = false } = {},
+) {
   const editor = nodes.editor;
   const previous = editor.value;
+  const selection = [
+    editor.selectionStart,
+    editor.selectionEnd,
+    editor.selectionDirection,
+  ];
   // The temporary edit selection must not move the candidate's active end.
   const direction =
     next.start === next.end ? "none" : editor.selectionDirection;
   if (next.value === previous) {
     editor.setSelectionRange(next.start, next.end, direction);
-    return;
+    return true;
   }
   let head = 0;
-  while (previous[head] === next.value[head]) head += 1;
+  while (
+    head < previous.length &&
+    head < next.value.length &&
+    previous[head] === next.value[head]
+  )
+    head += 1;
   let tail = 0;
   while (
     tail < Math.min(previous.length, next.value.length) - head &&
@@ -924,22 +967,45 @@ function applyEditorEdit(next) {
       next.value[next.value.length - 1 - tail]
   )
     tail += 1;
+  const end = previous.length - tail;
   const inserted = next.value.slice(head, next.value.length - tail);
-  editor.setSelectionRange(head, previous.length - tail);
-  let rewritten;
+  const endsInNewline =
+    splitNewline && end > head && previous[end - 1] === "\n";
+  const selectedEnd = endsInNewline ? end - 1 : end;
+  editor.setSelectionRange(head, selectedEnd);
+  let rewritten = true;
   applyingProgrammaticEdit = true;
   try {
-    rewritten = inserted
-      ? document.execCommand?.("insertText", false, inserted)
-      : document.execCommand?.("delete");
+    if (inserted)
+      rewritten = document.execCommand?.("insertText", false, inserted);
+    else if (selectedEnd > head) rewritten = document.execCommand?.("delete");
+    if (rewritten && endsInNewline)
+      rewritten = document.execCommand?.("forwardDelete");
   } finally {
     applyingProgrammaticEdit = false;
+  }
+  if (!rewritten && keepUndo) {
+    if (editor.value !== previous) {
+      applyingProgrammaticEdit = true;
+      try {
+        document.execCommand?.("undo");
+      } finally {
+        applyingProgrammaticEdit = false;
+      }
+    }
+    if (editor.value !== previous) {
+      editor.value = previous;
+      editor.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    editor.setSelectionRange(...selection);
+    return false;
   }
   if (!rewritten) {
     editor.value = next.value;
     editor.dispatchEvent(new Event("input", { bubbles: true }));
   }
   editor.setSelectionRange(next.start, next.end, direction);
+  return true;
 }
 
 function renderJimVolume() {
@@ -955,6 +1021,95 @@ function renderJimVolume() {
   );
   nodes.jimMute.setAttribute("aria-pressed", String(jimVolume.muted));
   nodes.jimMutedIndicator.hidden = !jimVolume.muted;
+}
+
+function disarmRestore() {
+  restoreArmed = null;
+  delete nodes.restoreStarter.dataset.armed;
+  nodes.restorePrompt.hidden = true;
+  nodes.restoreStarter.setAttribute("aria-label", "Restore the starter code");
+  nodes.restoreStatus.textContent = "";
+}
+
+function armRestore() {
+  restoreArmed = { language: state.language, value: nodes.editor.value };
+  nodes.restoreStarter.dataset.armed = "true";
+  nodes.restorePrompt.hidden = false;
+  // The visible words stay inside the name, so a voice user can say them.
+  nodes.restoreStarter.setAttribute(
+    "aria-label",
+    "Press again to replace your code with the starter code",
+  );
+  nodes.restoreStatus.textContent =
+    "Press again to replace your code with the starter code. Ctrl+Z (Cmd+Z on a Mac) may not bring it back.";
+  // WebKit does not focus a button that is clicked, and the blur and Escape
+  // that end the arm are heard only by a focused button, so a mouse press
+  // would arm it with no way left to cancel. Focus is put there to match.
+  nodes.restoreStarter.focus({ preventScroll: true });
+}
+
+/// Says something in the control's status region, which the caller has just
+/// cleared with `disarmRestore`. A live region reads only a change, so the
+/// words are written on the next frame, after the clear has been seen, or a
+/// second press would go unheard; and not at all if something else has written
+/// there in between, so a late message never overwrites the prompt a press has
+/// just armed. `stillTrue` is asked again on the frame, since an edit, a
+/// language switch or a pause in between can make the message false.
+function announceRestore(message, stillTrue) {
+  requestAnimationFrame(() => {
+    if (nodes.restoreStatus.textContent === "" && stillTrue())
+      nodes.restoreStatus.textContent = message;
+  });
+}
+
+/// Puts the current language's starter back. A reset is an edit like any
+/// other: the input listener files it in `codeByLanguage` and schedules the
+/// usual publish.
+///
+/// The first press replaces the buffer through the editing command, so Ctrl+Z
+/// brings it back. A browser that has no such command, or refuses it, would
+/// have to assign `value`, which leaves nothing to undo, so there the buffer is
+/// left alone and a second press confirms. That is done in the toolbar and
+/// not with `window.confirm`, which blocks the page's event loop while it is
+/// open and stalls the captions, the timer and the data channel with it.
+function restoreStarter() {
+  const starter = problem.starterCode[state.language];
+  if (codingClosed() || nodes.editor.disabled || starter === undefined) {
+    disarmRestore();
+    return;
+  }
+  if (nodes.editor.value === starter) {
+    // Nothing to replace, and a press that does nothing silently looks broken
+    // and says nothing to a screen reader.
+    disarmRestore();
+    announceRestore(
+      "The code is already the starter code.",
+      () =>
+        !nodes.restoreStarter.disabled &&
+        nodes.editor.value === problem.starterCode[state.language],
+    );
+    return;
+  }
+  const confirmed =
+    restoreArmed &&
+    restoreArmed.language === state.language &&
+    restoreArmed.value === nodes.editor.value;
+  if (!confirmed && !document.queryCommandSupported?.("insertText")) {
+    armRestore();
+    return;
+  }
+  disarmRestore();
+  nodes.editor.focus();
+  const restored = applyEditorEdit(
+    { value: starter, start: 0, end: 0 },
+    { splitNewline: true, keepUndo: !confirmed },
+  );
+  if (!restored) {
+    armRestore();
+    return;
+  }
+  nodes.restoreStatus.textContent =
+    "Restored the starter code. Ctrl+Z (Cmd+Z on a Mac) may undo this, but not after you switch languages.";
 }
 
 function bindEvents() {
@@ -1108,6 +1263,29 @@ function bindEvents() {
       );
     });
   }
+  nodes.restoreStarter.addEventListener("click", (event) => {
+    // The second click of a double-click is one gesture, not a confirmation.
+    // A keyboard activation reports a detail of 0, so it is not caught here.
+    if (event.detail > 1) return;
+    restoreStarter();
+  });
+  // Safari does not focus a clicked button, and its mousedown clears the focus
+  // that `armRestore` put there, so the blur below would end the arm before the
+  // second click could confirm it. Keeping the focus where it is avoids that.
+  nodes.restoreStarter.addEventListener("mousedown", (event) =>
+    event.preventDefault(),
+  );
+  nodes.restoreStarter.addEventListener("keydown", (event) => {
+    // Enter clicks a button on every auto-repeated keydown, so holding it would
+    // arm the control and then confirm it with no second press.
+    if (event.repeat && (event.key === "Enter" || event.key === " "))
+      event.preventDefault();
+    else if (event.key === "Escape" && restoreArmed) disarmRestore();
+  });
+  nodes.restoreStarter.addEventListener("blur", () => {
+    if (restoreArmed) disarmRestore();
+  });
+
   nodes.editorThemeToggle.addEventListener("click", () => {
     // Off the effective theme, not the attribute: with no explicit choice
     // yet, dataset.theme is unset while the editor can already be light from
@@ -1261,6 +1439,12 @@ function bindEvents() {
   nodes.report.addEventListener("click", (event) => {
     if (event.target.closest("#done")) leaveRoom();
     if (event.target.closest("#download-report")) downloadReport();
+  });
+  // Below the report listener on purpose: captions.test.js evaluates the source
+  // from the first `nodes.editor` input listener to that one on its own, so a
+  // listener that reads this module's state cannot sit inside that span.
+  nodes.editor.addEventListener("input", () => {
+    if (restoreArmed) disarmRestore();
   });
 }
 
@@ -2479,6 +2663,9 @@ function setLanguage(language) {
     // language's starter buffer.
     flushPendingEditorPublish();
     state.codeByLanguage[state.language] = nodes.editor.value;
+    // A round trip lands on the same language and buffer the arm was taken
+    // for, so the match in `restoreStarter` would honor it.
+    disarmRestore();
   }
   state.language = language;
   nodes.editor.value = state.codeByLanguage[language];
@@ -2737,6 +2924,7 @@ function receiveControl(bytes) {
         frameworkRound = "behavioral";
         if (whiteboard) paintBoard();
         else exampleBoard?.refresh();
+        updateRunAvailability();
         renderFrameworkProgress();
         showFrameworkHint();
       }
@@ -3177,6 +3365,14 @@ function removeCandidateCase(index) {
 }
 
 function updateRunAvailability() {
+  const restoreOff = state.paused || codingClosed();
+  // Disabling the control that has focus drops focus to the body, so a keyboard
+  // user who armed it is moved first, to the language picker, which this never
+  // disables, as the board buttons do.
+  if (restoreOff && document.activeElement === nodes.restoreStarter)
+    nodes.languageSelect.focus({ preventScroll: true });
+  nodes.restoreStarter.disabled = restoreOff;
+  if (restoreOff) disarmRestore();
   nodes.run.disabled =
     !editorOptions.execution ||
     state.runningTests ||
