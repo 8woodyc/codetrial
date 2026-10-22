@@ -1371,6 +1371,113 @@ public:
       );
     }
   }
+
+  // A deep copy whose last node links back to the first copies every value
+  // and every random pointer, so only a serializer that refuses a revisited
+  // node can tell it from a correct answer. "empty random list" has no node.
+  const cyclicCopies = {
+    c: `struct Node* snapshotOutline(struct Node* head) {
+    int n = 0;
+    for (struct Node* p = head; p; p = p->next) n++;
+    if (!n) return NULL;
+    struct Node** copies = calloc(n, sizeof(*copies));
+    struct Node* p = head;
+    for (int i = 0; i < n; i++, p = p->next) {
+        copies[i] = calloc(1, sizeof(*copies[i]));
+        copies[i]->val = p->val;
+    }
+    p = head;
+    for (int i = 0; i < n; i++, p = p->next) {
+        copies[i]->next = copies[(i + 1) % n];
+        struct Node* q = head;
+        for (int j = 0; j < n; j++, q = q->next)
+            if (q == p->random) copies[i]->random = copies[j];
+    }
+    struct Node* copy = copies[0];
+    free(copies);
+    return copy;
+}`,
+    cpp: `class Solution {
+public:
+    Node* snapshotOutline(Node* head) {
+        if (!head) return nullptr;
+        unordered_map<Node*, Node*> copies;
+        for (Node* p = head; p; p = p->next) copies[p] = new Node(p->val);
+        for (Node* p = head; p; p = p->next) {
+            copies[p]->next = p->next ? copies[p->next] : copies[head];
+            copies[p]->random = p->random ? copies[p->random] : nullptr;
+        }
+        return copies[head];
+    }
+};`,
+    java: `class Solution {
+    public Node snapshotOutline(Node head) {
+        if (head == null) return null;
+        java.util.HashMap<Node, Node> copies = new java.util.HashMap<>();
+        for (Node p = head; p != null; p = p.next) copies.put(p, new Node(p.val));
+        for (Node p = head; p != null; p = p.next) {
+            copies.get(p).next = p.next != null ? copies.get(p.next) : copies.get(head);
+            copies.get(p).random = p.random != null ? copies.get(p.random) : null;
+        }
+        return copies.get(head);
+    }
+}`,
+  };
+  const cyclicCopyRuns = {
+    c: { skip: noCc, file: "copy.c" },
+    cpp: { skip: noGpp, file: "copy.cpp" },
+    java: { skip: noJava, file: "Main.java" },
+  };
+  for (const [language, { skip, file }] of Object.entries(cyclicCopyRuns)) {
+    it(
+      `${language} harness refuses a copied random list that loops back into itself`,
+      { skip },
+      async () => {
+        const spec = judges["copy-list-with-random-pointer"];
+        const dir = mkdtempSync(join(tmpdir(), `codetrial-${language}-copy-`));
+        try {
+          const source = join(dir, file);
+          const binary = join(dir, "copy");
+          writeFileSync(
+            source,
+            generateHarness(language, spec, cyclicCopies[language]),
+          );
+          let command = binary;
+          let args = [];
+          if (language === "c")
+            await run("cc", ["-std=c17", source, "-o", binary]);
+          if (language === "cpp")
+            await run("g++", ["-std=c++20", source, "-o", binary]);
+          if (language === "java") {
+            await run("javac", [source]);
+            command = "java";
+            args = ["-cp", dir, "Main"];
+          }
+          // A serializer that walks the ring forever fails here instead of
+          // hanging the lane.
+          const { stdout } = await run(command, args, {
+            encoding: "utf8",
+            timeout: 10000,
+          });
+          const { results } = parseCompilerResults(stdout);
+          spec.cases.forEach((testCase, index) => {
+            const result = results[index];
+            if (testCase.expected.length === 0) {
+              assert.deepEqual(result.actual, [], testCase.label);
+              return;
+            }
+            assert.match(
+              result.error ?? "",
+              /Returned list must not reach a node twice\./,
+              testCase.label,
+            );
+          });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      },
+    );
+  }
 });
 
 test("harness generator handles output parameter and output prefix specs", () => {
