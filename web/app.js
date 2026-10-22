@@ -1,3 +1,4 @@
+import { mountProblemGrid } from "./problem-grid.js";
 import {
   FRAMEWORKS,
   SHOW_SOURCES_KEY,
@@ -1999,3 +2000,5 @@ function select(selector, chosen) {
     mark(button, button === chosen);
   }
 }
+
+mountProblemGrid();
