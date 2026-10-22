@@ -17,9 +17,11 @@ PR is read and does what the issue asks: `open_prs` holds every PR that
 cross-referenced the issue, and a mention alone does not suspend the
 reporter's reminder. `closing_prs` on the `unanswered` or `waiting` entry
 itself names the open PRs whose merge closes the issue, whoever wrote them,
-which settles the candidates without reading every cross-reference; reading
-that one PR's title and scope still decides it. Such an entry gets neither a
-reminder nor a first answer on the issue (#370 and #385 sat in
+which narrows the candidates without reading every cross-reference. A closing
+reference says only what the merge will close, so read each listed PR's scope
+and implementation; when none does what the issue asks, the normal
+`unanswered` or `waiting` rule applies. Only an entry whose PR does gets
+neither a reminder nor a first answer on the issue (#370 and #385 sat in
 `unanswered`, #159 and #298 in overdue `waiting`, all with PRs open):
 
 - `unanswered`: no maintainer has spoken. Triage these first, oldest first, with

@@ -228,7 +228,8 @@ class SweepCase(unittest.TestCase):
         # ci-failure.sh as the PR sweep runs it: a PR in $STALE is a stale base.
         files["PR_SWEEP_CI"] = (
             'case " $STALE " in *" $1 "*) s=true ;; *) s=false ;; esac\n'
-            'printf \'{"pr":%s,"stale_base":%s}\\n\' "$1" "$s"\n'
+            'printf \'{"pr":%s,"head":"%s","stale_base":%s}\\n\' '
+            '"$1" "${STALE_HEAD:-head$1}" "$s"\n'
         )
         if previous is not None:
             files["PREVIOUS"] = json.dumps(previous)
@@ -340,6 +341,13 @@ class IssueSweepTests(SweepCase):
         self.assertEqual(
             {e["issue"]: e["closing_prs"] for e in swept["waiting"]}, {2: [], 3: [7]}
         )
+
+    def test_more_closing_prs_than_read_marks_the_issue_truncated(self):
+        closing = {"totalCount": 11, "nodes": []}
+        swept = self.run_issues(
+            issue(1, "Body" + FILLER, closedByPullRequestsReferences=closing)
+        )
+        self.assertEqual(swept["truncated"], [1])
 
     def test_more_body_edits_than_read_marks_the_issue_truncated(self):
         edits = {"totalCount": 21, "nodes": []}
@@ -485,9 +493,11 @@ class PrSweepTests(SweepCase):
         failing = checked(("gates (portable)", "FAILURE"))
         cases = {
             # Says stale, then exits non-zero: not trusted.
-            "exit": 'echo \'{"pr":1,"stale_base":true}\'; exit 1\n',
+            "exit": 'echo \'{"pr":1,"head":"head1","stale_base":true}\'; exit 1\n',
             # Answers for another PR.
-            "other pr": 'echo \'{"pr":2,"stale_base":true}\'\n',
+            "other pr": 'echo \'{"pr":2,"head":"head1","stale_base":true}\'\n',
+            # Diagnosed a head pushed after the sweep read this one.
+            "other head": 'echo \'{"pr":1,"head":"later","stale_base":true}\'\n',
         }
         for name, stub in cases.items():
             with self.subTest(name):
@@ -1259,8 +1269,10 @@ FAKE_GH_POST = """#!/bin/sh
 case "$*" in
   "pr view 5 "*) echo "${FAKE_HEAD:-h1} ${FAKE_UPDATED:-T1}" ;;
   "pr diff 5 "*) cat "$FAKE_DIFF" ;;
-  "api -X POST repos/sysprog21/codetrial/pulls/5/reviews "*)
-    echo https://github.com/sysprog21/codetrial/pull/5#pullrequestreview-1 ;;
+  # Only the checked text on stdin: posting the file again would let a
+  # rewrite after the checks through.
+  "api -X POST repos/sysprog21/codetrial/pulls/5/reviews --input - "*)
+    jq -r '"https://github.com/sysprog21/codetrial/pull/5#pullrequestreview-" + .commit_id' ;;
   *) echo "unexpected gh call: $*" >&2; exit 1 ;;
 esac
 """
@@ -1288,7 +1300,7 @@ class PostReviewTests(unittest.TestCase):
     def test_posts_when_the_pr_is_where_the_user_read_it(self):
         result = self.post()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("pullrequestreview-1", result.stdout)
+        self.assertIn("pullrequestreview-h1", result.stdout)
 
     def test_refuses_a_payload_without_an_event(self):
         # GitHub would keep it as a pending review only its writer sees.

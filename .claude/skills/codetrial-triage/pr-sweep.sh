@@ -440,7 +440,8 @@ def refs: (ref_prefix + "[0-9]+\\b") as $one
         and (asked_here | not)
         and any($status[]; .pr == $n and .waits_on == "author"
           and (.checks.failing | length > 0)))
-    | {pr: .number, author: .author.login, reason: "stale_base"}],
+    | {pr: .number, author: .author.login, reason: "stale_base",
+       head: .headRefOid}],
   review: [$status[] | select(.waits_on == "maintainer" and .author != $me)
     | .pr],
   refs_only: [$prs[] | . as $p
@@ -505,13 +506,19 @@ done | jq -s .)
 # which the sweep does not. A run that fails leaves its PR out, since this list
 # posts without asking.
 ci=${PR_SWEEP_CI:-$(dirname "$0")/../codetrial-verify/ci-failure.sh}
-stale=$(printf '%s\n' "$out" | jq -r '.stale_candidates[].pr' | while read -r n; do
-    if found=$(sh "$ci" "$n" "$repo" < /dev/null 2> /dev/null); then
-        printf '%s\n' "$found" | jq -c --argjson n "$n" \
-            'select(.pr == $n and .stale_base == true) | .pr' || true
-    fi
-done | jq -s .)
+
+# A diagnosis of another head, after a push mid-sweep, says nothing about the
+# head this sweep read, so it is dropped rather than trusted.
+stale=$(printf '%s\n' "$out" | jq -r '.stale_candidates[] | "\(.pr) \(.head)"' \
+    | while read -r n head; do
+        if found=$(sh "$ci" "$n" "$repo" < /dev/null 2> /dev/null); then
+            printf '%s\n' "$found" | jq -c --argjson n "$n" --arg head "$head" \
+                'select(.pr == $n and .head == $head and .stale_base == true)
+                  | .pr' || true
+        fi
+    done | jq -s .)
 printf '%s\n' "$out" | jq --argjson states "$states" --argjson stale "$stale" \
     'if .gone == null then . else .gone = $states end
-     | .rebase += [.stale_candidates[] | select(.pr | IN($stale[]))]
+     | .rebase += [.stale_candidates[] | select(.pr | IN($stale[]))
+         | del(.head)]
      | del(.stale_candidates)'

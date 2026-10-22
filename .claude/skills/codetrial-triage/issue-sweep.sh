@@ -37,8 +37,8 @@
 #               is the newest comment; stale is null when the history is cut,
 #               and idle_days too when none of their acts is in what was read
 #   truncated   issues with more than 100 comments or cross-references, 10
-#               assignees, 20 assignments or 20 body edits, whose lists above
-#               may miss what was cut
+#               assignees, 20 assignments, 20 body edits or 10 closing PRs,
+#               whose lists above may miss what was cut
 
 set -eu
 
@@ -58,7 +58,7 @@ query='query($owner: String!, $name: String!, $endCursor: String) {
         }
         assignees(first: 10) { totalCount nodes { login } }
         closedByPullRequestsReferences(first: 10, includeClosedPrs: false) {
-          nodes { number repository { nameWithOwner } }
+          totalCount nodes { number repository { nameWithOwner } }
         }
         assigned: timelineItems(last: 20, itemTypes: [ASSIGNED_EVENT]) {
           totalCount
@@ -131,7 +131,8 @@ def ink: [limit(40; split("\n")[] | select(startswith("#") | not)
 def maint: [.comments.nodes[] | select(human and staff)];
 def cut: .comments.totalCount > 100 or .timelineItems.totalCount > 100
   or .assignees.totalCount > 10 or .assigned.totalCount > 20
-  or .userContentEdits.totalCount > 20;
+  or .userContentEdits.totalCount > 20
+  or (.closedByPullRequestsReferences.totalCount // 0) > 10;
 def prs: [.timelineItems.nodes[] | select(.source.number != null
   and .source.repository.nameWithOwner == $repo)];
 # A PR in another repository may close the issue too; as in prs, its number

@@ -173,6 +173,7 @@ the checked text, moved findings included, with the PR's `updatedAt`:
 ```sh
 .claude/skills/codetrial-verify/review-anchors.sh "$pr" "$SCRATCH/review-$pr.json" \
   > "$SCRATCH/review-$pr.checked.json"
+updated_at=$(gh pr view "$pr" --repo sysprog21/codetrial --json updatedAt --jq .updatedAt)
 ```
 
 The review is `event: "COMMENT"` on `commit_id` (the head the findings were

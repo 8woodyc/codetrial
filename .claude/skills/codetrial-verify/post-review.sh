@@ -67,4 +67,7 @@ if [ "$updated" != "$since" ]; then
     exit 3
 fi
 
-gh api -X POST "repos/$repo/pulls/$pr/reviews" --input "$payload" --jq .html_url
+# The checked text, not the file again, so a rewrite of the file after the
+# checks above cannot change what is posted.
+printf '%s\n' "$checked" | gh api -X POST "repos/$repo/pulls/$pr/reviews" \
+    --input - --jq .html_url
