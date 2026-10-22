@@ -582,6 +582,14 @@ class PrSweepTests(SweepCase):
             release,
         )
 
+    def test_hook_installer_prints_the_labels_conventions_explains(self):
+        # codetrial-conventions tells an agent to read make hooks' output by
+        # these labels, so renaming one has to move that text too.
+        installer = (ROOT / "scripts" / "install-git-hooks.sh").read_text()
+        for label in ("OK", "HOOK", "KEEP", "NOTE"):
+            with self.subTest(label=label):
+                self.assertIn(f"printf '  {label} ", installer)
+
     def test_gates_prefix_matches_the_check_workflow_job_name(self):
         # The grade reads "no gates lane ran" from this prefix; renaming the
         # job in check.yml without the script would mark every PR as such.

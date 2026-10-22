@@ -134,6 +134,9 @@ Give the contributor:
 - likely entry points and a concrete acceptance check;
 - a stopping condition and fallback, such as drafting the exact maintainer
   question if the expected behavior is still undecided.
+- the one setup step the first commit needs, `make hooks` in the clone, so the
+  message rules run on that commit rather than surfacing in CI
+  ([conventions](../codetrial-conventions/SKILL.md#commit-messages)).
 
 Keep unrelated refactoring out of the task. Do not require filing an issue for
 every small, well-understood fix. For uncertain product direction, establish
@@ -142,8 +145,10 @@ help the contributor explain what fails before and succeeds after the change.
 
 ## Prepare a pull request people can review
 
-Read the full branch diff against its intended base, relevant commits and linked
-issues. Check that the branch contains the intended work only, and use a topic
+Commit with the hooks installed: `make hooks` once per clone, read as
+[conventions](../codetrial-conventions/SKILL.md#commit-messages) says, before
+the first commit. Read the full branch diff against its intended base, relevant
+commits and linked issues. Check that the branch contains the intended work only, and use a topic
 branch as described in conventions. Scope follows
 [collaboration.md](collaboration.md#scope-one-pull-request): unrelated fixes
 and unrequested behavior go to their own PR, review follow-ups stay in this

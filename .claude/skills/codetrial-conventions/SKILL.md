@@ -22,6 +22,19 @@ user's approval first.
 
 ## Commit messages
 
+Before the first commit in a clone, run `make hooks`, and read both its exit
+status and its output. It is safe to repeat, and a worktree shares the clone's
+hooks, so once per clone covers every branch. Exit 0 with `OK` or `HOOK` for
+each `scripts/git-*.sh` means the message rules will run; a nonzero exit, or a
+hook with no line at all, means that hook failed to install, since a wrapper
+that cannot be written prints nothing. `KEEP` means a hook of the user's own
+already sits there and ours is not installed: say so, and leave it for the user
+to settle, since deleting it is how a local workflow disappears. `NOTE` means
+`core.hooksPath` points elsewhere; check that the wrappers landed there. Never
+commit with `--no-verify` or `-n`, and when the commit-msg hook refuses a
+message, rewrite the message: the pre-push hook and CI replay the same rules
+later, when fixing them costs a rebase.
+
 `./scripts/git-commit-msg.sh --rules` prints what the hook enforces, and
 `CONTRIBUTING.md` says what the body has to carry. Neither gives the
 calibration, so run this when a subject is hard to fit:

@@ -175,7 +175,9 @@ the report.
 
 ## The git hooks
 
-`make hooks` installs the fast half of the gate at commit time:
+`make hooks` installs the fast half of the gate at commit time, once per clone
+and before the first commit there; how to read its output is in
+[conventions](../codetrial-conventions/SKILL.md#commit-messages):
 `scripts/git-pre-commit.sh` runs `rustfmt`, ESLint, Prettier, `ruff` and
 `shellcheck` over a checkout of the index, so an unstaged edit neither fails a
 commit nor sneaks through one, plus `commentflow --check` and `shfmt -d` on
