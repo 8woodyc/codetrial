@@ -2983,7 +2983,7 @@ fn report_brief(input: &ReportPromptInput<'_>) -> String {
         ),
     };
     let communication_evidence = if input.candidate_turns == 0 {
-        "CANDIDATE TURNS: 0. The server recorded no candidate transcript turns. Return `communicationScore` as `null`, return `communicationFeedback.strengths` as an empty array, and state that communication was not assessed. Code edits and test runs are not spoken responses: use them only for coding assessment and never describe them as something the candidate said, explained, answered, or narrated."
+        "CANDIDATE TURNS: 0. The server recorded no candidate transcript turns. Return `communicationScore` as `null`, return both `communicationFeedback.strengths` and `communicationFeedback.improvements` as empty arrays, and state that communication was not assessed. Code edits and test runs are not spoken responses: use them only for coding assessment and never describe them as something the candidate said, explained, answered, or narrated."
             .to_string()
     } else {
         format!(
@@ -3237,8 +3237,9 @@ filler, and no item may repeat another in the same list. A session with little t
 distinct observations: a clarifying question asked, uncertainty admitted instead
 of guessed at, a decision explained, a boundary noticed, effort sustained under
 time pressure. Name two of those rather than saying one thing twice. The sole
-exception is a brief with zero candidate turns: communication strengths must be
-empty, because editor and test activity cannot establish spoken communication.
+exception is a brief with zero candidate turns: communication strengths and
+improvements must both be empty, because editor and test activity cannot
+establish spoken communication or ground a communication critique.
 
 For `improvementPlan`, take every string in `codingFeedback.improvements` and
 `communicationFeedback.improvements` together and emit one item for each, so the

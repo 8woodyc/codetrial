@@ -1643,11 +1643,13 @@ mod runner {
                     }
                     journal.start_row(&id)?;
                     let input = variant_input(item, variant);
+                    let turn_count = candidate_turns(&input);
                     let refused = std::sync::atomic::AtomicBool::new(false);
                     let calls = ReportCalls {
                         keys,
                         url: url.into(),
                         material: crate::gemini::tests::EDITOR,
+                        communication_assessed: turn_count > 0,
                         budget: ReportCallBudget::new(),
                         backoff: REPORT_RETRY_BACKOFF,
                         run: ReportRun {
@@ -1668,7 +1670,7 @@ mod runner {
                                 follow_ups_released: input["follow_ups_released"]
                                     .as_bool()
                                     .unwrap(),
-                                candidate_turns: candidate_turns(&input),
+                                candidate_turns: turn_count,
                             },
                         ),
                     )
@@ -1936,6 +1938,7 @@ mod runner {
             keys: &keys,
             url,
             material: crate::gemini::tests::EDITOR,
+            communication_assessed: true,
             budget: ReportCallBudget::new(),
             backoff: Duration::ZERO,
             run: ReportRun {

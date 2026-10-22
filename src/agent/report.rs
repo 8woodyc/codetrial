@@ -124,7 +124,7 @@ pub fn fallback_report(hints_used: u32, note: &str) -> serde_json::Value {
     })
 }
 
-pub fn report_response_schema() -> serde_json::Value {
+pub fn report_response_schema(communication_assessed: bool) -> serde_json::Value {
     // `responseSchema` accepts only Gemini's OpenAPI subset, which has no
     // `additionalProperties`: sending it fails the whole call with a 400 naming
     // an unknown field, so every report came back as the incomplete fallback.
@@ -144,10 +144,15 @@ pub fn report_response_schema() -> serde_json::Value {
         "properties": { "strengths": strings(2, 4), "improvements": strings(2, 4) },
         "required": ["strengths", "improvements"]
     });
+    let communication_min = if communication_assessed { 2 } else { 0 };
+    let communication_max = if communication_assessed { 4 } else { 0 };
     let communication_feedback = serde_json::json!({
         "type": "OBJECT",
         "propertyOrdering": ["strengths", "improvements"],
-        "properties": { "strengths": strings(0, 4), "improvements": strings(2, 4) },
+        "properties": {
+            "strengths": strings(communication_min, communication_max),
+            "improvements": strings(communication_min, communication_max)
+        },
         "required": ["strengths", "improvements"]
     });
     let plan = serde_json::json!({
@@ -188,7 +193,11 @@ pub fn report_response_schema() -> serde_json::Value {
         "propertyOrdering": ["codingScore", "communicationScore", "decision", "summary", "codingFeedback", "communicationFeedback", "improvementPlan", "frameworkAssessment", "followUps"],
         "properties": {
             "codingScore": { "type": "INTEGER", "minimum": 0, "maximum": 100 },
-            "communicationScore": { "type": "INTEGER", "minimum": 0, "maximum": 100, "nullable": true },
+            "communicationScore": if communication_assessed {
+                serde_json::json!({ "type": "INTEGER", "minimum": 0, "maximum": 100 })
+            } else {
+                serde_json::json!({ "type": "INTEGER", "minimum": 0, "maximum": 100, "nullable": true })
+            },
             "decision": { "type": "STRING", "enum": ["HIRE", "NO_HIRE"] },
             "summary": text(), "codingFeedback": coding_feedback, "communicationFeedback": communication_feedback,
             "improvementPlan": { "type": "ARRAY", "minItems": 0, "maxItems": 8, "items": plan },
@@ -313,25 +322,29 @@ fn validate_report_judging(
         object.get("codingFeedback"),
         "$.codingFeedback",
         2,
+        2,
         &mut errors,
     );
     validate_feedback(
         object.get("communicationFeedback"),
         "$.communicationFeedback",
         if communication_assessed { 2 } else { 0 },
+        if communication_assessed { 2 } else { 0 },
         &mut errors,
     );
-    if !communication_assessed
-        && object
-            .get("communicationFeedback")
-            .and_then(|feedback| feedback.get("strengths"))
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|strengths| !strengths.is_empty())
-    {
-        errors.push(
-            "$.communicationFeedback.strengths: expected an empty array because the transcript has zero candidate turns"
-                .to_string(),
-        );
+    if !communication_assessed {
+        for key in ["strengths", "improvements"] {
+            if object
+                .get("communicationFeedback")
+                .and_then(|feedback| feedback.get(key))
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|items| !items.is_empty())
+            {
+                errors.push(format!(
+                    "$.communicationFeedback.{key}: expected an empty array because the transcript has zero candidate turns"
+                ));
+            }
+        }
     }
     let improvements = object
         .get("codingFeedback")
@@ -1452,6 +1465,7 @@ fn validate_feedback(
     value: Option<&serde_json::Value>,
     path: &str,
     strengths_min: usize,
+    improvements_min: usize,
     errors: &mut Vec<String>,
 ) {
     let Some(object) = value.and_then(serde_json::Value::as_object) else {
@@ -1469,7 +1483,7 @@ fn validate_feedback(
     );
     validate_string_array(
         object.get("improvements"),
-        2,
+        improvements_min,
         4,
         400,
         &format!("{path}.improvements"),

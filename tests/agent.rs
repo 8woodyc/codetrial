@@ -1234,26 +1234,38 @@ fn evaluation_reaction(case: &Value, state: &mut RuntimeState) -> String {
             .generate_reply
             .expect("round gate produces a reaction")
         }
-        "report" => model_report_input(report_prompt(ReportPromptInput {
-            problem: get_problem(Some("two-sum")),
-            interview_mode: InterviewMode::Coding,
-            board_attached: false,
-            transcript: case["transcript"].as_str().expect("transcript is text"),
-            rolling_assessment: "",
-            final_code: code,
-            language: "python",
-            hints_used: case["hintsUsed"].as_u64().expect("hint count is integer") as u32,
-            hint_rung: 0,
-            volunteered_hints: 0,
-            duration_min: 45,
-            elapsed_min: 20.0,
-            test_summary: "No trusted server-side test was available.",
-            practice_level: None,
-            evidence: "",
-            behavioral_round: BehavioralRound::of(state),
-            follow_ups_released: false,
-            candidate_turns: state.evidence_ledger.conversation.candidate_turns,
-        })),
+        "report" => {
+            let transcript = case["transcript"].as_str().expect("transcript is text");
+            for (index, _) in transcript
+                .lines()
+                .filter(|line| line.starts_with("Candidate:"))
+                .enumerate()
+            {
+                state
+                    .evidence_ledger
+                    .record_conversation_turn(index as u64, "candidate");
+            }
+            model_report_input(report_prompt(ReportPromptInput {
+                problem: get_problem(Some("two-sum")),
+                interview_mode: InterviewMode::Coding,
+                board_attached: false,
+                transcript,
+                rolling_assessment: "",
+                final_code: code,
+                language: "python",
+                hints_used: case["hintsUsed"].as_u64().expect("hint count is integer") as u32,
+                hint_rung: 0,
+                volunteered_hints: 0,
+                duration_min: 45,
+                elapsed_min: 20.0,
+                test_summary: "No trusted server-side test was available.",
+                practice_level: None,
+                evidence: "",
+                behavioral_round: BehavioralRound::of(state),
+                follow_ups_released: false,
+                candidate_turns: state.evidence_ledger.conversation.candidate_turns,
+            }))
+        }
         other => panic!("unknown reaction kind {other}"),
     }
 }

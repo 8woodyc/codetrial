@@ -672,10 +672,13 @@ fn report_carries_the_debrief() {
         ],
         "frameworkAssessment": {"rubricVersion": 1, "phases": phases.iter().map(|phase| serde_json::json!({"phase": phase, "score": 75, "weaknessTags": []})).collect::<Vec<_>>()}
     });
-    let state = RuntimeState {
+    let mut state = RuntimeState {
         hint_rungs_given: 1,
         ..RuntimeState::default()
     };
+    state
+        .evidence_ledger
+        .record_conversation_turn(1, "candidate");
 
     let generated = report_value(
         &boot,
@@ -1187,6 +1190,8 @@ fn report_metadata_uses_the_frozen_assessment() {
     let config = report_test_config();
     let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
     let mut live = RuntimeState::default();
+    live.evidence_ledger
+        .record_conversation_turn(1, "candidate");
     let mut frozen = freeze_assessment(&boot, &mut live, 12.0, Vec::new());
     live.code = "post-interview edits".into();
     live.hints_used = 5;
@@ -1563,6 +1568,8 @@ async fn a_report_lost_to_503s_is_regenerated_from_the_frozen_interview() {
     let config = report_test_config();
     let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
     let mut live = RuntimeState::default();
+    live.evidence_ledger
+        .record_conversation_turn(1, "candidate");
     let mut frozen = freeze_assessment(&boot, &mut live, 12.0, Vec::new());
     let keys = GeminiKeys::single("recovery-e2e");
     let (flag, again) = (AtomicBool::default(), AtomicBool::default());
@@ -1667,6 +1674,8 @@ async fn a_report_refused_after_both_repairs_is_regenerated_on_another_seed() {
     let config = report_test_config();
     let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
     let mut live = RuntimeState::default();
+    live.evidence_ledger
+        .record_conversation_turn(1, "candidate");
     let mut frozen = freeze_assessment(&boot, &mut live, 12.0, Vec::new());
     let keys = GeminiKeys::single("schema-recovery");
     let (flag, again) = (AtomicBool::default(), AtomicBool::default());

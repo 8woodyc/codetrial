@@ -2192,7 +2192,7 @@ test("a silent session renders communication as not assessed", () => {
     codingFeedback: { strengths: ["Correct solution"], improvements: [] },
     communicationFeedback: {
       strengths: [],
-      improvements: ["Narrate the approach"],
+      improvements: [],
     },
   });
   const session = {

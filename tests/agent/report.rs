@@ -169,12 +169,18 @@ fn a_silent_candidate_has_no_communication_assessment() {
     let mut report = valid_strict_report();
     report["communicationScore"] = Value::Null;
     report["communicationFeedback"]["strengths"] = json!([]);
+    report["communicationFeedback"]["improvements"] = json!([]);
+    report["improvementPlan"]
+        .as_array_mut()
+        .expect("fixture plan is an array")
+        .truncate(2);
 
     let accepted =
         validate_report_for_round(&report, problem, silent, InterviewMode::Coding, false)
             .expect("zero candidate turns make communication unassessed");
     assert!(accepted["communicationScore"].is_null());
     assert_eq!(accepted["communicationFeedback"]["strengths"], json!([]));
+    assert_eq!(accepted["communicationFeedback"]["improvements"], json!([]));
 
     let published = final_report_for_round(
         Some(&report),
@@ -188,6 +194,10 @@ fn a_silent_candidate_has_no_communication_assessment() {
     assert!(!published["incomplete"].as_bool().unwrap_or(false));
     assert!(published["communicationScore"].is_null());
     assert_eq!(published["communicationFeedback"]["strengths"], json!([]));
+    assert_eq!(
+        published["communicationFeedback"]["improvements"],
+        json!([])
+    );
 
     let mut invented_score = report.clone();
     invented_score["communicationScore"] = json!(65);
@@ -202,7 +212,7 @@ fn a_silent_candidate_has_no_communication_assessment() {
     .join("\n");
     assert!(errors.contains("$.communicationScore"), "{errors}");
 
-    let mut invented_strength = report;
+    let mut invented_strength = report.clone();
     invented_strength["communicationFeedback"]["strengths"] = json!(["Responded to prompts"]);
     let errors = validate_report_for_round(
         &invented_strength,
@@ -217,6 +227,22 @@ fn a_silent_candidate_has_no_communication_assessment() {
         errors.contains("$.communicationFeedback.strengths"),
         "{errors}"
     );
+
+    let mut invented_improvement = report;
+    invented_improvement["communicationFeedback"]["improvements"] = json!(["Explain the approach"]);
+    let errors = validate_report_for_round(
+        &invented_improvement,
+        problem,
+        silent,
+        InterviewMode::Coding,
+        false,
+    )
+    .unwrap_err()
+    .join("\n");
+    assert!(
+        errors.contains("$.communicationFeedback.improvements"),
+        "{errors}"
+    );
 }
 
 #[test]
@@ -224,6 +250,7 @@ fn a_candidate_turn_still_requires_a_numeric_communication_assessment() {
     let mut report = valid_strict_report();
     report["communicationScore"] = Value::Null;
     report["communicationFeedback"]["strengths"] = json!([]);
+    report["communicationFeedback"]["improvements"] = json!([]);
 
     let errors = validate_report_for_round(
         &report,
@@ -237,6 +264,10 @@ fn a_candidate_turn_still_requires_a_numeric_communication_assessment() {
     assert!(errors.contains("$.communicationScore"), "{errors}");
     assert!(
         errors.contains("$.communicationFeedback.strengths"),
+        "{errors}"
+    );
+    assert!(
+        errors.contains("$.communicationFeedback.improvements"),
         "{errors}"
     );
 }
@@ -1037,7 +1068,7 @@ fn phase_rows_need_no_tags_from_the_model() {
     validate_report_candidate(&accepted, get_problem(Some("two-sum")))
         .expect("the derived tags validate again");
     assert!(
-        report_response_schema()["properties"]["frameworkAssessment"]["properties"]["phases"]
+        report_response_schema(true)["properties"]["frameworkAssessment"]["properties"]["phases"]
             ["items"]["properties"]
             .get("weaknessTags")
             .is_none()

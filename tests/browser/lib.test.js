@@ -1264,13 +1264,14 @@ test("sanitizeReport preserves an unassessed communication score", () => {
     decision: "NO_HIRE",
     communicationFeedback: {
       strengths: [],
-      improvements: ["Narrate the approach", "Explain the complexity"],
+      improvements: [],
     },
   });
 
   assert.equal(report.codingScore, 85);
   assert.equal(report.communicationScore, null);
   assert.deepEqual(report.communicationFeedback.strengths, []);
+  assert.deepEqual(report.communicationFeedback.improvements, []);
 });
 
 test("sanitizeReport preserves a well-formed agent report", () => {

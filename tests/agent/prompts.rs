@@ -240,8 +240,8 @@ fn prompt_golden_digest_matches_versions() {
     // its hash is a string nothing checks. The pair is still asserted, because
     // the failure worth catching is a version bumped with the golden left
     // alone, which a digest comparison on its own reads as fine.
-    let recorded_versions = (32, 23);
-    let recorded_digest = "c35ddcb8084e3d75dee0a52e3968c97be3ad8d066a42a213d706f384f831cfb3";
+    let recorded_versions = (32, 24);
+    let recorded_digest = "TODO_REGENERATE";
 
     assert_eq!(
         (LIVE_PROMPT_VERSION, REPORT_PROMPT_VERSION),
@@ -528,7 +528,9 @@ fn silent_report_brief_makes_communication_unassessed() {
         "{prompt}"
     );
     assert!(
-        prompt.contains("`communicationFeedback.strengths` as an empty array"),
+        prompt.contains(
+            "both `communicationFeedback.strengths` and `communicationFeedback.improvements` as empty arrays"
+        ),
         "{prompt}"
     );
     assert!(
@@ -700,7 +702,7 @@ fn document_grounding_requires_consent_and_is_bounded_as_untrusted_prompt_data()
 #[test]
 fn report_schema_matches_frozen_fixture() {
     let path = "tests/golden/report-schema.json";
-    let schema = report_response_schema();
+    let schema = report_response_schema(true);
     if std::env::var_os("UPDATE_REPORT_SCHEMA_GOLDEN").is_some() {
         let mut text = serde_json::to_string_pretty(&schema).unwrap();
         text.push('\n');
@@ -710,6 +712,33 @@ fn report_schema_matches_frozen_fixture() {
         .expect("report schema fixture should parse");
     assert_eq!(schema, expected);
     assert_eq!(spoken_minutes_from_remaining_seconds(270), 4);
+}
+
+#[test]
+fn report_schema_matches_the_communication_evidence_available() {
+    let assessed = report_response_schema(true);
+    assert!(
+        assessed["properties"]["communicationScore"]
+            .get("nullable")
+            .is_none()
+    );
+    assert_eq!(
+        assessed["properties"]["communicationFeedback"]["properties"]["strengths"]["minItems"],
+        2
+    );
+
+    let silent = report_response_schema(false);
+    assert_eq!(silent["properties"]["communicationScore"]["nullable"], true);
+    for key in ["strengths", "improvements"] {
+        assert_eq!(
+            silent["properties"]["communicationFeedback"]["properties"][key]["minItems"],
+            0
+        );
+        assert_eq!(
+            silent["properties"]["communicationFeedback"]["properties"][key]["maxItems"],
+            0
+        );
+    }
 }
 
 /// The golden fixture proves the schema is stable, not that it is legal, and it
@@ -819,7 +848,7 @@ fn report_schema_uses_only_what_gemini_accepts() {
     }
 
     let mut bad = Vec::new();
-    walk(&report_response_schema(), "$", &mut bad);
+    walk(&report_response_schema(true), "$", &mut bad);
     assert!(bad.is_empty(), "the API will 400 on: {}", bad.join(", "));
 }
 
