@@ -24,23 +24,24 @@ payload=${2:?$usage}
 since=${3:?$usage}
 repo=${4:-sysprog21/codetrial}
 
-# review-anchors.sh refuses a pull request that is not a number or a payload it
-# cannot read, with exit 2 and its own message, before any call to GitHub; set
-# -e passes that exit on. Its count of inline comments goes to stderr too.
+# review-anchors.sh refuses a pull request that is not a number or a payload
+# that is not one JSON object, with exit 2 and its own message, before any call
+# to GitHub; set -e passes that exit on. Its count of inline comments goes to
+# stderr too. The checks below read its output, the text that is posted.
 checked=$(sh "$(dirname "$0")/review-anchors.sh" "$pr" "$payload" "$repo")
-want=$(jq -er '.commit_id | strings' "$payload") || {
+want=$(printf '%s\n' "$checked" | jq -er '.commit_id | strings') || {
     echo "post-review.sh: $payload names no commit_id" >&2
     exit 2
 }
 
 # Without an event GitHub keeps the review pending, visible to nobody else, and
 # still answers with its URL.
-jq -e '.event | IN("COMMENT", "APPROVE", "REQUEST_CHANGES")' "$payload" \
-    > /dev/null || {
+printf '%s\n' "$checked" \
+    | jq -e '.event | IN("COMMENT", "APPROVE", "REQUEST_CHANGES")' > /dev/null || {
     echo "post-review.sh: $payload names no event, so the review would stay pending" >&2
     exit 2
 }
-jq -e '.body | strings | length > 0' "$payload" > /dev/null || {
+printf '%s\n' "$checked" | jq -e '.body | strings | length > 0' > /dev/null || {
     echo "post-review.sh: $payload has no body, which GitHub requires" >&2
     exit 2
 }
