@@ -11,6 +11,7 @@
 // section it already serves.
 
 import { reportMarkup, mountFinalCodeCopy } from "/render.js";
+import { loadOriginalProblem } from "/report-original-problem.js";
 import {
   modeLabel,
   replayRows,
@@ -516,6 +517,11 @@ async function loadReport(interviewId, recordingId) {
     ...final,
   });
   mountFinalCodeCopy(nodes.report, final.code);
+  void loadOriginalProblem(
+    nodes.report,
+    saved.problemId,
+    () => selected === recordingId,
+  );
 }
 
 nodes.more.addEventListener("click", () => void loadList());

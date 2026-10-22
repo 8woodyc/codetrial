@@ -34,8 +34,14 @@ import {
   reportMarkdown,
   reportMarkup,
 } from "./render.js";
+import { loadOriginalProblem } from "./report-original-problem.js";
 import { downloadMarkdown, reportFilename } from "./download.js";
-import { loadCategoryMap, loadPageMap, loadTopicMap } from "./problem-data.js";
+import {
+  loadCategoryMap,
+  loadPageMap,
+  loadPageMapWithin,
+  loadTopicMap,
+} from "./problem-data.js";
 import {
   availableTopics,
   compareCategoryAttempt,
@@ -226,8 +232,8 @@ for (const card of cards) {
 // throws (a private window, blocked site data) just means off.
 const showSources = document.querySelector("#show-sources");
 showSources.checked = readStored(SHOW_SOURCES_KEY) === "1";
-// The published names are not in the page: they arrive with the map, fetched
-// the first time the candidate turns them on.
+// The published names are not in the initial page. The map arrives when the
+// candidate turns them on, or opens or downloads a completed report.
 const applySources = async () => {
   if (showSources.checked) {
     const pages = await loadPageMap().catch(() => null);
@@ -601,12 +607,15 @@ nodes.attemptDownloadSelected.addEventListener("click", async () => {
     ) {
       historyCategories = await loadHistoryCategoryMap();
     }
-    for (const attempt of selected) {
-      downloadSavedReport(
-        attempt,
-        compareCategoryAttempt(history, attempt, historyCategories),
-      );
-    }
+    await Promise.all(
+      selected.map((attempt) =>
+        exportSavedReport(
+          attempt,
+          undefined,
+          compareCategoryAttempt(history, attempt, historyCategories),
+        ),
+      ),
+    );
     // Chrome saves the first file of one click and asks before the rest, or
     // drops them silently once the site is blocked. Neither reaches the page, so
     // the note says how to recover rather than what happened.
@@ -1188,7 +1197,7 @@ async function renderLocalHistory(generation = historyLoad) {
           entry?.pageMapChecked !== true,
       )
     ) {
-      const pages = await loadHistoryPageMap();
+      const pages = await loadPageMapWithin(requestTimeoutMs);
       if (generation !== historyLoad) return;
       if (pages) {
         renameLocalHistory(pages, undefined, true);
@@ -1244,22 +1253,6 @@ async function loadHistoryCategoryMap() {
   try {
     return await Promise.race([
       loadCategoryMap().catch(() => null),
-      new Promise((resolve) => {
-        timer = setTimeout(() => resolve(null), requestTimeoutMs);
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function loadHistoryPageMap() {
-  let timer;
-  try {
-    // The shared lookup also serves the title toggle. Bound this caller's
-    // wait without cancelling the lookup for its other consumers.
-    return await Promise.race([
-      loadPageMap().catch(() => null),
       new Promise((resolve) => {
         timer = setTimeout(() => resolve(null), requestTimeoutMs);
       }),
@@ -2043,6 +2036,7 @@ function renderAttemptHistory(attempts) {
       report.hidden = false;
       open.textContent = "Collapse report";
       void openAttemptCategoryComparison(report, attempt);
+      void loadOriginalProblem(report, attempt.problemId);
     });
     retry.addEventListener("click", () => {
       if (starting) return;
@@ -2132,18 +2126,24 @@ function syncAttemptSelection() {
     downloadingSelectedAttempts || selected === 0;
 }
 
-async function exportSavedReport(attempt, button) {
-  if (button?.disabled) return;
+const pendingReportDownloads = new Set();
+
+async function exportSavedReport(attempt, button, categoryComparison) {
+  const key = selectionKey(attempt);
+  if (pendingReportDownloads.has(key) || button?.disabled) return;
+  pendingReportDownloads.add(key);
   if (button) button.disabled = true;
   try {
-    const categoryComparison = await attemptCategoryComparison(attempt);
-    downloadSavedReport(attempt, categoryComparison);
+    if (categoryComparison === undefined)
+      categoryComparison = await attemptCategoryComparison(attempt);
+    await downloadSavedReport(attempt, categoryComparison);
   } finally {
+    pendingReportDownloads.delete(key);
     if (button) button.disabled = false;
   }
 }
 
-function downloadSavedReport(
+async function downloadSavedReport(
   attempt,
   categoryComparison = compareCategoryAttempt(
     progressNormalized,
@@ -2151,6 +2151,7 @@ function downloadSavedReport(
     historyCategories,
   ),
 ) {
+  const problemPages = await loadPageMapWithin(requestTimeoutMs);
   const markdown = reportMarkdown({
     report: {
       ...attempt.report,
@@ -2158,6 +2159,8 @@ function downloadSavedReport(
         attempt.report.incomplete || attempt.recordedDecision === null,
     },
     problemTitle: attempt.problemTitle,
+    problemPage: attempt.problemId,
+    problemPages,
     language: attempt.language,
     code: attempt.code,
     transcript: null,

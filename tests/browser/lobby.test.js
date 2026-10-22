@@ -4057,6 +4057,36 @@ lobbyTest(
 );
 
 lobbyTest(
+  "opening a saved report fetches and shows its original problem",
+  async (page) => {
+    reports = [savedAttempt(EASY[0])];
+    const fetched = [];
+    page.on("request", (request) =>
+      fetched.push(new URL(request.url()).pathname),
+    );
+    await lobby(page);
+    assert.ok(!fetched.includes("/problem-pages.json"));
+
+    const history = page.locator("#attempt-history");
+    assert.equal(
+      await history.locator(".report-original-problem").textContent(),
+      "",
+    );
+    await history.getByRole("button", { name: "Open report" }).click();
+    const link = history.getByRole("link", { name: "Two Sum" });
+    await link.waitFor();
+    assert.equal(
+      await link.getAttribute("href"),
+      "https://leetcode.com/problems/two-sum/",
+    );
+    assert.equal(
+      fetched.filter((path) => path === "/problem-pages.json").length,
+      1,
+    );
+  },
+);
+
+lobbyTest(
   "a problem already passed is not what gets recommended",
   async (page) => {
     // Passed one Hard and missed another, so the streak has no opinion and the
@@ -4270,6 +4300,10 @@ for (const storage of ["account", "device"]) {
         assert.ok(
           markdown.startsWith(`# Interview Report - Saved report\n_${when}_`),
         );
+        assert.match(
+          markdown,
+          /Original problem: \[Two Sum\]\(https:\/\/leetcode\.com\/problems\/two-sum\/\)/,
+        );
         assert.ok(markdown.includes(`Stored summary ${index}`));
         assert.ok(
           markdown.includes(
@@ -4314,10 +4348,16 @@ const recordDownloadNames = (page) =>
       return click.call(this);
     };
   });
-const takeDownloadNames = async (page) => {
+const takeDownloadNames = async (page, count = 0) => {
   await page.waitForFunction(
     () => !document.querySelector("#attempt-download-selected")?.disabled,
   );
+  // Report exports may still be waiting for the optional problem map.
+  if (count)
+    await page.waitForFunction(
+      (count) => window.downloadNames.length >= count,
+      count,
+    );
   return page.evaluate(() => window.downloadNames.splice(0).sort());
 };
 
@@ -4399,7 +4439,7 @@ for (const storage of ["account", "device"]) {
       page.on("download", onDownload);
       try {
         await downloadSelected.click();
-        assert.deepEqual(await takeDownloadNames(page), [
+        assert.deepEqual(await takeDownloadNames(page, 2), [
           filename(0),
           filename(2),
         ]);
@@ -4490,7 +4530,7 @@ lobbyTest(
     assert.equal(await toggle.textContent(), "Select all");
     assert.equal(await downloadSelected.textContent(), "Download selected (1)");
     await downloadSelected.click();
-    assert.deepEqual(await takeDownloadNames(page), [filename(3)]);
+    assert.deepEqual(await takeDownloadNames(page, 1), [filename(3)]);
     // One file is one download, which no browser asks about.
     assert.equal(await note.textContent(), "");
 
@@ -4498,7 +4538,7 @@ lobbyTest(
     assert.equal(await box("b").isChecked(), true);
     assert.equal(await toggle.textContent(), "Deselect all");
     await downloadSelected.click();
-    assert.deepEqual(await takeDownloadNames(page), [filename(2)]);
+    assert.deepEqual(await takeDownloadNames(page, 1), [filename(2)]);
     await toggle.click();
     assert.equal(await box("b").isChecked(), false);
     assert.equal(await downloadSelected.isDisabled(), true);
@@ -4562,7 +4602,7 @@ lobbyTest(
     await downloadSelected.click();
     assert.deepEqual(asked, []);
     assert.deepEqual(
-      await takeDownloadNames(page),
+      await takeDownloadNames(page, 5),
       [2, 3, 4, 5, 6].map(filename),
     );
 
@@ -4577,7 +4617,7 @@ lobbyTest(
     await downloadSelected.click();
     assert.equal(asked.length, 2);
     assert.deepEqual(
-      await takeDownloadNames(page),
+      await takeDownloadNames(page, 6),
       [1, 2, 3, 4, 5, 6].map(filename),
     );
   },
@@ -4769,6 +4809,94 @@ for (const storage of ["device", "account"]) {
           title,
         );
       }
+    },
+    { acceptDownloads: true },
+  );
+}
+
+lobbyTest(
+  "a stalled problem map allows only one pending saved report download",
+  async (page) => {
+    reports = [savedAttempt(EASY[0])];
+    await page.addInitScript(() => {
+      const fetch = window.fetch.bind(window);
+      window.mapRequested = false;
+      window.mapDeadline = null;
+      window.fetch = (path, options) => {
+        if (path !== "/problem-pages.json") return fetch(path, options);
+        window.mapRequested = true;
+        return new Promise(() => {});
+      };
+      const setTimeout = window.setTimeout.bind(window);
+      window.setTimeout = (callback, delay, ...args) => {
+        if (delay !== 10_000) return setTimeout(callback, delay, ...args);
+        window.mapDeadline = () => callback(...args);
+        return 0;
+      };
+    });
+    await lobby(page);
+    assert.equal(await page.evaluate(() => window.mapRequested), false);
+
+    const downloading = page.waitForEvent("download");
+    const button = page.getByRole("button", { name: /^Download report/ });
+    await button.click();
+    await page.waitForFunction(() => window.mapRequested && window.mapDeadline);
+    assert.equal(await button.isDisabled(), true);
+    await button.dispatchEvent("click");
+    await button.dispatchEvent("click");
+    await page.evaluate(() => window.mapDeadline());
+    const download = await downloading;
+    assert.equal(await download.failure(), null);
+    const chunks = [];
+    for await (const chunk of await download.createReadStream())
+      chunks.push(chunk);
+    const markdown = Buffer.concat(chunks).toString("utf8");
+    assert.match(markdown, /^# Interview Report/);
+    assert.doesNotMatch(markdown, /Original problem:/);
+    assert.equal(await button.isEnabled(), true);
+    const retrying = page.waitForEvent("download");
+    await button.click();
+    assert.equal(await button.isDisabled(), true);
+    await page.evaluate(() => window.mapDeadline());
+    assert.equal(await (await retrying).failure(), null);
+    assert.equal(await button.isEnabled(), true);
+  },
+  { acceptDownloads: true },
+);
+
+for (const failure of ["network failure", "invalid JSON"]) {
+  lobbyTest(
+    `a problem map with ${failure} still exports one saved report`,
+    async (page) => {
+      reports = [savedAttempt(EASY[0])];
+      let mapRequests = 0;
+      await page.route("**/problem-pages.json", (route) => {
+        mapRequests += 1;
+        return failure === "network failure"
+          ? route.abort("failed")
+          : route.fulfill({
+              contentType: "application/json",
+              body: "{invalid",
+            });
+      });
+      await recordDownloadNames(page);
+      await lobby(page);
+      assert.equal(mapRequests, 0);
+
+      const button = page.getByRole("button", { name: /^Download report/ });
+      const downloading = page.waitForEvent("download");
+      await button.click();
+      const download = await downloading;
+      const chunks = [];
+      for await (const chunk of await download.createReadStream())
+        chunks.push(chunk);
+      const markdown = Buffer.concat(chunks).toString("utf8");
+      assert.equal(await download.failure(), null);
+      assert.match(markdown, /^# Interview Report/);
+      assert.doesNotMatch(markdown, /Original problem:/);
+      assert.equal((await takeDownloadNames(page, 1)).length, 1);
+      assert.equal(await button.isEnabled(), true);
+      assert.equal(mapRequests, failure === "network failure" ? 2 : 1);
     },
     { acceptDownloads: true },
   );
