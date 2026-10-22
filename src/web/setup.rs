@@ -111,46 +111,201 @@ async fn setup_page() -> Html<&'static str> {
 /// launch with no console to print it on. Blank is a server that looks
 /// finished: the lobby loads, the interview starts, and nothing ever joins.
 const SETUP_PAGE: &str = r#"<!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>codetrial Setup</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CodeTrial - Setup</title>
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 32rem; margin: 2rem auto; padding: 0 1rem; }
-  label { display: block; margin-top: 1rem; font-weight: 600; }
-  input { display: block; width: 100%; margin-top: .25rem; padding: .4rem; box-sizing: border-box; }
-  small { display: block; color: #555; margin-top: .15rem; }
-  button { margin-top: 1.5rem; padding: .5rem 1rem; }
-  #status { margin-top: 1rem; white-space: pre-wrap; }
-  #status.error { color: #b00020; }
-  #status.ok { color: #0a7a2f; }
+  :root {
+    color-scheme: light;
+    --page: #f6f6f9;
+    --surface: #ffffff;
+    --ink: #171d2d;
+    --sub: #4f5b73;
+    --hairline: #e3e5ec;
+    --control-border: #858fa3;
+    --accent: #6e2bf0;
+    --accent-fill: #6e2bf0;
+    --accent-deep: #5520c4;
+    --accent-ink: #5520c4;
+    --practice-tint: #f3edff;
+    --practice-tint-edge: #ddd0fb;
+    --good: #137b56;
+    --critical: #c52d43;
+    --shadow-card: 0 1px 2px rgb(23 29 45 / 4%), 0 8px 24px rgb(23 29 45 / 6%);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --page: #11110f;
+      --surface: #1b1b18;
+      --ink: #f6f3ea;
+      --sub: #b7b2a5;
+      --hairline: #2d2b26;
+      --control-border: #8a8473;
+      --accent: #a291ff;
+      --accent-fill: #744ce6;
+      --accent-deep: #6437d2;
+      --accent-ink: #ab9eff;
+      --practice-tint: color-mix(in oklch, var(--accent-fill) 16%, var(--surface));
+      --practice-tint-edge: #473983;
+      --good: #24b47e;
+      --critical: #ff6b6b;
+      --shadow-card: 0 1px 2px rgb(0 0 0 / 30%), 0 8px 24px rgb(0 0 0 / 24%);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    min-height: 100vh;
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  main { width: min(100%, 52rem); margin: 0 auto; padding: 2.5rem 1.25rem; }
+  header { margin-bottom: 2rem; }
+  .brand { font-size: 1.125rem; font-weight: 700; letter-spacing: -0.02em; }
+  .hero { margin-bottom: 2rem; }
+  .badge {
+    display: inline-block;
+    margin-bottom: 1rem;
+    padding: 0.375rem 0.875rem;
+    border: 1px solid var(--practice-tint-edge);
+    border-radius: 999px;
+    background: var(--practice-tint);
+    color: var(--accent-ink);
+    font-size: 0.8125rem;
+    font-weight: 600;
+  }
+  h1 {
+    margin: 0;
+    font-size: clamp(2rem, 5vw, 3.25rem);
+    line-height: 1.1;
+    letter-spacing: -0.035em;
+  }
+  .lead { margin: 0.875rem 0 0; color: var(--sub); font-size: 1.125rem; line-height: 1.55; }
+  form {
+    padding: 1.5rem;
+    border: 1px solid var(--hairline);
+    border-radius: 20px;
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+  fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+  fieldset + fieldset { margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--hairline); }
+  legend { padding: 0; font-size: 1.25rem; font-weight: 700; letter-spacing: -0.02em; }
+  .requirement {
+    margin-left: 0.5rem;
+    color: var(--accent-ink);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .group-note { margin: 0.5rem 0 1.25rem; color: var(--sub); line-height: 1.5; }
+  .field + .field, .field-row { margin-top: 1rem; }
+  .field-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+  .field-row > .field + .field { margin-top: 0; }
+  label { display: block; margin-bottom: 0.375rem; font-size: 0.875rem; font-weight: 600; }
+  input {
+    display: block;
+    width: 100%;
+    min-height: 2.5rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--control-border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+  }
+  small { display: block; margin-top: 0.375rem; color: var(--sub); font-size: 0.8125rem; line-height: 1.5; }
+  a { color: var(--accent-ink); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .action-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1rem;
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--hairline);
+  }
+  button {
+    min-height: 2.75rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    background: var(--accent-fill);
+    color: #ffffff;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 700;
+    transition: background 120ms ease;
+  }
+  button:not(:disabled):hover { background: var(--accent-deep); }
+  button:disabled { cursor: not-allowed; opacity: 0.6; }
+  #status { flex: 1 1 14rem; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+  #status.error { color: var(--critical); }
+  #status.ok { color: var(--good); }
+  @media (max-width: 600px) {
+    main { padding: 1.25rem; }
+    header { margin-bottom: 1.25rem; }
+    .hero { margin-bottom: 1.5rem; }
+    .lead { font-size: 1rem; }
+    form { padding: 1.25rem; }
+    .field-row { grid-template-columns: minmax(0, 1fr); }
+    input { font-size: 1rem; }
+    .action-row { align-items: stretch; }
+    .action-row button { width: 100%; }
+  }
 </style>
 </head>
 <body>
-<h1>Setup</h1>
-<p>Enter your LiveKit and Google credentials to get started.</p>
-<form id="setup-form">
-  <label for="livekitUrl">LiveKit URL</label>
-  <input id="livekitUrl" name="livekitUrl" type="text" placeholder="wss://your-project.livekit.cloud" required>
-  <small>From your project at <a href="https://cloud.livekit.io" target="_blank" rel="noopener">cloud.livekit.io</a>.</small>
-
-  <label for="livekitApiKey">LiveKit API Key</label>
-  <input id="livekitApiKey" name="livekitApiKey" type="text" required>
-
-  <label for="livekitApiSecret">LiveKit API Secret</label>
-  <input id="livekitApiSecret" name="livekitApiSecret" type="password" required>
-  <small>Both come from the same project's Keys page.</small>
-
-  <label for="googleApiKey">Google API Key</label>
-  <input id="googleApiKey" name="googleApiKey" type="password">
-  <small>From <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com</a>.
-  Optional, and what it decides is whether this server hosts the interviewer. Without it
-  the app still loads and an interview still starts, but nobody joins the room: something
-  running elsewhere would have to.</small>
-
-  <button id="submit" type="submit">Save and continue</button>
-</form>
-<div id="status"></div>
+<main>
+  <header><div class="brand">CODETRIAL</div></header>
+  <section class="hero" aria-labelledby="setup-title">
+    <span class="badge">First-time setup</span>
+    <h1 id="setup-title">Set up CodeTrial</h1>
+    <p class="lead">Connect your services to start practicing live technical interviews.</p>
+  </section>
+  <form id="setup-form">
+    <fieldset>
+      <legend>LiveKit credentials <span class="requirement">Required</span></legend>
+      <p class="group-note">Use the URL and keys from the same LiveKit project.</p>
+      <div class="field">
+        <label for="livekitUrl">LiveKit URL</label>
+        <input id="livekitUrl" name="livekitUrl" type="text" placeholder="wss://your-project.livekit.cloud" required>
+        <small>Find it at <a href="https://cloud.livekit.io" target="_blank" rel="noopener">cloud.livekit.io</a>.</small>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="livekitApiKey">LiveKit API Key</label>
+          <input id="livekitApiKey" name="livekitApiKey" type="text" required>
+        </div>
+        <div class="field">
+          <label for="livekitApiSecret">LiveKit API Secret</label>
+          <input id="livekitApiSecret" name="livekitApiSecret" type="password" required>
+        </div>
+      </div>
+      <small>Find both on the project's Keys page.</small>
+    </fieldset>
+    <fieldset>
+      <legend>Google AI <span class="requirement">Optional</span></legend>
+      <p class="group-note">Add a key if this server will host the interviewer.</p>
+      <div class="field">
+        <label for="googleApiKey">Google API Key</label>
+        <input id="googleApiKey" name="googleApiKey" type="password">
+        <small>Get a key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com</a>.</small>
+        <small>Without a key, the app still loads and an interview can start, but an interviewer running elsewhere must join the room.</small>
+      </div>
+    </fieldset>
+    <div class="action-row">
+      <button id="submit" type="submit">Save and continue</button>
+      <div id="status" role="status" aria-live="polite"></div>
+    </div>
+  </form>
+</main>
 <script>
   const form = document.getElementById('setup-form');
   const status = document.getElementById('status');

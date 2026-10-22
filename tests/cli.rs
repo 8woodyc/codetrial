@@ -1093,9 +1093,12 @@ fn setup_page_renders_a_form_with_all_four_credential_fields() {
     }
     assert!(response.contains("/api/setup"), "{response}");
 
-    // What leaving the optional field blank buys. The only other place that
-    // says it is a console this launch does not have.
-    assert!(response.contains("nobody joins the room"), "{response}");
+    // The setup page explains what happens when the optional key is blank: an
+    // interviewer hosted elsewhere still needs to join the room.
+    assert!(
+        response.contains("an interviewer running elsewhere must join the room"),
+        "{response}"
+    );
 }
 
 /// Accept, validate, write: the mocks answer as working credentials would,
