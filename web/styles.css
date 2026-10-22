@@ -924,6 +924,18 @@ p {
   overflow: hidden;
 }
 
+/* Unmirrored: web/self-view.js says why. */
+.self-view {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  margin-top: 0.35rem;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--float-surface);
+  object-fit: cover;
+}
+
 /* Completed Jim turns keep their full text. The viewport cap bounds the bar's
    height while scrolling keeps longer turns readable. */
 .jim-stage .captions-bar {
@@ -1094,6 +1106,18 @@ p {
   position: absolute;
   top: var(--jim-stage-top, 4.25rem);
   bottom: auto;
+}
+
+/* Kept, unlike the avatar: it is what a screen recording of this window shows
+   of the candidate. Kept small, because it now sits over code. */
+.jim-stage.compact .self-view {
+  width: 120px;
+  margin-left: auto;
+}
+
+/* The wait keeps room for captions alone under a compact card. */
+#ending-overlay:not([hidden]) ~ .jim-stage.compact .self-view {
+  display: none;
 }
 
 .jim-avatar-canvas {
