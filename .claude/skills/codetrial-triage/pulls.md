@@ -225,9 +225,9 @@ last; a stale base is a rebase request; one `main` shares, or an environment
 limit, is the maintainer's. The sweep's `status` lists them (`failing:` in
 `why`), and `ci-failure.sh` in
 [codetrial-verify](../codetrial-verify/SKILL.md#failed-github-actions-checks)
-tells those cases apart for one PR in one call. Read the failing
-`gates (<lane>)` job, not `check` or `mutation`, which only collect results ([codetrial-verify](../codetrial-verify/SKILL.md)
-describes the lanes). A failing commit-message check skips the rest of the
+tells those cases apart for one PR in one call. Read the failing job that
+[codetrial-verify](../codetrial-verify/SKILL.md) names, not `check`, which only
+collects results. A failing commit-message check skips the rest of the
 portable lane, so name it first. A second PR
 from the same author for the same change supersedes the first or is superseded
 by it; report which in the sweep output and leave the

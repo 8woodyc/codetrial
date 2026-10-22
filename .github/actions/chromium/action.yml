@@ -1,0 +1,27 @@
+name: Install Chromium
+description: Restore Playwright's Chromium and install its system libraries.
+
+# The browser binary, not the npm package. package-lock.json pins the
+# playwright version, and the version is what decides which build of Chromium
+# lands in this directory. Needs `npm ci` first, since it runs that playwright.
+#
+# The install is one command on a cache hit too: it then only installs the
+# system libraries, which are not in the cached directory. Without it the
+# browser suites skip themselves and the gate passes while testing nothing.
+outputs:
+  key:
+    description: The exact key, for the step that saves the browser.
+    value: ${{ steps.restore.outputs.cache-primary-key }}
+  cache-hit:
+    description: Whether the exact key was restored.
+    value: ${{ steps.restore.outputs.cache-hit }}
+runs:
+  using: composite
+  steps:
+    - id: restore
+      uses: actions/cache/restore@v6
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+    - shell: sh
+      run: npx playwright install --with-deps chromium

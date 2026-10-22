@@ -15,12 +15,12 @@ make check                # every gate, plus a live Gemini credential check
 
 CI runs one `gates (<lane>)` job per lane in parallel: `gates (rust)`,
 `gates (portable)` and `gates (browser)`. The `check` job only collects their
-results and `mutation` does the same for the mutant shards, so neither log
-says what failed: open the failing lane, or the failing `mutants` shard when
-`mutation` is the red one. On a pull request the portable lane
-checks the commit messages first, and a bad message skips the rest of that
-lane only. A gate names its lane where it is declared, one naming none is
-portable, and a test proves the three lanes together cover the full run.
+results and the mutation jobs', so its log does not say what failed: open the
+failing lane, or, when every lane is green, the failing `plan-mutants` job or
+`mutants` shard. On a pull request the portable lane checks the commit
+messages first, and a bad message skips the rest of that lane only. A gate
+names its lane where it is declared, one naming none is portable, and a test
+proves the three lanes together cover the full run.
 Reproduce a failure with the same lane locally.
 
 `scripts/test.sh` is a list of named gates that all run before it reports, so
@@ -130,7 +130,7 @@ regression check in the existing lane.
 
 ## Failed GitHub Actions checks
 
-The lanes and the aggregate `check` and `mutation` jobs are described above;
+The lanes and the aggregate `check` job are described above;
 telling a stale base, a regression, a race and an environment limit apart is in
 [collaboration.md](../codetrial-contribute/collaboration.md#make-ci-green-before-asking-for-review);
 reading the job log, and why it is `--log`, is the recipe in
@@ -152,9 +152,9 @@ locally with the same head. A `cargo-audit` failure on a PR whose base predates
 the advisory fix is a stale base, answered by a rebase (#334), not a code
 change; `stale_base` (defined in the script's header) says exactly that, and
 the PR sweep lists such a PR in `rebase` on its own. The aggregate `check` job
-only collects the lanes, so its entry points at the failing `gates (<lane>)`
-one. A check outside Actions has only its link, and `held` checks have no log
-until a maintainer approves the run.
+only collects results, so its entry points at the failing job it collected,
+as in the lanes section above. A check outside Actions has only its link, and
+`held` checks have no log until a maintainer approves the run.
 
 The raw calls behind it, when one answer needs checking:
 
