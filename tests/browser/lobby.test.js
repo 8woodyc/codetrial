@@ -24,6 +24,7 @@ import {
   startStaticServer,
 } from "./source.js";
 import { ACTIVE_CONTRACT, frameworkPhases } from "../../web/lib.js";
+import { PRACTICE_LIST_KEY } from "../../web/practice-list.js";
 
 let browser = null;
 let server = null;
@@ -288,11 +289,12 @@ const HARD = ["candy", "trapping-rain-water"].map(pageOf);
 function lobbyTest(name, body, options) {
   test(name, async (t) => {
     if (!browser) return t.skip("playwright chromium unavailable");
-    const page = await browser.newPage(options);
+    const context = await browser.newContext(options);
+    const page = await context.newPage();
     try {
       await body(page, t);
     } finally {
-      await page.close();
+      await context.close();
     }
   });
 }
@@ -464,6 +466,773 @@ async function openTopicFilter(page) {
     () => !document.querySelector("#problem-topic").disabled,
   );
 }
+
+const practiceInput = (page, id) =>
+  page.locator(`[data-practice-problem="${id}"]`);
+
+lobbyTest(
+  "practice checkboxes preserve the current problem and remove the last saved item",
+  async (page) => {
+    await lobby(page);
+    await openTopicFilter(page);
+    const before = await snapshot(page);
+    const pick = page.getByRole("button", {
+      name: "Pick from my list",
+      exact: true,
+    });
+    assert.equal(await pick.isDisabled(), true);
+    assert.equal(
+      await pick.evaluate((button) => getComputedStyle(button).cursor),
+      "not-allowed",
+    );
+    assert.match(
+      await page.locator("#practice-list-status").textContent(),
+      /Open the problem picker/,
+    );
+    const problemTitle = await page
+      .locator(`[data-problem="${MEDIUM[0]}"] .problem-title`)
+      .textContent();
+    const checkbox = page.getByRole("checkbox", {
+      name: `In my list: ${problemTitle}`,
+      exact: true,
+    });
+    assert.equal(await checkbox.count(), 1);
+    assert.equal(await checkbox.locator("xpath=ancestor::button").count(), 0);
+    await checkbox.check();
+    assert.deepEqual(await snapshot(page), before);
+    assert.equal(await pick.isEnabled(), true);
+    assert.equal(
+      await pick.evaluate((button) => getComputedStyle(button).cursor),
+      "pointer",
+    );
+    assert.match(
+      await page.locator("#practice-list-status").textContent(),
+      /1 problem in your list/,
+    );
+    await checkbox.focus();
+    await page.keyboard.press("Space");
+    assert.equal(await checkbox.isChecked(), false);
+    assert.deepEqual(await snapshot(page), before);
+    assert.equal(await pick.isDisabled(), true);
+    assert.deepEqual(
+      await page.evaluate(
+        (key) => JSON.parse(localStorage.getItem(key)),
+        PRACTICE_LIST_KEY,
+      ),
+      [],
+    );
+  },
+);
+
+lobbyTest(
+  "practice list additions and removals survive a lobby reload",
+  async (page) => {
+    await lobby(page);
+    await openTopicFilter(page);
+    await practiceInput(page, MEDIUM[0]).check();
+    await practiceInput(page, MEDIUM[1]).check();
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForFunction(
+      () => !document.querySelector("#random-problem").disabled,
+    );
+    assert.equal(await practiceInput(page, MEDIUM[0]).isChecked(), true);
+    assert.equal(await practiceInput(page, MEDIUM[1]).isChecked(), true);
+    await openTopicFilter(page);
+    await practiceInput(page, MEDIUM[0]).uncheck();
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForFunction(
+      () => !document.querySelector("#random-problem").disabled,
+    );
+    assert.equal(await practiceInput(page, MEDIUM[0]).isChecked(), false);
+    assert.equal(await practiceInput(page, MEDIUM[1]).isChecked(), true);
+    assert.deepEqual(
+      await page.evaluate(
+        (key) => JSON.parse(localStorage.getItem(key)),
+        PRACTICE_LIST_KEY,
+      ),
+      [MEDIUM[1]],
+    );
+  },
+);
+
+lobbyTest(
+  "a saved practice list can be drawn with the problem picker closed",
+  async (page) => {
+    await page.addInitScript(
+      ([key, id]) => localStorage.setItem(key, JSON.stringify([id])),
+      [PRACTICE_LIST_KEY, MEDIUM[0]],
+    );
+    await lobby(page);
+    assert.equal(
+      await page
+        .locator("details.problem-picker")
+        .evaluate((picker) => picker.open),
+      false,
+    );
+    assert.equal(await page.locator("#practice-list-pick").isVisible(), true);
+    assert.equal(await page.locator("#practice-list-status").isVisible(), true);
+    await page.click("#practice-list-pick");
+    assert.equal((await snapshot(page)).card, MEDIUM[0]);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await awaitReady(page);
+    assert.equal(
+      await page
+        .locator("details.problem-picker")
+        .evaluate((picker) => picker.open),
+      false,
+    );
+    assert.equal(await page.locator("#practice-list-pick").isVisible(), true);
+    for (const width of [320, 375, 1280]) {
+      await page.setViewportSize({ width, height: 800 });
+      assert.equal(await page.locator("#practice-list-pick").isVisible(), true);
+      assert.deepEqual(
+        await page.evaluate(() => [
+          document.documentElement.scrollWidth,
+          document.documentElement.clientWidth,
+        ]),
+        [width, width],
+      );
+    }
+  },
+);
+
+lobbyTest(
+  "emptying a practice list in another tab preserves keyboard focus",
+  async (page) => {
+    const other = await page.context().newPage();
+    try {
+      await lobby(page);
+      await openTopicFilter(page);
+      await practiceInput(page, MEDIUM[0]).check();
+      await page.click("details.problem-picker summary");
+      await lobby(other);
+      await openTopicFilter(other);
+      await page.locator("#practice-list-pick").focus();
+      assert.equal(
+        await page.evaluate(() => document.activeElement.id),
+        "practice-list-pick",
+      );
+      await practiceInput(other, MEDIUM[0]).uncheck();
+      await reaches(
+        page,
+        () => document.querySelector("#practice-list-pick").disabled,
+      );
+      assert.equal(
+        await page.evaluate(() => document.activeElement.id),
+        "practice-list-status",
+      );
+      assert.equal(
+        await page.locator("#practice-list-status").isVisible(),
+        true,
+      );
+      assert.match(
+        await page.locator("#practice-list-status").textContent(),
+        /0 problems/,
+      );
+      await page.keyboard.press("Tab");
+      assert.equal(
+        await page.evaluate(() => document.activeElement.tagName),
+        "SUMMARY",
+      );
+    } finally {
+      await other.close();
+    }
+  },
+);
+
+for (const filter of ["difficulty", "topic"]) {
+  lobbyTest(
+    `a practice draw follows explicit ${filter} changes without changing the saved list`,
+    async (page) => {
+      const id = filter === "difficulty" ? EASY[1] : MEDIUM[0];
+      await page.addInitScript(
+        ([key, id]) => localStorage.setItem(key, JSON.stringify([id])),
+        [PRACTICE_LIST_KEY, id],
+      );
+      await lobby(page);
+      await openTopicFilter(page);
+      await page.click('[data-duration="60"]');
+      await page.click("#practice-list-pick");
+      assert.equal((await snapshot(page)).card, id);
+      if (filter === "difficulty") await setLevel(page, "Easy", true);
+      else await page.selectOption("#problem-topic", "Array");
+      assert.equal((await snapshot(page)).card, id);
+      if (filter === "difficulty") await setLevel(page, "Easy", false);
+      else await page.selectOption("#problem-topic", "Stack");
+      const filtered = await snapshot(page);
+      assert.notEqual(filtered.card, id);
+      assert.equal((await cardInfo(page, filtered.card)).level, "Medium");
+      if (filter === "topic")
+        assert.equal(TOPICS_BY_PAGE[filtered.card].includes("Stack"), true);
+      assert.equal(await practiceInput(page, id).isHidden(), true);
+      assert.equal(await practiceInput(page, id).isChecked(), true);
+      assert.equal(filtered.duration, "60");
+      assert.deepEqual(
+        await page.evaluate(
+          (key) => JSON.parse(localStorage.getItem(key)),
+          PRACTICE_LIST_KEY,
+        ),
+        [id],
+      );
+      await page.click("#practice-list-pick");
+      const drawn = await snapshot(page);
+      assert.equal(drawn.card, id);
+      assert.deepEqual(drawn.levels, filtered.levels);
+      assert.equal(drawn.duration, "60");
+      assert.equal(
+        await page.locator("#problem-topic").inputValue(),
+        filter === "topic" ? "Stack" : "",
+      );
+    },
+  );
+}
+
+lobbyTest("practice lists stay in sync across lobby tabs", async (page) => {
+  const other = await page.context().newPage();
+  try {
+    await lobby(page);
+    await lobby(other);
+    await openTopicFilter(page);
+    await openTopicFilter(other);
+    const before = await snapshot(other);
+    await practiceInput(page, MEDIUM[0]).check();
+    await reaches(other, () =>
+      document
+        .querySelector("#practice-list-status")
+        .textContent.startsWith("1 problem"),
+    );
+    assert.equal(await practiceInput(other, MEDIUM[0]).isChecked(), true);
+    assert.deepEqual(await snapshot(other), before);
+    assert.equal(await other.locator("#practice-list-pick").isEnabled(), true);
+    await practiceInput(other, MEDIUM[1]).check();
+    await reaches(page, () =>
+      document
+        .querySelector("#practice-list-status")
+        .textContent.startsWith("2 problems"),
+    );
+    assert.equal(await practiceInput(page, MEDIUM[1]).isChecked(), true);
+    assert.deepEqual(
+      await page.evaluate(
+        (key) => JSON.parse(localStorage.getItem(key)),
+        PRACTICE_LIST_KEY,
+      ),
+      MEDIUM,
+    );
+    await practiceInput(page, MEDIUM[0]).uncheck();
+    await reaches(other, () =>
+      document
+        .querySelector("#practice-list-status")
+        .textContent.startsWith("1 problem"),
+    );
+    assert.equal(await practiceInput(other, MEDIUM[0]).isChecked(), false);
+    await other.click("#practice-list-pick");
+    assert.equal((await snapshot(other)).card, MEDIUM[1]);
+    for (const clearAll of [false, true]) {
+      await page.evaluate(
+        ([key, clearAll]) => {
+          if (clearAll) localStorage.clear();
+          else localStorage.removeItem(key);
+        },
+        [PRACTICE_LIST_KEY, clearAll],
+      );
+      await reaches(
+        other,
+        () => document.querySelector("#practice-list-pick").disabled,
+      );
+      assert.equal(
+        await other.locator("[data-practice-problem]:checked").count(),
+        0,
+      );
+      if (!clearAll) await practiceInput(other, MEDIUM[1]).check();
+    }
+  } finally {
+    await other.close();
+  }
+});
+
+lobbyTest(
+  "a practice edit merges stored changes before their notification arrives",
+  async (page) => {
+    await page.addInitScript(() => {
+      window.addEventListener(
+        "storage",
+        (event) => event.stopImmediatePropagation(),
+        true,
+      );
+    });
+    const other = await page.context().newPage();
+    try {
+      await lobby(page);
+      await lobby(other);
+      await openTopicFilter(page);
+      await openTopicFilter(other);
+      await practiceInput(other, MEDIUM[0]).check();
+      assert.equal(await practiceInput(page, MEDIUM[0]).isChecked(), false);
+      await practiceInput(page, MEDIUM[1]).check();
+      assert.equal(await practiceInput(page, MEDIUM[0]).isChecked(), true);
+      assert.deepEqual(
+        await page.evaluate(
+          (key) => JSON.parse(localStorage.getItem(key)),
+          PRACTICE_LIST_KEY,
+        ),
+        MEDIUM,
+      );
+      await practiceInput(other, MEDIUM[0]).uncheck();
+      await practiceInput(page, MEDIUM[1]).uncheck();
+      assert.deepEqual(
+        await page.evaluate(
+          (key) => JSON.parse(localStorage.getItem(key)),
+          PRACTICE_LIST_KEY,
+        ),
+        [],
+      );
+      assert.equal(
+        await page.locator("#practice-list-pick").isDisabled(),
+        true,
+      );
+      assert.equal(await practiceInput(page, MEDIUM[0]).isChecked(), false);
+      await practiceInput(page, MEDIUM[0]).check();
+      await other.evaluate(
+        (key) => localStorage.removeItem(key),
+        PRACTICE_LIST_KEY,
+      );
+      await practiceInput(page, MEDIUM[1]).check();
+      assert.deepEqual(
+        await page.evaluate(
+          (key) => JSON.parse(localStorage.getItem(key)),
+          PRACTICE_LIST_KEY,
+        ),
+        [MEDIUM[1]],
+      );
+      assert.equal(await practiceInput(page, MEDIUM[0]).isChecked(), false);
+    } finally {
+      await other.close();
+    }
+  },
+);
+
+for (const change of ["replace", "empty", "remove", "clear"]) {
+  lobbyTest(
+    `a practice draw refreshes before a delayed storage notification (${change})`,
+    async (page) => {
+      await page.addInitScript(() => {
+        window.addEventListener(
+          "storage",
+          (event) => event.stopImmediatePropagation(),
+          true,
+        );
+      });
+      const other = await page.context().newPage();
+      try {
+        await lobby(page);
+        await openTopicFilter(page);
+        await practiceInput(page, MEDIUM[0]).check();
+        const before = await snapshot(page);
+        await lobby(other);
+        await other.evaluate(
+          ([key, id, change]) => {
+            if (change === "clear") localStorage.clear();
+            else if (change === "remove") localStorage.removeItem(key);
+            else
+              localStorage.setItem(
+                key,
+                JSON.stringify(change === "replace" ? [id] : []),
+              );
+          },
+          [PRACTICE_LIST_KEY, MEDIUM[1], change],
+        );
+        // The write is visible in storage, while this tab has no notification.
+        assert.equal(await practiceInput(page, MEDIUM[0]).isChecked(), true);
+        assert.equal(await practiceInput(page, MEDIUM[1]).isChecked(), false);
+        assert.equal(
+          await page.locator("#practice-list-pick").isEnabled(),
+          true,
+        );
+        await page.click("#practice-list-pick");
+        if (change === "replace") {
+          assert.equal((await snapshot(page)).card, MEDIUM[1]);
+          assert.equal(await practiceInput(page, MEDIUM[1]).isChecked(), true);
+          assert.match(
+            await page.locator("#practice-list-status").textContent(),
+            /^1 problem in your list/,
+          );
+        } else {
+          assert.deepEqual(await snapshot(page), before);
+          assert.equal(
+            await page.locator("#practice-list-pick").isDisabled(),
+            true,
+          );
+          assert.equal(
+            await page.locator("[data-practice-problem]:checked").count(),
+            0,
+          );
+          assert.match(
+            await page.locator("#practice-list-status").textContent(),
+            /^0 problems in your list/,
+          );
+          assert.equal(
+            await page.evaluate(() => document.activeElement.id),
+            "practice-list-status",
+          );
+        }
+        assert.equal(await practiceInput(page, MEDIUM[0]).isChecked(), false);
+      } finally {
+        await other.close();
+      }
+    },
+  );
+}
+
+lobbyTest(
+  "practice draws reveal only the selected exception without rewriting filters or duration",
+  async (page) => {
+    await page.addInitScript(
+      ([key, ids]) => localStorage.setItem(key, JSON.stringify(ids)),
+      [PRACTICE_LIST_KEY, [EASY[1], HARD[0]]],
+    );
+    await lobby(page);
+    await openTopicFilter(page);
+    await page.selectOption("#problem-topic", "Array");
+    await page.click('[data-duration="60"]');
+    const before = await snapshot(page);
+    await page.evaluate(() => {
+      Math.random = () => 0;
+    });
+    await page.click("#practice-list-pick");
+    const first = await snapshot(page);
+    assert.equal(first.card, EASY[1]);
+    assert.equal(first.pressed, EASY[1]);
+    assert.deepEqual(first.levels, before.levels);
+    assert.equal(first.duration, "60");
+    assert.equal(await page.locator("#problem-topic").inputValue(), "Array");
+    assert.match(first.note, /From my list:.*\(Easy\)/);
+    assert.equal(await practiceInput(page, EASY[1]).isVisible(), true);
+    assert.equal(await practiceInput(page, HARD[0]).isVisible(), false);
+    await page.click("#practice-list-pick");
+    assert.equal((await snapshot(page)).card, HARD[0]);
+    assert.equal(await practiceInput(page, EASY[1]).isVisible(), false);
+    assert.equal(await practiceInput(page, HARD[0]).isVisible(), true);
+    await restore(page);
+    await page.waitForFunction(
+      () => !document.querySelector("#practice-list-pick").disabled,
+    );
+    assert.equal((await snapshot(page)).card, HARD[0]);
+    assert.equal(await practiceInput(page, HARD[0]).isVisible(), true);
+    await page.click(`[data-problem="${MEDIUM[0]}"]`);
+    assert.equal((await snapshot(page)).card, MEDIUM[0]);
+    await page.click("#random-problem");
+    const general = await snapshot(page);
+    assert.equal([EASY[1], HARD[0]].includes(general.card), false);
+    assert.deepEqual(general.levels, before.levels);
+    assert.equal(general.duration, "60");
+  },
+);
+
+lobbyTest(
+  "a sole saved problem can be redrawn and supplies its suggested duration",
+  async (page) => {
+    await page.addInitScript(
+      ([key, id]) => localStorage.setItem(key, JSON.stringify([id])),
+      [PRACTICE_LIST_KEY, EASY[0]],
+    );
+    await lobby(page);
+    await openTopicFilter(page);
+    for (let draw = 0; draw < 2; draw++) {
+      await page.click("#practice-list-pick");
+      const picked = await snapshot(page);
+      assert.equal(picked.card, EASY[0]);
+      assert.equal(picked.duration, "30");
+      assert.deepEqual(picked.levels, ["Medium"]);
+    }
+    await page.click("#start");
+    await page.waitForURL("**/interview?*");
+    const params = new URL(page.url()).searchParams;
+    assert.equal(params.get("problem"), EASY[0]);
+    assert.equal(params.get("duration"), "30");
+    assert.equal(
+      [...params.keys()].some((key) => /practice|list/i.test(key)),
+      false,
+    );
+  },
+);
+
+lobbyTest(
+  "practice draws wait for history and account refreshes",
+  async (page) => {
+    await page.addInitScript(
+      ([key, id]) => localStorage.setItem(key, JSON.stringify([id])),
+      [PRACTICE_LIST_KEY, MEDIUM[0]],
+    );
+    let release = holdHistory();
+    try {
+      await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() =>
+        document.querySelector("[data-problem]").hasAttribute("aria-pressed"),
+      );
+      assert.equal(
+        await page.locator("#practice-list-pick").isDisabled(),
+        true,
+      );
+      release();
+      await page.waitForFunction(
+        () => !document.querySelector("#practice-list-pick").disabled,
+      );
+      release = holdHistory();
+      await restore(page);
+      assert.equal(
+        await page.locator("#practice-list-pick").isDisabled(),
+        true,
+      );
+      release();
+      await page.waitForFunction(
+        () => !document.querySelector("#practice-list-pick").disabled,
+      );
+    } finally {
+      release();
+    }
+  },
+);
+
+lobbyTest(
+  "malformed and retired saved IDs do not enable a practice draw",
+  async (page) => {
+    for (const stored of ["{", "{}", '["retired",null,42]']) {
+      await page.addInitScript(
+        ([key, stored]) => localStorage.setItem(key, stored),
+        [PRACTICE_LIST_KEY, stored],
+      );
+      await lobby(page);
+      assert.equal(
+        await page.locator("#practice-list-pick").isDisabled(),
+        true,
+      );
+      assert.equal(
+        await page.locator("[data-practice-problem]:checked").count(),
+        0,
+      );
+    }
+  },
+);
+
+for (const failure of ["throw", "ignore"]) {
+  lobbyTest(
+    `a practice list warns when writes ${failure} on its last removal before reload`,
+    async (page) => {
+      const errors = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      await page.addInitScript(
+        ([key, failure]) => {
+          const setItem = Storage.prototype.setItem;
+          window.failPracticeWrites = false;
+          Storage.prototype.setItem = function (storedKey, value) {
+            if (storedKey === key && window.failPracticeWrites) {
+              if (failure === "throw") throw new Error("quota exceeded");
+              return;
+            }
+            return setItem.call(this, storedKey, value);
+          };
+        },
+        [PRACTICE_LIST_KEY, failure],
+      );
+      await lobby(page);
+      await openTopicFilter(page);
+      await practiceInput(page, MEDIUM[0]).check();
+      await page.evaluate(() => {
+        window.failPracticeWrites = true;
+      });
+      await practiceInput(page, MEDIUM[0]).uncheck();
+      assert.equal(await practiceInput(page, MEDIUM[0]).isChecked(), false);
+      assert.equal(
+        await page.locator("#practice-list-pick").isDisabled(),
+        true,
+      );
+      assert.deepEqual(
+        await page.evaluate(
+          (key) => JSON.parse(localStorage.getItem(key)),
+          PRACTICE_LIST_KEY,
+        ),
+        [MEDIUM[0]],
+      );
+      assert.match(
+        await page.locator("#practice-list-status").textContent(),
+        /^0 problems in your list.*Kept for this visit only/,
+      );
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await awaitReady(page);
+      assert.equal(await practiceInput(page, MEDIUM[0]).isChecked(), true);
+      assert.equal(await page.locator("#practice-list-pick").isEnabled(), true);
+      assert.match(
+        await page.locator("#practice-list-status").textContent(),
+        /^1 problem in your list.*Saved in this browser only/,
+      );
+      assert.deepEqual(errors, []);
+    },
+  );
+
+  lobbyTest(
+    `a practice list preserves unsaved changes when writes ${failure} but reads work`,
+    async (page) => {
+      const errors = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      await page.addInitScript(
+        ([key, id, failure]) => {
+          localStorage.setItem(key, JSON.stringify([id]));
+          const setItem = Storage.prototype.setItem;
+          window.allowPracticeWrites = false;
+          Storage.prototype.setItem = function (storedKey, value) {
+            if (storedKey === key && !window.allowPracticeWrites) {
+              if (failure === "throw") throw new Error("quota exceeded");
+              return;
+            }
+            return setItem.call(this, storedKey, value);
+          };
+        },
+        [PRACTICE_LIST_KEY, MEDIUM[0], failure],
+      );
+      await lobby(page);
+      await openTopicFilter(page);
+      await practiceInput(page, MEDIUM[1]).check();
+      await practiceInput(page, MEDIUM[0]).uncheck();
+      assert.equal(await practiceInput(page, MEDIUM[1]).isChecked(), true);
+      assert.equal(await practiceInput(page, MEDIUM[0]).isChecked(), false);
+      assert.match(
+        await page.locator("#practice-list-status").textContent(),
+        /1 problem in your list.*Kept for this visit only/,
+      );
+      assert.deepEqual(
+        await page.evaluate(
+          (key) => JSON.parse(localStorage.getItem(key)),
+          PRACTICE_LIST_KEY,
+        ),
+        [MEDIUM[0]],
+      );
+      await page.click("#practice-list-pick");
+      assert.equal((await snapshot(page)).card, MEDIUM[1]);
+      const other = await page.context().newPage();
+      try {
+        await lobby(other);
+        await page.evaluate((key) => {
+          window.practiceStorageChanged = false;
+          window.addEventListener("storage", (event) => {
+            if (event.key === key) window.practiceStorageChanged = true;
+          });
+        }, PRACTICE_LIST_KEY);
+        await other.evaluate(
+          (key) => localStorage.setItem(key, "[]"),
+          PRACTICE_LIST_KEY,
+        );
+        await reaches(page, () => window.practiceStorageChanged);
+        assert.equal(await practiceInput(page, MEDIUM[1]).isChecked(), true);
+        assert.equal(await practiceInput(page, MEDIUM[0]).isChecked(), false);
+        assert.equal(
+          await page.locator("#practice-list-pick").isEnabled(),
+          true,
+        );
+        assert.match(
+          await page.locator("#practice-list-status").textContent(),
+          /Kept for this visit only/,
+        );
+        await page.evaluate(() => {
+          window.allowPracticeWrites = true;
+        });
+        await practiceInput(page, MEDIUM[0]).check();
+        assert.deepEqual(
+          await page.evaluate(
+            (key) => JSON.parse(localStorage.getItem(key)),
+            PRACTICE_LIST_KEY,
+          ),
+          [MEDIUM[1], MEDIUM[0]],
+        );
+        assert.match(
+          await page.locator("#practice-list-status").textContent(),
+          /Saved in this browser only/,
+        );
+        await other.evaluate(
+          (key) => localStorage.setItem(key, "[]"),
+          PRACTICE_LIST_KEY,
+        );
+        await reaches(
+          page,
+          () => document.querySelector("#practice-list-pick").disabled,
+        );
+        assert.equal(
+          await page.locator("[data-practice-problem]:checked").count(),
+          0,
+        );
+        assert.deepEqual(errors, []);
+      } finally {
+        await other.close();
+      }
+    },
+  );
+}
+
+for (const failure of ["access", "read"]) {
+  lobbyTest(
+    `a practice list reports unavailable storage on load after a failed ${failure}`,
+    async (page) => {
+      const errors = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      await page.addInitScript(
+        ([key, failure]) => {
+          if (failure === "access") {
+            Object.defineProperty(window, "localStorage", {
+              get() {
+                throw new Error("blocked");
+              },
+            });
+          } else {
+            const getItem = Storage.prototype.getItem;
+            Storage.prototype.getItem = function (storedKey) {
+              if (storedKey === key) throw new Error("blocked");
+              return getItem.call(this, storedKey);
+            };
+          }
+        },
+        [PRACTICE_LIST_KEY, failure],
+      );
+      await lobby(page);
+      assert.match(
+        await page.locator("#practice-list-status").textContent(),
+        /^0 problems in your list.*Kept for this visit only/,
+      );
+      assert.equal(
+        await page.locator("#practice-list-pick").isDisabled(),
+        true,
+      );
+      assert.deepEqual(errors, []);
+    },
+  );
+}
+
+lobbyTest(
+  "a practice list stays usable in memory when browser storage is blocked",
+  async (page) => {
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.addInitScript(() =>
+      Object.defineProperty(window, "localStorage", {
+        get() {
+          throw new Error("blocked");
+        },
+      }),
+    );
+    await lobby(page);
+    await openTopicFilter(page);
+    await practiceInput(page, MEDIUM[0]).check();
+    await practiceInput(page, MEDIUM[1]).check();
+    assert.equal(await practiceInput(page, MEDIUM[0]).isChecked(), true);
+    assert.equal(await practiceInput(page, MEDIUM[1]).isChecked(), true);
+    await practiceInput(page, MEDIUM[1]).uncheck();
+    await page.click("#practice-list-pick");
+    assert.equal((await snapshot(page)).card, MEDIUM[0]);
+    assert.match(
+      await page.locator("#practice-list-status").textContent(),
+      /Kept for this visit only/,
+    );
+    assert.deepEqual(errors, []);
+  },
+);
 
 /// What the difficulty filter did to one card.
 const cardInfo = (page, id) =>
@@ -1870,18 +2639,41 @@ for (const [when, widenFirst] of [
 lobbyTest(
   "Random problem waits for history on load and browser restore",
   async (page) => {
+    const random = page.locator("#random-problem");
     const release = await heldLobby(page);
-    assert.equal(await page.isDisabled("#random-problem"), true);
-    release();
+    try {
+      assert.equal(await random.isDisabled(), true);
+      assert.equal(
+        await random.evaluate((button) => getComputedStyle(button).cursor),
+        "not-allowed",
+      );
+    } finally {
+      release();
+    }
     await awaitReady(page);
-    assert.equal(await page.isEnabled("#random-problem"), true);
+    assert.equal(await random.isEnabled(), true);
+    assert.equal(
+      await random.evaluate((button) => getComputedStyle(button).cursor),
+      "pointer",
+    );
 
     const releaseRestore = holdHistory();
-    await restore(page);
-    assert.equal(await page.isDisabled("#random-problem"), true);
-    releaseRestore();
+    try {
+      await restore(page);
+      assert.equal(await random.isDisabled(), true);
+      assert.equal(
+        await random.evaluate((button) => getComputedStyle(button).cursor),
+        "not-allowed",
+      );
+    } finally {
+      releaseRestore();
+    }
     await awaitReady(page);
-    assert.equal(await page.isEnabled("#random-problem"), true);
+    assert.equal(await random.isEnabled(), true);
+    assert.equal(
+      await random.evaluate((button) => getComputedStyle(button).cursor),
+      "pointer",
+    );
   },
 );
 
@@ -2333,6 +3125,51 @@ lobbyTest("try again selects the problem", async (page) => {
     /Selected problem:/,
   );
 });
+
+for (const filter of ["difficulty", "topic"]) {
+  lobbyTest(
+    `try again reveals the card and practice checkbox hidden by ${filter}`,
+    async (page) => {
+      reports = [savedAttempt(EASY[0])];
+      reports[0].payload.date = new Date().toISOString();
+      await lobby(page);
+      await openTopicFilter(page);
+      if (filter === "topic") {
+        await setLevel(page, "Easy", true);
+        await page.selectOption("#problem-topic", "Stack");
+      }
+      const card = page.locator(`[data-problem="${EASY[0]}"]`);
+      const entry = page.locator(`#problem-entry-${EASY[0]}`);
+      const checkbox = practiceInput(page, EASY[0]);
+      const before = await snapshot(page);
+      const topic = await page.locator("#problem-topic").inputValue();
+      assert.equal(await entry.isHidden(), true);
+      assert.equal(await card.isHidden(), true);
+      assert.equal(await checkbox.isHidden(), true);
+      await page
+        .getByRole("button", { name: "Try again", exact: true })
+        .click();
+      const retried = await snapshot(page);
+      assert.equal(retried.card, EASY[0]);
+      assert.equal(retried.pressed, EASY[0]);
+      assert.deepEqual(retried.levels, before.levels);
+      assert.equal(await page.locator("#problem-topic").inputValue(), topic);
+      assert.equal(await entry.isVisible(), true);
+      assert.equal(await card.isVisible(), true);
+      assert.equal(await checkbox.isVisible(), true);
+      await checkbox.check();
+      assert.equal((await snapshot(page)).card, EASY[0]);
+      await restore(page);
+      await awaitReady(page);
+      assert.equal(await card.isVisible(), true);
+      assert.equal(await checkbox.isVisible(), true);
+      assert.equal(await checkbox.isChecked(), true);
+      await page.click("#start");
+      await page.waitForURL("**/interview?**");
+      assert.equal(new URL(page.url()).searchParams.get("problem"), EASY[0]);
+    },
+  );
+}
 
 lobbyTest("try again restores the saved language", async (page) => {
   reports = [

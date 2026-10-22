@@ -44,7 +44,12 @@ import {
   setEditorOptions,
 } from "./editor-options.js";
 
-import { readStored, writeStored } from "./audio-output.js";
+import { readStored, storageArea, writeStored } from "./audio-output.js";
+import {
+  PRACTICE_LIST_KEY,
+  parsePracticeList,
+  pickPracticeProblem,
+} from "./practice-list.js";
 
 const SETTINGS_KEY = "codetrial.interviewSettings";
 const requestTimeoutMs = 10_000;
@@ -113,6 +118,8 @@ const nodes = {
   reportDeleteStatus: document.querySelector("#report-delete-status"),
   recommendation: document.querySelector("#recommendation"),
   randomProblem: document.querySelector("#random-problem"),
+  practiceListPick: document.querySelector("#practice-list-pick"),
+  practiceListStatus: document.querySelector("#practice-list-status"),
   practiceFocus: document.querySelector("#practice-focus"),
   practiceFocusShare: document.querySelector("#practice-focus-share"),
   practiceFocusShareInput: document.querySelector(
@@ -158,9 +165,16 @@ const cards = [...document.querySelectorAll("[data-problem]")].map(
     difficulty: button.dataset.difficulty,
     topics: [],
     button,
+    entry: document.querySelector(`#problem-entry-${button.dataset.problem}`),
+    practiceInput: document.querySelector(
+      `[data-practice-problem="${button.dataset.problem}"]`,
+    ),
   }),
 );
 const cardIds = new Set(cards.map((card) => card.id));
+let practiceList = new Set();
+let practiceListSaved = true;
+practiceListSaved = refreshPracticeList();
 for (const card of cards) mark(card.button, false);
 
 // The published names are off unless the candidate turns them on, and the
@@ -254,6 +268,18 @@ function selectedEditorOptions() {
 // the level it belongs to, which `setDuration` applies only if the candidate
 // has not already chosen one.
 for (const card of cards) {
+  card.practiceInput.checked = practiceList.has(card.id);
+  card.practiceInput.addEventListener("change", () => {
+    // Another tab may have saved a change before its storage event arrives.
+    refreshPracticeList();
+    if (card.practiceInput.checked) practiceList.add(card.id);
+    else practiceList.delete(card.id);
+    const stored = JSON.stringify([...practiceList]);
+    writeStored(PRACTICE_LIST_KEY, stored);
+    practiceListSaved = readStored(PRACTICE_LIST_KEY) === stored;
+    renderPracticeList();
+    syncLobbyControls();
+  });
   card.button.addEventListener("click", () => {
     manualProblem = true;
     setProblem(card);
@@ -261,6 +287,19 @@ for (const card of cards) {
     nodes.recommendation.textContent = `Selected problem: ${title(card)}.`;
   });
 }
+
+window.addEventListener("storage", (event) => {
+  if (
+    (event.key !== PRACTICE_LIST_KEY && event.key !== null) ||
+    event.storageArea !== storageArea("localStorage")
+  )
+    return;
+  // Notifications can queue behind a newer write, including one by this tab.
+  if (!refreshPracticeList()) return;
+  practiceListSaved = true;
+  renderPracticeList();
+  syncLobbyControls();
+});
 
 nodes.randomProblem.addEventListener("click", () => {
   if (!historyReady || accountUpdatePending() || deletingReports) return;
@@ -271,6 +310,56 @@ nodes.randomProblem.addEventListener("click", () => {
   applyDifficulties();
   recommend("", "random");
 });
+
+nodes.practiceListPick.addEventListener("click", () => {
+  if (!historyReady || starting || accountUpdatePending() || deletingReports)
+    return;
+  if (refreshPracticeList()) {
+    renderPracticeList();
+    syncLobbyControls();
+  }
+  const card = pickPracticeProblem(
+    cards,
+    practiceList,
+    Math.random,
+    problem?.id,
+  );
+  if (!card) return;
+  manualProblem = true;
+  keptDraw = null;
+  applyProblemFilters();
+  setCardHidden(card, false);
+  setProblem(card);
+  setDuration(suggestedDuration(new Set([card.difficulty])));
+  nodes.recommendation.textContent = `From my list: ${title(card)} (${card.difficulty}).`;
+});
+
+function refreshPracticeList() {
+  // After a failed save, readable storage is older than this visit's changes.
+  if (!practiceListSaved) return false;
+  try {
+    // A removed key means an empty list; a failed read keeps this visit's list.
+    practiceList = parsePracticeList(
+      storageArea("localStorage").getItem(PRACTICE_LIST_KEY),
+      cardIds,
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function renderPracticeList() {
+  for (const card of cards)
+    card.practiceInput.checked = practiceList.has(card.id);
+  const count = practiceList.size;
+  const storageNote = practiceListSaved
+    ? "Saved in this browser only."
+    : "Kept for this visit only; browser storage is unavailable.";
+  nodes.practiceListStatus.textContent = count
+    ? `${count} problem${count === 1 ? "" : "s"} in your list. Draws use all checked problems, regardless of filters. ${storageNote}`
+    : `0 problems in your list. Open the problem picker below to check problems. ${storageNote}`;
+}
 
 for (const input of levels) {
   input.addEventListener("change", () => {
@@ -387,6 +476,7 @@ let signInFirst = false;
 let starting = false;
 
 restoreSettings();
+renderPracticeList();
 
 // The button by name, not by asking the event which element it was dispatched
 // to: the browser clears that property when dispatch ends, so every line after
@@ -599,6 +689,14 @@ function syncLobbyControls() {
     starting || loginPending || historyRefreshing || deletingReports;
   nodes.randomProblem.disabled =
     !historyReady || accountBusy || deletingReports;
+  if (!practiceList.size && document.activeElement === nodes.practiceListPick)
+    nodes.practiceListStatus.focus();
+  nodes.practiceListPick.disabled =
+    !practiceList.size ||
+    !historyReady ||
+    starting ||
+    accountBusy ||
+    deletingReports;
   const deleteBlocked = reportDeletesBlocked();
   nodes.deleteReports.disabled = deleteBlocked;
   for (const remove of nodes.attemptHistory.querySelectorAll(
@@ -668,6 +766,9 @@ function refreshHistory() {
 /// describing history the page had already replaced.
 function settle() {
   historyReady = true;
+  // A back/forward restore reapplies the filters. Keep an explicit choice
+  // visible, whether selected by card, practice draw or history's Try again.
+  if (manualProblem && problem) setCardHidden(problem, false);
   // Refreshed reports that differ from the ones a kept draw came from may have
   // just recorded it as passed, so the lobby draws again.
   if (keptDraw !== null && keptDraw !== JSON.stringify(reports))
@@ -1022,11 +1123,16 @@ function applyProblemFilters(difficulties = selectedDifficulties()) {
       topic: nodes.problemTopic.value,
     }),
   );
-  for (const card of cards) card.button.hidden = !visible.has(card);
+  for (const card of cards) setCardHidden(card, !visible.has(card));
   const topic = nodes.problemTopic.value;
   nodes.problemFilterSummary.textContent = topic
     ? `${visible.size} problem${visible.size === 1 ? "" : "s"} tagged ${topic} shown.`
     : "";
+}
+
+function setCardHidden(card, hidden) {
+  card.button.hidden = hidden;
+  card.entry.hidden = hidden;
 }
 
 function filterSelectionChanged() {
@@ -1079,7 +1185,7 @@ function recommend(note = "", mode = "recommend") {
   if (choice.review) {
     // A review can fall outside the levels now selected, so the card is
     // unhidden and the level said out loud rather than silently ignored.
-    choice.picked.button.hidden = false;
+    setCardHidden(choice.picked, false);
     const level = selectedDifficulties().has(choice.picked.difficulty)
       ? ""
       : ` (${choice.picked.difficulty})`;
@@ -1501,7 +1607,7 @@ function renderAttemptHistory(attempts) {
       );
       if (!card) return;
       manualProblem = true;
-      card.button.hidden = false;
+      setCardHidden(card, false);
       setProblem(card, attempt.language);
       const savedDuration = attempt.durationMin;
       const offered = durations.map((button) =>

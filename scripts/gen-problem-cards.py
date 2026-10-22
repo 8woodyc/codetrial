@@ -52,11 +52,16 @@ def card(problem: dict[str, object], page: str, title: str) -> str:
     """
     return "\n".join(
         [
-            f'  <button class="problem-card" type="button" data-problem="{html.escape(page)}" data-difficulty="{html.escape(problem["difficulty"])}">',
-            f'    <span class="problem-title">{html.escape(title)}</span>',
-            '    <span class="problem-source" hidden></span>',
-            f'    <span class="problem-meta">{html.escape(problem["difficulty"])}</span>',
-            "  </button>",
+            f'  <div class="problem-entry" id="problem-entry-{html.escape(page)}">',
+            f'    <button class="problem-card" type="button" data-problem="{html.escape(page)}" data-difficulty="{html.escape(problem["difficulty"])}">',
+            f'      <span class="problem-title">{html.escape(title)}</span>',
+            '      <span class="problem-source" hidden></span>',
+            f'      <span class="problem-meta">{html.escape(problem["difficulty"])}</span>',
+            "    </button>",
+            '    <label class="practice-list-toggle">',
+            f'      <input type="checkbox" data-practice-problem="{html.escape(page)}" aria-label="In my list: {html.escape(title)}"> In my list',
+            "    </label>",
+            "  </div>",
         ]
     )
 

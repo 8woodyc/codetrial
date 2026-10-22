@@ -286,6 +286,37 @@ p {
   margin-top: 1rem;
 }
 
+.problem-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.problem-entry .problem-card {
+  flex: 1;
+  width: 100%;
+}
+
+.practice-list-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  padding: 0 0.5rem;
+  color: var(--sub);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.practice-list-picker {
+  margin-top: 1rem;
+}
+
+.practice-list-picker p {
+  margin: 0.5rem 0;
+}
+
 .problem-card {
   min-height: 8rem;
   padding: 1rem;
@@ -487,11 +518,13 @@ p {
 }
 
 .start-button:disabled,
-#random-problem:disabled {
+#random-problem:disabled,
+#practice-list-pick:disabled {
   opacity: 0.6;
 }
 
-#random-problem:disabled {
+.lobby #random-problem:disabled,
+.lobby #practice-list-pick:disabled {
   cursor: not-allowed;
 }
 
@@ -3339,6 +3372,7 @@ body:not([data-recording]) .replay-detail > :not(header) {
 }
 
 .lobby #random-problem,
+.lobby #practice-list-pick,
 .lobby .interview-context button,
 .lobby #problem-filters-reset,
 .lobby .weak-topic button,
@@ -3356,6 +3390,7 @@ body:not([data-recording]) .replay-detail > :not(header) {
 }
 
 .lobby #random-problem:not(:disabled):hover,
+.lobby #practice-list-pick:not(:disabled):hover,
 .lobby .interview-context button:hover,
 .lobby #problem-filters-reset:hover,
 .lobby .weak-topic button:hover,
@@ -3598,7 +3633,8 @@ body:not([data-recording]) .replay-detail > :not(header) {
   .lobby .difficulty-row label,
   .lobby .editor-options-row label,
   .lobby .duration-button,
-  .lobby #random-problem {
+  .lobby #random-problem,
+  .lobby #practice-list-pick {
     min-height: 2.75rem;
   }
 
