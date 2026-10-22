@@ -4100,15 +4100,60 @@ function initWhiteboard() {
   nodes.board.addEventListener("pointerenter", paintBoardCursor);
   window.addEventListener("resize", paintBoardCursor);
   paintToolState();
-  nodes.boardUndo.addEventListener("click", () =>
-    applyBoardEdit(board.model.undo()),
-  );
-  nodes.boardRedo.addEventListener("click", () =>
-    applyBoardEdit(board.model.redo()),
-  );
-  nodes.boardClear.addEventListener("click", () =>
-    applyBoardEdit(board.model.clear()),
-  );
+  const mac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+  for (const [button, action, shortcut, hint] of [
+    [
+      nodes.boardUndo,
+      "undo",
+      mac ? "Meta+Z" : "Control+Z",
+      mac ? "Cmd+Z" : "Ctrl+Z",
+    ],
+    [
+      nodes.boardRedo,
+      "redo",
+      mac ? "Meta+Shift+Z" : "Control+Y Control+Shift+Z",
+      mac ? "Cmd+Shift+Z" : "Ctrl+Y / Ctrl+Shift+Z",
+    ],
+    [nodes.boardClear, "clear"],
+  ]) {
+    button.addEventListener("click", () => editBoard(action));
+    if (shortcut) {
+      button.setAttribute("aria-keyshortcuts", shortcut);
+      button.title = `${button.textContent.trim()} (${hint})`;
+    }
+  }
+  nodes.boardPanel.addEventListener("keydown", (event) => {
+    if (
+      event.defaultPrevented ||
+      event.repeat ||
+      event.isComposing ||
+      event.keyCode === 229 ||
+      event.altKey ||
+      (mac ? !event.metaKey || event.ctrlKey : !event.ctrlKey || event.metaKey)
+    )
+      return;
+    const target = event.target;
+    if (
+      !(target instanceof HTMLElement) ||
+      target.isContentEditable ||
+      target.closest('input, textarea, select, [role="textbox"]') ||
+      (target !== nodes.board && !target.closest(".board-toolbar"))
+    )
+      return;
+    const printable = /^[\x20-\x7e]$/.test(event.key);
+    if (!printable && !/^[^\x00-\x7f]$/u.test(event.key)) return;
+    const key = printable
+      ? event.key.toLowerCase()
+      : event.code.replace(/^Key/, "").toLowerCase();
+    let action = "";
+    if (key === "z" && !event.shiftKey) action = "undo";
+    else if (
+      (key === "z" && event.shiftKey) ||
+      (!mac && key === "y" && !event.shiftKey)
+    )
+      action = "redo";
+    if (action && editBoard(action)) event.preventDefault();
+  });
   bindBoardPointer();
   paintBoard();
 }
@@ -4147,6 +4192,7 @@ function bindBoardPointer() {
     board.settle = null;
     nodes.board.setPointerCapture(event.pointerId);
     event.preventDefault();
+    nodes.board.focus({ preventScroll: true });
     paintBoard();
   });
   nodes.board.addEventListener("pointermove", (event) => {
@@ -4227,15 +4273,26 @@ function paintBoardCursor() {
   nodes.board.style.cursor = `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${Math.round(centre)} ${Math.round(centre)}, crosshair`;
 }
 
+/// Button and keyboard edits share the pointer's editing restrictions.
+function editBoard(action) {
+  if (boardLocked() || board.model.isDrawing()) return false;
+  return applyBoardEdit(board.model[action]());
+}
+
 /// Repaints after an edit that changed something, and sends the board on.
 ///
 /// Undo, redo and clear all go through here because all three change what the
 /// interviewer should be looking at. A clear that was not published leaves
 /// them asking about a diagram that is no longer on the board.
 function applyBoardEdit(changed) {
-  if (!changed) return;
+  if (!changed) return false;
+  // A button the repaint disables would drop focus to the page.
+  const owner = document.activeElement;
   paintBoard();
+  if (owner === document.body || owner?.disabled)
+    nodes.board.focus({ preventScroll: true });
   scheduleBoardPublish();
+  return true;
 }
 
 function paintBoard() {
