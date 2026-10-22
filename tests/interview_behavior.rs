@@ -1690,3 +1690,6 @@ async fn the_phase_judge_ticks_what_the_candidate_said_and_nothing_else() {
         "agreement with the interviewer's plan is not the candidate's: {ticked:?}"
     );
 }
+
+#[path = "interview_behavior/injection.rs"]
+mod injection;
