@@ -291,6 +291,11 @@ BEHAVIOR_PROBLEMS=3sum,lru-cache scripts/interview-behavior-check.sh
 A free key allows fifteen requests a minute, so the check waits out rate
 limits; three problems take about two minutes.
 
+`BEHAVIOR_CHECK_MODE=injection` runs only the instruction-injection probe. It
+takes an explicit call cap and a token ceiling that can overshoot by one call,
+and needs an isolated config and a journal path outside the repository;
+`tests/fixtures/report-eval/README.md` describes it.
+
 The end-to-end browser check additionally needs Playwright and Chromium:
 
 ```bash

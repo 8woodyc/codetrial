@@ -422,6 +422,7 @@ gate test-gate-tests unittest_gate "$ROOT/tests/test_test_gate.py"
 gate mutants-plan-tests unittest_gate "$ROOT/tests/test_mutants_plan.py"
 gate mutants-install-tests unittest_gate "$ROOT/tests/test_mutants_install.py"
 gate latency-tests unittest_gate "$ROOT/tests/test_analyze_latency.py"
+gate interview-behavior-script-tests unittest_gate "$ROOT/tests/test_interview_behavior_script.py"
 
 # The skills name scripts, lanes, make targets and each other's headings, and an
 # agent follows a dangling one without noticing. Their own scripts are tested

@@ -510,6 +510,11 @@ and token ceilings and keeps a durable journal of every call;
 `tests/fixtures/report-eval/README.md` has its environment, ceilings and
 resume rules.
 
+The live-instruction injection probe, `BEHAVIOR_CHECK_MODE=injection
+scripts/interview-behavior-check.sh`, spends the same way: an explicit call cap,
+a token ceiling that can overshoot by one call, no retries, and a journal of
+every request that cannot be resumed. The same README covers it.
+
 ## Retrieving omitted conversation
 
 `read_conversation` is available on both interview surfaces. It reads only
