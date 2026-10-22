@@ -323,9 +323,10 @@ the git steps behind them:
   commit.
 - "Append `Closes #N`" or "avoid ambiguous `Refs`": the PR finishes the issue,
   so end the PR body, and by this tree's habit the commit message, with
-  `Closes #N`, each on its own line. `Refs #N` is for a PR that only touches
-  the issue, and then the body says what is left; a bare `Refs: #60` told the
-  reviewer nothing.
+  `Closes #N`, each on its own line. Avoid `Refs #N`: it belongs only beside a
+  `Closes #N`, or in a body that states the motivation and the implementation
+  in full, including what is left; a bare `Refs: #60` told the reviewer
+  nothing.
 - A code change requested in review: check it against the
   current head, then make it. When any item in the review is unclear, ask
   about all of them before changing any, since items in one review are often

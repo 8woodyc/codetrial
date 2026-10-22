@@ -207,7 +207,8 @@ titles or the same broad symptom are insufficient to establish duplication.
   reference, and never promise the merge will close it otherwise. When the PR
   delivers the issue and only says `Refs #N`, the fix is a comment on the PR
   asking its author to make the last line `Closes #N`, so the merge records it
-  (#143 for #141).
+  (#143 for #141). The PR sweep's `refs_only` lists these pairs and whether a
+  maintainer already asked ([pulls.md](pulls.md#closing-references)).
 - **Already shipped**: the tree already does what the request asks. `git grep -n`
   over `src` and `web` finds a candidate and settles nothing, since a string also
   lives in a fixture, a disabled branch, a generated file or code behind a flag

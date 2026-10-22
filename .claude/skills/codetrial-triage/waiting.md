@@ -15,8 +15,11 @@ The four sweep lists are the queue, and each one has a fixed next move. An
 on review of that PR, which the PR sweep owns, not on the reporter, once the
 PR is read and does what the issue asks: `open_prs` holds every PR that
 cross-referenced the issue, and a mention alone does not suspend the
-reporter's reminder. Such an entry gets neither a reminder nor a first answer
-on the issue (#370 and #385 sat in
+reporter's reminder. `closing_prs` on the `unanswered` or `waiting` entry
+itself names the open PRs whose merge closes the issue, whoever wrote them,
+which settles the candidates without reading every cross-reference; reading
+that one PR's title and scope still decides it. Such an entry gets neither a
+reminder nor a first answer on the issue (#370 and #385 sat in
 `unanswered`, #159 and #298 in overdue `waiting`, all with PRs open):
 
 - `unanswered`: no maintainer has spoken. Triage these first, oldest first, with

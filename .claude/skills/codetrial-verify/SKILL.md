@@ -150,14 +150,16 @@ and the author is not asked to fix it. Otherwise `gates` names what
 `scripts/test.sh` failed and `errors` the lines that say why; rerun that lane
 locally with the same head. A `cargo-audit` failure on a PR whose base predates
 the advisory fix is a stale base, answered by a rebase (#334), not a code
-change. The aggregate `check` job only collects the lanes, so its entry points
-at the failing `gates (<lane>)` one. A check outside Actions has only its
-link, and `held` checks have no log until a maintainer approves the run.
+change; `stale_base` (defined in the script's header) says exactly that, and
+the PR sweep lists such a PR in `rebase` on its own. The aggregate `check` job
+only collects the lanes, so its entry points at the failing `gates (<lane>)`
+one. A check outside Actions has only its link, and `held` checks have no log
+until a maintainer approves the run.
 
 The raw calls behind it, when one answer needs checking:
 
 ```sh
-gh pr view "$pr" --repo sysprog21/codetrial --json headRefOid
+gh pr view "$pr" --repo sysprog21/codetrial --json headRefOid,files,changedFiles
 gh pr checks "$pr" --repo sysprog21/codetrial --json name,state,bucket,link
 gh run view "$run" --repo sysprog21/codetrial --json headSha,status,conclusion,jobs
 gh run list --repo sysprog21/codetrial --workflow check.yml --branch main \

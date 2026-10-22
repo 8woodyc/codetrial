@@ -70,11 +70,13 @@ for its own issue, not folded in.
   this pull request is worth proceeding." (#245, closed while #244 fixed
   #131). Review the open one rather than writing a competitor.
 - Close what the PR finishes. CONTRIBUTING.md has the rule: `Closes #N` when
-  the PR finishes the issue, `Refs #N` when it only touches it. Maintainers
-  call `Refs` on a PR that does finish its issue ambiguous ("Avoid ambiguous
-  `Refs #210`. Do close an issue when you submit a pull request." on #256,
-  "Avoid using ambiguous `Refs #261`" on #265), so decide by the issue's acceptance criteria, not by caution. A
-  `Refs` PR says in its body what remains:
+  the PR finishes the issue, and `Refs #N` avoided, since a reference that
+  closes nothing is easy to add to every PR. Maintainers call `Refs` on a PR
+  that does finish its issue ambiguous ("Avoid ambiguous `Refs #210`. Do close
+  an issue when you submit a pull request." on #256, "Avoid using ambiguous
+  `Refs #261`" on #265), so decide by the issue's acceptance criteria, not by
+  caution. `Refs` belongs only beside a `Closes #N`, or in a body that states
+  the motivation and the implementation in full, including what remains:
   [#161](https://github.com/sysprog21/codetrial/issues/161#issuecomment-6131824178)
   asked for `Refs #161` because the cap and modality toggle stay open. One PR
   may close two issues when that was agreed, each `Closes #N` on its own line
