@@ -32,13 +32,18 @@ clone only `HEAD`; the portable lane keeps full history for the commit-message
 check. The Rust lane deletes the runner's unused toolchains only when less than
 40 GB is free. Running `./scripts/test.sh` locally still runs every gate.
 
-The `check` status requires every lane to succeed and reports as soon as the
-lanes finish. Mutation testing has a status of its own, `mutation`, which on a
-pull request requires the plan and every shard to pass; shards may be skipped
-only when the plan found no mutants. Mutation planning checks the Rust diff
-before installing its tools, so a PR with no Rust changes starts no mutation
-shards and pays no mutation-tool setup cost. Rust diffs still use the complete
-diff-selected mutant set and the existing exclusions.
+`check` is the only status a branch rule for main should require. It needs
+every lane to succeed, and on a pull request the mutation plan and every shard
+too; shards may be skipped only when the plan found no mutants. A push to main
+or a merge queue entry plans no mutants, so `check` reports as soon as the
+lanes finish. The workflow also runs on `merge_group`, so once main has a merge
+queue, it tests each pull request on top of the main it will land on; two pull
+requests that pass against their own bases can still break main together. A
+merge group saves no caches, since its queue ref is gone once it lands.
+Mutation planning checks the Rust diff before installing its tools, so a PR
+with no Rust changes starts no mutation shards and pays no mutation-tool setup
+cost. Rust diffs still use the complete diff-selected mutant set and the
+existing exclusions.
 
 Every skip the gate sees joins its `not checked by this run:` summary: a gate's
 own skip, a Node browser test's skip or todo, a missing formatter in
@@ -52,10 +57,11 @@ Browser tests that wait out a timer jump the fake clock with
 `page.clock.fastForward` rather than `runFor`, which also steps every frame
 and interval in between and once made a single test take eighteen minutes.
 
-The scheduled avatar check restores the same Cargo, vendored-asset and Chromium
-caches as the main checks. Its Rust profile and linker flags match so dependency
-artifacts can be reused; it only restores these caches rather than saving a
-second copy for the weekly job. Chromium's system dependencies are still
+The weekly avatar check is the `avatar` job in the same workflow, started only
+by the schedule or a manual dispatch, and neither starts anything else. It
+restores the Cargo, vendored-asset and Chromium caches through the same
+composite actions under `.github/actions/` as the lanes, and saves none of them,
+so the weekly job keeps no second copy. Chromium's system dependencies are still
 installed on every fresh runner.
 
 The gate picks its own compiler and Python, so running it directly builds with

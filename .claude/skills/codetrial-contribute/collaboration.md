@@ -138,11 +138,11 @@ triage's outdated ones.
 ## Make CI green before asking for review
 
 "Before asking someone to review, you MUST resolve any regressions flagged by
-GitHub Actions." (#256, #260). Open the failing `gates (<lane>)` job, not
-`check` (`.claude/skills/codetrial-verify/ci-failure.sh <pr>` names the failed
-gates and whether `main` fails them too), and rerun that lane with
-`./scripts/test.sh <lane>`
-([codetrial-verify](../codetrial-verify/SKILL.md) describes the lanes). A bad
+GitHub Actions." (#256, #260). Open the failing job, not `check`
+([codetrial-verify](../codetrial-verify/SKILL.md) says which one, and
+`.claude/skills/codetrial-verify/ci-failure.sh <pr>` names the failed gates and
+whether `main` fails them too), and rerun a failing lane with
+`./scripts/test.sh <lane>`. A bad
 commit message skips the rest of the portable lane, so fix the messages
 first.
 

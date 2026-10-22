@@ -47,7 +47,7 @@ rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"
 rust-embed = { version = "8.13.0", features = ["include-exclude"] }
 serde_json = "1.0.154"
 serde = { version = "1.0.229", features = ["derive"] }
-tokio = { version = "1.54.0", features = ["fs", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1.54.1", features = ["fs", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 tokio-util = "0.7.20"
 tower-http = { version = "0.7.1", default-features = false, features = ["compression-gzip"] }
@@ -77,7 +77,7 @@ livekit-protocol = "0.8.2"
 livekit-net = "0.1.4"
 # The paused clock, so the Live socket's keepalive and idle limits are tested
 # at their real values instead of waiting them out.
-tokio = { version = "1.54.0", features = ["test-util"] }
+tokio = { version = "1.54.1", features = ["test-util"] }
 
 # Release archives distribute the executable, not a debugging target. Cargo
 # already omits debug information in this profile; omit linker symbols too.

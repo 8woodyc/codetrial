@@ -101,7 +101,7 @@ report what it reports. For each area, look for:
 - Ordering. A resume racing the message it replays, a check then an act across
   an await, a message handled before the state it assumes.
 - Tests. A new branch no test reaches; a surviving mutant in code the diff adds
-  (CI's mutation job names them, as on #262; it is skipped when the diff
+  (CI's `mutants` shards name them, as on #262; it is skipped when the diff
   changes no Rust, so `web/` code has no mutation evidence and each new branch
   needs a test that reaches it); a browser test of the shapes
   [SKILL.md](SKILL.md) says reviewers reject (Writing a test).
@@ -200,7 +200,7 @@ Past about 500 changed lines, or when several reviewers are run, split them
 by lens rather than by file, each reading the whole diff for one thing: the
 specification checklist; the owners in step 2; trust boundaries, workflows and
 what reaches a log or a public thread; failure paths and boundaries; tests,
-including what CI's mutation job says survived; and comments and messages
+including what CI's `mutants` shards say survived; and comments and messages
 against the register in
 [codetrial-conventions](../codetrial-conventions/SKILL.md). A reviewer handed a
 lens reports only that lens, so silence on the others is not a pass.

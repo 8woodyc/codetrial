@@ -6368,10 +6368,10 @@ lobbyTest(
       "cards and outline must agree with the native picker before paint",
     );
     await grid.evaluate((node) => {
-      for (const [index, card] of [
-        ...node.querySelectorAll(".problem-card"),
+      for (const [index, entry] of [
+        ...node.querySelectorAll(".problem-entry"),
       ].entries())
-        card.hidden = index > 0;
+        entry.hidden = index > 0;
     });
     await page.waitForFunction(() => {
       const path = document.querySelector(".problem-picker-outline path");
@@ -6390,8 +6390,9 @@ lobbyTest(
       return Math.abs(bounds.x + bounds.width - expected) < 1;
     });
     await grid.evaluate((node) => {
-      for (const card of node.querySelectorAll(".problem-card"))
-        card.hidden = false;
+      // Filtering hides both the entry and its card, so both come back.
+      for (const item of node.querySelectorAll(".problem-entry, .problem-card"))
+        item.hidden = false;
     });
     const bounds = await page.evaluate(() => {
       const setup = document
@@ -6456,7 +6457,11 @@ lobbyTest(
     await first.click();
     assert.equal(
       await grid.evaluate((node) => {
-        const cards = [...node.querySelectorAll(".problem-card:not([hidden])")];
+        // Rendered cards, not unhidden ones: filtering hides the enclosing
+        // entry, and a card inside it measures as a zero box at the top.
+        const cards = [...node.querySelectorAll(".problem-card")].filter(
+          (card) => card.checkVisibility(),
+        );
         const top = cards[0].getBoundingClientRect().top;
         return cards.filter(
           (card) => Math.abs(card.getBoundingClientRect().top - top) < 1,

@@ -1,0 +1,31 @@
+name: Restore vendored bytes
+description: Restore the web/vendor tree the portable lane saves.
+
+# One definition of the key for every job that reads this cache: the gate
+# lanes, the mutation shards, the release legs and the avatar check.
+#
+# Keyed on the whole tree, not on SHA256SUMS alone. The cached path holds the
+# committed vendor files as well as the fetched ones, so a key that only reads
+# the pins is unchanged when a committed file is edited: the restore then puts
+# the old bytes back over the edit and verify-vendor passes on content the pull
+# request does not contain. Hashing the tree costs a re-fetch when a README
+# under web/vendor changes, which is the cheaper side of that trade.
+#
+# At restore time the directory holds only checked-out files, so the key is a
+# function of the commit. No restore-keys: a stale entry here is 24 MB of bytes
+# that fail their hash.
+outputs:
+  key:
+    description: The exact key, for the step that saves the tree.
+    value: ${{ steps.restore.outputs.cache-primary-key }}
+  cache-hit:
+    description: Whether the exact key was restored.
+    value: ${{ steps.restore.outputs.cache-hit }}
+runs:
+  using: composite
+  steps:
+    - id: restore
+      uses: actions/cache/restore@v6
+      with:
+        path: web/vendor
+        key: vendor-${{ hashFiles('web/vendor/**') }}

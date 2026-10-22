@@ -6,14 +6,26 @@ on:
   push:
     branches: [main]
   pull_request:
+  # A merge queue tests each pull request on top of the main it will land on.
+  # Two pull requests green against their own bases can still break main
+  # together, as #401 and #410 did; nothing else here runs them side by side.
+  merge_group:
+  # The avatar check needs a real model download, so it runs weekly rather
+  # than on every change. It is the only job a schedule or a dispatch starts.
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 # A second push to a branch makes the first run's answer worthless, so stop
 # paying for it. Never on main: those runs are the record of what passed.
+#
+# The event is in the group so a weekly avatar run on main never queues behind,
+# or displaces, the push run that publishes a release.
 concurrency:
-  group: check-${{ github.ref }}
+  group: check-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
@@ -61,6 +73,7 @@ env:
 jobs:
   gates:
     name: gates (${{ matrix.lane }})
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -187,33 +200,14 @@ jobs:
         id: cargo-cache
         uses: ./.github/actions/restore-cargo-cache
 
-      # Keyed on the whole tree, not on SHA256SUMS alone. The cached path holds
-      # the committed vendor files as well as the fetched ones, so a key that
-      # only reads the pins is unchanged when a committed file is edited: the
-      # restore then puts the old bytes back over the edit and verify-vendor
-      # passes on content the pull request does not contain. Hashing the tree
-      # costs a re-fetch when a README under web/vendor changes, which is the
-      # cheaper side of that trade.
-      #
-      # At restore time the directory holds only checked-out files, so the key
-      # is a function of the commit. No restore-keys: a stale entry here is
-      # 24 MB of bytes that fail their hash.
-      #
       # Every lane fetches and verifies these bytes; only the portable lane
       # saves them, below, so three lanes do not race to write one key.
       - name: Restore vendored bytes
         id: vendor
-        uses: actions/cache/restore@v6
-        with:
-          path: web/vendor
-          key: vendor-${{ hashFiles('web/vendor/**') }}
+        uses: ./.github/actions/restore-vendor
 
-      # The browser binary, not the npm package. package-lock.json pins the
-      # playwright version, and the version is what decides which build of
-      # Chromium lands in this directory.
-      #
-      # The install itself is not cached. It is 90 packages now that eslint is
-      # here, but they are small and pure JavaScript, and the step runs in
+      # The npm install itself is not cached. It is 90 packages now that eslint
+      # is here, but they are small and pure JavaScript, and the step runs in
       # seconds against a cargo build that runs in minutes. A cache round trip
       # would not show up next to that.
       #
@@ -221,26 +215,15 @@ jobs:
       # ranges, so an install resolves them fresh on every run and the gate that
       # passed yesterday is not the gate running today. The exact pins in
       # package.json only cover the four direct dependencies.
-      #
-      # Both browser-driving lanes restore it; the browser lane saves it, below.
-      - name: Restore Chromium
-        if: matrix.lane != 'portable'
-        id: chromium
-        uses: actions/cache/restore@v6
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-
       - name: Install node dependencies
         run: npm ci
 
-      # tests/browser/face-detector.test.js skips itself when no browser is
-      # downloaded, so without this the gate would pass while testing nothing.
-      # Left as one command on a cache hit too: it then only installs the system
-      # libraries, which are not in the cached directory.
+      # Both browser-driving lanes restore Chromium; the browser lane saves it,
+      # below.
       - name: Install Chromium
         if: matrix.lane != 'portable'
-        run: npx playwright install --with-deps chromium
+        id: chromium
+        uses: ./.github/actions/chromium
 
       # The gate skips this audit when the binary is missing, which is right for
       # a contributor's laptop and wrong for CI: a silent skip here means the
@@ -305,21 +288,25 @@ jobs:
       - name: Run gates
         run: ./scripts/test.sh "${{ matrix.lane }}"
 
+      # A merge group runs on a queue ref that is deleted once it lands, and a
+      # cache saved there is visible to no other ref, so none of the saves below
+      # run for one.
+      #
       # After the gates pass, so the bytes saved are bytes verify-vendor
       # accepted. Under the restore step's key: hashing the tree now would also
       # hash what the fetch added, and no later restore would ask for that key.
       - name: Save vendored bytes
-        if: matrix.lane == 'portable' && steps.vendor.outputs.cache-hit != 'true'
+        if: github.event_name != 'merge_group' && matrix.lane == 'portable' && steps.vendor.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: web/vendor
-          key: ${{ steps.vendor.outputs.cache-primary-key }}
+          key: ${{ steps.vendor.outputs.key }}
       - name: Save Chromium
-        if: matrix.lane == 'browser' && steps.chromium.outputs.cache-hit != 'true'
+        if: github.event_name != 'merge_group' && matrix.lane == 'browser' && steps.chromium.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ steps.chromium.outputs.cache-primary-key }}
+          key: ${{ steps.chromium.outputs.key }}
 
       # The release job makes the same comparison, but only after a merge: a
       # `build.rs` that stops recording the commit would pass every pull
@@ -354,7 +341,7 @@ jobs:
       # the gates decided about the code. `cancelled()` is excluded because a
       # superseded run is killed mid-step and has nothing coherent to save.
       - name: Save cargo cache
-        if: ${{ !cancelled() && matrix.lane == 'rust' && steps.cargo-cache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && github.event_name != 'merge_group' && matrix.lane == 'rust' && steps.cargo-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
           path: |
@@ -364,40 +351,32 @@ jobs:
             target
           key: ${{ steps.cargo-cache.outputs.key }}
 
-  # The fast answer: every gate lane passed. Mutation is answered separately
-  # below, so a pull request is not held behind shards that can run for most of
-  # an hour. `!cancelled()` rather than `always()`: a run superseded by a newer
-  # push has nothing to report, while a lane that failed or timed out still
-  # reaches this job and fails it.
+  # The one status: every gate lane passed, and on a pull request the mutation
+  # plan and every shard did too. Planning only runs on pull requests, and the
+  # shards only after a plan that found mutants, so a skipped shard job after a
+  # successful plan means the plan counted none. A push or a merge group plans
+  # nothing, so it is answered as soon as the lanes finish.
+  #
+  # `!cancelled()` rather than `always()`: a run superseded by a newer push has
+  # nothing to report, while a lane or shard that failed or timed out still
+  # reaches this job and fails it. Not on a schedule or a dispatch, which run
+  # no gates.
   check:
-    needs: gates
-    if: ${{ !cancelled() }}
+    needs: [gates, plan-mutants, mutants]
+    if: ${{ !cancelled() && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Require every gate lane
+      - name: Require every gate lane and mutation shard
         env:
-          RESULT: ${{ needs.gates.result }}
-        run: |
-          if [ "$RESULT" != success ]; then
-            echo "::error::gate lanes: $RESULT. This job only collects them; the failed gates lane has the cause."
-            exit 1
-          fi
-
-  # One status for mutation testing, failing closed. Planning only runs on pull
-  # requests, and the shards only after a plan that found mutants, so a skipped
-  # shard job after a successful plan means the plan counted none.
-  mutation:
-    needs: [plan-mutants, mutants]
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: Require mutation planning and every shard
-        env:
+          GATES: ${{ needs.gates.result }}
           PLAN: ${{ needs.plan-mutants.result }}
           MUTANTS: ${{ needs.mutants.result }}
         run: |
+          if [ "$GATES" != success ]; then
+            echo "::error::gate lanes: $GATES. This job only collects them; the failed gates lane has the cause."
+            exit 1
+          fi
           case "$MUTANTS/$PLAN" in
             success/success | skipped/success | skipped/skipped) ;;
             *) echo "::error::mutants: $MUTANTS (plan: $PLAN)"; exit 1 ;;
@@ -580,10 +559,7 @@ jobs:
       # fetched MediaPipe binaries and asserts their content types, and
       # cargo-mutants runs the real suite once per mutant.
       - name: Restore vendored bytes
-        uses: actions/cache/restore@v6
-        with:
-          path: web/vendor
-          key: vendor-${{ hashFiles('web/vendor/**') }}
+        uses: ./.github/actions/restore-vendor
 
       - name: Fetch any vendored bytes the cache did not have
         run: ./scripts/fetch-vendor.sh
@@ -661,8 +637,12 @@ jobs:
   # The release is a binary, not a directory beside a binary: `rust-embed`
   # compiles `web/` (including its WASM) into it. Native runners avoid a
   # cross-platform linker or packaging toolchain.
+  #
+  # After `gates` rather than `check`: on a push `check` adds nothing, and the
+  # mutation jobs it waits on are skipped, which the default `success()` reads
+  # as a reason to skip everything downstream.
   build:
-    needs: check
+    needs: gates
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: ${{ matrix.name }}
     timeout-minutes: 45
@@ -724,10 +704,7 @@ jobs:
       # three platform legs re-download 24 MB that one job already fetched and
       # stored on this commit, and the fetch script no-ops on a hit.
       - name: Restore vendored bytes
-        uses: actions/cache/restore@v6
-        with:
-          path: web/vendor
-          key: vendor-${{ hashFiles('web/vendor/**') }}
+        uses: ./.github/actions/restore-vendor
       - name: Fetch browser assets
         run: ./scripts/fetch-vendor.sh
         shell: bash
@@ -978,7 +955,7 @@ jobs:
   # One rolling release for the current main build. GitHub releases require a
   # tag; `latest` avoids exposing an implementation SHA as a release name.
   release:
-    needs: [check, build]
+    needs: [gates, build]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -1087,3 +1064,40 @@ jobs:
           # deletes above are for.
           gh release edit "$staged" --tag "$tag" --target "$GITHUB_SHA" --draft=false
           published=true
+
+  # The avatar flow end to end, with the real model rather than a stub. It
+  # reads the gates' caches and saves none: a second build tree in cache
+  # storage for a weekly job would evict the one every pull request uses.
+  avatar:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      # browser-check.sh builds the server, and webrtc-sys needs Clang 21+.
+      - name: Install system packages
+        run: sudo apt-get update && sudo apt-get install -y libglib2.0-dev mold
+      - name: Install WebRTC C++ compiler
+        uses: ./.github/actions/webrtc-clang
+      - name: Install Rust
+        run: |
+          rustup update stable
+          rustup default stable
+      - name: Restore cargo cache
+        uses: ./.github/actions/restore-cargo-cache
+      - name: Report disk after restoring the build cache
+        run: df -h /
+      - name: Restore vendored bytes
+        uses: ./.github/actions/restore-vendor
+      - name: Install node dependencies
+        run: npm ci
+      - name: Install Chromium
+        uses: ./.github/actions/chromium
+      - name: Run the avatar browser check
+        env:
+          BROWSER_CHECK_FLOW: avatar
+          BROWSER_CHECK_REQUIRE_MODEL: 1
+        run: ./scripts/browser-check.sh
+      - name: Report disk after the browser check
+        if: always()
+        run: df -h /

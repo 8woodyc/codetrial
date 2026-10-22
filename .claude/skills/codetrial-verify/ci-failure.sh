@@ -151,11 +151,11 @@ failing=$(printf '%s\n' "$checks" | jq -r "$defs"'.[] | select(failed)
           | if $read then . else .gates = null | .errors = null | .excerpt = null end'
     done | jq -s .)
 
-# The check job only collects the lanes, so it says nothing of its own. A
-# failing check outside Actions (cubic) has no gates to read, so a rebase is not
-# known to clear it, and it rules a stale base out. Each gate that reads data
-# from outside the tree maps to the files whose change would make the failure
-# the PR's own; a gate added here needs nothing else.
+# The check job only collects the lanes and the mutation jobs, so it says
+# nothing of its own. A failing check outside Actions (cubic) has no gates to
+# read, so a rebase is not known to clear it, and it rules a stale base out.
+# Each gate that reads data from outside the tree maps to the files whose change
+# would make the failure the PR's own; a gate added here needs nothing else.
 printf '%s\n' "$checks" | jq --argjson failing "$failing" --arg head "$head" \
     --argjson pr "$pr" --argjson meta "$meta" --argjson jobs "$main_jobs" \
     "$defs"'

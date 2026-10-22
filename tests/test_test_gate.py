@@ -19,6 +19,10 @@ SPEC.loader.exec_module(support)
 
 ROOT = support.ROOT
 SCRIPT = ROOT / "scripts/test.sh"
+# The events that start only the avatar job.
+NOT_AVATAR = (
+    "github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'"
+)
 
 
 def gates_job():
@@ -224,37 +228,41 @@ gate()
             check=False,
         ).returncode
 
-    def test_check_waits_only_for_the_gate_lanes(self):
+    def test_check_requires_the_lanes_and_explains_every_mutation_skip(self):
         check = support.job("check")
-        self.assertIn("    needs: gates\n", check)
-        self.assertIn("    if: ${{ !cancelled() }}\n", check)
+        self.assertIn("    needs: [gates, plan-mutants, mutants]\n", check)
+        self.assertIn(f"    if: ${{{{ !cancelled() && {NOT_AVATAR} }}}}\n", check)
         command = support.run_block(check)
-        for state in ("success", "failure", "cancelled", "skipped", ""):
-            with self.subTest(state=state):
-                self.assertEqual(
-                    self.run_status(command, RESULT=state) == 0,
-                    state == "success",
+        states = ("success", "failure", "cancelled", "skipped", "")
+        # The lanes are checked first, so one passing mutation answer stands in
+        # for the rest.
+        for gates in states:
+            with self.subTest(gates=gates):
+                status = self.run_status(
+                    command, GATES=gates, PLAN="success", MUTANTS="success"
                 )
-
-    def test_mutation_status_rejects_failed_or_unexplained_skips(self):
-        mutation = support.job("mutation")
-        self.assertIn("    needs: [plan-mutants, mutants]\n", mutation)
-        self.assertIn("    if: ${{ !cancelled() }}\n", mutation)
-        command = support.run_block(mutation)
+                self.assertEqual(status == 0, gates == "success")
         accepted = {
             # Shards ran and passed.
             ("success", "success"),
             # The plan found no mutants, so no shard started.
             ("success", "skipped"),
-            # A push to main plans nothing.
+            # A push or a merge group plans nothing.
             ("skipped", "skipped"),
         }
-        states = ("success", "failure", "cancelled", "skipped", "")
         for plan in states:
             for mutants in states:
                 with self.subTest(plan=plan, mutants=mutants):
-                    status = self.run_status(command, PLAN=plan, MUTANTS=mutants)
+                    status = self.run_status(
+                        command, GATES="success", PLAN=plan, MUTANTS=mutants
+                    )
                     self.assertEqual(status == 0, (plan, mutants) in accepted)
+
+    def test_publishing_waits_on_the_lanes_not_on_check(self):
+        # A push skips the mutation jobs `check` waits on, and the default
+        # `success()` would carry that skip through `check` to both of these.
+        self.assertIn("    needs: gates\n", support.job("build"))
+        self.assertIn("    needs: [gates, build]\n", support.job("release"))
 
     def test_each_lane_has_a_bounded_job(self):
         timeouts = {lane: int(entry["timeout"]) for lane, entry in lanes().items()}
@@ -315,34 +323,25 @@ gate()
             ],
         )
 
-    def test_avatar_reuses_compatible_check_caches_without_saving_them(self):
-        check = support.WORKFLOW.read_text()
-        avatar = (ROOT / ".github/workflows/avatar.yml").read_text()
-
-        def environment(workflow):
-            block = support.section(workflow, "\nenv:\n", "\njobs:\n", "env")
-            return dict(re.findall(r"^  ([A-Z_]+): (.+)$", block, re.M))
-
-        check_env, avatar_env = environment(check), environment(avatar)
-        for name in (
-            "CARGO_PROFILE_DEV_DEBUG",
-            "CARGO_PROFILE_TEST_DEBUG",
-            "RUSTFLAGS",
-        ):
-            self.assertEqual(avatar_env[name], check_env[name], name)
-        self.assertEqual(
-            avatar_env["CARGO_INCREMENTAL"], check_env.get("CARGO_INCREMENTAL", "1")
+    def test_avatar_reuses_the_gate_caches_without_saving_them(self):
+        avatar = support.job("avatar")
+        self.assertIn(
+            "    if: github.event_name == 'schedule'"
+            " || github.event_name == 'workflow_dispatch'\n",
+            avatar,
         )
-
-        def cache_inputs(workflow, name):
-            block = support.step(workflow, name)
-            return support.section(block, "        with:\n", "\n      #", name).strip()
-
-        cargo = "uses: ./.github/actions/restore-cargo-cache"
-        for workflow in (check, avatar):
-            self.assertIn(cargo, support.step(workflow, "Restore cargo cache"))
-        for name in ("Restore vendored bytes", "Restore Chromium"):
-            self.assertEqual(cache_inputs(check, name), cache_inputs(avatar, name))
+        # The schedule and the dispatch exist for this job alone.
+        gates = gates_job()
+        self.assertIn(f"    if: {NOT_AVATAR}\n", gates)
+        for name, action in (
+            ("Restore cargo cache", "restore-cargo-cache"),
+            ("Restore vendored bytes", "restore-vendor"),
+            ("Install Chromium", "chromium"),
+        ):
+            with self.subTest(step=name):
+                uses = f"        uses: ./.github/actions/{action}"
+                self.assertIn(uses, support.step(avatar, name).splitlines())
+                self.assertIn(uses, support.step(gates, name).splitlines())
         self.assertNotIn("actions/cache/save", avatar)
         self.assertNotIn("uses: actions/cache@", avatar)
 
@@ -375,8 +374,9 @@ gate()
                 self.assertEqual(
                     condition(gates, f"Install {name}"), "matrix.lane == 'portable'"
                 )
-        for name in ("Restore Chromium", "Install Chromium"):
-            self.assertEqual(condition(gates, name), "matrix.lane != 'portable'")
+        self.assertEqual(
+            condition(gates, "Install Chromium"), "matrix.lane != 'portable'"
+        )
         # After the gates pass, so the binary is this checkout's.
         for name in (
             "Prove the build names its commit",
@@ -393,11 +393,11 @@ gate()
             with self.subTest(step=name):
                 self.assertEqual(
                     condition(gates, name),
-                    f"matrix.lane == '{lane}' && "
+                    f"github.event_name != 'merge_group' && matrix.lane == '{lane}' && "
                     f"steps.{step_id}.outputs.cache-hit != 'true'",
                 )
                 self.assertIn(
-                    f"key: ${{{{ steps.{step_id}.outputs.cache-primary-key }}}}",
+                    f"key: ${{{{ steps.{step_id}.outputs.key }}}}",
                     support.step(gates, name),
                 )
                 self.assertLess(
