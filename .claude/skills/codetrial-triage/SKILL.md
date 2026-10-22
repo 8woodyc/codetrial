@@ -5,8 +5,9 @@ description: >
   unanswered requests, linked fixes, stale claims, overlapping work and stalled
   review, and draft the reminders, acceptances and closes that follow. Use for
   backlog triage, checking new issues or PRs, asking what needs attention,
-  deciding whether a symptom already has an issue, explicit PR sweeps,
-  approving GitHub Actions runs held for first-time contributors, asking
+  deciding whether a symptom already has an issue, explicit PR sweeps, ranking
+  open PRs by size and merge confidence, reporting what moved since the last
+  sweep, approving GitHub Actions runs held for first-time contributors, asking
   conflicting PRs to rebase, and applying requested label, assignee, issue type,
   sub-issue or blocked-by changes. Default to a read-only report; a PR sweep has
   narrowly defined actions in pulls.md. Use codetrial-contribute for drafts on
@@ -61,7 +62,10 @@ coverage limit.
 Without a date from the user, call the result an initial inventory, not "new
 issues". For "since DATE", query `--state all --search 'updated:>=DATE'` (or
 `created:>=DATE` for newly filed only) and state the date and filter used.
-Record the repository, filters and counts in the report.
+Record the repository, filters and counts in the report. A second sweep in the
+same session diffs the new snapshot against the saved one and reports only
+what changed, naming the session's own comments and renames as such, since
+they move issues between the sweep's lists without anything new happening.
 
 ## Retrieve evidence efficiently
 
@@ -200,7 +204,10 @@ titles or the same broad symptom are insufficient to establish duplication.
   Development-sidebar link or a closing keyword in a commit closes an issue even
   when the body has none, and read what you find against the `Closes` and `Refs`
   rule in CONTRIBUTING.md. Say it needs a manual close when nothing carries the
-  reference, and never promise the merge will close it otherwise.
+  reference, and never promise the merge will close it otherwise. When the PR
+  delivers the issue and only says `Refs #N`, the fix is a comment on the PR
+  asking its author to make the last line `Closes #N`, so the merge records it
+  (#143 for #141).
 - **Already shipped**: the tree already does what the request asks. `git grep -n`
   over `src` and `web` finds a candidate and settles nothing, since a string also
   lives in a fixture, a disabled branch, a generated file or code behind a flag
@@ -371,10 +378,13 @@ thread at once.
 Before any write, list every planned action: the issue, the action, and the exact
 comment or title text. Get one confirmation for that list and apply nothing that
 is not on it; "close the duplicates" approves proposing a list, not whatever
-closes the agent later decides on. Record each affected issue's `updatedAt`,
-canonical issues included, when proposing the list. Immediately before applying,
-refetch them; if one changed, re-read it, revise the affected actions and confirm
-those again.
+closes the agent later decides on. "Post all" after a report covers the
+fixed-text actions that report offered, such as the rebase request, which
+apply at once; replies drafted for a maintainer's own decision (#365, #380)
+still go on the confirmed list with their text. Record each affected issue's
+`updatedAt`, canonical issues included, when proposing the list. Immediately
+before applying, refetch them; if one changed, re-read it, revise the affected
+actions and confirm those again.
 Use only labels `gh label list` shows unless creating one was approved.
 
 ```sh

@@ -3,7 +3,8 @@
 # nothing to GitHub; pulls.md says which of the actions it lists a sweep applies
 # on its own and which wait for the user.
 #
-# Usage: pr-sweep.sh [repo] [stale-days] (default sysprog21/codetrial, 7)
+# Usage: pr-sweep.sh [repo] [stale-days] [previous.json]
+#        (default sysprog21/codetrial, 7, none)
 #
 # Prints one JSON object:
 #   maintainers_known  false when the push listing failed and the COLLABORATOR
@@ -22,7 +23,21 @@
 #   hide      superseded rebase requests in a known wording, to hide
 #   hide_ask  other rebase requests, to confirm before hiding
 #             (all three: pulls.md, "Conflicting branches")
-#   unknown   PRs whose mergeability GitHub has not computed yet; rerun
+#   unknown   PRs whose mergeability GitHub has still not computed after one
+#             retry; rerun
+#   status    every open PR, smallest first: lines changed split into source
+#             and tests, mergeability, review decision, failing, pending and
+#             held checks, whether a gates lane ran, open threads by human
+#             and bot reviewers, and a grade with its reasons. The grade is
+#             the worst row of the table in grade() that the PR matches, from
+#             blocked, low, medium and medium-high down to high when none
+#             does; draft PRs are set aside. pulls.md, "Rank by size and
+#             merge confidence", says how to read it.
+#   superseded  runs awaiting approval on a head no open PR has any more,
+#             which need nothing
+#   moved     with previous.json, a saved earlier output: the PRs whose head,
+#             mergeability, decision, checks, threads or grade changed
+#   gone      with previous.json: PRs no longer open, with merged or closed
 #   prs       number, title, updatedAt, head, author, closing issues and files
 #             of every open PR, for judging overlap that shares no issue and
 #             for checking a PR again before writing to it
@@ -31,6 +46,14 @@ set -eu
 
 repo=${1:-sysprog21/codetrial}
 days=${2:-7}
+prev=${3:-}
+previous=null
+if [ -n "$prev" ]; then
+    previous=$(jq -ce '.status' "$prev" 2> /dev/null) || {
+        echo "pr-sweep.sh: $prev is not an earlier pr-sweep.sh output" >&2
+        exit 2
+    }
+fi
 
 # No fallback when /user cannot be read, unlike issue-sweep.sh: an unknown
 # viewer would put the viewer's own pull requests in rebase, a list a sweep
@@ -73,12 +96,17 @@ query='query($owner: String!, $name: String!, $endCursor: String) {
       nodes {
         number title isDraft authorAssociation headRefOid mergeable baseRefName
         updatedAt headRefName headRepository { nameWithOwner }
+        additions deletions reviewDecision
         author { login }
         closingIssuesReferences(first: 100) { totalCount nodes { number } }
-        files(first: 100) { totalCount nodes { path } }
+        files(first: 100) { totalCount nodes { path additions deletions } }
         commits(last: 1) {
           nodes { commit { committedDate
-            checkSuites(first: 10) { nodes { createdAt } } } }
+            checkSuites(first: 10) { nodes { createdAt } }
+            statusCheckRollup { contexts(first: 50) { totalCount nodes {
+              __typename
+              ... on CheckRun { databaseId name status conclusion }
+              ... on StatusContext { context state } } } } } }
         }
         reviews(last: 100) {
           totalCount
@@ -98,7 +126,8 @@ query='query($owner: String!, $name: String!, $endCursor: String) {
         }
         reviewThreads(first: 100) {
           totalCount
-          nodes { id isResolved isOutdated path }
+          nodes { id isResolved isOutdated path
+            comments(first: 1) { nodes { author { __typename login } } } }
         }
         timelineItems(last: 1, itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT]) {
           nodes { ... on HeadRefForcePushedEvent { createdAt } }
@@ -112,6 +141,23 @@ pages=$(gh api graphql --paginate -F owner="${repo%/*}" -F name="${repo#*/}" \
     -f query="$query")
 prs=$(printf '%s\n' "$pages" | jq -s '[.[].data.repository.pullRequests.nodes[]]')
 base=$(printf '%s\n' "$pages" | jq -rs '.[0].data.repository.defaultBranchRef.name')
+
+# GitHub computes mergeability on first request, and every merge to main resets
+# it, so one read often answers UNKNOWN for most PRs. The first read starts the
+# computation; a few seconds later one small query asks again for just those
+# PRs, rather than refetching everything above.
+unknown=$(printf '%s\n' "$prs" | jq -r '.[] | select(.mergeable == "UNKNOWN") | .number')
+if [ -n "$unknown" ]; then
+    sleep "${PR_SWEEP_RETRY_DELAY:-5}"
+    asks=$(printf '%s\n' "$unknown" | sed 's/.*/p&: pullRequest(number: &) { number mergeable }/')
+    again=$(gh api graphql -F owner="${repo%/*}" -F name="${repo#*/}" -f query="
+      query(\$owner: String!, \$name: String!) {
+        repository(owner: \$owner, name: \$name) { $asks } }" \
+        --jq '[.data.repository[] | select(. != null)]') || again='[]'
+    prs=$(printf '%s\n' "$prs" | jq --argjson again "$again" \
+        '($again | INDEX(.number)) as $a
+         | map(.mergeable = ($a[.number | tostring].mergeable // .mergeable))')
+fi
 
 # Fork runs carry an empty pull_requests array, so a run is tied to its PR by
 # head repository, branch and SHA; the SHA alone would let two forks' PRs at one
@@ -127,9 +173,9 @@ runs=$(printf '%s\n' "$runs" | jq -s .)
 
 # What counts as a rebase request, when it is current, and which copies are
 # hidden or only offered for hiding: pulls.md, "Conflicting branches".
-printf '%s\n%s\n' "$prs" "$runs" | jq -s --argjson days "$days" --arg me "$me" \
+out=$(printf '%s\n%s\n' "$prs" "$runs" | jq -s --argjson days "$days" --arg me "$me" \
     --arg base "$base" --rawfile text "$text" --argjson known "$known" \
-    --argjson pushers "$pushers" '
+    --argjson pushers "$pushers" --argjson previous "$previous" '
 def human: .author != null and .author.__typename != "Bot";
 def ts: if . == null then 0 else fromdateiso8601 end;
 def pushed: (.commits.nodes[0].commit // {checkSuites: {nodes: []}}) as $c
@@ -142,6 +188,10 @@ def nudgeable: .author != null and .author.login != $me;
 def staff: if $pushers != null then .author.login | IN($pushers[])
   else .authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR") end;
 .[0] as $prs | .[1] as $runs | ([$text | norm] + $known) as $wordings |
+def owns($r): $r.head_sha == .headRefOid and $r.head_branch == .headRefName
+  and $r.head_repo == .headRepository.nameWithOwner;
+def runs_of($p): $runs[] | select(. as $r | $p | owns($r));
+def opens_with_rebase: test("^\\s*(@[\\w-]+[,:]?\\s+)*rebase\\b"; "i");
 def requests: .author.login as $a | .headRefOid as $head | pushed as $p |
   [(.reviews.nodes[]
      | select(.state == "CHANGES_REQUESTED"
@@ -149,7 +199,7 @@ def requests: .author.login as $a | .headRefOid as $head | pushed as $p |
      | {at: .submittedAt, inline: .comments.totalCount,
         current: (.commit.oid == $head)} + .),
    (.comments.nodes[]
-     | select(.body | test("^\\s*(@[\\w-]+[,:]?\\s+)*rebase\\b"; "i"))
+     | select(.body | opens_with_rebase)
      | {at: .createdAt, inline: 0, current: ((.createdAt | ts) >= $p)} + .)]
   | map(select(human and staff and .author.login != $a and (.isMinimized | not))
       | {id, by: .author.login, at, body, inline, current});
@@ -164,10 +214,117 @@ def needs_rebase: .mergeable == "CONFLICTING" and (.isDraft | not)
   and .baseRefName == $base and $base == "main"
   and nudgeable and whole
   and (asked_here | not);
+# A test is anything under a tests/ directory, the browser check, or a file
+# named as one (test_x.py, x.test.js); a substring would also catch problem
+# files such as tightest-channel-spacing.json. With more than 100 files the
+# split undercounts tests.
+def size: ((.additions // 0) + (.deletions // 0)) as $total
+  | ([.files.nodes[] | select(.path | test(
+        "(^|/)tests/|browser-check|(^|/)test_[^/]*$|\\.test\\.[a-z]+$"))
+      | (.additions // 0) + (.deletions // 0)] | add // 0) as $tests
+  | {total: $total, source: ($total - $tests), tests: $tests};
+# ACTION_REQUIRED is a run held for a first-time contributor, not a failure.
+# A held run often has no check run at all, only its entry in $runs, so a
+# match there counts as held too. A rerun adds a check run of the same name
+# beside the old one, so only the latest of each name counts, or a failure
+# rerun green would still read as failing.
+def checks: [runs_of(.) | .name] as $waiting
+  | ((.commits.nodes[0].commit.statusCheckRollup.contexts.totalCount // 0)
+      > 50) as $cut
+  | [.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]?
+    | if .__typename == "CheckRun" then
+        {name, s: (if .status != "COMPLETED" then "pending"
+          elif .conclusion == "ACTION_REQUIRED" then "held"
+          elif .conclusion | IN("FAILURE", "TIMED_OUT", "CANCELLED",
+            "STARTUP_FAILURE") then "failing"
+          else "ok" end), kind: "run", id: .databaseId}
+      else
+        {name: .context, s: (if .state | IN("PENDING", "EXPECTED") then "pending"
+          elif .state | IN("FAILURE", "ERROR") then "failing" else "ok" end),
+         kind: "status"}
+      end]
+  # A rerun leaves the old run beside the new one under the same name, so the
+  # latest run of each name stands; a commit status keeps one entry per name
+  # anyway, and is never merged with a check run that happens to share it.
+  | group_by([.kind, .name]) | map(max_by(.id))
+  | def named($s): [.[] | select(.s == $s) | .name];
+  {failing: named("failing"), pending: named("pending"),
+     held: (named("held") + $waiting | unique),
+     gates: any(.[]; .name | startswith("gates (")),
+     truncated: $cut};
+# A thread the PR author opened is a note to reviewers, not a finding left
+# for the author, so only threads reviewers opened count.
+def threads: .author.login as $a
+  | [.reviewThreads.nodes[] | select(.isResolved | not)
+    | .comments.nodes[0].author // {__typename: "Ghost", login: "ghost"}
+    | select(.login != $a)]
+  | {human: [.[] | select(.__typename != "Bot") | .login],
+     bot: [.[] | select(.__typename == "Bot") | .login]}
+  | .by = (.human | unique);
+# The latest visible verdict of each maintainer, since one approval does not answer
+# a changes request from another maintainer. A request on the current head waits on
+# the author; one the author pushed past waits on a re-review. A hidden review
+# still counts in reviewDecision, which is what says a re-review is owed. A
+# request is a rebase only when it opens with the word, as a rebase comment is
+# read above, so "no rebase is needed" is not one. requests reads a review that
+# mentions rebase anywhere as asking for one, which only keeps the sweep from
+# asking twice; here the mistake would hide a substantive request.
+def open_requests: .headRefOid as $head
+  | [.reviews.nodes[] | select(human and staff and (.isMinimized | not)
+      and (.state == "APPROVED" or .state == "CHANGES_REQUESTED"))]
+  | group_by(.author.login) | map(max_by(.submittedAt | ts))
+  | [.[] | select(.state == "CHANGES_REQUESTED" and .commit.oid == $head)
+    | {rebase: (.body | opens_with_rebase)}];
+# One row per condition: when it holds, the reason it adds and the grade it
+# caps the PR at. The grade is the worst row that holds, so adding a problem
+# never raises it, and the reasons and the grade cannot disagree. A row with
+# no reason only strengthens one that already gave its own.
+def grade($c; $t): .isDraft as $draft | open_requests as $r
+  | (.reviewDecision == "CHANGES_REQUESTED") as $cr
+  | ($r | length > 0) as $cr_head
+  | any($r[]; .rebase | not) as $cr_work
+  | ($t.human | length > 0) as $talk
+  | [{when: (.mergeable == "CONFLICTING"), why: "conflicts", grade: "medium"},
+     {when: $cr_work, why: "changes requested on this head", grade: "blocked"},
+     {when: ($cr_head and ($cr_work | not)),
+      why: "changes requested on this head (rebase)", grade: "medium"},
+     {when: ($cr and ($cr_head | not)),
+      why: "changes requested before the last push, or hidden",
+      grade: "medium-high"},
+     {when: $talk, grade: "low",
+      why: "\($t.human | length) open thread(s) by \($t.by | join(", "))"},
+     {when: ($talk and (.mergeable == "CONFLICTING" or $cr_head)),
+      why: null, grade: "blocked"},
+     {when: ($t.bot | length > 0), grade: "medium",
+      why: "\($t.bot | length) open bot thread(s)"},
+     {when: ($c.failing | length > 0), grade: "low",
+      why: "failing: \($c.failing | join(", "))"},
+     {when: ($c.held | length > 0), why: "held for approval", grade: "medium"},
+     {when: ($c.pending | length > 0), grade: "medium-high",
+      why: "pending: \($c.pending | join(", "))"},
+     {when: ($c.gates | not), why: "no gates lane ran", grade: "medium"},
+     {when: $c.truncated, why: "more than 50 checks, not all read",
+      grade: "medium"},
+     {when: (.mergeable == "UNKNOWN"), why: "mergeability unknown",
+      grade: "medium"},
+     # Past 100 reviews or threads the newest may be the ones not read, so
+     # nothing above can be trusted to have seen them.
+     {when: (.reviews.totalCount > 100 or .reviewThreads.totalCount > 100),
+      why: "more than 100 reviews or threads, not all read", grade: "medium"}]
+  | map(select(.when)) as $hit
+  | ["high", "medium-high", "medium", "low", "blocked"] as $ladder
+  | {grade: (if $draft then "draft"
+      else $ladder[[$hit[].grade as $g | $ladder | index($g)] | max // 0] end),
+     why: [$hit[].why | strings]};
+def status: checks as $c | threads as $t
+  | {pr: .number, title, author: .author.login, head: .headRefOid,
+     size: size, files_truncated: (.files.totalCount > 100),
+     mergeable, decision: .reviewDecision, checks: $c,
+     threads: {human: ($t.human | length), bot: ($t.bot | length), by: $t.by},
+     closes: [.closingIssuesReferences.nodes[].number]} + grade($c; $t);
+([$prs[] | status] | sort_by(.size.total)) as $status |
 {
-  approve: [$prs[] as $p | $runs[] | select(.head_sha == $p.headRefOid
-      and .head_branch == $p.headRefName
-      and .head_repo == $p.headRepository.nameWithOwner)
+  approve: [$prs[] as $p | runs_of($p)
     | {pr: $p.number, run: .id, workflow: .name, actor,
        touches_workflows: any($p.files.nodes[].path; startswith(".github/")),
        files_truncated: ($p.files.totalCount > 100),
@@ -217,6 +374,22 @@ def needs_rebase: .mergeable == "CONFLICTING" and (.isDraft | not)
     | {pr: $n, id, at, by, body}],
   maintainers_known: ($pushers != null),
   unknown: [$prs[] | select(.mergeable == "UNKNOWN") | .number],
+  status: $status,
+  superseded: ([$runs[] | . as $r | select(any($prs[]; owns($r)) | not)]
+    | length),
+  moved: (if $previous == null then null else
+    ($previous | INDEX(.pr)) as $old
+    | [$status[] | . as $now | $old[.pr | tostring] as $was
+      | if $was == null then {pr, new: true}
+        else {pr, changed: ([
+            (("head", "mergeable", "decision", "grade", "checks", "threads")
+              as $k
+              | select($was[$k] != $now[$k]) | {($k): [$was[$k], $now[$k]]})]
+          | add)}
+          | select(.changed != null) end]
+    end),
+  gone: (if $previous == null then null
+    else [$previous[].pr] - [$status[].pr] end),
   prs: [$prs[] | {number, title, updatedAt, head: .headRefOid,
     author: .author.login, isDraft, authorAssociation,
     closes: [.closingIssuesReferences.nodes[].number],
@@ -225,4 +398,17 @@ def needs_rebase: .mergeable == "CONFLICTING" and (.isDraft | not)
     reviews_truncated: (.reviews.totalCount > 100),
     comments_truncated: (.comments.totalCount > 100),
     threads_truncated: (.reviewThreads.totalCount > 100)}]
-}'
+}')
+
+# A PR that left the open list either merged or closed; one call each says
+# which, and gone stays short. A lookup that fails, from a network blip or a
+# previous output saved for another repository, marks that PR UNKNOWN rather
+# than losing the sweep.
+gone=$(printf '%s\n' "$out" | jq -r '.gone // [] | .[]')
+states=$(for n in $gone; do
+    gh pr view "$n" --repo "$repo" --json number,state,mergedAt,mergeCommit \
+        --jq '{pr: .number, state, mergedAt, merge: .mergeCommit.oid}' \
+        || jq -n --argjson n "$n" '{pr: $n, state: "UNKNOWN"}'
+done | jq -s .)
+printf '%s\n' "$out" | jq --argjson states "$states" \
+    'if .gone == null then . else .gone = $states end'

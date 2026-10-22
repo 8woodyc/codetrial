@@ -135,12 +135,34 @@ telling a stale base, a regression, a race and an environment limit apart is in
 [collaboration.md](../codetrial-contribute/collaboration.md#make-ci-green-before-asking-for-review);
 reading the job log, and why it is `--log`, is the recipe in
 [pulls.md](../codetrial-triage/pulls.md#recheck-dependencies-and-substantive-review).
-What this adds is checking that the failure is current:
+What this adds is one call that reads all of it at the PR's head:
+
+```sh
+.claude/skills/codetrial-verify/ci-failure.sh "$pr" > "$SCRATCH/ci-$pr.json"
+```
+
+Read its `failing` entries in this order. `current` false is history, not the
+current failure: say so and stop there. `current` or `on_main` null means its
+lookup failed, and `gates`, `errors` and `excerpt` null mean the job log could
+not be read; check either with the raw calls below. `on_main` true means the latest
+finished run on `main` fails the same job, so the failure is the maintainer's
+and the author is not asked to fix it. Otherwise `gates` names what
+`scripts/test.sh` failed and `errors` the lines that say why; rerun that lane
+locally with the same head. A `cargo-audit` failure on a PR whose base predates
+the advisory fix is a stale base, answered by a rebase (#334), not a code
+change. The aggregate `check` job only collects the lanes, so its entry points
+at the failing `gates (<lane>)` one. A check outside Actions has only its
+link, and `held` checks have no log until a maintainer approves the run.
+
+The raw calls behind it, when one answer needs checking:
 
 ```sh
 gh pr view "$pr" --repo sysprog21/codetrial --json headRefOid
 gh pr checks "$pr" --repo sysprog21/codetrial --json name,state,bucket,link
 gh run view "$run" --repo sysprog21/codetrial --json headSha,status,conclusion,jobs
+gh run list --repo sysprog21/codetrial --workflow check.yml --branch main \
+  --event push --status completed --limit 10 --json databaseId,conclusion
+gh run view "$run" --repo sysprog21/codetrial --job "$job" --log
 ```
 
 A run whose `headSha` is not the PR head is history, not the current failure.
@@ -153,7 +175,9 @@ the report.
 
 ## The git hooks
 
-`make hooks` installs the fast half of the gate at commit time:
+`make hooks` installs the fast half of the gate at commit time, once per clone
+and before the first commit there; how to read its output is in
+[conventions](../codetrial-conventions/SKILL.md#commit-messages):
 `scripts/git-pre-commit.sh` runs `rustfmt`, ESLint, Prettier, `ruff` and
 `shellcheck` over a checkout of the index, so an unstaged edit neither fails a
 commit nor sneaks through one, plus `commentflow --check` and `shfmt -d` on

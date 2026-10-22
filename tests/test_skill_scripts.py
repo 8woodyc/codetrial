@@ -37,8 +37,11 @@ FAKE_GH = """#!/bin/sh
 case "$*" in
   "api user --jq .login") echo viewer ;;
   *collaborators*) printf 'maint\\nviewer\\n' ;;
-  *actions/runs*) : ;;
-  "api graphql"*) cat "$FAKE_PAGE" ;;
+  *actions/runs*) cat "$FAKE_RUNS" ;;
+  "api graphql --paginate"*) cat "$FAKE_PAGE" ;;
+  "api graphql"*) cat "$FAKE_AGAIN" ;;
+  "pr view 404 "*) echo "no such pull request" >&2; exit 1 ;;
+  "pr view"*) printf '{"pr":%s,"state":"MERGED","merge":"m%s"}\\n' "$3" "$3" ;;
   *) echo "unexpected gh call: $*" >&2; exit 1 ;;
 esac
 """
@@ -87,6 +90,39 @@ def listed(*nodes):
     return {"totalCount": len(nodes), "nodes": list(nodes)}
 
 
+def checked(*runs):
+    """A head pushed ten days ago whose check runs ended as (name, conclusion).
+
+    A conclusion of None is a run still in progress.
+    """
+    return {
+        "nodes": [
+            {
+                "commit": {
+                    "committedDate": ago(10),
+                    "checkSuites": {"nodes": [{"createdAt": ago(10)}]},
+                    "statusCheckRollup": {
+                        "contexts": {
+                            "nodes": [
+                                {
+                                    "__typename": "CheckRun",
+                                    "databaseId": index,
+                                    "name": name,
+                                    "status": "IN_PROGRESS"
+                                    if conclusion is None
+                                    else "COMPLETED",
+                                    "conclusion": conclusion,
+                                }
+                                for index, (name, conclusion) in enumerate(runs)
+                            ]
+                        }
+                    },
+                }
+            }
+        ]
+    }
+
+
 def pull(number, **fields):
     node = {
         "number": number,
@@ -103,22 +139,27 @@ def pull(number, **fields):
         "closingIssuesReferences": listed(),
         "files": listed(),
         # The head was pushed ten days ago, which dates every request.
-        "commits": {
-            "nodes": [
-                {
-                    "commit": {
-                        "committedDate": ago(10),
-                        "checkSuites": {"nodes": [{"createdAt": ago(10)}]},
-                    }
-                }
-            ]
-        },
+        "commits": checked(),
         "reviews": listed(),
         "comments": listed(),
         "reviewThreads": listed(),
         "timelineItems": {"nodes": []},
     }
     return node | fields
+
+
+def review(login, state, days, body="", oid="head1"):
+    return {
+        "id": f"R_{login}",
+        "author": {"__typename": "User", "login": login},
+        "authorAssociation": "MEMBER",
+        "state": state,
+        "submittedAt": ago(days),
+        "isMinimized": False,
+        "body": body,
+        "commit": {"oid": oid},
+        "comments": {"totalCount": 0},
+    }
 
 
 def request(node_id, days, body):
@@ -135,24 +176,57 @@ def request(node_id, days, body):
 FIXED = "Rebase latest `main` branch and resolve conflicts."
 
 
+GREEN = checked(("check", "SUCCESS"), ("gates (rust)", "SUCCESS"))
+
+
+def thread(kind="User", login="maint"):
+    return {
+        "id": f"T_{login}",
+        "isResolved": False,
+        "isOutdated": False,
+        "path": "web/runners.js",
+        "comments": {"nodes": [{"author": {"__typename": kind, "login": login}}]},
+    }
+
+
+def run_fake(script, args, fake_gh, files, cwd=None, env=()):
+    """Run a skill script against a fake gh, with files it or the fake reads."""
+    with tempfile.TemporaryDirectory() as scratch:
+        scratch = Path(scratch)
+        (scratch / "bin").mkdir()
+        support.write_executable(scratch / "bin" / "gh", fake_gh)
+        paths = {}
+        for variable, content in files.items():
+            paths[variable] = scratch / variable.lower()
+            paths[variable].write_text(content)
+        # An argument "$NAME" is the path of the file given as NAME.
+        args = [str(paths[a[1:]]) if str(a).startswith("$") else str(a) for a in args]
+        return subprocess.run(
+            ["sh", str(script), *args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            env=os.environ
+            | {"PATH": f"{scratch / 'bin'}:{os.environ['PATH']}"}
+            | {k: str(v) for k, v in paths.items()}
+            | dict(env),
+        )
+
+
 @unittest.skipUnless(shutil.which("jq"), "jq is not installed")
 class SweepCase(unittest.TestCase):
-    def sweep(self, script, page):
-        with tempfile.TemporaryDirectory() as scratch:
-            scratch = Path(scratch)
-            (scratch / "bin").mkdir()
-            support.write_executable(scratch / "bin" / "gh", FAKE_GH)
-            (scratch / "page.json").write_text(json.dumps({"data": page}))
-            result = subprocess.run(
-                ["sh", str(script), "sysprog21/codetrial"],
-                capture_output=True,
-                text=True,
-                env=os.environ
-                | {
-                    "PATH": f"{scratch / 'bin'}:{os.environ['PATH']}",
-                    "FAKE_PAGE": str(scratch / "page.json"),
-                },
-            )
+    def sweep(self, script, page, previous=None, runs=(), again=(), env=()):
+        files = {
+            "FAKE_PAGE": json.dumps({"data": page}),
+            # gh applies --jq itself, so the fake prints one object per run.
+            "FAKE_RUNS": "".join(json.dumps(run) + "\n" for run in runs),
+            "FAKE_AGAIN": json.dumps(list(again)),
+        }
+        args = ["sysprog21/codetrial"]
+        if previous is not None:
+            files["PREVIOUS"] = json.dumps(previous)
+            args += ["7", "$PREVIOUS"]
+        result = run_fake(script, args, FAKE_GH, files, env=env)
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
@@ -241,7 +315,7 @@ class IssueSweepTests(SweepCase):
 
 
 class PrSweepTests(SweepCase):
-    def run_pulls(self, *pulls):
+    def run_pulls(self, *pulls, **options):
         page = {
             "repository": {
                 "defaultBranchRef": {"name": "main"},
@@ -251,7 +325,282 @@ class PrSweepTests(SweepCase):
                 },
             }
         }
-        return self.sweep(PR_SWEEP, page)
+        return self.sweep(PR_SWEEP, page, **options)
+
+    def grades(self, *pulls):
+        return {
+            entry["pr"]: entry["grade"] for entry in self.run_pulls(*pulls)["status"]
+        }
+
+    def test_status_ranks_by_size_and_splits_out_tests(self):
+        files = listed(
+            {"path": "web/runners.js", "additions": 2, "deletions": 1},
+            {"path": "tests/browser/runners.test.js", "additions": 40, "deletions": 0},
+        )
+        swept = self.run_pulls(
+            pull(1, additions=90, deletions=10, commits=GREEN),
+            pull(2, additions=42, deletions=1, files=files, commits=GREEN),
+        )
+        self.assertEqual([entry["pr"] for entry in swept["status"]], [2, 1])
+        self.assertEqual(
+            swept["status"][0]["size"], {"total": 43, "source": 3, "tests": 40}
+        )
+
+    def test_grade_follows_what_github_records(self):
+        cases = {
+            "high": pull(1, commits=GREEN),
+            "low": pull(2, commits=checked(("gates (rust)", "FAILURE"))),
+            "blocked": pull(
+                3,
+                commits=GREEN,
+                mergeable="CONFLICTING",
+                reviewThreads=listed(thread()),
+            ),
+            "medium": pull(4, commits=checked(("check", "SUCCESS"))),
+            "medium-high": pull(5, commits=GREEN, reviewDecision="CHANGES_REQUESTED"),
+        }
+        grades = self.grades(*cases.values())
+        for grade, node in cases.items():
+            with self.subTest(grade=grade):
+                self.assertEqual(grades[node["number"]], grade)
+
+    def test_human_thread_lowers_the_grade_and_a_bot_thread_only_to_medium(self):
+        grades = self.grades(
+            pull(1, commits=GREEN, reviewThreads=listed(thread())),
+            pull(2, commits=GREEN, reviewThreads=listed(thread("Bot", "cubic-dev-ai"))),
+        )
+        self.assertEqual(grades, {1: "low", 2: "medium"})
+
+    def test_a_thread_the_author_opened_is_not_a_reviewer_thread(self):
+        grades = self.grades(
+            pull(1, commits=GREEN, reviewThreads=listed(thread(login="contributor")))
+        )
+        self.assertEqual(grades, {1: "high"})
+
+    def test_a_failure_rerun_green_is_not_failing(self):
+        rerun = checked(
+            ("gates (rust)", "FAILURE"),
+            ("gates (rust)", "SUCCESS"),
+            ("check", "SUCCESS"),
+        )
+        self.assertEqual(self.grades(pull(1, commits=rerun)), {1: "high"})
+
+    def test_a_failing_status_is_not_hidden_by_a_check_run_of_its_name(self):
+        commits = checked(("lint", "SUCCESS"), ("gates (rust)", "SUCCESS"))
+        contexts = commits["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]
+        contexts["nodes"].append(
+            {"__typename": "StatusContext", "context": "lint", "state": "ERROR"}
+        )
+        swept = self.run_pulls(pull(1, commits=commits))
+        entry = swept["status"][0]
+        self.assertEqual(
+            (entry["checks"]["failing"], entry["grade"]), (["lint"], "low")
+        )
+
+    def test_a_pr_past_100_reviews_is_not_graded_as_fully_read(self):
+        swept = self.run_pulls(
+            pull(1, commits=GREEN, reviews={"totalCount": 101, "nodes": []})
+        )
+        entry = swept["status"][0]
+        self.assertEqual(entry["grade"], "medium")
+        self.assertIn("more than 100 reviews or threads, not all read", entry["why"])
+
+    def test_a_held_run_is_not_a_failure(self):
+        grades = self.grades(
+            pull(
+                1,
+                commits=checked(
+                    ("gates (rust)", "SUCCESS"), ("check", "ACTION_REQUIRED")
+                ),
+            )
+        )
+        self.assertEqual(grades, {1: "medium"})
+
+    def test_problem_files_named_with_test_inside_a_word_are_source(self):
+        files = listed(
+            {
+                "path": "web/problems/tightest-channel-spacing.json",
+                "additions": 30,
+                "deletions": 0,
+            },
+            {"path": "tests/test_gen_problems.py", "additions": 5, "deletions": 0},
+            {"path": "web/lib.test.js", "additions": 4, "deletions": 0},
+        )
+        swept = self.run_pulls(pull(1, additions=39, deletions=0, files=files))
+        self.assertEqual(
+            swept["status"][0]["size"], {"total": 39, "source": 30, "tests": 9}
+        )
+
+    def test_one_approval_does_not_hide_another_maintainers_request(self):
+        reviews = listed(
+            review("maint", "CHANGES_REQUESTED", 3, "Fix the null case."),
+            review("viewer", "APPROVED", 1),
+        )
+        grades = self.grades(
+            pull(1, commits=GREEN, reviews=reviews, reviewDecision="CHANGES_REQUESTED")
+        )
+        self.assertEqual(grades, {1: "blocked"})
+
+    def test_only_a_request_that_opens_with_rebase_is_a_rebase(self):
+        def asked(number, body):
+            request = review("maint", "CHANGES_REQUESTED", 1, body, f"head{number}")
+            return pull(
+                number,
+                commits=GREEN,
+                reviewDecision="CHANGES_REQUESTED",
+                reviews=listed(request),
+            )
+
+        grades = self.grades(
+            asked(1, FIXED), asked(2, "Fix the null dereference; no rebase is needed.")
+        )
+        self.assertEqual(grades, {1: "medium", 2: "blocked"})
+
+    def test_adding_a_failing_check_never_raises_a_blocked_grade(self):
+        grades = self.grades(
+            pull(
+                1,
+                commits=checked(("gates (rust)", "FAILURE")),
+                mergeable="CONFLICTING",
+                reviewThreads=listed(thread()),
+            )
+        )
+        self.assertEqual(grades, {1: "blocked"})
+
+    def test_a_run_waiting_for_approval_with_no_check_run_is_held(self):
+        run = {
+            "id": 1,
+            "name": "check",
+            "head_sha": "head1",
+            "head_branch": "topic",
+            "head_repo": "contributor/codetrial",
+            "actor": "contributor",
+        }
+        swept = self.run_pulls(pull(1, commits=GREEN), runs=[run])
+        entry = swept["status"][0]
+        self.assertEqual(
+            (entry["checks"]["held"], entry["grade"]), (["check"], "medium")
+        )
+
+    def test_previous_sweep_reports_only_what_moved_and_what_left(self):
+        first = self.run_pulls(
+            pull(1, commits=GREEN), pull(2, commits=GREEN), pull(9, commits=GREEN)
+        )
+        swept = self.run_pulls(
+            pull(1, commits=GREEN),
+            pull(2, commits=GREEN, mergeable="CONFLICTING"),
+            previous=first,
+        )
+        self.assertEqual(
+            swept["moved"],
+            [
+                {
+                    "pr": 2,
+                    "changed": {
+                        "mergeable": ["MERGEABLE", "CONFLICTING"],
+                        "grade": ["high", "medium"],
+                    },
+                }
+            ],
+        )
+        self.assertEqual(swept["gone"], [{"pr": 9, "state": "MERGED", "merge": "m9"}])
+
+    def test_a_failed_lookup_marks_one_departed_pr_and_keeps_the_sweep(self):
+        first = self.run_pulls(pull(1), pull(9), pull(404))
+        swept = self.run_pulls(pull(1), previous=first)
+        self.assertEqual(
+            swept["gone"],
+            [
+                {"pr": 9, "state": "MERGED", "merge": "m9"},
+                {"pr": 404, "state": "UNKNOWN"},
+            ],
+        )
+
+    def test_a_check_finishing_moves_a_pr_even_when_its_grade_holds(self):
+        waiting = checked(("gates (rust)", "SUCCESS"), ("check", None))
+        decided = {"reviewDecision": "CHANGES_REQUESTED"}
+        first = self.run_pulls(pull(1, commits=waiting, **decided))
+        swept = self.run_pulls(pull(1, commits=GREEN, **decided), previous=first)
+        self.assertEqual([entry["pr"] for entry in swept["moved"]], [1])
+        self.assertEqual(list(swept["moved"][0]["changed"]), ["checks"])
+
+    def test_unknown_mergeability_is_asked_again_for_those_prs_only(self):
+        swept = self.run_pulls(
+            pull(1, commits=GREEN, mergeable="UNKNOWN"),
+            pull(2, commits=GREEN),
+            again=[{"number": 1, "mergeable": "CONFLICTING"}],
+            env={"PR_SWEEP_RETRY_DELAY": "0"},
+        )
+        self.assertEqual(swept["unknown"], [])
+        self.assertEqual(
+            {entry["pr"]: entry["mergeable"] for entry in swept["status"]},
+            {1: "CONFLICTING", 2: "MERGEABLE"},
+        )
+
+    def test_runs_awaiting_approval_on_old_heads_are_only_counted(self):
+        def run(sha):
+            return {
+                "id": sha,
+                "name": "check",
+                "head_sha": sha,
+                "head_branch": "topic",
+                "head_repo": "contributor/codetrial",
+                "actor": "contributor",
+            }
+
+        swept = self.run_pulls(pull(1, commits=GREEN), runs=[run("head1"), run("old")])
+        self.assertEqual(
+            ([entry["run"] for entry in swept["approve"]], swept["superseded"]),
+            (["head1"], 1),
+        )
+
+    def test_failed_gates_line_matches_what_the_test_gate_prints(self):
+        # ci-failure.sh reads the gate names from the last line test.sh prints
+        # on failure; a change to that line has to break this test too.
+        self.assertIn(
+            'echo "failed gates:$failed"', (ROOT / "scripts" / "test.sh").read_text()
+        )
+        self.assertIn(
+            'startswith("failed gates:")', (VERIFY / "ci-failure.sh").read_text()
+        )
+
+    def test_workflow_facts_the_review_checklist_states_still_hold(self):
+        # review.md's workflow checklist says check.yml runs on pull_request
+        # with contents: read, and that the only job granted contents: write
+        # is release, which runs on a push to main.
+        workflow = (ROOT / ".github" / "workflows" / "check.yml").read_text()
+        self.assertNotIn("pull_request_target", workflow)
+        self.assertNotIn("workflow_run", workflow)
+        self.assertNotIn("issue_comment", workflow)
+        self.assertIn("\npermissions:\n  contents: read\n", workflow)
+        self.assertEqual(workflow.count("contents: write"), 1)
+        release = workflow[workflow.index("\n  release:\n") :]
+        release = release[: release.index("steps:")]
+        self.assertIn("contents: write", release)
+        self.assertIn(
+            "if: github.event_name == 'push' && github.ref == 'refs/heads/main'",
+            release,
+        )
+
+    def test_hook_installer_prints_the_labels_conventions_explains(self):
+        # codetrial-conventions tells an agent to read make hooks' output by
+        # these labels, so renaming one has to move that text too.
+        installer = (ROOT / "scripts" / "install-git-hooks.sh").read_text()
+        for label in ("OK", "HOOK", "KEEP", "NOTE"):
+            with self.subTest(label=label):
+                self.assertIn(f"printf '  {label} ", installer)
+
+    def test_gates_prefix_matches_the_check_workflow_job_name(self):
+        # The grade reads "no gates lane ran" from this prefix; renaming the
+        # job in check.yml without the script would mark every PR as such.
+        workflow = (ROOT / ".github" / "workflows" / "check.yml").read_text()
+        self.assertIn("name: gates (", workflow)
+        self.assertIn('startswith("gates (")', PR_SWEEP.read_text())
+
+    def test_without_a_previous_sweep_moved_and_gone_are_null(self):
+        swept = self.run_pulls(pull(1))
+        self.assertIsNone(swept["moved"])
+        self.assertIsNone(swept["gone"])
 
     def test_pr_with_no_commits_does_not_end_the_sweep(self):
         swept = self.run_pulls(pull(1, commits={"nodes": []}), pull(2))
@@ -279,6 +628,315 @@ class PrSweepTests(SweepCase):
                 self.assertEqual([entry["id"] for entry in swept["hide"]], ["IC_old"])
                 self.assertEqual(swept["hide_ask"], [])
                 self.assertEqual(swept["rebase"], [])
+
+
+RELATED = SKILLS / "codetrial-contribute" / "related.sh"
+
+# The viewer, one issue held by someone else, and the open PRs; gh applies
+# --jq itself, so the issue view answers in the shape related.sh asks for.
+FAKE_GH_RELATED = """#!/bin/sh
+case "$*" in
+  "api user --jq .login") echo viewer ;;
+  "issue view 5 "*) echo '{"number":5,"title":"t","state":"OPEN","stateReason":"","assignees":["viewer","someone"]}' ;;
+  "issue view "*) printf '{"number":%s,"title":"t","state":"OPEN","stateReason":"","assignees":[]}\n' "$3" ;;
+  "pr list"*) cat "$FAKE_PRS" ;;
+  *) echo "unexpected gh call: $*" >&2; exit 1 ;;
+esac
+"""
+
+
+def open_pr(number, author, branch, paths, closes=(), head=""):
+    return {
+        "number": number,
+        "title": f"PR {number}",
+        "author": {"login": author},
+        "headRefName": branch,
+        "headRefOid": head,
+        "files": [{"path": path} for path in paths],
+        "closingIssuesReferences": [{"number": n} for n in closes],
+    }
+
+
+@unittest.skipUnless(shutil.which("jq") and shutil.which("git"), "jq or git missing")
+class RelatedTests(unittest.TestCase):
+    def test_branch_meets_the_same_issue_shared_files_and_a_held_issue(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            scratch = Path(scratch)
+            repo = scratch / "repo"
+            git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+            subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+            (repo / "web").mkdir()
+            (repo / "web" / "runners.js").write_text("a\n")
+            subprocess.run([*git, "add", "."], check=True)
+            subprocess.run([*git, "commit", "-qm", "base"], check=True)
+            subprocess.run([*git, "switch", "-qc", "topic"], check=True)
+            (repo / "web" / "runners.js").write_text("b\n")
+            # A qualified close counts, another repository's does not, and a
+            # reference to an issue the branch also closes is a close.
+            message = (
+                "Fix it\n\nCloses #5\nFixes sysprog21/codetrial#12\n"
+                "Fixes other/repo#9\nRefs #5\nRefs #8"
+            )
+            subprocess.run([*git, "commit", "-qam", message], check=True)
+            head = subprocess.run(
+                [*git, "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+            ).stdout.strip()
+            prs = [
+                open_pr(7, "other", "x", ["web/runners.js"], closes=[5]),
+                open_pr(8, "other", "y", ["web/styles.css"]),
+                # Pushed under another name, found by its head commit.
+                open_pr(9, "viewer", "pushed-as", ["web/runners.js"], head=head),
+            ]
+            result = run_fake(
+                RELATED,
+                [],
+                FAKE_GH_RELATED,
+                {"FAKE_PRS": json.dumps(prs)},
+                cwd=repo,
+                env={"RELATED_BASE": "main"},
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        found = json.loads(result.stdout)
+        self.assertEqual(found["files"], ["web/runners.js"])
+        self.assertEqual((found["closes"], found["refs"]), ([5, 12], [8]))
+        self.assertEqual(
+            {entry["number"]: entry["others_hold"] for entry in found["issues"]},
+            {5: True, 8: False, 12: False},
+        )
+        self.assertEqual(found["own_pr"], 9)
+        self.assertEqual([entry["pr"] for entry in found["same_issue"]], [7])
+        self.assertEqual(
+            found["same_files"],
+            [
+                {
+                    "pr": 7,
+                    "title": "PR 7",
+                    "author": "other",
+                    "shared": ["web/runners.js"],
+                }
+            ],
+        )
+
+
+VERIFY = SKILLS / "codetrial-verify"
+
+# One PR at head "h1": a gates lane whose log names two gates, the aggregate job
+# main also fails, and a check from an app outside GitHub Actions.
+FAKE_GH_CI = """#!/bin/sh
+case "$*" in
+  "pr view 5 "*) echo h1 ;;
+  "pr checks 5 "*) cat "$FAKE_CHECKS"; exit 1 ;;
+  "run list "*"--event push "*) echo 500 ;;
+  "run view 500 "*) echo '["check"]' ;;
+  "run view 7 --repo sysprog21/codetrial --json headSha"*) echo h1 ;;
+  "run view 7 "*"--job 70 "*) cat "$FAKE_LOG" ;;
+  "run view 7 "*"--job 73 "*) printf 'gates (browser)\\tlobby\\t2026-10-22T00:00:00.0Z SyntaxError: Unexpected token\\n' ;;
+  "run view 7 "*"--job 74 "*) : ;;
+  "run view 7 "*"--job 75 "*) echo "log expired" >&2; exit 1 ;;
+  "run view 7 "*"--job 71 "*) printf 'check\\tcollect\\t2026-10-22T00:00:00.0Z ##[error]gate lanes: failure\\n' ;;
+  "pr diff 5 "*) cat "$FAKE_DIFF" ;;
+  *) echo "unexpected gh call: $*" >&2; exit 1 ;;
+esac
+"""
+
+# A step's first log line carries a byte order mark before its timestamp, in
+# the message column, as the real log of run 39712346073 does.
+BOM = "\ufeff"
+CI_LOG = "".join(
+    f"gates (portable)\trun\t{BOM if n == 0 else ''}2026-10-22T00:00:0{n}.0Z {line}\n"
+    for n, line in enumerate(
+        [
+            "Ran 24 tests",
+            "error: 3 vulnerabilities found!",
+            "failed gates: cargo-audit indent",
+            "##[error]Process completed with exit code 1.",
+        ]
+    )
+)
+
+# A modified file whose hunk deletes a line reading "-- x", and a deleted file.
+DIFF = """\
+diff --git a/web/a.js b/web/a.js
+index 1..2 100644
+--- a/web/a.js
++++ b/web/a.js
+@@ -10,3 +10,3 @@ function f() {
+ keep
+--- x
++new
+ tail
+diff --git a/web/a b.txt b/web/a b.txt
+index 1..2 100644
+--- a/web/a b.txt\t
++++ b/web/a b.txt\t
+@@ -1,1 +1,1 @@
+-old
++new
+diff --git a/web/old.js b/web/old.js
+deleted file mode 100644
+--- a/web/old.js
++++ /dev/null
+@@ -1,1 +0,0 @@
+-gone
+"""
+
+
+@unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+class VerifyScriptTests(unittest.TestCase):
+    def test_ci_failure_names_the_gates_and_what_main_shares(self):
+        checks = [
+            {
+                "name": "gates (portable)",
+                "state": "FAILURE",
+                "bucket": "fail",
+                "link": "https://github.com/sysprog21/codetrial/actions/runs/7/job/70",
+            },
+            {
+                "name": "check",
+                "state": "FAILURE",
+                "bucket": "fail",
+                "link": "https://github.com/sysprog21/codetrial/actions/runs/7/job/71",
+            },
+            # Cancelled at its time limit: no failed step, so only the whole
+            # job log shows why (#300).
+            {
+                "name": "gates (browser)",
+                "state": "CANCELLED",
+                "bucket": "cancel",
+                "link": "https://github.com/sysprog21/codetrial/actions/runs/7/job/73",
+            },
+            # gh files a startup failure as pending; it never ran.
+            {
+                "name": "gates (mutants)",
+                "state": "STARTUP_FAILURE",
+                "bucket": "pending",
+                "link": "https://github.com/sysprog21/codetrial/actions/runs/7/job/74",
+            },
+            # Its log can no longer be read.
+            {
+                "name": "gates (wasm-old)",
+                "state": "FAILURE",
+                "bucket": "fail",
+                "link": "https://github.com/sysprog21/codetrial/actions/runs/7/job/75",
+            },
+            {
+                "name": "cubic",
+                "state": "FAILURE",
+                "bucket": "fail",
+                "link": "https://www.cubic.dev/pr/5",
+            },
+            {
+                "name": "gates (rust)",
+                "state": "PENDING",
+                "bucket": "pending",
+                "link": "https://github.com/sysprog21/codetrial/actions/runs/7/job/72",
+            },
+            # gh files a held check under fail; it has no log to read.
+            {
+                "name": "gates (wasm)",
+                "state": "ACTION_REQUIRED",
+                "bucket": "fail",
+                "link": "https://github.com/sysprog21/codetrial/actions/runs/8/job/80",
+            },
+        ]
+        result = run_fake(
+            VERIFY / "ci-failure.sh",
+            [5],
+            FAKE_GH_CI,
+            {"FAKE_CHECKS": json.dumps(checks), "FAKE_LOG": CI_LOG},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        found = json.loads(result.stdout)
+        self.assertEqual(found["pending"], ["gates (rust)"])
+        self.assertEqual(found["held"], ["gates (wasm)"])
+        lane, collector, cancelled, startup, unread, app = found["failing"]
+        # Log order, not alphabetical, which would put "Process" first.
+        self.assertEqual(
+            lane["errors"],
+            ["error: 3 vulnerabilities found!", "Process completed with exit code 1."],
+        )
+        self.assertEqual(
+            (unread["gates"], unread["errors"], unread["excerpt"]), (None, None, None)
+        )
+        self.assertTrue(lane["excerpt"].startswith("Ran 24 tests"), lane["excerpt"])
+        self.assertEqual(cancelled["errors"], ["SyntaxError: Unexpected token"])
+        self.assertEqual((startup["name"], startup["errors"]), ("gates (mutants)", []))
+        self.assertEqual(
+            (lane["gates"], lane["current"], lane["on_main"]),
+            (["cargo-audit", "indent"], True, False),
+        )
+        self.assertIn("error: 3 vulnerabilities found!", lane["errors"])
+        self.assertEqual((collector["name"], collector["on_main"]), ("check", True))
+        self.assertEqual(app, {"name": "cubic", "link": "https://www.cubic.dev/pr/5"})
+
+    def test_a_checks_lookup_that_fails_is_not_read_as_a_clean_pr(self):
+        # The fake exits 1 with nothing on stdout, as gh does when the API
+        # refuses the call rather than when a check failed.
+        result = run_fake(
+            VERIFY / "ci-failure.sh",
+            [5],
+            FAKE_GH_CI,
+            {"FAKE_CHECKS": "", "FAKE_LOG": ""},
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("could not read the checks of #5", result.stderr)
+
+    def test_a_pr_that_is_not_a_number_is_refused_before_any_call(self):
+        for script, args in (
+            ("ci-failure.sh", ["abc"]),
+            ("review-anchors.sh", ["abc", "payload.json"]),
+        ):
+            with self.subTest(script=script):
+                # The fake gh fails every call, so only the script's own
+                # check can produce exit 2 and its message.
+                result = run_fake(VERIFY / script, args, "#!/bin/sh\nexit 1\n", {})
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("is not a pull request number", result.stderr)
+
+    def test_review_anchors_keep_diff_lines_inline_and_move_the_rest(self):
+        def note(path, line, side, text):
+            return {"path": path, "line": line, "side": side, "body": text}
+
+        payload = {
+            "event": "COMMENT",
+            "commit_id": "h1",
+            "body": "Notes.",
+            "comments": [
+                note("web/a.js", 11, "RIGHT", "added line"),
+                note("web/a.js", 11, "LEFT", "the deleted -- x line"),
+                note("web/a.js", 12, "RIGHT", "context on the right"),
+                # Left line 12 exists only if the "-- x" line was counted.
+                note("web/a.js", 12, "LEFT", "context on the left"),
+                note("web/old.js", 1, "LEFT", "deleted file"),
+                # git appends a tab to a header path containing a space.
+                note("web/a b.txt", 1, "RIGHT", "a name with a space"),
+                note("web/a.js", 40, "RIGHT", "outside every hunk"),
+                note("web/a.js", 11, "RIGHT", "starts outside") | {"start_line": 2},
+            ],
+        }
+        result = run_fake(
+            VERIFY / "review-anchors.sh",
+            [5, "$FAKE_PAYLOAD"],
+            FAKE_GH_CI,
+            {"FAKE_DIFF": DIFF, "FAKE_PAYLOAD": json.dumps(payload)},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        checked = json.loads(result.stdout)
+        self.assertEqual(
+            [c["body"] for c in checked["comments"]],
+            [
+                "added line",
+                "the deleted -- x line",
+                "context on the right",
+                "context on the left",
+                "deleted file",
+                "a name with a space",
+            ],
+        )
+        self.assertEqual(
+            checked["body"],
+            "Notes.\n\nweb/a.js:40: outside every hunk\n\nweb/a.js:11: starts outside",
+        )
 
 
 GOOD_TARGET = """\

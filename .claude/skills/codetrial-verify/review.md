@@ -25,6 +25,8 @@ linked issue and the maintainer comment that accepted its scope
 ([collaboration.md](../codetrial-contribute/collaboration.md#start-with-an-actionable-contribution)):
 that comment is the specification, and work outside it is a finding. When the
 issue was only assigned, its body's scope stands in, and that is worth saying.
+Write the specification down as a checklist now, one line per thing it asks
+for, so step 4 can report against it.
 With no target named, review the working tree when it is dirty, else
 `upstream/main...HEAD`, naming the remote as the rebase recipe in
 [codetrial-contribute](../codetrial-contribute/SKILL.md#answer-a-review) does;
@@ -107,6 +109,26 @@ report what it reports. For each area, look for:
   sites, never an alias or a deprecation (`CONTRIBUTING.md`, Before changing
   code); defer only what a versioned contract still promises, and name the
   version bump that frees it.
+- Workflows. A diff to `.github/`, to `scripts/test.sh` or to a script a lane
+  runs executes on every PR's runner, so it keeps what makes a fork PR safe to
+  run here. `.github/workflows/check.yml` runs on `pull_request` with
+  `contents: read`; a new `pull_request_target`, `workflow_run` or
+  `issue_comment` trigger, or a job
+  that raises `permissions`, runs with the base repository's token and is P0
+  until a maintainer says otherwise. A value a PR author controls (a title, a
+  body, a branch name, `github.head_ref`) reaches a shell through `env:`, as
+  `BASE_SHA` does, never as `${{ }}` inside `run:`. `secrets.` stays out of any
+  job a PR triggers; `release`, the one job with `contents: write`, runs only
+  on a push to `main`. A new third-party action is named with what it gets, and
+  a moved tag on an existing one is a change too. A change under
+  `.github/actions/` runs inside every job that uses it. PR caches are scoped to
+  the PR's ref, so a cache step is a finding only when it restores something a
+  later step executes without checking it. `actionlint` in the gate checks
+  syntax, not any of this. The trigger, default-permission and release facts
+  above are pinned by
+  `test_workflow_facts_the_review_checklist_states_still_hold` in
+  `tests/test_skill_scripts.py`, so a workflow change that breaks one fails
+  there; the `env:` and `secrets.` rules are not, and are read in the diff.
 - Skills. A diff that renames or removes a gate, a lane, a CI job, a script,
   a flag or a make target, or changes a maintainer wording, leaves stale the
   skill that names it; run `scripts/check-skill-refs.py` and reread the skills
@@ -124,7 +146,13 @@ a stated nothing.
 | P2 | a test gap, a surviving mutant, a silent failure path harmless today | fix here or file an issue |
 | P3 | a clarity point the gate does not enforce | optional |
 
-Lead with the counts by level, then each finding most severe first:
+Report two things, kept apart because they fail separately: the checklist from
+step 1, each line met, partly met or missing with the `file:line` that shows
+it, plus anything the diff does beyond it; then the findings against the
+contracts and step 3. A PR can satisfy its issue and break a contract, or keep
+every contract and miss half the issue.
+
+Lead the findings with the counts by level, then each one most severe first:
 `file:line`, the input or state that goes wrong, and the fix. A finding with no
 concrete failure is a question; ask it as one. A clean review names what was
 checked, what was not (a live interview, a provider, a browser the tests do not
@@ -138,7 +166,16 @@ inline comment in plain words, under the GitHub rule in
 
 Post through gh-review when it is installed. Otherwise post the approved
 findings as one review, so the author gets one notification. Refetch
-`headRefOid` first and reread any line that moved. The review is `event:
+`headRefOid` first and reread any line that moved, then check every anchor
+against the diff, which moves a finding on a line outside every hunk into the
+body instead of letting it fail the whole review:
+
+```sh
+.claude/skills/codetrial-verify/review-anchors.sh "$pr" "$SCRATCH/review-$pr.json" \
+  > "$SCRATCH/review-$pr.checked.json"
+```
+
+Post the checked file. The review is `event:
 "COMMENT"` on `commit_id` (that head), with a one-sentence `body`, which GitHub
 requires, and one entry in `comments` per finding, each with `path`, `line` (the
 line in the file), `side` (`RIGHT` for an added or unchanged line, `LEFT` for a
@@ -146,12 +183,22 @@ deleted one) and its own `body`:
 
 ```sh
 gh api -X POST "repos/sysprog21/codetrial/pulls/$pr/reviews" \
-  --input "$SCRATCH/review-$pr.json"
+  --input "$SCRATCH/review-$pr.checked.json"
 ```
 
-A line outside every hunk is refused with 422; move that finding into the body.
+A line outside every hunk is refused with 422, which the anchor check above
+prevents.
 When posting is not allowed in this run, leave the payload at
 `$SCRATCH/review-$pr.json` and say so.
+
+Past about 500 changed lines, or when several reviewers are run, split them
+by lens rather than by file, each reading the whole diff for one thing: the
+specification checklist; the owners in step 2; trust boundaries, workflows and
+what reaches a log or a public thread; failure paths and boundaries; tests,
+including what CI's mutation job says survived; and comments and messages
+against the register in
+[codetrial-conventions](../codetrial-conventions/SKILL.md). A reviewer handed a
+lens reports only that lens, so silence on the others is not a pass.
 
 When more than one reviewer ran, merge duplicates, note how many agreed, and
 keep disagreements visible; agreement ranks nothing, a concrete failure does.

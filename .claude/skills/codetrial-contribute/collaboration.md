@@ -137,7 +137,9 @@ triage's outdated ones.
 
 "Before asking someone to review, you MUST resolve any regressions flagged by
 GitHub Actions." (#256, #260). Open the failing `gates (<lane>)` job, not
-`check`, and rerun that lane with `./scripts/test.sh <lane>`
+`check` (`.claude/skills/codetrial-verify/ci-failure.sh <pr>` names the failed
+gates and whether `main` fails them too), and rerun that lane with
+`./scripts/test.sh <lane>`
 ([codetrial-verify](../codetrial-verify/SKILL.md) describes the lanes). A bad
 commit message skips the rest of the portable lane, so fix the messages
 first.

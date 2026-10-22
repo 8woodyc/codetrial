@@ -1,6 +1,6 @@
 ---
 name: codetrial-contribute
-description: Help CodeTrial contributors turn observations into clear English GitHub issues, small contribution plans, and pull request descriptions, and see them through. Use to draft, improve or file a CodeTrial issue, answer what a maintainer asked on it (a revision, a log, an initial analysis, a retest), prepare a PR description, retrieve and address PR review comments, respond to requests such as rebase, squash or commit message fixes, check which of your own issues and PRs are waiting on you, ask a focused maintainer question, or choose a bounded first contribution with an AI agent. The deliverable is copy-ready text, or verified fixes when asked to address review feedback; judging an existing backlog for duplicates is codetrial-triage. Opening a PR goes through gh-submit when it is installed; this skill covers it otherwise.
+description: Help CodeTrial contributors turn observations into clear English GitHub issues, small contribution plans, and pull request descriptions, and see them through. Use to draft, improve or file a CodeTrial issue, answer what a maintainer asked on it (a revision, a log, an initial analysis, a retest), prepare a PR description and check the open PRs and issues it will meet before opening it, retrieve and address PR review comments, respond to requests such as rebase, squash or commit message fixes, check which of your own issues and PRs are waiting on you, ask a focused maintainer question, or choose a bounded first contribution with an AI agent. The deliverable is copy-ready text, or verified fixes when asked to address review feedback; judging an existing backlog for duplicates is codetrial-triage. Opening a PR goes through gh-submit when it is installed; this skill covers it otherwise.
 ---
 
 # Contribute to CodeTrial
@@ -134,6 +134,9 @@ Give the contributor:
 - likely entry points and a concrete acceptance check;
 - a stopping condition and fallback, such as drafting the exact maintainer
   question if the expected behavior is still undecided.
+- the one setup step the first commit needs, `make hooks` in the clone, so the
+  message rules run on that commit rather than surfacing in CI
+  ([conventions](../codetrial-conventions/SKILL.md#commit-messages)).
 
 Keep unrelated refactoring out of the task. Do not require filing an issue for
 every small, well-understood fix. For uncertain product direction, establish
@@ -142,8 +145,10 @@ help the contributor explain what fails before and succeeds after the change.
 
 ## Prepare a pull request people can review
 
-Read the full branch diff against its intended base, relevant commits and linked
-issues. Check that the branch contains the intended work only, and use a topic
+Commit with the hooks installed: `make hooks` once per clone, read as
+[conventions](../codetrial-conventions/SKILL.md#commit-messages) says, before
+the first commit. Read the full branch diff against its intended base, relevant
+commits and linked issues. Check that the branch contains the intended work only, and use a topic
 branch as described in conventions. Scope follows
 [collaboration.md](collaboration.md#scope-one-pull-request): unrelated fixes
 and unrequested behavior go to their own PR, review follow-ups stay in this
@@ -168,6 +173,43 @@ The description should cover:
 
 For a simple PR, one or two paragraphs plus validation is enough. Rewrite the
 title and body when scope changes.
+
+Before the draft is shown, check what the branch is about to meet. Commit
+first, since only commits are read. Run on the branch, it compares against
+upstream `main` even from a fork, and takes issue numbers when the commits name
+none:
+
+```sh
+.claude/skills/codetrial-contribute/related.sh > "$SCRATCH/related.json"
+```
+
+Each field it prints has one consequence for the draft, and the hint goes to
+the user with the draft rather than being acted on alone:
+
+- `same_issue`: another open PR closes the same issue. Read its diff first; an
+  open PR doing the same thing is reviewed, not competed with
+  ([collaboration.md](collaboration.md#scope-one-pull-request)). When the two
+  differ, the description says how, linking the other PR.
+- `issues[].others_hold`: the issue is assigned to someone else, so the work is
+  theirs until a maintainer reassigns it. Ask in the issue before opening.
+- `issues[].state` closed, or merged when the number is a pull request: the
+  work may already be done or declined; read the closing comment and say which
+  in the draft.
+- `closes` empty while `refs` names the issue the branch finishes: the last
+  line should be `Closes #N`, not `Refs #N`, or the merge will not close it.
+  `refs` leaves out what `closes` already has, and both read `#N`,
+  `sysprog21/codetrial#N` and the issue URL.
+- `same_files`: overlap by file is weak alone, since `web/interview.js` and
+  `web/styles.css` sit in most UI PRs, but a shared harness file in
+  `web/compiler-explorer.js` or `web/runners.js` means whichever merges second
+  rebases (#376 and #396). Name such a PR in the description when it rewrites
+  the same function.
+- `own_pr`: a PR whose head is this commit, or the viewer's PR from a branch of
+  this name, is already open; update it instead of opening a second.
+
+`RELATED_BASE=<ref>` skips the fetch, but the ref has to be as current as
+upstream `main`: against a stale one, commits that already merged count as the
+branch's own.
 
 ## Publish only after the user sees the text
 
@@ -215,10 +257,17 @@ gh pr list --repo sysprog21/codetrial --author "@me" \
   --json number,title,reviewDecision,mergeable,updatedAt
 ```
 
-`pr-sweep.sh` is no help for one's own pull requests: it leaves out the viewer's
-PRs, since its nudges and rebase requests are a maintainer's to send. A PR whose
-`reviewDecision` is `CHANGES_REQUESTED` or whose `mergeable` is `CONFLICTING` is
-waiting on its author, unless that decision comes only from a hidden rebase
+`pr-sweep.sh` leaves the viewer's PRs out of its nudges and rebase requests,
+which are a maintainer's to send, but its `status` covers every open PR, with
+what is still open on each:
+
+```sh
+.claude/skills/codetrial-triage/pr-sweep.sh |
+  jq --arg me "$me" '.status[] | select(.author == $me) | {pr, grade, why}'
+```
+
+A PR whose `reviewDecision` is `CHANGES_REQUESTED` or whose `mergeable` is
+`CONFLICTING` is waiting on its author, unless that decision comes only from a hidden rebase
 request the branch has since answered, which waits on a maintainer to
 re-review. Checks held as "awaiting approval" are waiting on a maintainer
 instead
