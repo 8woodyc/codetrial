@@ -93,55 +93,32 @@ fn playout_ends_on_its_deadline() {
     assert!(!output_audio.playing_at(deadline + Duration::from_millis(1)));
 }
 
-/// Speech is buffered until there is enough of it to be worth sending, and
-/// the tail still goes when the track ends.
-///
-/// Sending every arriving frame would be a websocket message every ten
-/// milliseconds, and dropping the tail would lose whatever was said last.
-/// Both were unreachable from a test while this took the concrete session
-/// type, which needs a live socket to exist at all.
+/// A partial frame still waits for enough samples, and an ended track flushes
+/// its remaining samples exactly once.
 #[tokio::test]
 async fn audio_is_buffered_to_a_threshold_and_the_tail_still_goes() {
     let mut media = CandidateMedia::new();
     let mut sink = RecordingSink::default();
-
-    pump_audio(&mut media, &mut sink, Some(frame_of(160)))
+    pump_audio(&mut media, &mut sink, Some(frame_of(80)))
         .await
-        .expect("buffering cannot fail");
-    assert!(sink.sent.is_empty(), "a tenth of a second is not a message");
-    assert_eq!(media.audio_bytes.len(), 320);
-
-    // Bounded, because a flush empties the buffer: waiting on the buffer to
-    // reach the threshold is waiting for something that is cleared the instant
-    // it gets there.
-    for _ in 0..GEMINI_AUDIO_BUFFER_BYTES {
-        if !sink.sent.is_empty() {
-            break;
-        }
-        pump_audio(&mut media, &mut sink, Some(frame_of(160)))
-            .await
-            .expect("buffering cannot fail");
-    }
-    assert_eq!(sink.sent.len(), 1, "one flush, not a message per frame");
-    assert!(sink.sent[0].len() >= GEMINI_AUDIO_BUFFER_BYTES);
-    assert!(
-        media.audio_bytes.is_empty(),
-        "a sent buffer is not sent twice"
-    );
-
-    pump_audio(&mut media, &mut sink, Some(frame_of(160)))
+        .unwrap();
+    assert!(sink.sent.is_empty());
+    assert_eq!(media.audio_bytes.len(), 160);
+    pump_audio(&mut media, &mut sink, Some(frame_of(80)))
         .await
-        .expect("buffering cannot fail");
-    pump_audio(&mut media, &mut sink, None)
+        .unwrap();
+    assert_eq!(sink.sent.len(), 1);
+    assert_eq!(sink.sent[0].len(), 320);
+    assert!(media.audio_bytes.is_empty());
+
+    pump_audio(&mut media, &mut sink, Some(frame_of(80)))
         .await
-        .expect("the tail flush succeeds here");
+        .unwrap();
+    pump_audio(&mut media, &mut sink, None).await.unwrap();
     assert_eq!(sink.sent.len(), 2);
-    assert_eq!(sink.sent[1].len(), 320, "the tail is what was left");
-
-    pump_audio(&mut media, &mut sink, None)
-        .await
-        .expect("an empty tail is not an error");
-    assert_eq!(sink.sent.len(), 2, "nothing held is nothing to send");
+    assert_eq!(sink.sent[1].len(), 160);
+    pump_audio(&mut media, &mut sink, None).await.unwrap();
+    assert_eq!(sink.sent.len(), 2);
 }
 
 /// Playout is cut into ten-millisecond frames and the remainder waits.
@@ -596,19 +573,17 @@ fn voiced_recently_spans_the_quiet_window_only() {
 }
 
 #[tokio::test]
-async fn twenty_milliseconds_of_pcm_flushes_without_waiting_for_a_third_frame() {
+async fn each_complete_input_frame_flushes_without_waiting_for_another() {
     let mut media = CandidateMedia::new();
     let mut sink = RecordingSink::default();
-    pump_audio(&mut media, &mut sink, Some(frame_of(160)))
-        .await
-        .unwrap();
-    assert!(sink.sent.is_empty());
-    pump_audio(&mut media, &mut sink, Some(frame_of(160)))
-        .await
-        .unwrap();
-    assert_eq!(sink.sent.len(), 1);
-    assert_eq!(sink.sent[0].len(), 640);
-    assert!(media.audio_bytes.is_empty());
+    for expected_messages in 1..=2 {
+        pump_audio(&mut media, &mut sink, Some(frame_of(160)))
+            .await
+            .unwrap();
+        assert_eq!(sink.sent.len(), expected_messages);
+        assert_eq!(sink.sent.last().unwrap().len(), 320);
+        assert!(media.audio_bytes.is_empty());
+    }
 }
 
 /// A chunk short of a frame queues nothing, so the reply's marker waits for the

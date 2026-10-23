@@ -213,11 +213,16 @@ the latency lines the harness saw; pipe it into the analyzer. The harness keeps
 a bounded tail of agent output, so this is a smoke test, not an archive of a
 long session.
 
-Input audio is sent to Gemini in 20 ms batches, two of LiveKit's 10 ms frames,
-so the last words wait at most one frame for a batch. Keep the default silence
-window unless a matched comparison shows it no longer cuts candidates off:
-`silence_window` is usually the largest segment, and the one most likely to be
-traded against interrupting a candidate who paused to think.
+Input audio is sent to Gemini one complete 10 ms LiveKit frame at a time. A
+two-frame batch held its first frame for another frame period, including the
+last frame of an utterance that ended on an odd frame, and the endpointing
+clock does not start until Gemini has it. This removes local batching wait, not
+provider inference or network time. It doubles websocket messages from 50 to
+100 per second while sending the same PCM bytes. Partial frames still buffer
+and flush when the track ends. Keep the default silence window unless a matched
+comparison shows it no longer cuts candidates off: `silence_window` is usually
+the largest segment, and the one most likely to be traded against interrupting
+a candidate who paused to think.
 
 ## Design lineage
 
