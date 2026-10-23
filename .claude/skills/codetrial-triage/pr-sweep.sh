@@ -11,7 +11,8 @@
 #             badge, which read-only collaborators also carry, stood in for it
 #   approve   runs waiting for approval on the current head of an open PR, and
 #             whether its author is a first-time contributor
-#   outdated  unresolved review threads whose lines the PR no longer touches
+#   outdated  unresolved review threads whose lines the PR no longer touches,
+#             to recheck at the head before resolving
 #   overlap   PR pairs that close the same issue
 #   stale     PRs, not the viewer's or a deleted account's, whose last visible
 #             human review or comment from someone other than the author is
@@ -34,13 +35,16 @@
 #             retry; rerun
 #   status    every open PR, smallest first: lines changed split into source
 #             and tests, mergeability, review decision, failing, pending and
-#             held checks, whether a gates lane ran, open threads by human
-#             and bot reviewers, and a grade with its reasons. The grade is
+#             held checks, the gates lanes that skipped, whether a gates lane
+#             passed, open threads by human and bot reviewers, whether its
+#             author may push (null when that listing failed), and a grade
+#             with its reasons. The grade is
 #             the worst row of the table in grade() that the PR matches, from
 #             blocked, low, medium and medium-high down to high when none
 #             does; draft PRs are set aside. pulls.md, "Rank by size and
 #             merge confidence", says how to read it. waits_on names whose
-#             move it is (author, maintainer, ci, approval); why names a
+#             move it is (author, maintainer, ci, approval), the first of
+#             waits_on_all, which names everyone with a move left; why names a
 #             failing job main's latest run also fails, which ci-failure.sh
 #             settles
 #   review    the PRs, not the viewer's, whose waits_on is maintainer,
@@ -49,6 +53,12 @@
 #   refs_only PRs that close no issue and name one with Refs, which
 #             CONTRIBUTING.md asks PRs to avoid; asked says a maintainer
 #             already asked for Closes #N on that PR
+#   viewer    the account that ran the sweep
+#   prerequisites  PRs that must land first: stacked on the other's branch,
+#             or stated in the body as depending on it
+#   collide   PR pairs whose diffs change the same or adjacent base lines of
+#             a file, with the hunk's function; collide_unread names the PRs
+#             whose diff could not be read
 #   superseded  runs awaiting approval on a head no open PR has any more,
 #             which need nothing
 #   moved     with previous.json, a saved earlier output: the PRs whose head,
@@ -268,6 +278,9 @@ def size: ((.additions // 0) + (.deletions // 0)) as $total
       | (.additions // 0) + (.deletions // 0)] | add // 0) as $tests
   | {total: $total, source: ($total - $tests), tests: $tests};
 # ACTION_REQUIRED is a run held for a first-time contributor, not a failure.
+# SKIPPED and NEUTRAL are neither a pass nor a failure: the mutation shards
+# skip on a diff with no Rust in it, but a gates lane that skipped tested
+# nothing, so only a gates lane that passed says the gates ran.
 # A held run often has no check run at all, only its entry in $runs, so a
 # match there counts as held too. A rerun adds a check run of the same name
 # beside the old one, so only the latest of each name counts, or a failure
@@ -281,6 +294,7 @@ def checks: [runs_of(.) | .name] as $waiting
           elif .conclusion == "ACTION_REQUIRED" then "held"
           elif .conclusion | IN("FAILURE", "TIMED_OUT", "CANCELLED",
             "STARTUP_FAILURE") then "failing"
+          elif .conclusion | IN("SKIPPED", "NEUTRAL") then "skipped"
           else "ok" end), kind: "run", id: .databaseId}
       else
         {name: .context, s: (if .state | IN("PENDING", "EXPECTED") then "pending"
@@ -291,10 +305,12 @@ def checks: [runs_of(.) | .name] as $waiting
   # latest run of each name stands; a commit status keeps one entry per name
   # anyway, and is never merged with a check run that happens to share it.
   | group_by([.kind, .name]) | map(max_by(.id))
+  | [.[] | select(.name | startswith("gates ("))] as $lanes
   | def named($s): [.[] | select(.s == $s) | .name];
   {failing: named("failing"), pending: named("pending"),
      held: (named("held") + $waiting | unique),
-     gates: any(.[]; .name | startswith("gates (")),
+     skipped: [$lanes[] | select(.s == "skipped") | .name],
+     gates: any($lanes[]; .s == "ok"),
      truncated: $cut};
 # A thread the PR author opened is a note to reviewers, not a finding left
 # for the author, so only threads reviewers opened count.
@@ -315,15 +331,24 @@ def threads: .author.login as $a
 # read above, so "no rebase is needed" is not one. requests reads a review that
 # mentions rebase anywhere as asking for one, which only keeps the sweep from
 # asking twice; here the mistake would hide a substantive request.
-def open_requests: .headRefOid as $head
-  | [.reviews.nodes[] | select(human and staff and (.isMinimized | not)
+def verdicts: [.reviews.nodes[]
+    | select(human and staff and (.isMinimized | not)
       and (.state == "APPROVED" or .state == "CHANGES_REQUESTED"))]
-  | group_by(.author.login)
+  | group_by(.author.login);
+def open_requests: .headRefOid as $head
+  | verdicts
   | map(sort_by(.submittedAt | ts)
       | (map(.state == "APPROVED") | rindex(true)) as $ok
       | if $ok == null then .[] else .[$ok + 1:][] end)
   | [.[] | select(.state == "CHANGES_REQUESTED" and .commit.oid == $head)
     | {rebase: (.body | opens_with_rebase)}];
+# An approval is of the code it was left on. GitHub keeps it after a push
+# unless the branch protection dismisses stale reviews, so reviewDecision can
+# read APPROVED for a head nobody approved: true when every maintainer whose
+# latest verdict is an approval left it on an older head.
+def approval_stale: .headRefOid as $head
+  | [verdicts[] | max_by(.submittedAt | ts) | select(.state == "APPROVED")]
+  | length > 0 and all(.[]; .commit.oid != $head);
 # One row per condition: when it holds, the reason it adds, the grade it caps
 # the PR at, and whose move it makes it. The grade is the worst row that holds,
 # so adding a problem never raises it, and the reasons and the grade cannot
@@ -348,6 +373,8 @@ def grade($c; $t): .isDraft as $draft | open_requests as $r
      {when: ($cr and ($cr_head | not)),
       why: "changes requested before the last push, or hidden",
       grade: "medium-high"},
+     {when: approval_stale, why: "approved before the last push",
+      grade: "medium-high", who: "maintainer"},
      {when: $talk, grade: "low", who: "author",
       why: "\($t.human | length) open thread(s) by \($t.by | join(", "))"},
      {when: ($talk and (.mergeable == "CONFLICTING" or $cr_head)),
@@ -365,8 +392,12 @@ def grade($c; $t): .isDraft as $draft | open_requests as $r
       who: "approval"},
      {when: ($c.pending | length > 0), grade: "medium-high", who: "ci",
       why: "pending: \($c.pending | join(", "))"},
-     {when: ($c.gates | not), why: "no gates lane ran", grade: "medium",
-      who: "author"},
+     # A lane still running, held or failing has its own row above, which
+     # says whose move it is; only a head no lane ran on waits on the author.
+     {when: (($c.gates or any(($c.pending + $c.held + $c.failing)[];
+         startswith("gates ("))) | not), grade: "medium", who: "author",
+      why: ("no gates lane passed" + if $c.skipped == [] then ""
+        else " (skipped: \($c.skipped | join(", ")))" end)},
      {when: $c.truncated, why: "more than 50 checks, not all read",
       grade: "medium"},
      # GitHub is still computing it, which the sweep retries; nobody should
@@ -383,11 +414,14 @@ def grade($c; $t): .isDraft as $draft | open_requests as $r
   | {grade: (if $draft then "draft"
       else $ladder[[$hit[].grade as $g | $ladder | index($g)] | max // 0] end),
      why: [$hit[].why | strings],
-     waits_on: (if $draft then "author"
-       else $turn[[$hit[].who | strings as $w | $turn | index($w)] | max // 0]
-       end)};
+     waits_on_all: (if $draft then ["author"]
+       else [$turn | reverse[] | select(IN($hit[].who))]
+         | if length == 0 then ["maintainer"] else . end end)}
+  | .waits_on = .waits_on_all[0];
 def status: checks as $c | threads as $t
-  | {pr: .number, title, author: .author.login, head: .headRefOid,
+  | {pr: .number, title, author: .author.login,
+     author_is_maintainer: (if $pushers == null then null else staff end),
+     head: .headRefOid,
      size: size, files_truncated: (.files.totalCount > 100),
      mergeable, decision: .reviewDecision, checks: $c,
      threads: {human: ($t.human | length), bot: ($t.bot | length), by: $t.by},
@@ -396,9 +430,29 @@ def status: checks as $c | threads as $t
 # An issue named as #N, owner/repo#N or its URL, the forms related.sh in
 # codetrial-contribute reads; issue_ref is the regex after a keyword, and
 # captures the number. The dot a repository name may hold is escaped.
-def ref_prefix: ($repo | gsub("\\."; "\\.")) as $r
-  | "(?:#|\($r)#|https://github\\.com/\($r)/issues/)";
+def repo_re: $repo | gsub("\\."; "\\.");
+def ref_prefix($kind): repo_re as $r
+  | "(?:#|\($r)#|https://github\\.com/\($r)/\($kind)/)";
+def ref_prefix: ref_prefix("issues");
 def issue_ref: ref_prefix + "([0-9]+)\\b";
+
+# A pull request that has to land first: one whose head branch in this
+# repository is the branch this one is based on, or one the body names as
+# what it depends on or builds on. A bare "after #N" also dates a symptom
+# ("broke after #412"), so it is not read as one. Words are the only record of
+# the second kind, so a PR that waits without saying so is not found.
+def prerequisites:
+  ("(?i)\\b(?:depends on|builds? on|based on|on top of|stacked on)\\s+"
+     + "(?:PR\\s+)?" + ref_prefix("pull") + "([0-9]+)\\b") as $says
+  | [$prs[] as $p
+    | [$p.body // "" | scan($says) | .[0] | tonumber] as $named
+    | $prs[] as $q | select($p.number != $q.number)
+    | ($p.baseRefName == $q.headRefName
+        and $q.headRepository.nameWithOwner == $repo) as $stacked
+    | ($q.number | IN($named[])) as $stated
+    | select($stacked or $stated)
+    | {pr: $p.number, on: $q.number,
+       how: (if $stacked then "stacked" else "stated" end)}];
 
 # Issues the body names with Refs, which the merge leaves open, including each
 # of a list such as "Refs #1, #2 and #3".
@@ -482,6 +536,8 @@ def refs: (ref_prefix + "[0-9]+\\b") as $one
     | requests[] | select(fixed_only | not)
     | {pr: $n, id, at, by, body}],
   maintainers_known: ($pushers != null),
+  viewer: $me,
+  prerequisites: prerequisites,
   unknown: [$prs[] | select(.mergeable == "UNKNOWN") | .number],
   status: $status,
   superseded: ([$runs[] | . as $r | select(any($prs[]; owns($r)) | not)]
@@ -510,6 +566,27 @@ def refs: (ref_prefix + "[0-9]+\\b") as $one
     threads_truncated: (.reviewThreads.totalCount > 100)}]
 }')
 
+# Two PRs that change the same base lines of a file conflict as soon as one
+# merges, and a shared file alone is too weak a sign: web/interview.js is in
+# most UI PRs. So the diff of each PR sharing a path with another is read,
+# started here so the lookups below overlap it and capped so GitHub does not
+# throttle the burst, and each run of added or removed lines on a shared path
+# becomes the base lines it replaces: an insertion, the two around it; a file
+# with no hunk (binary, renamed, mode only), all of it. Paths are the ones the
+# PR leaves, so a rename meets an edit of its old path only when both PRs also
+# share another file. pulls.md says how to read a collision.
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+# shellcheck disable=SC2016
+shared='[.prs[] | .number as $n | .files[] | {n: $n, path: .}]
+    | group_by(.path) | map(select(length > 1))'
+printf '%s\n' "$out" | jq -r "$shared | .[][0].path" > "$work/paths"
+printf '%s\n' "$out" | jq -r "$shared | [.[][].n] | unique[]" > "$work/prs"
+# shellcheck disable=SC2016
+xargs -P 6 -I{} sh -c 'gh pr diff "$1" --repo "$2" > "$3/$1.diff" 2> /dev/null ||
+    rm -f "$3/$1.diff"' _ {} "$repo" "$work" < "$work/prs" &
+fetching=$!
+
 # A PR that left the open list either merged or closed; one call each says
 # which, and gone stays short. A lookup that fails, from a network blip or a
 # previous output saved for another repository, marks that PR UNKNOWN rather
@@ -536,8 +613,68 @@ stale=$(printf '%s\n' "$out" | jq -r '.stale_candidates[] | "\(.pr) \(.head)"' \
                   | .pr' || true
         fi
     done | jq -s .)
+
+wait "$fetching" || true
+unread=$(while read -r n; do [ -f "$work/$n.diff" ] || echo "$n"; done \
+    < "$work/prs" | jq -s .)
+collide=$(find "$work" -name '*.diff' -exec awk \
+    "$(cat "$(dirname "$0")/../codetrial-verify/diff-path.awk")"'
+    function flush() {
+        if (first != "" && path in shared)
+            print pr "\t" path "\t" first "\t" last "\t" ctx
+        first = ""
+    }
+    # A section with no hunk changes the file as a whole.
+    function end_section() {
+        flush()
+        if (section && !hunks && path in shared)
+            print pr "\t" path "\t0\t2147483647\t"
+        section = 0
+    }
+    # The shared paths come first, then one diff per file, named for its PR.
+    FILENAME == paths { shared[$0] = 1; next }
+    FNR == 1 {
+        end_section()
+        pr = FILENAME; sub(/^.*\//, "", pr); sub(/\.diff$/, "", pr)
+    }
+    /^diff --git / {
+        end_section()
+        section = 1; header = 1; hunks = 0; path = git_path($0)
+        next
+    }
+    header && /^(---|\+\+\+) / {
+        if ((p = header_path($0)) != "/dev/null") path = p
+        next
+    }
+    /^@@ / {
+        flush(); header = 0; hunks = 1
+        split(substr($2, 2), r, ",")
+        old = r[1] + 0
+        ctx = $0; sub(/^@@ [^@]* @@ ?/, "", ctx)
+        next
+    }
+    header { next }
+    /^-/ { if (first == "") first = old; last = old; old++; next }
+    # A new file has no base lines; 0 stands for the start of one.
+    /^\+/ { if (first == "") { first = old > 0 ? old - 1 : 0; last = old }; next }
+    /^\\/ { next }
+    { flush(); old++ }
+    END { end_section() }
+' paths="$work/paths" "$work/paths" {} + | jq -Rn '[inputs | split("\t")
+    | {pr: (.[0] | tonumber), path: .[1], first: (.[2] | tonumber),
+       last: (.[3] | tonumber), context: (.[4:] | join("\t"))}]
+    | [group_by(.path)[] | sort_by(.first) | . as $on
+      | range(length) as $i | $on[$i] as $a | $on[$i + 1:][]
+      | select(.first <= $a.last + 1 and .pr != $a.pr)
+      | [$a, .] | sort_by(.pr) | {a: .[0].pr, b: .[1].pr, path: .[0].path,
+         lines: map([.first, .last]),
+         context: (map(.context | select(length > 0)) | unique)}]
+    | unique_by([.a, .b, .path])')
+
 printf '%s\n' "$out" | jq --argjson states "$states" --argjson stale "$stale" \
-    'if .gone == null then . else .gone = $states end
+    --argjson collide "$collide" --argjson unread "$unread" \
+    '.collide = $collide | .collide_unread = $unread
+     | if .gone == null then . else .gone = $states end
      | .rebase += [.stale_candidates[] | select(.pr | IN($stale[]))
          | del(.head)]
      | del(.stale_candidates)'

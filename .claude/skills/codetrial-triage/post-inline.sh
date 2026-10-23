@@ -1,13 +1,14 @@
 #!/bin/sh
-# Post a sweep review's inline comments, one per finding, at the head they were
-# read at. review-prs.md describes the draft and why a sweep posts it without a
-# confirmation.
+# Post a sweep review's inline comments at the head they were read at, as one
+# review so the author gets one notification, not one per finding. review-prs.md
+# describes the draft and why a sweep posts it without a confirmation.
 #
 # Usage: post-inline.sh <pr> <draft.json> [repo]
-#        Prints each posted comment's URL, and on stderr each finding it
-#        dropped and why. Exits 3 when the head moved, checked before anything
-#        is read and again before every post, so a push during the reads posts
-#        nothing; 1 when GitHub refused a comment; 2 on bad arguments.
+#        Prints the review's URL, or each comment's when it fell back to one
+#        post per finding, and on stderr each finding it dropped and why.
+#        Exits 3 when the head moved, checked before anything is read and
+#        again before every post, so a push during the reads posts nothing; 1
+#        when GitHub refused a comment; 2 on bad arguments.
 #
 # The draft is {sha, comments: [{path, line, start_line?, body}], summary}. Two
 # kinds of finding are dropped rather than posted. One outside the diff, which
@@ -66,17 +67,11 @@ sh "$(dirname "$0")/../codetrial-verify/review-anchors.sh" "$pr" \
     exit 1
 }
 
-# Each hunk's new-side span, one tab-separated "path first last" per row. Header
-# handling is review-anchors.sh's; a hunk adding nothing on the right has no
-# span.
+# Each hunk's new-side span, one tab-separated "path first last" per row; a hunk
+# adding nothing on the right has no span.
 diff=$(gh pr diff "$pr" --repo "$repo")
-printf '%s\n' "$diff" | awk '
-    function header_path(line,    p) {
-        p = substr(line, 5)
-        sub(/\t.*$/, "", p)
-        if (p ~ /^".*"$/) p = substr(p, 2, length(p) - 2)
-        return p == "/dev/null" ? p : substr(p, 3)
-    }
+printf '%s\n' "$diff" \
+    | awk "$(cat "$(dirname "$0")/../codetrial-verify/diff-path.awk")"'
     /^diff --git / { header = 1; path = ""; next }
     header && /^\+\+\+ / { path = header_path($0); next }
     /^@@ / && path != "/dev/null" {
@@ -87,46 +82,68 @@ printf '%s\n' "$diff" | awk '
     }
 ' > "$work/hunks"
 
-gh api "repos/$repo/pulls/$pr/comments" --paginate > "$work/threads.json"
+# Sorts the findings against the review threads as they stand, leaving those to
+# post in $work/post. Run again after a refused review, since a review that
+# landed with its answer lost reads as refused, and its findings are then
+# already posted at this head; a second sort only ever drops more.
+sort_findings()
+{
+    gh api "repos/$repo/pulls/$pr/comments" --paginate \
+        > "$work/threads.json" < /dev/null
+    jq -n --slurpfile anchored "$work/anchored.json" \
+        --slurpfile threads "$work/threads.json" --arg sha "$sha" --arg me "$me" \
+        --rawfile hunks "$work/hunks" --slurpfile payload "$work/payload.json" '
+      [$hunks | split("\n")[] | select(length > 0) | split("\t")
+        | {path: .[0], first: (.[1] | tonumber), last: (.[2] | tonumber)}] as $spans
+      | def span: {path, first: (.start_line // .line), last: .line};
+        def overlaps($a; $b): $a.path == $b.path
+          and $a.first <= $b.last and $b.first <= $a.last;
+      ($threads | add // [] | map(select(.commit_id == $sha))) as $here
+      | [$here[] | select(.user.login == "cubic-dev-ai[bot]" and .line != null
+          and .side == "RIGHT") | span] as $cubic
+      | def posted: . as $c | any($here[]; .user.login == $me
+          and .path == $c.path and .line == $c.line and .body == $c.body);
+      def claimed: span as $s
+          | any($spans[]; . as $h | overlaps($h; $s) and any($cubic[]; overlaps($h; .)));
+      ($anchored[0].comments) as $inline
+      | def anchored: . as $c | any($inline[]; .path == $c.path and .line == $c.line
+          and .start_line == $c.start_line);
+      $payload[0].comments[]
+      | if anchored | not then {drop: "outside the diff"} + .
+        elif posted then {drop: "already posted at this head"} + .
+        elif claimed then {drop: "in a hunk cubic already commented on"} + .
+        else . end
+    ' > "$work/sorted.json"
+    jq -c 'select(.drop | not)' "$work/sorted.json" > "$work/post"
+}
+sort_findings
 
-jq -n --slurpfile anchored "$work/anchored.json" \
-    --slurpfile threads "$work/threads.json" --arg sha "$sha" --arg me "$me" \
-    --rawfile hunks "$work/hunks" --slurpfile payload "$work/payload.json" '
-  [$hunks | split("\n")[] | select(length > 0) | split("\t")
-    | {path: .[0], first: (.[1] | tonumber), last: (.[2] | tonumber)}] as $spans
-  | def span: {path, first: (.start_line // .line), last: .line};
-    def overlaps($a; $b): $a.path == $b.path
-      and $a.first <= $b.last and $b.first <= $a.last;
-  ($threads | add // [] | map(select(.commit_id == $sha))) as $here
-  | [$here[] | select(.user.login == "cubic-dev-ai[bot]" and .line != null
-      and .side == "RIGHT") | span] as $cubic
-  | def posted: . as $c | any($here[]; .user.login == $me
-      and .path == $c.path and .line == $c.line and .body == $c.body);
-  def claimed: span as $s
-      | any($spans[]; . as $h | overlaps($h; $s) and any($cubic[]; overlaps($h; .)));
-  ($anchored[0].comments) as $inline
-  | def anchored: . as $c | any($inline[]; .path == $c.path and .line == $c.line
-      and .start_line == $c.start_line);
-  $payload[0].comments[]
-  | if anchored | not then {drop: "outside the diff"} + .
-    elif posted then {drop: "already posted at this head"} + .
-    elif claimed then {drop: "in a hunk cubic already commented on"} + .
-    else . end
-' > "$work/sorted.json"
-
+# GitHub creates a review whole or not at all, so one refused comment refuses
+# them all; only then is each posted on its own, so the rest still land.
+status=0
+if [ -s "$work/post" ]; then
+    same_head
+    jq -s --arg sha "$sha" '{commit_id: $sha, event: "COMMENT", body: "",
+        comments: .}' "$work/post" > "$work/review.json"
+    if gh api "repos/$repo/pulls/$pr/reviews" --input "$work/review.json" \
+        --jq .html_url < /dev/null 2> "$work/refused"; then
+        : > "$work/post"
+    else
+        why=$(head -1 "$work/refused")
+        echo "post-inline.sh: #$pr refused the review${why:+ ($why)};" \
+            "posting each finding" >&2
+        sort_findings
+    fi
+fi
 jq -r 'select(.drop) | "post-inline.sh: #'"$pr"' dropped \(.path):\(.line), \(.drop)"' \
     "$work/sorted.json" >&2
-jq -c --arg sha "$sha" 'select(.drop | not) | . + {commit_id: $sha}' \
-    "$work/sorted.json" > "$work/post"
-
-# One at a time, so a refused comment does not stop the rest.
-status=0
 while IFS= read -r comment; do
 
     # Before every write: a push mid-way leaves what already landed, which a
     # rerun at the new head reads as not current, and posts nothing more.
     same_head
-    printf '%s\n' "$comment" > "$work/one.json"
+    printf '%s\n' "$comment" | jq --arg sha "$sha" '. + {commit_id: $sha}' \
+        > "$work/one.json"
     gh api "repos/$repo/pulls/$pr/comments" --input "$work/one.json" \
         --jq .html_url < /dev/null || {
         echo "post-inline.sh: #$pr refused $(jq -r '"\(.path):\(.line)"' "$work/one.json")" >&2
