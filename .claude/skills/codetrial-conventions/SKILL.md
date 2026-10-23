@@ -136,7 +136,11 @@ for duplicates and incomplete reports, and sweeping the open pull requests, is
 [codetrial-triage](../codetrial-triage/SKILL.md). Approving a held workflow
 run, resolving an outdated review thread, posting the fixed rebase request and
 hiding the copies it supersedes need no per-thread approval of text; that
-skill says when a sweep applies them without a separate confirmation.
+skill says when a sweep applies them without a separate confirmation. A bare
+`/codetrial-triage` also posts, without a per-thread approval, the fixed-text
+hygiene review ([pulls.md](../codetrial-triage/pulls.md#contributor-hygiene)), and the inline findings and similar-work notices
+of its review of low and blocked PRs ([review-prs.md](../codetrial-triage/review-prs.md)), each verified at the
+head first; the maintainer approved those forms by asking for them.
 
 ## Pull request branches and review replies
 

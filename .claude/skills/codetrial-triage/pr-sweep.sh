@@ -22,8 +22,10 @@
 #   rebase    PRs to send the fixed rebase request, each with its reason:
 #             conflicts, or stale_base when its only failures are what
 #             ci-failure.sh calls a stale base. Neither is a draft, the
-#             viewer's, stacked on another branch, cut off at 100, or already
-#             holding a current request in any wording. PR_SWEEP_CI names the
+#             viewer's, stacked on another branch, or cut off at 100. A
+#             conflict already holding a current changes-requested review
+#             that mentions rebase, and a stale base holding a current request
+#             of either kind, are left out. PR_SWEEP_CI names the
 #             ci-failure.sh to ask, for tests
 #   hide      superseded rebase requests in a known wording, to hide
 #   hide_ask  other rebase requests, to confirm before hiding
@@ -229,19 +231,25 @@ def requests: .author.login as $a | .headRefOid as $head | pushed as $p |
   [(.reviews.nodes[]
      | select(.state == "CHANGES_REQUESTED"
          and (.body | test("\\brebase"; "i")))
-     | {at: .submittedAt, inline: .comments.totalCount,
+     | {at: .submittedAt, inline: .comments.totalCount, review: true,
         current: (.commit.oid == $head)} + .),
    (.comments.nodes[]
      | select(.body | opens_with_rebase)
-     | {at: .createdAt, inline: 0, current: ((.createdAt | ts) >= $p)} + .)]
+     | {at: .createdAt, inline: 0, review: false,
+        current: ((.createdAt | ts) >= $p)} + .)]
   | map(select(human and staff and .author.login != $a and (.isMinimized | not))
-      | {id, by: .author.login, at, body, inline, current});
+      | {id, by: .author.login, at, body, inline, review, current});
 def fixed_only: .inline == 0 and (.body | norm | IN($wordings[]));
 def asks_rebase: [requests[] | select(fixed_only)] | sort_by(.at | ts);
 def asked_here: any(requests[]; .current);
-# A PR whose only request on its current head is hand-written, whether or not
-# it still conflicts: that request is the standing one, so no fixed one is kept
-# beside it and it is never offered for hiding.
+# A conflict is asked about with a Request changes review, so a current
+# comment alone, whatever its wording, does not hold a conflicting PR back from
+# getting one; a fixed-wording comment is then hidden as an earlier copy.
+def reviewed_here: any(requests[]; .current and .review);
+# A PR whose only request on its current head is hand-written: that request is
+# the standing one, so no fixed copy is kept beside it and it is never offered
+# for hiding. A conflicting PR whose hand-written request is only a comment
+# still gets the review (needs_rebase), and the comment goes to hide_ask.
 def hand_asked: asked_here and all(asks_rebase[]; .current | not);
 # Who the fixed text may go to at all: it names main, so a stacked PR is left
 # to its reviewer; a draft is still being written; and a PR whose history was
@@ -249,7 +257,7 @@ def hand_asked: asked_here and all(asks_rebase[]; .current | not);
 def rebase_eligible: (.isDraft | not) and .baseRefName == $base
   and $base == "main" and nudgeable and whole;
 def needs_rebase: .mergeable == "CONFLICTING" and rebase_eligible
-  and (asked_here | not);
+  and (reviewed_here | not);
 # A test is anything under a tests/ directory, the browser check, or a file
 # named as one (test_x.py, x.test.js); a substring would also catch problem
 # files such as tightest-channel-spacing.json. With more than 100 files the
@@ -297,8 +305,10 @@ def threads: .author.login as $a
   | {human: [.[] | select(.__typename != "Bot") | .login],
      bot: [.[] | select(.__typename == "Bot") | .login]}
   | .by = (.human | unique);
-# The latest visible verdict of each maintainer, since one approval does not answer
-# a changes request from another maintainer. A request on the current head waits on
+# The visible changes requests of each maintainer since their last approval,
+# since one approval does not answer a changes request from another maintainer,
+# and a later rebase request from the same account does not withdraw the
+# substantive one before it. A request on the current head waits on
 # the author; one the author pushed past waits on a re-review. A hidden review
 # still counts in reviewDecision, which is what says a re-review is owed. A
 # request is a rebase only when it opens with the word, as a rebase comment is
@@ -308,7 +318,10 @@ def threads: .author.login as $a
 def open_requests: .headRefOid as $head
   | [.reviews.nodes[] | select(human and staff and (.isMinimized | not)
       and (.state == "APPROVED" or .state == "CHANGES_REQUESTED"))]
-  | group_by(.author.login) | map(max_by(.submittedAt | ts))
+  | group_by(.author.login)
+  | map(sort_by(.submittedAt | ts)
+      | (map(.state == "APPROVED") | rindex(true)) as $ok
+      | if $ok == null then .[] else .[$ok + 1:][] end)
   | [.[] | select(.state == "CHANGES_REQUESTED" and .commit.oid == $head)
     | {rebase: (.body | opens_with_rebase)}];
 # One row per condition: when it holds, the reason it adds, the grade it caps
@@ -457,7 +470,10 @@ def refs: (ref_prefix + "[0-9]+\\b") as $one
            | .[0] | tonumber] | any(.[]; . == $n)))}],
   hide: [$prs[] | .number as $n | select(whole)
     | asks_rebase as $r
-    | ($r | map(.current) | rindex(true) // -1) as $keep
+    # The copy kept is the one that holds the PR out of rebase: on a conflict
+    # that is the newest current review, which a later comment must not hide.
+    | ($r | map(.current and .review) | rindex(true)
+        // ($r | map(.current) | rindex(true)) // -1) as $keep
     | (if needs_rebase or hand_asked then $r else $r | del(.[$keep]) end)[]
     | {pr: $n, id, at, by}],
   hide_ask: [$prs[] | .number as $n

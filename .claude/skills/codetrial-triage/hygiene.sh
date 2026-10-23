@@ -1,0 +1,156 @@
+#!/bin/sh
+# Read-only: which of the requests maintainers keep typing by hand a pull
+# request needs at its current head. Each is a rule a script can decide, and
+# each carries the wording the maintainers already used for it, so a sweep posts
+# the result as a Request changes review without drafting anything (pulls.md,
+# "Contributor hygiene"). A conflict is not here: rebase.md owns it.
+#
+# Usage: hygiene.sh <pr> [repo]
+#        Prints {pr, head, skip, items: [{key, text}], body}. skip says why
+#        the PR gets nothing (the skip calls below), and items is then empty.
+#        body is the review text, empty when no item applies.
+#        Exits 2 on bad arguments.
+#
+# An item a maintainer already raised at this head, in a review left on it or a
+# comment after GitHub's first check suite for it (the push, by GitHub's clock
+# rather than the contributor's), is left out: that request stands.
+
+set -eu
+
+usage='usage: hygiene.sh <pr> [repo]'
+pr=${1:?$usage}
+repo=${2:-sysprog21/codetrial}
+case $pr in
+    *[!0-9]*)
+        echo "hygiene.sh: $pr is not a pull request number" >&2
+        exit 2
+        ;;
+esac
+root=$(cd "$(dirname "$0")/../../.." && pwd)
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+gh pr view "$pr" --repo "$repo" --json \
+    number,headRefOid,headRefName,isCrossRepository,isDraft,baseRefName,mergeable,author,body,files,reviews,comments \
+    > "$work/pr.json"
+head=$(jq -r .headRefOid "$work/pr.json")
+
+# A PR nobody should be asked about is decided before the costly reads: the
+# commits, and ci-failure.sh's job logs.
+skip()
+{
+    jq -n --arg why "$1" --slurpfile p "$work/pr.json" \
+        '{pr: $p[0].number, head: $p[0].headRefOid, skip: $why, items: [], body: ""}'
+    exit 0
+}
+why=$(jq -r 'if .isDraft then "draft"
+    elif .baseRefName != "main" then "base is not main"
+    elif .author.is_bot or (.author.login | test("\\[bot\\]$|^(app/)?dependabot"))
+    then "a bot'\''s pull request"
+    else "" end' "$work/pr.json")
+[ -z "$why" ] || skip "$why"
+author=$(jq -r .author.login "$work/pr.json")
+
+# As in pr-sweep.sh: on a refusal gh prints the error body to stdout, so only a
+# successful call is read, and a pipe would hide the failure behind jq's status.
+# Without the listing nobody can be told apart as a maintainer, and a request
+# one of them already made would be asked again. Listing it needs push access,
+# so the viewer is on it, and their own PR is skipped as a maintainer's.
+logins=$(gh api --paginate "repos/$repo/collaborators?permission=push" \
+    --jq '.[].login' 2> /dev/null) || skip "the push listing failed"
+printf '%s\n' "$logins" | grep -qxF "$author" && skip "a maintainer's pull request"
+pushers=$(printf '%s\n' "$logins" | jq -Rn '[inputs | select(length > 0)]')
+
+# When the head reached GitHub, by GitHub's clock: its first check suite. The
+# committer date is set by the contributor's clock and dates nothing about the
+# push, so without a check suite the PR is skipped rather than guessed.
+pushed=$(gh api "repos/$repo/commits/$head/check-suites" \
+    --jq '[.check_suites[].created_at] | min // empty' 2> /dev/null) || pushed=
+[ -n "$pushed" ] || skip "no check suite dates the push"
+gh api "repos/$repo/pulls/$pr/commits" --paginate > "$work/commits.json"
+
+# Inline review comments, where a maintainer may ask on a line rather than in
+# the review body.
+gh api "repos/$repo/pulls/$pr/comments" --paginate > "$work/inline.json"
+
+# Each commit through the commit-msg hook's own rules, the ones CI applies too.
+# Merges are git's wording and get their own item; Dependabot's are skipped by
+# author, as check-commit-log.sh does. One JSON string per line, so a message's
+# own newlines survive the loop.
+bad_messages=0
+jq -s -c 'add | .[]
+    | select((.parents | length) < 2
+        and .commit.author.email != "49699333+dependabot[bot]@users.noreply.github.com")
+    | .commit.message' "$work/commits.json" > "$work/messages"
+while IFS= read -r message; do
+    printf '%s\n' "$message" | jq -r . \
+        | sh "$root/scripts/git-commit-msg.sh" - > /dev/null 2>&1 \
+        || bad_messages=$((bad_messages + 1))
+done < "$work/messages"
+
+# Failing checks at this head, and whether main shares them. A diagnosis that
+# fails, or that read another head, yields no CI item rather than a guess.
+# HYGIENE_CI names the ci-failure.sh to ask, for tests.
+sh "${HYGIENE_CI:-$root/.claude/skills/codetrial-verify/ci-failure.sh}" "$pr" "$repo" \
+    > "$work/ci.json" 2> /dev/null || echo '{}' > "$work/ci.json"
+# Every read above describes one head only if the PR did not move meanwhile.
+again=$(gh pr view "$pr" --repo "$repo" --json headRefOid --jq .headRefOid)
+
+jq -n -L "$(dirname "$0")" --slurpfile p "$work/pr.json" --slurpfile c "$work/commits.json" \
+    --slurpfile ci "$work/ci.json" --slurpfile inline "$work/inline.json" \
+    --argjson bad "$bad_messages" \
+    --argjson pushers "$pushers" --arg pushed "$pushed" \
+    --arg again "$again" '
+  include "agent-marker";
+  $p[0] as $pr | ($c | add) as $commits
+  | (if $ci[0].head == $pr.headRefOid then $ci[0] else {} end) as $ci
+  | def staff: .author.login | IN($pushers[]);
+  # What maintainers already said at this head.
+  ([$pr.reviews[] | select(staff and .commit.oid == $pr.headRefOid) | .body]
+   + [$pr.comments[] | select(staff and .createdAt > $pushed) | .body]
+   + [$inline | add // [] | .[]
+      | select((.user.login | IN($pushers[])) and .commit_id == $pr.headRefOid)
+      | .body]
+   | join("\n")) as $said
+  # The aggregate check job only collects the others, so it proves nothing.
+  # A job whose log could not be read has null gates: no evidence either way.
+  | ($ci.failing // [] | map(select(.current == true and .name != "check"
+      and .gates != null))) as $failing
+  | def item($key; $when; $marker; $text):
+      if $when and ($said | test($marker; "i") | not)
+      then {key: $key, text: $text} else empty end;
+  (if $again != $pr.headRefOid or ($commits | last | .sha) != $pr.headRefOid
+   then "the head moved while it was read"
+   else null end) as $skip
+  | (if $skip then [] else [
+      item("fork_main"; $pr.isCrossRepository and $pr.headRefName == "main";
+        "branch of your fork|topic branch";
+        "This pull request is opened from the `main` branch of your fork, so every later commit you push there joins it. Open a new pull request from a topic branch and close this one; see `CONTRIBUTING.md`."),
+      item("merge_commit"; any($commits[]; (.parents | length) > 1);
+        "git merge|merge commit";
+        "Do not merge `main` into this branch with `git merge`. Drop the merge commits, put your own commits on top of the latest `main`, and force-push."),
+      item("commit_rules"; $bad > 0; "cbea\\.ms|chris\\.beams|make hooks";
+        "Improve git commit messages per https://cbea.ms/git-commit/ and `CONTRIBUTING.md`; CI applies the same rules. Hint: run `make hooks` once per clone, so the hooks check every message before you push."),
+      item("co_authored"; any($commits[]; .commit.message | ai_marker);
+        "co-authored|attribution|agent marker";
+        "Remove AI agent markers (`Co-authored-by` an agent, \"Generated with\") from Git commit messages, as this attribution does not improve collaboration."),
+      item("indent"; any($failing[]; .on_main == false
+          and any(.gates[]; . == "indent")); "make indent";
+        "CI fails on the `indent` gate. Run `make indent`, then amend and force-push."),
+      # A conflicting PR is asked to rebase first, and a rebase may be the
+      # whole answer to the failure; UNKNOWN may still turn out a conflict.
+      item("ci_regression";
+        $pr.mergeable == "MERGEABLE" and ($ci.stale_base != true)
+        and any($failing[]; .on_main == false and .gates != ["indent"]);
+        "regression|rebase";
+        "Before asking someone to review, you MUST resolve any regressions flagged by GitHub Actions."),
+      item("screenshot";
+        any($pr.files[]; .path | test("^web/.*\\.(html|css)$"))
+        and ($pr.body // "" | test("<img|!\\[|user-attachments/|\\.(png|jpe?g|gif|webp|mp4|mov)\\b"; "i") | not);
+        "screenshot";
+        "This changes what the web pages show, so the pull request description must include screenshots of the result (before and after where something changed), with any personal data removed.")
+    ] end) as $items
+  | {pr: $pr.number, head: $pr.headRefOid, skip: $skip, items: $items,
+     body: ([$items[].text] | join("\n\n"))}
+'

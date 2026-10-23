@@ -158,7 +158,8 @@ diff and actual test results. Do not paste a conversation transcript.
 
 Use [codetrial-verify](../codetrial-verify/SKILL.md) for the appropriate validation
 and [codetrial-web](../codetrial-web/SKILL.md) when browser or wire behavior is
-involved. Report commands and outcomes, including failures and skipped or unrun
+involved, [codetrial-livekit](../codetrial-livekit/SKILL.md) when the room or
+the LiveKit crates are. Report commands and outcomes, including failures and skipped or unrun
 checks with reasons. Local success is not evidence that remote CI passed, and
 a PR is not ready for review until CI is green.
 

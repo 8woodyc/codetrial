@@ -8,10 +8,14 @@ description: >
   deciding whether a symptom already has an issue, explicit PR sweeps, ranking
   open PRs by size and merge confidence, reporting what moved since the last
   sweep, approving GitHub Actions runs held for first-time contributors, asking
-  conflicting PRs to rebase, and applying requested label, assignee, issue type,
-  sub-issue or blocked-by changes. Default to a read-only report; a PR sweep has
-  narrowly defined actions in pulls.md. Use codetrial-contribute for drafts on
-  a contributor's behalf, new issues or PRs, and focused maintainer questions.
+  conflicting PRs to rebase, requesting changes for recurring contributor
+  mistakes (hooks, indent, merge commits, missing screenshots), reviewing low
+  and blocked PRs with several agents, posting the verified inline findings and
+  similar-work reminders, and applying requested label, assignee, issue type,
+  sub-issue or blocked-by changes. Default to a read-only report; a PR sweep
+  has narrowly defined actions in pulls.md. Use codetrial-contribute for drafts
+  on a contributor's behalf, new issues or PRs, and focused maintainer
+  questions.
 ---
 
 # Triage CodeTrial issues and pull requests
@@ -33,6 +37,15 @@ A request about open pull requests ("sweep the PRs", "which PRs are stuck")
 follows [pulls.md](pulls.md) after the scope below. The duplicate reasoning
 here applies to PRs too, and the confirmed-list rule governs every comment it
 drafts.
+
+A bare `/codetrial-triage` is both halves at once, and it runs often, so run
+it wide. One call starts `issue-sweep.sh` and `pr-sweep.sh` together (each
+in the background of one shell, then `wait`). The next response does
+everything that needs only their output in parallel: the no-ask actions in
+[pulls.md](pulls.md), `hygiene.sh` for every open PR, one review agent per low
+or blocked PR from [review-prs.md](review-prs.md), and the issue body, comment
+and search reads below. Each PR's review is verified and posted the moment it lands, and the
+report waits only for the last of them.
 
 How work moves on this tracker (who the maintainers are, how a PR is scoped,
 what the one-line review requests mean) is in

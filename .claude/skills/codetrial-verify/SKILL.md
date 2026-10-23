@@ -285,3 +285,13 @@ check script this skill does not list; run it on its own after changing either
 side. It catches a rename, not a change of meaning, so a changed rule still
 needs the skill reread. The scripts the skills run are tested in
 `tests/test_skill_scripts.py`.
+
+Routing is the other half. Run `scripts/check-skill-routing.py` after changing
+a description (its header says why), with `--skill` naming the edited skill
+and each neighbor it hands off to (the near-misses run too), and the whole set
+once before committing. Add a request that routed wrong to
+`scripts/skill-routing-queries.json`. Fix a miss by having one description
+claim the phrase and its neighbor disclaim it, then confirm with `--only`
+naming the failing queries and `--runs 3`. For the same reason, do not install
+another skill set into this checkout whose descriptions claim requests these
+skills own.

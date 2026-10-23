@@ -1,0 +1,282 @@
+[
+  {
+    "q": "the interview page says offline practice mode and i cant hear Jim at all, console shows 401 invalid API key for domain. what's going on",
+    "expect": [
+      "codetrial-livekit"
+    ]
+  },
+  {
+    "q": "browser keeps getting 429 Too Many Requests from livekit after i reloaded a few times, how do i get unstuck",
+    "expect": [
+      "codetrial-livekit"
+    ]
+  },
+  {
+    "q": "is the agent actually in the room? i want to check without opening the browser, i have the LIVEKIT_* creds in config",
+    "expect": [
+      "codetrial-livekit"
+    ]
+  },
+  {
+    "q": "can we bump the livekit crate to the latest version? cargo says there's a newer one",
+    "expect": [
+      "codetrial-livekit"
+    ]
+  },
+  {
+    "q": "does livekit support server-side noise suppression for the candidate mic, or do we have to do that in the browser",
+    "expect": [
+      "codetrial-livekit"
+    ]
+  },
+  {
+    "q": "i want to try `lk agent debugger` against our interviewer to drive a few turns, how do i point it at src/livekit.rs",
+    "expect": [
+      "codetrial-livekit"
+    ]
+  },
+  {
+    "q": "src/dispatch.rs spawns the agent per room, where does the join token for the browser get minted and how long is it valid",
+    "expect": [
+      "codetrial-livekit"
+    ]
+  },
+  {
+    "q": "add a new data channel message so the page can tell the agent the candidate switched languages",
+    "expect": [
+      "codetrial-web"
+    ]
+  },
+  {
+    "q": "the Run tests button in web/interview.html isn't keyboard reachable, fix the focus order",
+    "expect": [
+      "codetrial-web"
+    ]
+  },
+  {
+    "q": "i edited web/lib.js and every rust test still passes but the integrity section in the report is empty now. why",
+    "expect": [
+      "codetrial-web"
+    ]
+  },
+  {
+    "q": "redesign the lobby problem cards so the difficulty is easier to scan",
+    "expect": [
+      "codetrial-web"
+    ]
+  },
+  {
+    "q": "how does a file under web/ end up in the release binary, is it embedded or read from disk?",
+    "expect": [
+      "codetrial-web"
+    ]
+  },
+  {
+    "q": "is my change ready? run whatever the gate is before i push",
+    "expect": [
+      "codetrial-verify"
+    ]
+  },
+  {
+    "q": "CI failed on gates (portable) for my PR, figure out why",
+    "expect": [
+      "codetrial-verify"
+    ]
+  },
+  {
+    "q": "start the server so i can look at the fix in the browser, but don't take port 3000",
+    "expect": [
+      "codetrial-verify"
+    ]
+  },
+  {
+    "q": "scripts/test.sh fails on drift in tests/fixtures, i didn't touch those",
+    "expect": [
+      "codetrial-verify"
+    ]
+  },
+  {
+    "q": "i edited a SKILL.md, what do i need to run so the references still resolve",
+    "expect": [
+      "codetrial-verify"
+    ]
+  },
+  {
+    "q": "review PR #430 against the docs contracts and tell me what blocks it",
+    "expect": [
+      "codetrial-verify",
+      "codetrial-triage"
+    ]
+  },
+  {
+    "q": "go through the open issues and find duplicates and reports missing a revision",
+    "expect": [
+      "codetrial-triage"
+    ]
+  },
+  {
+    "q": "sweep the PRs, which ones are stuck and which conflict with main",
+    "expect": [
+      "codetrial-triage"
+    ]
+  },
+  {
+    "q": "approve the held github actions runs for the first-time contributors",
+    "expect": [
+      "codetrial-triage"
+    ]
+  },
+  {
+    "q": "is there already an issue for the reconnect loop after the candidate's wifi drops?",
+    "expect": [
+      "codetrial-triage"
+    ]
+  },
+  {
+    "q": "rank the open pull requests by size and tell me how confident a merge would be",
+    "expect": [
+      "codetrial-triage"
+    ]
+  },
+  {
+    "q": "what changed on the tracker since yesterday's sweep",
+    "expect": [
+      "codetrial-triage"
+    ]
+  },
+  {
+    "q": "help me write up an issue: the timer keeps running after i press End and the report never shows",
+    "expect": [
+      "codetrial-contribute"
+    ]
+  },
+  {
+    "q": "the maintainer asked me for the git revision and a log on my issue, how do i get those",
+    "expect": [
+      "codetrial-contribute"
+    ]
+  },
+  {
+    "q": "draft the PR description for my branch, it fixes #419",
+    "expect": [
+      "codetrial-contribute"
+    ]
+  },
+  {
+    "q": "the reviewer said 'Rebase latest main branch and resolve conflicts' on my PR, what do i do",
+    "expect": [
+      "codetrial-contribute"
+    ]
+  },
+  {
+    "q": "i'm new and want to contribute with an AI agent, what's a small first thing i could pick up",
+    "expect": [
+      "codetrial-contribute"
+    ]
+  },
+  {
+    "q": "address the review comments on my pull request",
+    "expect": [
+      "codetrial-contribute"
+    ]
+  },
+  {
+    "q": "write the commit message for these staged changes",
+    "expect": [
+      "codetrial-conventions"
+    ]
+  },
+  {
+    "q": "we don't need the --legacy-report flag anymore, should i deprecate it first or just remove it",
+    "expect": [
+      "codetrial-conventions"
+    ]
+  },
+  {
+    "q": "can i put a Chinese string in tests/ as a multi-byte fixture?",
+    "expect": [
+      "codetrial-conventions"
+    ]
+  },
+  {
+    "q": "what's a good title for an issue about the camera preview freezing",
+    "expect": [
+      "codetrial-conventions",
+      "codetrial-contribute"
+    ]
+  },
+  {
+    "q": "i want to cache the finished session and regenerate the report later to save tokens, any objection?",
+    "expect": [
+      "codetrial-conventions"
+    ]
+  },
+  {
+    "q": "explain big-o of quicksort vs mergesort for my coding interview prep",
+    "expect": []
+  },
+  {
+    "q": "how do i install rustup on ubuntu 24.04",
+    "expect": []
+  },
+  {
+    "q": "translate this paragraph into french: the interview ends when the timer runs out",
+    "expect": []
+  },
+  {
+    "q": "what is a selective forwarding unit, conceptually, compared to a mesh call",
+    "expect": []
+  },
+  {
+    "q": "write a python script that renames my vacation photos by date",
+    "expect": []
+  },
+  {
+    "q": "the report packet the agent publishes on the data channel never shows up in the page, but the agent logs say it was sent",
+    "expect": [
+      "codetrial-web",
+      "codetrial-livekit"
+    ]
+  },
+  {
+    "q": "jim's voice is choppy in the browser but only on long interviews, where would i even start looking",
+    "expect": [
+      "codetrial-livekit"
+    ]
+  },
+  {
+    "q": "a maintainer left a Request changes review saying run make hooks and fix my commit messages, how do i fix the commits already pushed",
+    "expect": [
+      "codetrial-contribute"
+    ]
+  },
+  {
+    "q": "post the rebase request on every conflicting PR",
+    "expect": [
+      "codetrial-triage"
+    ]
+  },
+  {
+    "q": "add a test for the new token expiry check in src/web/token.rs and make sure the gate still passes",
+    "expect": [
+      "codetrial-verify",
+      "codetrial-livekit"
+    ]
+  },
+  {
+    "q": "how long should a comment above a tricky function be in this codebase",
+    "expect": [
+      "codetrial-conventions"
+    ]
+  },
+  {
+    "q": "should the lobby show the LiveKit region the interview will connect to? sketch the UI",
+    "expect": [
+      "codetrial-web"
+    ]
+  },
+  {
+    "q": "write a short blog post with tips for staying calm in a live mock coding interview",
+    "expect": []
+  }
+]
