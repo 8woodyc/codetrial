@@ -221,7 +221,9 @@ let editorPaintFrame = null;
 // The agent reads the editor once per 2s watch tick, so publishing every
 // keystroke sends ~10x more full-buffer packets than anyone consumes.
 const CODE_PUBLISH_DEBOUNCE_MS = 300;
-const TOKEN_REQUEST_TIMEOUT_MS = 10_000;
+// Bounds startup through the response headers. The server may finish claim and
+// dispatch after the browser has fallen back to offline practice.
+const TOKEN_REQUEST_TIMEOUT_MS = 20_000;
 /// Long enough to read twice, short enough that it is gone before the answer
 /// it is about. Measured against the hint text, not chosen round.
 const FRAMEWORK_HINT_MS = 12000;

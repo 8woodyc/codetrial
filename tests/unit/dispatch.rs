@@ -179,16 +179,30 @@ async fn release_no_show_gives_the_claimed_room_back() {
             .unwrap()
     );
 
-    release_no_show(
-        Some(NoShowConsent::new(
-            Arc::clone(&accounts),
-            interview_id.into(),
-            account_id,
-            room_name.into(),
-        )),
-        room_name,
-    )
-    .await;
+    assert!(
+        release_no_show(
+            Some(NoShowConsent::new(
+                Arc::clone(&accounts),
+                interview_id.into(),
+                account_id,
+                room_name.into(),
+            )),
+            room_name,
+        )
+        .await
+    );
+    assert!(
+        !release_no_show(
+            Some(NoShowConsent::new(
+                Arc::clone(&accounts),
+                interview_id.into(),
+                account_id,
+                room_name.into(),
+            )),
+            room_name,
+        )
+        .await
+    );
 
     let room: Option<String> = accounts
         .with(|connection| {
@@ -201,7 +215,67 @@ async fn release_no_show_gives_the_claimed_room_back() {
         .unwrap();
     assert_eq!(room, None);
 
+    assert!(
+        crate::accounts::claim_interview_room(&accounts, interview_id, account_id, room_name)
+            .unwrap()
+    );
+    accounts
+        .with(|connection| {
+            connection.execute(
+                "INSERT INTO recordings (
+                    id, account_id, interview_id, room_name, idempotency_key,
+                    recipient_email, state, created_at, updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?3, ?5, 'starting', 1, 1)",
+                (
+                    "recording-release-race",
+                    account_id,
+                    interview_id,
+                    room_name,
+                    "candidate@example.com",
+                ),
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    assert!(
+        !release_no_show(
+            Some(NoShowConsent::new(
+                Arc::clone(&accounts),
+                interview_id.into(),
+                account_id,
+                room_name.into(),
+            )),
+            room_name,
+        )
+        .await
+    );
+    let recorded_room: Option<String> = accounts
+        .with(|connection| {
+            connection.query_row(
+                "SELECT room_name FROM interviews WHERE id = ?1",
+                [interview_id],
+                |row| row.get(0),
+            )
+        })
+        .unwrap();
+    assert_eq!(recorded_room.as_deref(), Some(room_name));
+
     drop(accounts);
+}
+
+#[test]
+fn pre_candidate_outcomes_release_consent() {
+    assert!(no_show_release_required(
+        &crate::livekit::RoomRunOutcome::NoCandidate
+    ));
+    assert!(no_show_release_required(
+        &crate::livekit::RoomRunOutcome::FailedBeforeCandidate(Box::new(std::io::Error::other(
+            "startup failed"
+        )))
+    ));
+    assert!(!no_show_release_required(
+        &crate::livekit::RoomRunOutcome::Completed
+    ));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

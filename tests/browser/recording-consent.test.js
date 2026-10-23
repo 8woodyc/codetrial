@@ -199,8 +199,8 @@ test("recording-consent is recorded before a token is asked for", () => {
 test("recording-consent bounds a stalled token request before offline practice", () => {
   const body = withoutComments(functionBody(script, "connect"));
   assert.ok(
-    code.includes("const TOKEN_REQUEST_TIMEOUT_MS = 10_000;"),
-    "the token request needs a named ten-second deadline",
+    code.includes("const TOKEN_REQUEST_TIMEOUT_MS = 20_000;"),
+    "the browser deadline must leave the server's body deadline time to answer",
   );
   assertIncludesCompact(
     body,

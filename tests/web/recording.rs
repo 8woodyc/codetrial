@@ -757,7 +757,7 @@ async fn token_stalls_before_and_after_dispatch_have_different_side_effects() {
             rusqlite::params![replacement_room, &dispatched_interview],
         )
         .unwrap();
-    guarded_release.release().await.unwrap();
+    assert!(!guarded_release.release().await.unwrap());
     let room_after_stale_release: Option<String> = rusqlite::Connection::open(&path)
         .unwrap()
         .query_row(
@@ -780,11 +780,13 @@ async fn token_stalls_before_and_after_dispatch_have_different_side_effects() {
 
     // Returning the claimed row to pending would violate the one-pending-row
     // index while the reload's row exists, so the no-show release must wait.
-    dispatcher
-        .no_show_release(&dispatched_room)
-        .release()
-        .await
-        .unwrap();
+    assert!(
+        !dispatcher
+            .no_show_release(&dispatched_room)
+            .release()
+            .await
+            .unwrap()
+    );
     let (room_while_pending, pending_room): (Option<String>, Option<String>) =
         rusqlite::Connection::open(&path)
             .unwrap()

@@ -204,6 +204,10 @@ pub fn interview_for_account(
 /// Guarded on the room it is giving back, so a release arriving late cannot
 /// unbind a room some other request has since claimed.
 ///
+/// Returns whether the claim was released. `false` means the room no longer
+/// matches, another pending interview holds this consent version's pending
+/// slot, or recording has started for this interview.
+///
 /// The ceiling: a process that dies between the claim and the release leaves
 /// the interview bound to a room that never ran, and the candidate has to
 /// reload. That is one page reload against a lock nobody can take back, which
@@ -213,14 +217,18 @@ pub fn release_interview_room(
     id: &str,
     account_id: i64,
     room_name: &str,
-) -> rusqlite::Result<()> {
+) -> rusqlite::Result<bool> {
     accounts.with(|connection| {
-        connection.execute(
+        let changed = connection.execute(
             "
         UPDATE interviews SET room_name = NULL
         WHERE id = ?1
           AND account_id = ?2
           AND room_name = ?3
+          AND NOT EXISTS (
+              SELECT 1 FROM recordings
+              WHERE recordings.interview_id = interviews.id
+          )
           AND NOT EXISTS (
               SELECT 1 FROM interviews AS pending
               WHERE pending.account_id = interviews.account_id
@@ -231,7 +239,7 @@ pub fn release_interview_room(
         ",
             (id, account_id, room_name),
         )?;
-        Ok(())
+        Ok(changed > 0)
     })
 }
 

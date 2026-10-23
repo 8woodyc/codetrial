@@ -569,10 +569,17 @@ async fn dispatch_or_release_consent(
         return None;
     };
 
-    if let Some(no_show) = no_show
-        && let Err(error) = no_show.release().await
-    {
-        eprintln!("could not release interview consent after a refused dispatch: {error}");
+    if let Some(no_show) = no_show {
+        match no_show.release().await {
+            Ok(true) => {}
+            Ok(false) => eprintln!(
+                "codetrial consent_release_skipped room={room_name} \
+                 reason=claim_changed_or_pending_interview"
+            ),
+            Err(error) => {
+                eprintln!("could not release interview consent after a refused dispatch: {error}")
+            }
+        }
     }
 
     let error = match refusal {
@@ -588,6 +595,37 @@ async fn dispatch_or_release_consent(
         StatusCode::SERVICE_UNAVAILABLE,
         json!({ "error": error }),
     ))
+}
+
+/// Keeps the consent claim and its dispatch in one task if the client drops
+/// the request while the blocking database claim is still finishing.
+async fn claim_and_dispatch(
+    state: AppState,
+    owner: Option<Owner>,
+    interview: Option<String>,
+    room_name: String,
+    provider: crate::config::Provider,
+) -> Option<Response> {
+    if let (Some(owner), Some(interview)) = (owner.as_ref(), interview.as_ref())
+        && let Err(response) = claim_consent(
+            &owner.accounts,
+            owner.user.id,
+            interview.clone(),
+            &room_name,
+        )
+        .await
+    {
+        return Some(response);
+    }
+
+    dispatch_or_release_consent(
+        &state,
+        owner.as_ref(),
+        interview.as_ref(),
+        &room_name,
+        &provider,
+    )
+    .await
 }
 
 fn minted_token(
@@ -693,32 +731,30 @@ pub(crate) async fn token_handler(
 
     // Before the dispatcher, so two requests racing on one interview cannot
     // both start an interviewer, and after the token, so a signing failure
-    // costs nothing. The loser of that race is refused here without dispatching
-    // anything.
-    if let (Some(owner), Some(interview)) = (owner.as_ref(), interview.as_ref())
-        && let Err(response) = claim_consent(
-            &owner.accounts,
-            owner.user.id,
-            interview.clone(),
-            &room_name,
-        )
-        .await
-    {
-        return response;
-    }
-
-    // After the token and the claim, so a request that was going to be refused
-    // anyway never leaves an interviewer running behind it.
-    if let Some(refusal) = dispatch_or_release_consent(
-        &state,
-        owner.as_ref(),
-        interview.as_ref(),
-        &room_name,
-        provider,
-    )
-    .await
-    {
-        return refusal;
+    // costs nothing. Spawned as one operation because dropping a request must
+    // not cancel the handler after the blocking claim commits but before the
+    // matching dispatcher sees it. Dropping a Tokio join handle detaches its
+    // task, so this pair finishes even when the browser has gone away.
+    let startup = tokio::spawn(claim_and_dispatch(
+        state.clone(),
+        owner.as_ref().map(|owner| Owner {
+            accounts: Arc::clone(&owner.accounts),
+            user: owner.user.clone(),
+        }),
+        interview.clone(),
+        room_name.clone(),
+        provider.clone(),
+    ));
+    match startup.await {
+        Ok(Some(refusal)) => return refusal,
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!("could not finish the consent claim and room dispatch: {error}");
+            return json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({ "error": "Could not start the interview." }),
+            );
+        }
     }
 
     if let Some(owner) = owner.as_ref() {

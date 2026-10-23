@@ -554,8 +554,8 @@ impl NoShowConsent {
     }
 
     /// Gives a recorded interview's consent back only if it is still bound to
-    /// the room whose candidate never arrived.
-    pub async fn release(self) -> rusqlite::Result<()> {
+    /// the room whose candidate never arrived, and reports whether it did.
+    pub async fn release(self) -> rusqlite::Result<bool> {
         blocking(move || {
             release_interview_room(
                 &self.accounts,

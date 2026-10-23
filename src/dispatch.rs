@@ -103,20 +103,20 @@ impl LocalDispatcher {
         // outlives the response by the length of the interview.
         self.runtime.spawn(async move {
             eprintln!("codetrial dispatch room={}", slot.room_name);
-            match crate::livekit::run_room_with_slot(
+            let outcome = crate::livekit::run_room_with_slot(
                 &config,
                 &slot.room_name,
                 crate::web::current_epoch_seconds(),
                 Some(&slot),
             )
-            .await
-            {
-                Ok(crate::livekit::RoomRunOutcome::NoCandidate) => {
-                    release_no_show(no_show, &slot.room_name).await;
-                }
+            .await;
+            if outcome.as_ref().is_ok_and(no_show_release_required) {
+                release_no_show(no_show, &slot.room_name).await;
+            }
+            match outcome {
+                Ok(crate::livekit::RoomRunOutcome::NoCandidate) => {}
                 Ok(crate::livekit::RoomRunOutcome::FailedBeforeCandidate(error)) => {
                     eprintln!("codetrial agent_failed room={}: {error}", slot.room_name);
-                    release_no_show(no_show, &slot.room_name).await;
                 }
                 Ok(crate::livekit::RoomRunOutcome::Completed) => {}
                 Err(error) => {
@@ -128,13 +128,33 @@ impl LocalDispatcher {
     }
 }
 
-async fn release_no_show(no_show: Option<NoShowConsent>, room_name: &str) {
-    if let Some(no_show) = no_show
-        && let Err(error) = no_show.release().await
-    {
-        eprintln!(
-            "could not release interview consent after a no-show in room={room_name}: {error}"
-        );
+fn no_show_release_required(outcome: &crate::livekit::RoomRunOutcome) -> bool {
+    matches!(
+        outcome,
+        crate::livekit::RoomRunOutcome::NoCandidate
+            | crate::livekit::RoomRunOutcome::FailedBeforeCandidate(_)
+    )
+}
+
+async fn release_no_show(no_show: Option<NoShowConsent>, room_name: &str) -> bool {
+    let Some(no_show) = no_show else {
+        return false;
+    };
+    match no_show.release().await {
+        Ok(true) => true,
+        Ok(false) => {
+            eprintln!(
+                "codetrial consent_release_skipped room={room_name} \
+                 reason=claim_changed_pending_or_recording_started"
+            );
+            false
+        }
+        Err(error) => {
+            eprintln!(
+                "could not release interview consent after a no-show in room={room_name}: {error}"
+            );
+            false
+        }
     }
 }
 
