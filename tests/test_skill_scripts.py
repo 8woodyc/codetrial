@@ -46,6 +46,9 @@ case "$*" in
   "run view 500 "*) printf '%s\\n' "$FAKE_MAIN_FAILED" ;;
   "api graphql"*) cat "$FAKE_AGAIN" ;;
   "pr view 404 "*) echo "no such pull request" >&2; exit 1 ;;
+  # FAKE_DIFFS maps a PR number to its diff; a PR missing from it fails.
+  "pr diff "*) [ -n "${FAKE_DIFFS:-}" ] || exit 1
+    jq -jre --arg n "$3" '.[$n] | strings' "$FAKE_DIFFS" ;;
   "pr view"*) printf '{"pr":%s,"state":"MERGED","merge":"m%s"}\\n' "$3" "$3" ;;
   *) echo "unexpected gh call: $*" >&2; exit 1 ;;
 esac
@@ -220,7 +223,7 @@ def run_fake(script, args, fake_gh, files, cwd=None, env=()):
 
 @unittest.skipUnless(shutil.which("jq"), "jq is not installed")
 class SweepCase(unittest.TestCase):
-    def sweep(self, script, page, previous=None, runs=(), again=(), env=()):
+    def sweep(self, script, page, previous=None, runs=(), again=(), env=(), diffs=None):
         files = {
             "FAKE_PAGE": json.dumps({"data": page}),
             # gh applies --jq itself, so the fake prints one object per run.
@@ -234,6 +237,8 @@ class SweepCase(unittest.TestCase):
             'printf \'{"pr":%s,"head":"%s","stale_base":%s}\\n\' '
             '"$1" "${STALE_HEAD:-head$1}" "$s"\n'
         )
+        if diffs is not None:
+            files["FAKE_DIFFS"] = json.dumps(diffs)
         if previous is not None:
             files["PREVIOUS"] = json.dumps(previous)
             args += ["7", "$PREVIOUS"]
@@ -819,8 +824,153 @@ class PrSweepTests(SweepCase):
             with self.subTest(label=label):
                 self.assertIn(f"printf '  {label} ", installer)
 
+    def test_a_skipped_gates_lane_is_not_a_pass_and_a_skipped_shard_is_nothing(self):
+        skipped = checked(("check", "SUCCESS"), ("gates (rust)", "SKIPPED"))
+        shard = checked(
+            ("check", "SUCCESS"),
+            ("gates (rust)", "SUCCESS"),
+            ("mutants (0)", "SKIPPED"),
+        )
+        swept = self.run_pulls(pull(1, commits=skipped), pull(2, commits=shard))
+        status = {entry["pr"]: entry for entry in swept["status"]}
+        self.assertEqual(status[1]["grade"], "medium")
+        self.assertEqual(status[1]["checks"]["skipped"], ["gates (rust)"])
+        self.assertEqual(
+            status[1]["why"], ["no gates lane passed (skipped: gates (rust))"]
+        )
+        self.assertEqual((status[2]["grade"], status[2]["why"]), ("high", []))
+
+    def test_an_approval_left_before_the_last_push_waits_on_a_re_review(self):
+        old = review("maint", "APPROVED", 2, oid="older")
+        here = review("maint", "APPROVED", 2, oid="head2")
+        swept = self.run_pulls(
+            pull(1, commits=GREEN, reviewDecision="APPROVED", reviews=listed(old)),
+            pull(2, commits=GREEN, reviewDecision="APPROVED", reviews=listed(here)),
+        )
+        status = {entry["pr"]: entry for entry in swept["status"]}
+        self.assertEqual(status[1]["grade"], "medium-high")
+        self.assertEqual(status[1]["why"], ["approved before the last push"])
+        self.assertEqual(status[1]["waits_on"], "maintainer")
+        self.assertEqual((status[2]["grade"], status[2]["why"]), ("high", []))
+
+    def test_waits_on_all_keeps_the_author_behind_a_pending_check(self):
+        asked = review("maint", "CHANGES_REQUESTED", 1, "Handle the empty list.")
+        node = pull(
+            1,
+            commits=checked(("gates (rust)", "SUCCESS"), ("check", None)),
+            reviewDecision="CHANGES_REQUESTED",
+            reviews=listed(asked),
+        )
+        entry = self.run_pulls(node)["status"][0]
+        self.assertEqual(entry["waits_on"], "ci")
+        self.assertEqual(entry["waits_on_all"], ["ci", "author"])
+        # A gates lane still running is the CI's move, not the author's.
+        running = self.run_pulls(
+            pull(1, commits=checked(("check", "SUCCESS"), ("gates (rust)", None)))
+        )["status"][0]
+        self.assertEqual(running["waits_on_all"], ["ci"])
+        self.assertEqual(running["grade"], "medium-high")
+        self.assertEqual(
+            self.run_pulls(pull(1, commits=GREEN))["status"][0]["waits_on_all"],
+            ["maintainer"],
+        )
+
+    def test_the_viewer_and_a_maintainers_own_pr_are_named(self):
+        swept = self.run_pulls(
+            pull(1, author={"login": "maint"}), pull(2, author={"login": "contributor"})
+        )
+        self.assertEqual(swept["viewer"], "viewer")
+        mine = {entry["pr"]: entry["author_is_maintainer"] for entry in swept["status"]}
+        self.assertEqual(mine, {1: True, 2: False})
+
+    def test_prerequisites_are_a_stacked_branch_or_a_stated_dependency(self):
+        base = pull(
+            1,
+            headRefName="feature-a",
+            headRepository={"nameWithOwner": "sysprog21/codetrial"},
+        )
+        stacked = pull(2, baseRefName="feature-a")
+        stated = pull(3, body="Depends on #1 for the queue bound.")
+        mention = pull(4, body="Unlike #1, this keeps the order, broken after #1.")
+        swept = self.run_pulls(base, stacked, stated, mention)
+        self.assertEqual(
+            swept["prerequisites"],
+            [
+                {"pr": 2, "on": 1, "how": "stacked"},
+                {"pr": 3, "on": 1, "how": "stated"},
+            ],
+        )
+
+    def test_collide_pairs_prs_that_change_the_same_base_lines(self):
+        def diff(old, new, start):
+            return (
+                "diff --git a/web/a.js b/web/a.js\n--- a/web/a.js\n+++ b/web/a.js\n"
+                f"@@ -{start},3 +{start},3 @@ function walk(node) {{\n"
+                f" keep\n-{old}\n+{new}\n keep\n"
+            )
+
+        shared = listed({"path": "web/a.js", "additions": 1, "deletions": 1})
+        swept = self.run_pulls(
+            pull(1, files=shared),
+            pull(2, files=shared),
+            pull(3, files=shared),
+            pull(4, files=shared),
+            diffs={
+                "1": diff("a", "b", 10),
+                "2": diff("a", "c", 10),
+                "3": diff("x", "y", 40),
+            },
+        )
+        self.assertEqual(
+            swept["collide"],
+            [
+                {
+                    "a": 1,
+                    "b": 2,
+                    "path": "web/a.js",
+                    "lines": [[11, 11], [11, 11]],
+                    "context": ["function walk(node) {"],
+                }
+            ],
+        )
+        self.assertEqual(swept["collide_unread"], [4])
+
+    def test_a_binary_file_both_prs_change_collides_whole(self):
+        # A name holding " b/" still splits right, since both halves match.
+        binary = (
+            "diff --git a/web/a b/logo.png b/web/a b/logo.png\n"
+            "index 1..2 100644\nBinary files differ\n"
+        )
+        shared = listed({"path": "web/a b/logo.png", "additions": 0, "deletions": 0})
+        swept = self.run_pulls(
+            pull(1, files=shared),
+            pull(2, files=shared),
+            diffs={"1": binary, "2": binary},
+        )
+        self.assertEqual(
+            [(c["a"], c["b"], c["path"]) for c in swept["collide"]],
+            [(1, 2, "web/a b/logo.png")],
+        )
+
+    def test_a_rename_collides_under_its_new_name(self):
+        # The diff --git line alone would split this name at its last " b/".
+        rename = (
+            "diff --git a/web/a b/old.js b/web/a b/new.js\nsimilarity index 100%\n"
+            "rename from web/a b/old.js\nrename to web/a b/new.js\n"
+        )
+        shared = listed({"path": "web/a b/new.js", "additions": 0, "deletions": 0})
+        swept = self.run_pulls(
+            pull(1, files=shared),
+            pull(2, files=shared),
+            diffs={"1": rename, "2": rename},
+        )
+        self.assertEqual(
+            [(c["a"], c["b"], c["path"]) for c in swept["collide"]],
+            [(1, 2, "web/a b/new.js")],
+        )
+
     def test_gates_prefix_matches_the_check_workflow_job_name(self):
-        # The grade reads "no gates lane ran" from this prefix; renaming the
+        # The grade reads "no gates lane passed" from this prefix; renaming the
         # job in check.yml without the script would mark every PR as such.
         workflow = (ROOT / ".github" / "workflows" / "check.yml").read_text()
         self.assertIn("name: gates (", workflow)
@@ -1429,6 +1579,19 @@ case "$*" in
     else echo "${FAKE_HEAD:-h1}"; fi ;;
   "pr diff 5 "*) cat "$FAKE_DIFF" ;;
   "api repos/sysprog21/codetrial/pulls/5/comments --paginate") cat "$FAKE_THREADS" ;;
+  # A review is created whole or refused whole, as GitHub does.
+  "api repos/sysprog21/codetrial/pulls/5/reviews --input "*)
+    [ -z "${FAKE_REFUSE_REVIEW:-}" ] || exit 1
+    # FAKE_LOSE_REVIEW: the review lands, and its answer is lost.
+    if [ -n "${FAKE_LOSE_REVIEW:-}" ]; then
+      jq --slurpfile r "$4" '. + [$r[0].comments[]
+        | {user: {login: "viewer"}, commit_id: $r[0].commit_id, path, line, body}]' \
+        "$FAKE_THREADS" > "$FAKE_THREADS.new" && mv "$FAKE_THREADS.new" "$FAKE_THREADS"
+      exit 1
+    fi
+    ! jq -e --arg l "${FAKE_REFUSE_LINE:-}" 'any(.comments[]; (.line | tostring) == $l)' \
+      "$4" > /dev/null || exit 1
+    jq -r '.commit_id as $c | .comments[] | "posted \\(.path):\\(.line) at \\($c)"' "$4" ;;
   "api repos/sysprog21/codetrial/pulls/5/comments --input "*)
     [ "$(jq -r .line "$4")" != "${FAKE_REFUSE_LINE:-}" ] || exit 1
     [ -z "${FAKE_PUSHED_AFTER:-}" ] || : > "$FAKE_PUSHED_AFTER"
@@ -1501,8 +1664,15 @@ class PostInlineTests(unittest.TestCase):
             {"path": "web/a.js", "line": 11, "body": "first"},
             {"path": "web/a.js", "line": 12, "body": "second"},
         ]
+        # Only the fallback posts one at a time, so only it can be split.
         with tempfile.TemporaryDirectory() as scratch:
-            result = self.post(notes, env={"FAKE_PUSHED_AFTER": f"{scratch}/pushed"})
+            result = self.post(
+                notes,
+                env={
+                    "FAKE_PUSHED_AFTER": f"{scratch}/pushed",
+                    "FAKE_REFUSE_REVIEW": "1",
+                },
+            )
         self.assertEqual(result.returncode, 3)
         self.assertEqual(result.stdout, "posted web/a.js:11 at h1\n")
         self.assertIn("moved from h1 to h2", result.stderr)
@@ -1541,12 +1711,90 @@ class PostInlineTests(unittest.TestCase):
         self.assertEqual(result.stdout, "posted web/a.js:11 at h1\n")
         self.assertIn("summary held back", result.stderr)
 
+    def test_findings_go_out_as_one_review(self):
+        notes = [
+            {"path": "web/a.js", "line": 11, "body": "first"},
+            {"path": "web/a.js", "line": 12, "body": "second"},
+        ]
+        result = self.post(notes)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout, "posted web/a.js:11 at h1\nposted web/a.js:12 at h1\n"
+        )
+        self.assertNotIn("posting each finding", result.stderr)
+
+    def test_a_review_whose_answer_was_lost_is_not_posted_again(self):
+        notes = [{"path": "web/a.js", "line": 11, "body": "once"}]
+        result = self.post(notes, env={"FAKE_LOSE_REVIEW": "1"})
+        self.assertEqual((result.returncode, result.stdout), (0, ""))
+        self.assertIn("posting each finding", result.stderr)
+
     def test_a_moved_head_posts_nothing(self):
         result = self.post(
             [{"path": "web/a.js", "line": 11, "body": "x"}], env={"FAKE_HEAD": "h2"}
         )
         self.assertEqual((result.returncode, result.stdout), (3, ""))
         self.assertIn("moved from h1 to h2", result.stderr)
+
+
+ODDS = SKILLS / "codetrial-odds"
+
+
+@unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+class OddsTests(unittest.TestCase):
+    def test_it_is_typed_only_and_named_for_its_directory(self):
+        # Routing never offers it, so the plain-language ranking request
+        # stays with codetrial-triage.
+        front = (ODDS / "SKILL.md").read_text().split("---", 2)[1]
+        self.assertIn("name: codetrial-odds\n", front)
+        self.assertIn("disable-model-invocation: true\n", front)
+
+    def test_only_a_whole_sweep_replaces_the_snapshot(self):
+        # Records its arguments in the snapshot, or fails as FAKE_SWEEP says.
+        sweep = (
+            'case "${FAKE_SWEEP:-}" in\n'
+            "  fail) echo '{\"status\": [' ; exit 1 ;;\n"
+            "  junk) echo '{}' ;;\n"
+            "  *) jq -n '{status: [], args: $ARGS.positional}' --args \"$@\" ;;\n"
+            "esac\n"
+        )
+        snapshot = ".git/codetrial-triage/pr-sweep-sysprog21-codetrial.json"
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            saved = repo / snapshot
+
+            def run(mode=""):
+                return run_fake(
+                    ODDS / "snapshot.sh",
+                    [],
+                    FAKE_GH_FAILS,
+                    {"ODDS_SWEEP": sweep},
+                    cwd=repo,
+                    env={"FAKE_SWEEP": mode},
+                )
+
+            first = run()
+            self.assertEqual((first.returncode, first.stdout), (0, f"{snapshot}\n"))
+            # An empty stale-days leaves the sweep its own default.
+            self.assertEqual(
+                json.loads(saved.read_text())["args"], ["sysprog21/codetrial", ""]
+            )
+            self.assertEqual(run().returncode, 0)
+            self.assertEqual(
+                json.loads(saved.read_text())["args"],
+                ["sysprog21/codetrial", "", snapshot],
+            )
+            kept = saved.read_text()
+            for mode in ("fail", "junk"):
+                with self.subTest(mode=mode):
+                    result = run(mode)
+                    self.assertEqual((result.returncode, result.stdout), (1, ""))
+                    self.assertIn("the last snapshot is kept", result.stderr)
+                    self.assertEqual(saved.read_text(), kept)
+                    self.assertEqual(
+                        [p.name for p in saved.parent.iterdir()], [saved.name]
+                    )
 
 
 HYGIENE = SKILLS / "codetrial-triage" / "hygiene.sh"

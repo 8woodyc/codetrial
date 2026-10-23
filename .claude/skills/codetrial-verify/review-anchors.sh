@@ -45,15 +45,7 @@ jq -se 'map(type) == ["object"]' "$payload" > /dev/null 2>&1 || {
 # anchors reach jq on stdin rather than as an argument, which a 20000-line diff
 # would push past the argument limit.
 diff=$(gh pr diff "$pr" --repo "$repo")
-printf '%s\n' "$diff" | awk '
-    # A header path: drop the tab git appends after a name with a space, the
-    # quotes it puts around one with special characters, and the a/ or b/.
-    function header_path(line,    p) {
-        p = substr(line, 5)
-        sub(/\t.*$/, "", p)
-        if (p ~ /^".*"$/) p = substr(p, 2, length(p) - 2)
-        return p == "/dev/null" ? p : substr(p, 3)
-    }
+printf '%s\n' "$diff" | awk "$(cat "$(dirname "$0")/diff-path.awk")"'
     /^diff --git / { header = 1; path = ""; next }
     header && /^--- / { old = header_path($0); next }
     header && /^\+\+\+ / { path = header_path($0); if (path == "/dev/null") path = old; next }

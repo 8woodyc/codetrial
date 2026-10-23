@@ -68,9 +68,16 @@ and these actions go on the confirmed list instead.
   still matters: skim the diff, and move the approval to the confirmed list when
   code the build or tests execute does something the title does not explain,
   such as a network call or a download it then runs.
-- Resolving a thread in `outdated`. Outdated means the commented lines changed,
-  not that the concern was met, so report the resolved threads by PR and path;
-  a reviewer who disagrees clicks unresolve.
+- Resolving a thread in `outdated` once it was checked at the PR's head and
+  found addressed. Outdated means the commented lines changed, not that the
+  concern was met, and an open thread is what holds a grade down, so resolving
+  one unchecked raises a grade nobody earned: #430 went from low to
+  medium-high on threads resolved before anyone read the new head. On a bare
+  `/codetrial-triage` the review of each low or blocked PR checks the outdated
+  threads on it ([review-prs.md](review-prs.md)); every other outdated thread
+  is reported by PR and path as one to recheck, and stays open. Report each
+  resolved thread with what at the head addresses it; a reviewer who disagrees
+  clicks unresolve.
 - Requesting a rebase on each PR in `rebase`, then hiding every entry in
   `hide` as outdated. The text is fixed in [rebase.md](rebase.md), so the
   maintainer approved it once by writing it, and `hide` holds only requests in a
@@ -178,6 +185,16 @@ wording and a marker that recognizes it, and a case in
 enough to act on. Shared files are not one: `web/interview.js` and
 `web/styles.css` appear in most UI PRs. For PRs that share no issue, compare the
 titles in `prs` and read the bodies of the few that describe the same outcome.
+
+Two other lists say which PRs meet at merge time rather than in purpose.
+`collide` holds the pairs whose diffs change the same or adjacent base lines of
+a file, with the hunk header's function, so whichever merges second will
+conflict there; the line numbers are each PR's own base's, so a PR far behind
+`main` can drift in or out, and a collision is a reason to read both hunks, not
+a verdict. `collide_unread` names the PRs whose diff GitHub would not serve,
+which no collision covers. `prerequisites` holds the PRs that must land first:
+`stacked` when one is based on the other's branch, `stated` when its body says
+it depends on, builds on or is stacked on the other.
 
 Two PRs overlap in function when a user would see the same behavior change, or
 one makes the other unnecessary. Same issue with different outcomes is related
@@ -374,17 +391,31 @@ NULL-neighbor check answered #396's cubic P2). The C, C++ and Java harnesses in
 `web/compiler-explorer.js` are one line per function, so split those lines on
 `; ` to read them.
 
-No gates run means the checks ran on a base older than the gates workflow (#363
-on 9dc74fe), so green there proves less; say so and ask for a rebase or a
-rerun. Two PRs that rewrite the same harness function (#376 and #396 on
+"No gates lane passed" means no `gates (` job succeeded at the head: the
+checks ran on a base older than the gates workflow (#363 on 9dc74fe), a lane
+was skipped (`checks.skipped` names it), or the job was renamed; a lane still
+running, held or failing reads as that instead. Green
+there proves less; read which before asking for a rebase or a rerun. A skipped
+mutation shard is normal on a diff without Rust and counts for nothing either
+way. Two PRs that rewrite the same harness function (#376 and #396 on
 `json_graph`) conflict as soon as one merges: name the order.
+
+"Approved before the last push" means every maintainer whose latest verdict is
+an approval left it on an older head. GitHub keeps such an approval, so
+`decision` can read APPROVED for code nobody approved; it waits on a re-review.
 
 Each `status` entry carries `waits_on`, read off the same rows as the grade:
 `approval` for a held run, `ci` for a pending check or a mergeability GitHub
 has not computed, `author` for a conflict, a changes request on the head, an
 open thread, a failing check or no gates lane, and `maintainer` otherwise,
 which is a first review, a re-review after a push, or a merge. `review` lists
-those last PRs, not the account's own, smallest first. A failing job whose name
+those last PRs, not the account's own, smallest first. `waits_on` is the one
+whose move comes first, so a pending check groups a PR under `ci` while its
+author still owes a requested change; `waits_on_all` names everyone with a move
+left, first mover first, and the report says the rest. `author_is_maintainer`
+marks a PR a maintainer wrote, null when the push listing failed, and `viewer`
+is the account that ran the sweep: a maintainer's own PR goes to another
+reviewer rather than into their own queue. A failing job whose name
 `main`'s latest run also fails says so in `why`; the lane runs several gates,
 so only `ci-failure.sh` can tell a failure `main` shares, which is the
 maintainer's, from the PR's own in the same lane.
@@ -397,7 +428,8 @@ which commit, or `UNKNOWN` when that lookup failed. A repeated request then
 costs one call and reports only what moved. A PR that moved to `CONFLICTING`
 right after a merge is one that shared its files (#373 and #396 after #376);
 `rebase` lists it once no current request stands. When `moved` and `gone` are
-empty, say that nothing changed, then say who each PR waits on from its
+empty, say that no tracked field changed (titles, bodies and sizes are not
+compared), then say who each PR waits on from its
 `waits_on`, with the `why` that put it there.
 
 ## Closing references
