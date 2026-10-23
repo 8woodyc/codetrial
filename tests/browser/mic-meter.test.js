@@ -122,6 +122,28 @@ test("a replacement microphone is proven on its own frames", () => {
   );
 });
 
+test("callbacks from a replaced microphone cannot prove or fail the current one", () => {
+  const started = fakeMeter();
+  const pool = fakePool();
+  const meter = createMicMeter({
+    pool,
+    isFinished: () => false,
+    onLevel: () => {},
+    onFailure: () => assert.fail("a stale meter failed the current microphone"),
+    startMeter: started.start,
+  });
+  meter.start();
+  const previous = started.latest();
+  meter.forget();
+  meter.start();
+  for (let index = 0; index < MIC_CONFIRM_FRAMES; index++) previous.onPeak(0.8);
+  previous.onError("Old meter stopped");
+  assert.equal(meter.peak(), 0);
+  assert.equal(pool.errorOf("audio"), null);
+  loudEnough(started);
+  assert.ok(meter.peak() > 0);
+});
+
 /// Timers a test can run by hand.
 ///
 /// The retry is the whole point of these two, and a real `setTimeout` would

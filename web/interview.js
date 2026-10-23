@@ -45,6 +45,7 @@ import {
   toggleLineComment,
 } from "./editor.js";
 import { createDevicePool } from "./devices.js";
+import { createAudioInput } from "./audio-input.js";
 import { createFaceCheck } from "./face-check.js";
 import { attachSelfView } from "./self-view.js";
 import { createMicMeter, startMediaMeter } from "./mic-meter.js";
@@ -119,7 +120,8 @@ import {
   responseWindowIndex,
 } from "./replay-feed.js";
 import {
-  AUDIO_OUTPUT_KEY,
+  audioOutputId,
+  audioOutputSettled,
   MEET_PRESENTATION_KEY,
   applyAudioOutput,
   createJimVolume,
@@ -617,6 +619,10 @@ const nodes = {
   meetOutputRow: document.querySelector("#meet-output-row"),
   meetOutputSelect: document.querySelector("#meet-output-select"),
   meetOutputNote: document.querySelector("#meet-output-note"),
+  preflightOutput: document.querySelector("#preflight-output"),
+  preflightOutputNote: document.querySelector("#preflight-output-note"),
+  preflightInput: document.querySelector("#preflight-input"),
+  preflightInputNote: document.querySelector("#preflight-input-note"),
   sidebar: document.querySelector("#interview-sidebar"),
   sidebarResizer: document.querySelector("#sidebar-resizer"),
   editorPanel: document.querySelector(".editor-panel"),
@@ -1039,9 +1045,11 @@ function bindEvents() {
     removeCandidateCase(Number(button.dataset.removeCase));
   });
   void initializeCandidateCases();
-  nodes.meetOutputSelect.addEventListener("change", () => {
-    void applyAudioOutput(nodes.meetOutputSelect.value);
-  });
+  for (const select of [nodes.meetOutputSelect, nodes.preflightOutput]) {
+    select.addEventListener("change", () => {
+      void applyAudioOutput(select.value);
+    });
+  }
   // The checkbox is the only copy of this answer. A mirrored state field had to
   // be written in two places and read in four, and the one reader that forgot
   // it published a wrong camera status for the whole interview.
@@ -1421,6 +1429,38 @@ function runAudioCheck() {
     let hint = null;
     let hintUntil = 0;
     let finished = false;
+    const microphoneSelector = createAudioInput({
+      mediaDevices,
+      pool,
+      select: nodes.preflightInput,
+      note: nodes.preflightInputNote,
+      isFinished: () => finished,
+    });
+    let playbackRequest = 0;
+    let playbackRouting = Promise.resolve();
+    const outputChanged = () => {
+      if (finished) return;
+      playbackRequest += 1;
+      outputConfirmed = false;
+      nodes.audioTestVoice.pause();
+      refresh();
+    };
+    nodes.preflightOutput.addEventListener("outputchange", outputChanged);
+    // A stale setSinkId can change the sink even when its caller never plays.
+    // Keep routing ordered, including when the selection returns to the same id.
+    const routeTestOutput = (target, outputId, request) => {
+      const routing = playbackRouting.then(async () => {
+        if (finished || request !== playbackRequest) return false;
+        if (typeof target.setSinkId === "function") {
+          if (target.sinkId !== outputId) await target.setSinkId(outputId);
+        } else if (outputId) {
+          throw new Error("Output selection is unavailable");
+        }
+        return !finished && request === playbackRequest;
+      });
+      playbackRouting = routing.catch(() => {});
+      return routing;
+    };
     // Set once, because refresh() runs on every animation frame: the
     // candidate is the only reliable output sensor, so confirming is
     // accepted whenever they click rather than gated on tone timing.
@@ -1481,6 +1521,9 @@ function runAudioCheck() {
     // so a request still pending when this runs never lights the camera.
     const stopChecks = () => {
       finished = true;
+      microphoneSelector.close();
+      playbackRequest += 1;
+      nodes.preflightOutput.removeEventListener("outputchange", outputChanged);
       nodes.audioTestVoice.pause();
       nodes.audioTestVoice.currentTime = 0;
       meter.stop();
@@ -1525,11 +1568,29 @@ function runAudioCheck() {
     };
 
     nodes.audioTestTone.addEventListener("click", async () => {
+      const outputId = audioOutputId();
+      const request = ++playbackRequest;
       nodes.audioTestVoice.pause();
       if (!(await unblockOutput())) {
         showHint("The browser is still blocking audio. Click the tone again.");
         return;
       }
+      try {
+        if (typeof context.setSinkId !== "function" && outputId) {
+          showHint(
+            "This browser cannot route the test tone. Try the test voice instead.",
+          );
+          return;
+        }
+        if (!(await routeTestOutput(context, outputId, request))) return;
+      } catch {
+        if (finished || request !== playbackRequest) return;
+        showHint(
+          "Could not use that output device. Choose another device and try again.",
+        );
+        return;
+      }
+      if (finished || request !== playbackRequest) return;
       const oscillator = context.createOscillator();
       const gain = context.createGain();
       oscillator.frequency.value = 440;
@@ -1546,17 +1607,25 @@ function runAudioCheck() {
     // speech. A local sample needs no interview session or synthesis service,
     // and playing it says nothing about whether the candidate actually heard it.
     nodes.audioTestSpeech.addEventListener("click", async () => {
+      const outputId = audioOutputId();
+      const request = ++playbackRequest;
       nodes.audioTestSpeech.disabled = true;
       try {
         nodes.audioTestVoice.pause();
         nodes.audioTestVoice.currentTime = 0;
         if (nodes.audioTestVoice.error) nodes.audioTestVoice.load();
+        if (!(await routeTestOutput(nodes.audioTestVoice, outputId, request)))
+          return;
         await nodes.audioTestVoice.play();
-        if (finished) return;
+        if (finished || request !== playbackRequest) return;
         nodes.audioTestSpeech.textContent = "Play speech again";
         showHint('If you hear the test voice, click "I heard it".');
       } catch (error) {
-        if (!finished && error?.name !== "AbortError") {
+        if (
+          !finished &&
+          request === playbackRequest &&
+          error?.name !== "AbortError"
+        ) {
           showHint(
             "Could not play the test voice. Try again and check your audio settings.",
           );
@@ -1620,7 +1689,13 @@ function runAudioCheck() {
     // actually carries sound, and it runs for the rest of the preflight.
     pool.configure("audio", {
       accept: (track) => Boolean(track),
-      onTrack: () => meter.start(),
+      onTrack: () => {
+        meter.start();
+        // A grant reveals labels; failed retries must leave open menus alone
+        // while the candidate chooses a different device.
+        void refreshAudioOutputs({ granted: true });
+        void microphoneSelector.refresh();
+      },
       onLost: () => {
         meter.forget();
         nodes.audioMeterFill.style.width = "0%";
@@ -1647,6 +1722,8 @@ function runAudioCheck() {
       },
     });
     pool.start();
+    void microphoneSelector.refresh();
+    void refreshAudioOutputs();
     refresh();
   });
 }
@@ -2293,6 +2370,7 @@ function playRemoteAudio(track, participant) {
     !isCurrentAgent(participant)
   )
     return;
+  const fresh = !jimAudio;
   const element = jimAudio ?? document.createElement("audio");
   // LiveKit can deliver the old track's unsubscribe after the new track's
   // subscribe. Its detach pauses every element the track still holds, so the
@@ -2303,11 +2381,30 @@ function playRemoteAudio(track, participant) {
   element.id = "jim-audio";
   jimAudio = element;
   jimTrack = track;
-  jimVolume.apply();
+  // LiveKit unmutes during attach; every volume reapply must retain this hold.
+  if (fresh) jimVolume.setRoutingHeld(true);
+  else jimVolume.apply();
   if (!element.isConnected) document.body.appendChild(element);
   void audioPlayback.play(element);
   // The candidate may have chosen an output before Jim's track arrived.
-  void applyAudioOutput(readStored(AUDIO_OUTPUT_KEY));
+  void applyAudioOutput(audioOutputId());
+  if (fresh) {
+    const pending = setTimeout(() => {
+      if (jimAudio === element)
+        setBanner(
+          "output",
+          "Audio output selection is taking longer than expected. Check your device, or reload the page to retry.",
+        );
+    }, 5000);
+    void audioOutputSettled().finally(() => {
+      clearTimeout(pending);
+      if (jimAudio !== element) return;
+      setBanner("output", "");
+      jimVolume.setRoutingHeld(false);
+      // Muted play can succeed without permission to play audibly.
+      void audioPlayback.play(element);
+    });
+  }
   attachAvatarAnalyser(track, participant);
 }
 
@@ -2322,7 +2419,8 @@ function dropRemoteAudio(track) {
     element.remove();
     if (element === jimAudio) {
       jimAudio = jimTrack = null;
-      jimVolume.apply();
+      jimVolume.setRoutingHeld(false);
+      setBanner("output", "");
     }
   }
   // Only if it was the analyser's own track. The guard above already refuses to
@@ -2509,8 +2607,9 @@ function setLanguage(language) {
 /// deferred-text field that only one of the two owners got, and a lock-breaking
 /// special case for session-ending events.
 const BANNER_RANK = {
-  session: 5,
-  connection: 4,
+  session: 6,
+  connection: 5,
+  output: 4,
   interviewer: 3,
   reconnect: 2,
   face: 1,
@@ -2518,6 +2617,7 @@ const BANNER_RANK = {
 const banners = {
   session: "",
   connection: "",
+  output: "",
   interviewer: "",
   reconnect: "",
   face: "",

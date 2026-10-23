@@ -6,6 +6,7 @@ import {
   playbackBlocked,
 } from "../../web/audio-playback.js";
 import { loadInterview } from "./source.js";
+import { createJimVolume } from "../../web/audio-output.js";
 
 const blocked = () => new DOMException("Gesture required", "NotAllowedError");
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -328,12 +329,158 @@ function audioTrack() {
   };
 }
 
+test("releasing a routing hold detects blocked audible play and offers recovery", async () => {
+  const route = deferred();
+  let allowed = false;
+  const element = {
+    volume: 1,
+    muted: false,
+    isConnected: false,
+    play() {
+      return this.muted || allowed
+        ? Promise.resolve()
+        : Promise.reject(blocked());
+    },
+  };
+  let volume;
+  const f = fixture({ reapply: () => volume.apply() });
+  const own = {
+    jimAudio: null,
+    jimTrack: null,
+    audioPlayback: f.playback,
+    isCurrentAgent: () => true,
+    applyAudioOutput: async () => {},
+    audioOutputSettled: () => route.promise,
+    setTimeout: () => 1,
+    clearTimeout() {},
+    setBanner() {},
+    document: {
+      createElement: () => element,
+      body: { appendChild: (audio) => (audio.isConnected = true) },
+    },
+  };
+  volume = own.jimVolume = createJimVolume({
+    element: () => own.jimAudio,
+    storage: null,
+  });
+  interviewFunction("playRemoteAudio", own)({ kind: "audio", attach() {} }, {});
+  await tick();
+  assert.equal(element.muted, true);
+  assert.equal(f.notice.hidden, true);
+  route.resolve();
+  await tick();
+  assert.equal(element.muted, false);
+  assert.equal(f.notice.hidden, false);
+  allowed = true;
+  f.click();
+  await tick();
+  assert.equal(f.notice.hidden, true);
+});
+
+test("a native pause after successful play rechecks permission and drops old listeners", async () => {
+  const f = fixture();
+  let allowed = true;
+  let attempts = 0;
+  const audio = Object.assign(new EventTarget(), {
+    paused: false,
+    ended: false,
+    play() {
+      attempts += 1;
+      return allowed ? Promise.resolve() : Promise.reject(blocked());
+    },
+  });
+  await f.playback.play(audio);
+  allowed = false;
+  audio.paused = true;
+  audio.dispatchEvent(new Event("pause"));
+  await tick();
+  assert.equal(attempts, 2);
+  assert.equal(f.notice.hidden, false);
+  f.playback.forget(audio);
+  audio.dispatchEvent(new Event("pause"));
+  await tick();
+  assert.equal(attempts, 2);
+  assert.equal(f.notice.hidden, true);
+});
+
+test("fresh Jim audio stays muted until the selected output route settles", async () => {
+  const route = deferred();
+  const observed = [];
+  const element = { muted: false, volume: 1, isConnected: false };
+  let expire;
+  const messages = [];
+  const own = {
+    jimAudio: null,
+    jimTrack: null,
+    isCurrentAgent: () => true,
+    audioOutputId: () => "headphones",
+    setTimeout(callback) {
+      expire = callback;
+      return 1;
+    },
+    clearTimeout() {},
+    setBanner(source, message) {
+      messages.push([source, message]);
+    },
+    applyAudioOutput(id) {
+      assert.equal(id, "headphones");
+      return Promise.resolve();
+    },
+    audioOutputSettled() {
+      return route.promise;
+    },
+    audioPlayback: {
+      play(audio) {
+        observed.push(["play", audio.muted]);
+        return Promise.resolve();
+      },
+    },
+    document: {
+      createElement: () => element,
+      body: { appendChild: (audio) => (audio.isConnected = true) },
+    },
+  };
+  own.jimVolume = createJimVolume({
+    element: () => own.jimAudio,
+    storage: null,
+  });
+  const track = {
+    kind: "audio",
+    attach(audio) {
+      audio.muted = false;
+      observed.push(["attach", audio.muted]);
+    },
+  };
+  const play = interviewFunction("playRemoteAudio", own);
+  play(track, {});
+  assert.deepEqual(observed, [
+    ["attach", false],
+    ["play", true],
+  ]);
+  await tick();
+  assert.equal(element.muted, true);
+  expire();
+  assert.match(messages.at(-1)[1], /reload/);
+  route.resolve();
+  await tick();
+  assert.equal(element.muted, false);
+  assert.deepEqual(messages.at(-1), ["output", ""]);
+  play(track, {});
+  assert.equal(own.jimAudio, element);
+  assert.deepEqual(observed.slice(-2), [
+    ["attach", false],
+    ["play", false],
+  ]);
+});
+
 test("a late unsubscribe for Jim's old track leaves the new track playing and recoverable", async () => {
   const f = fixture();
   const own = {
     jimAudio: null,
     jimTrack: null,
     audioPlayback: f.playback,
+    applyAudioOutput: async () => {},
+    audioOutputSettled: async () => {},
     isCurrentAgent: () => true,
     isAvatarAnalyserTrack: () => false,
     document: {
@@ -354,6 +501,10 @@ test("a late unsubscribe for Jim's old track leaves the new track playing and re
       body: { appendChild: (element) => (element.isConnected = true) },
     },
   };
+  own.jimVolume = createJimVolume({
+    element: () => own.jimAudio,
+    storage: null,
+  });
   const play = interviewFunction("playRemoteAudio", own);
   const drop = interviewFunction("dropRemoteAudio", own);
   const old = audioTrack();
@@ -361,6 +512,7 @@ test("a late unsubscribe for Jim's old track leaves the new track playing and re
   play(old, {});
   await tick();
   const element = own.jimAudio;
+  assert.equal(element.muted, false);
   // Reconnect order LiveKit is allowed to use: the new subscribe first.
   play(replacement, {});
   await tick();
@@ -368,6 +520,7 @@ test("a late unsubscribe for Jim's old track leaves the new track playing and re
   drop(old);
   assert.equal(own.jimAudio, element);
   assert.equal(element.isConnected, true);
+  assert.equal(element.muted, false);
   assert.equal(element.paused, false);
   assert.equal(f.notice.hidden, false);
   drop(replacement);

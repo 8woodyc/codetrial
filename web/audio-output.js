@@ -1,114 +1,162 @@
-/// Which speaker plays the tab's audio, and the two preferences that outlive a
-/// reload.
-///
-/// No mixer and no synthetic microphone: Meet captures the tab, and CodeTrial
-/// only decides which output device the tab's own audio lands on. Split out of
-/// `interview.js` because routing, the stored preference and the note the
-/// candidate reads about it are one decision made in three places, and the
-/// order they happen in is the part that matters.
+// One output selection for preflight playback and the interviewer's voice.
 
-import {
-  OUTPUT_NOTES,
-  outputAfterRouting,
-  outputOptions,
-} from "./meet-audio.js";
+import { OUTPUT_NOTES, outputOptions } from "./meet-audio.js";
 
 let nodes = null;
-/// Read through a function rather than held: `playRemoteAudio` creates and
-/// drops Jim's element as LiveKit re-subscribes him, and a copy taken at init
-/// would route the one from the previous subscription.
 let jimAudioElement = () => null;
-
-export function initAudioOutput(deps) {
-  ({ nodes, jimAudioElement } = deps);
-}
+let selectedOutputId = "";
+let outputNote = "";
+let listRequest = 0;
+// A pre-grant listing can hide a saved device; only a granted listing can
+// prove that it disappeared.
+let outputAccessGranted = false;
+// Serialize routes so an older setSinkId cannot finish after a newer one.
+// Stamp requests to skip superseded choices and ignore their late failures.
+let routingRequest = 0;
+let routingChain = Promise.resolve();
 
 export const AUDIO_OUTPUT_KEY = "codetrial:audioOutputId";
 export const MEET_PRESENTATION_KEY = "codetrial:meetPresentation";
 
-/// Lists output devices so Jim can be routed away from the shared tab's
-/// default. No mixer and no synthetic microphone: Meet captures the tab, and
-/// CodeTrial only decides which speaker plays the tab's own audio.
-export async function refreshAudioOutputs() {
+export function initAudioOutput(deps) {
+  ({ nodes, jimAudioElement } = deps);
+  selectedOutputId = readStored(AUDIO_OUTPUT_KEY) || "";
+  renderOutputs(outputOptions([], selectedOutputId));
+}
+
+export function audioOutputId() {
+  return selectedOutputId;
+}
+
+function renderOutputs(options) {
+  if (
+    selectedOutputId &&
+    !outputAccessGranted &&
+    !options.some((option) => option.deviceId === selectedOutputId)
+  ) {
+    options = [
+      ...options,
+      {
+        deviceId: selectedOutputId,
+        label: "Saved output device",
+        selected: true,
+      },
+    ];
+  }
+  for (const select of [nodes.meetOutputSelect, nodes.preflightOutput]) {
+    select.replaceChildren(
+      ...options.map((option) => {
+        const element = document.createElement("option");
+        element.value = option.deviceId;
+        element.textContent = option.label;
+        element.selected = option.selected;
+        return element;
+      }),
+    );
+  }
+}
+
+function selectOutput(deviceId) {
+  const changed = selectedOutputId !== deviceId;
+  selectedOutputId = deviceId;
+  writeStored(AUDIO_OUTPUT_KEY, deviceId);
+  nodes.meetOutputSelect.value = deviceId;
+  nodes.preflightOutput.value = deviceId;
+  if (changed) nodes.preflightOutput.dispatchEvent(new Event("outputchange"));
+}
+
+export async function refreshAudioOutputs({ granted = false } = {}) {
+  if (granted) outputAccessGranted = true;
+  const request = ++listRequest;
   const mediaDevices = navigator.mediaDevices;
   if (
     !mediaDevices?.enumerateDevices ||
     !("setSinkId" in HTMLMediaElement.prototype)
   ) {
-    // Hide the row, not just the control: a label pointing at a hidden select
-    // renders as a heading with nothing under it.
     nodes.meetOutputRow.hidden = true;
+    nodes.preflightOutput.disabled = true;
     showOutputNote(OUTPUT_NOTES.unsupported);
+    if (selectedOutputId) void applyAudioOutput("");
     return;
   }
-  let devices = [];
+  nodes.meetOutputRow.hidden = false;
+  nodes.preflightOutput.disabled = false;
   try {
-    devices = await mediaDevices.enumerateDevices();
+    const devices = await mediaDevices.enumerateDevices();
+    if (request !== listRequest) return;
+    const options = outputOptions(devices, selectedOutputId);
+    const missing =
+      outputAccessGranted &&
+      !options.some((option) => option.deviceId === selectedOutputId);
+    if (missing) {
+      options[0].selected = true;
+    }
+    renderOutputs(options);
+    if (outputNote !== OUTPUT_NOTES.refused)
+      showOutputNote(options.length === 1 ? OUTPUT_NOTES.empty : "");
+    if (missing) void applyAudioOutput("");
   } catch {
-    showOutputNote(OUTPUT_NOTES.listFailed);
-    return;
+    if (request === listRequest) showOutputNote(OUTPUT_NOTES.listFailed);
   }
-  const options = outputOptions(devices, readStored(AUDIO_OUTPUT_KEY));
-  nodes.meetOutputSelect.replaceChildren();
-  for (const option of options) {
-    const element = document.createElement("option");
-    element.value = option.deviceId;
-    element.textContent = option.label;
-    element.selected = option.selected;
-    nodes.meetOutputSelect.append(element);
-  }
-  showOutputNote(options.length ? "" : OUTPUT_NOTES.empty);
 }
 
-/// The routing request this one has to finish behind, and the number that says
-/// which request is the newest.
-///
-/// `setSinkId` is asynchronous and the candidate can pick again before it
-/// settles. Two in flight can resolve in either order, and the older one would
-/// then write its device into the preference and the select, undoing a choice
-/// the candidate made after it. Serialized so they resolve in the order they
-/// were asked for, and stamped so a request that is no longer the newest
-/// routes but does not get the last word on what is stored or shown.
-let routingChain = Promise.resolve();
-let routingRequest = 0;
-
 export function applyAudioOutput(deviceId) {
-  routingChain = routingChain.then(() =>
-    routeAudioOutput(deviceId, ++routingRequest),
-  );
+  deviceId = deviceId || "";
+  const request = ++routingRequest;
+  selectOutput(deviceId);
+  routingChain = routingChain
+    .catch(() => {})
+    .then(() => routeAudioOutput(deviceId, request));
   return routingChain;
 }
 
-async function routeAudioOutput(deviceId, request) {
-  if (!deviceId) return;
-  const previous = readStored(AUDIO_OUTPUT_KEY);
-  writeStored(AUDIO_OUTPUT_KEY, deviceId);
-  const jimAudio = jimAudioElement();
-  if (!jimAudio || typeof jimAudio.setSinkId !== "function") return;
-  const routed = await jimAudio
-    .setSinkId(deviceId)
-    .then(() => true)
-    .catch(() => false);
-  // Cleared, not left alone, when there is no previous device to restore. The
-  // refused id was written before routing was attempted, so leaving it would
-  // persist a device Jim never played through: the next reload would pre-select
-  // it and retry the same refusal.
-  // A newer pick arrived while this one was routing. It has already routed, so
-  // Jim plays through whatever the last `setSinkId` chose, and the newest
-  // request is the one entitled to say so in the preference and the select.
-  if (request !== routingRequest) return;
-  const stored = outputAfterRouting(previous, deviceId, routed);
-  writeStored(AUDIO_OUTPUT_KEY, stored);
-  nodes.meetOutputSelect.value = stored || "";
-  // An empty list keeps its explanation: routing succeeding says nothing about
-  // whether there was anything to choose from.
-  const note = routed ? "" : OUTPUT_NOTES.refused;
-  if (note || nodes.meetOutputSelect.length) showOutputNote(note);
+export async function audioOutputSettled() {
+  let pending;
+  do {
+    pending = routingChain;
+    await pending;
+  } while (pending !== routingChain);
 }
 
-export function showOutputNote(text) {
-  nodes.meetOutputNote.textContent = text;
-  nodes.meetOutputNote.hidden = !text;
+async function routeAudioOutput(deviceId, request) {
+  if (request !== routingRequest) return;
+  // The element changes across subscriptions; read it when routing starts.
+  const jimAudio = jimAudioElement();
+  if (!jimAudio) return;
+  const previous = jimAudio.sinkId || "";
+  try {
+    if (typeof jimAudio.setSinkId === "function") {
+      if (jimAudio.sinkId !== deviceId) await jimAudio.setSinkId(deviceId);
+    } else if (deviceId) throw new Error("Output selection is unavailable");
+    if (request === routingRequest && outputNote === OUTPUT_NOTES.refused)
+      showOutputNote("");
+  } catch {
+    if (request !== routingRequest) return;
+    // The previous sink may have disappeared while this request was pending.
+    const fallback = Array.from(nodes.meetOutputSelect.options).some(
+      (option) => option.value === previous,
+    )
+      ? previous
+      : "";
+    if (fallback !== previous) {
+      try {
+        await jimAudio.setSinkId(fallback);
+      } catch {
+        // Keep the refusal visible if even the system output is unavailable.
+      }
+    }
+    if (request !== routingRequest) return;
+    selectOutput(fallback);
+    showOutputNote(OUTPUT_NOTES.refused);
+  }
+}
+
+function showOutputNote(text) {
+  outputNote = text;
+  for (const note of [nodes.meetOutputNote, nodes.preflightOutputNote]) {
+    note.textContent = text;
+    note.hidden = !text;
+  }
 }
 
 /// `localStorage` or `sessionStorage`, or `null` where site data is blocked:
@@ -169,13 +217,14 @@ export function createJimVolume({
   const stored = readStored(JIM_VOLUME_KEY, storage);
   let level = /^(?:[1-9][0-9]?|100)$/.test(stored ?? "") ? Number(stored) : 100;
   let muted = false;
+  let routingHeld = false;
   let supported = true;
   let tested = null;
   const restore = () => {
     const audio = element();
     if (
       audio &&
-      (audio.muted !== muted ||
+      (audio.muted !== (muted || routingHeld) ||
         (supported && !sameVolume(audio.volume, level / 100)))
     )
       apply();
@@ -192,7 +241,7 @@ export function createJimVolume({
       // another level synchronously, then restore the requested attenuation.
       if (fresh) supported = setsVolume(audio, 0.5);
       if (supported) supported = setsVolume(audio, level / 100);
-      audio.muted = muted;
+      audio.muted = muted || routingHeld;
       if (fresh) audio.addEventListener?.("volumechange", restore);
     }
     onChange();
@@ -225,6 +274,10 @@ export function createJimVolume({
       return supported;
     },
     apply,
+    setRoutingHeld(value) {
+      routingHeld = Boolean(value);
+      apply();
+    },
     setVolume,
     toggleMute() {
       muted = !muted;

@@ -86,9 +86,12 @@ test("interview reconnect wiring recovers blocked Jim audio and clears on discon
     for (const error of errors) t.diagnostic(`page error: ${error}`);
   });
   await page.addInitScript(() => {
+    delete HTMLMediaElement.prototype.setSinkId;
     const nativePlay = HTMLMediaElement.prototype.play;
     window.blockJim = true;
     HTMLMediaElement.prototype.play = function () {
+      if (this.id === "jim-audio" && window.jimMutedAtPlay === undefined)
+        window.jimMutedAtPlay = this.muted;
       return this.id === "jim-audio" && window.blockJim
         ? Promise.reject(
             new DOMException("Test autoplay denial", "NotAllowedError"),
@@ -137,6 +140,8 @@ test("interview reconnect wiring recovers blocked Jim audio and clears on discon
   await page.waitForFunction(
     () => !document.querySelector("#audio-check-join").disabled,
   );
+  const outputNote = await page.locator("#preflight-output-note").textContent();
+  assert.match(outputNote, /cannot choose an output device/);
   await page.locator("#audio-check-join").click();
   await page.waitForFunction(
     () =>
@@ -144,6 +149,14 @@ test("interview reconnect wiring recovers blocked Jim audio and clears on discon
       document.querySelector("#mic").textContent === "Mic on",
   );
   await page.evaluate(() => {
+    window.fakeLivekit = window.LivekitClient;
+  });
+  await page.addScriptTag({
+    url: `${base}/vendor/livekit-client.js?real-attach`,
+  });
+  await page.evaluate(async () => {
+    const RemoteAudioTrack = window.LivekitClient.RemoteAudioTrack;
+    window.LivekitClient = window.fakeLivekit;
     const room = window.testRoom;
     const participant = {
       identity: "interviewer-jim",
@@ -152,25 +165,44 @@ test("interview reconnect wiring recovers blocked Jim audio and clears on discon
     room.remoteParticipants.set(participant.identity, participant);
     room.emit("Reconnecting");
     room.emit("Reconnected");
-    window.testTrack = {
-      kind: "audio",
-      attach: (audio) => {
-        // A live track never ends; loop the short fixture so it does not
-        // report paused again before the wait after resume sees it.
-        audio.loop = true;
-        audio.src = "/audio/test-voice.wav";
-      },
-      detach: () => [document.querySelector("#jim-audio")],
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    window.testTrack = new RemoteAudioTrack(
+      stream.getAudioTracks()[0],
+      "test-jim",
+    );
+    const attach = window.testTrack.attach.bind(window.testTrack);
+    window.testTrack.attach = (audio) => {
+      const result = attach(audio);
+      window.jimMutedAtAttach = audio.muted;
+      return result;
     };
     room.emit("TrackSubscribed", window.testTrack, {}, participant);
   });
   await page.waitForSelector("#audio-playback-notice:not([hidden])");
+  assert.deepEqual(
+    await page.evaluate(() => [window.jimMutedAtAttach, window.jimMutedAtPlay]),
+    [false, true],
+  );
+  assert.equal(
+    await page.locator("#preflight-output-note").textContent(),
+    outputNote,
+  );
+  assert.equal(
+    await page
+      .locator("#preflight-output-note")
+      .evaluate((note) => note.hidden),
+    false,
+  );
   assert.equal(await page.locator("#jim-stage #resume-audio").count(), 1);
   await page.locator("#resume-audio").click();
   await page.waitForFunction(
     () =>
       document.querySelector("#audio-playback-notice").hidden &&
       !document.querySelector("#jim-audio").paused,
+  );
+  assert.equal(
+    await page.locator("#jim-audio").evaluate((audio) => audio.muted),
+    false,
   );
   assert.equal(await page.evaluate(() => window.testRoom.starts), 1);
   assert.equal(
