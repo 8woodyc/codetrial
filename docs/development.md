@@ -5,6 +5,55 @@ time actually goes. `make` targets and the one-line summary of each are in
 [README.md](../README.md#development); everything here is the detail behind
 them.
 
+## Dependency security checks
+
+A new RustSec advisory must reach maintainers without making an unrelated
+feature look broken. The independent `audit` job uses `scripts/audit.py`:
+
+- Pull requests compare the tested merge commit against its first parent, the
+  event's base tip. Merge groups compare against `merge_group.base_sha`.
+  Never use the old branch's merge-base: that can hide a reintroduced weakness.
+- Both lockfiles use one freshly fetched advisory database snapshot. Findings
+  are compared by advisory ID, crate and version, so replacing one vulnerable
+  dependency with another cannot pass by keeping the same count.
+- An unchanged lockfile gets one informational scan. Inherited vulnerabilities
+  and scan errors appear in the job summary without failing the PR. With a
+  changed lockfile, new findings or an incomplete scan fail the audit. Removing
+  a finding passes; upgrading to another affected version remains blocking.
+- Pushes to main run a full audit. Builds and the rolling release wait for it,
+  so a known vulnerability or scan error blocks publication. This can delay
+  unrelated fixes while the previous release remains vulnerable; prioritize
+  the dependency repair rather than bypassing the audit.
+
+Checkout and tool-installation failures still fail the job. The informational
+exception covers scanner and database errors after the tool is installed.
+
+The separate `security audit` workflow runs daily and on manual dispatch from
+main. It maintains one bot-authored issue titled `Dependency security audit`,
+updating its findings or closing it after a clean scan, and reopening the same
+issue when findings return so its subscribers keep following it. Changes to the
+findings also leave a comment to notify subscribers, once even when a retry
+follows a failed update; a database refresh alone does not.
+An incomplete scan fails without closing the issue. Only this trusted-main job
+has `issues: write`; fork PRs use read permissions and job summaries, without
+comments or secrets. Maintainers should subscribe to the tracking issue and
+workflow failures, assign an owner and a repair deadline, and link the repair
+PR in the issue. A recurring scan is not a repair deadline.
+
+Enable Dependabot alerts and security updates in repository settings; the
+existing `.github/dependabot.yml` groups coupled security updates. RustSec
+findings may precede GitHub's advisory import, so the daily audit remains
+necessary. Review security PRs promptly and link them to the audit issue.
+Do not add blanket advisory ignores. Any proposed exception needs a maintainer,
+reason, expiry and tracking issue; no exception is implemented by this change.
+
+`./scripts/test.sh` retains the full local `cargo audit` when installed. Its
+three CI lanes omit that gate because the separate audit job owns CI policy.
+To reproduce CI locally, run `python3 scripts/audit.py` for a full scan or
+`python3 scripts/audit.py --base <base-tip-sha>` on the tested merge tree.
+The scanner tests run with
+`python3 scripts/run-python-tests.py tests/test_audit.py`.
+
 ## What the gate checks, and what it will not
 
 `./scripts/test.sh` finishes by printing what it did not check, because several
@@ -22,7 +71,7 @@ cargo install cargo-audit         # the dependency advisory scan
 CI runs `scripts/test.sh rust`, `scripts/test.sh portable` and
 `scripts/test.sh browser` in parallel, with fail-fast disabled so a failure in
 one lane does not hide the others. Clippy and Rust tests share the Rust lane's
-build cache; formatting, audits, Python and shell checks run in the portable
+build cache; formatting, Python and shell checks run in the portable
 lane; Node browser tests have their own lane, except the face-detector suite,
 which needs the Rust binary and runs after its build. All lanes fetch and
 verify vendor assets; each restores the vendored-asset cache, and only the
@@ -32,18 +81,18 @@ clone only `HEAD`; the portable lane keeps full history for the commit-message
 check. The Rust lane deletes the runner's unused toolchains only when less than
 40 GB is free. Running `./scripts/test.sh` locally still runs every gate.
 
-`check` is the only status a branch rule for main should require. It needs
-every lane to succeed, and on a pull request the mutation plan and every shard
-too; shards may be skipped only when the plan found no mutants. A push to main
-or a merge queue entry plans no mutants, so `check` reports as soon as the
-lanes finish. The workflow also runs on `merge_group`, so once main has a merge
-queue, it tests each pull request on top of the main it will land on; two pull
-requests that pass against their own bases can still break main together. A
-merge group saves no caches, since its queue ref is gone once it lands.
-Mutation planning checks the Rust diff before installing its tools, so a PR
-with no Rust changes starts no mutation shards and pays no mutation-tool setup
-cost. Rust diffs still use the complete diff-selected mutant set and the
-existing exclusions.
+`check` is the only status a branch rule for main should require. It needs every
+lane and the independent security audit to succeed, and on a pull request the
+mutation plan and every shard too; shards may be skipped only when the plan
+found no mutants. A push to main or a merge queue entry plans no mutants, so
+`check` reports as soon as the lanes finish. The workflow also runs on
+`merge_group`, so once main has a merge queue, it tests each pull request on top
+of the main it will land on; two pull requests that pass against their own bases
+can still break main together. A merge group saves no caches, since its queue
+ref is gone once it lands. Mutation planning checks the Rust diff before
+installing its tools, so a PR with no Rust changes starts no mutation shards and
+pays no mutation-tool setup cost. Rust diffs still use the complete
+diff-selected mutant set and the existing exclusions.
 
 Every skip the gate sees joins its `not checked by this run:` summary: a gate's
 own skip, a Node browser test's skip or todo, a missing formatter in

@@ -1314,6 +1314,30 @@ class VerifyScriptTests(unittest.TestCase):
         # indent failed beside cargo-audit, so a rebase would not clear it.
         self.assertIs(found["stale_base"], False)
 
+    def test_ci_failure_reports_the_advisory_from_an_audit_annotation(self):
+        checks = [
+            {
+                "name": "audit",
+                "state": "FAILURE",
+                "bucket": "fail",
+                "link": "https://github.com/sysprog21/codetrial/actions/runs/7/job/70",
+            }
+        ]
+        message = "RUSTSEC-2026-0385 ctutils 0.4.3"
+        result = run_fake(
+            VERIFY / "ci-failure.sh",
+            [5],
+            FAKE_GH_CI,
+            {
+                "FAKE_CHECKS": json.dumps(checks),
+                "FAKE_LOG": f"audit\tscan\t2026-10-22T00:00:00.0Z ##[error]{message}\n",
+            },
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        found = json.loads(result.stdout)
+        self.assertEqual(found["failing"][0]["errors"], [message])
+        self.assertFalse(found["stale_base"])
+
     def test_an_audit_failure_main_has_fixed_is_a_stale_base(self):
         checks = [
             {

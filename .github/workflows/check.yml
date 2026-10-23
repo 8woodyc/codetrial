@@ -54,23 +54,51 @@ env:
   # install, and a guard skips the install whenever a cached binary exists:
   # bumping only the install line would leave the old key matching, the old
   # binary restored, and CI running a version nobody asked for.
-  CARGO_AUDIT_VERSION: 0.22.2
   CARGO_MUTANTS_VERSION: 27.1.0
 
-  # Pinned for the same reason the two above are: a linter that moves under you
+  # Pinned for the same reason as the one above: a linter that moves under you
   # turns an unrelated push red, and the fix is then a version bump nobody chose
   # to make. Kept in step with whatever contributors run locally, which is
   # whatever `ruff` is on their PATH; the gate skips rather than fails when they
   # have none.
   RUFF_VERSION: 0.15.2
 
-  # The workflow's own linter, pinned like the three above. Installed rather
+  # The workflow's own linter, pinned like the tools above. Installed rather
   # than assumed: `scripts/test.sh` skips this gate when the binary is absent,
   # and absent is what it was here, so the file that describes every other
   # check was the one file nothing checked.
   ACTIONLINT_VERSION: 1.7.12
 
 jobs:
+  audit:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Install cargo-audit
+        uses: ./.github/actions/install-audit
+      - name: Audit the tested merge or main
+        env:
+          EVENT: ${{ github.event_name }}
+          GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+        run: |
+          case "$EVENT" in
+            pull_request)
+              base=$(git rev-parse HEAD^1)
+              python3 scripts/audit.py --base "$base"
+              ;;
+            merge_group)
+              git cat-file -e "$GROUP_BASE^{commit}" || git fetch --no-tags --depth=1 origin "$GROUP_BASE"
+              python3 scripts/audit.py --base "$GROUP_BASE"
+              ;;
+            push) python3 scripts/audit.py ;;
+            *) exit 2 ;;
+          esac
+
   gates:
     name: gates (${{ matrix.lane }})
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
@@ -225,25 +253,6 @@ jobs:
         id: chromium
         uses: ./.github/actions/chromium
 
-      # The gate skips this audit when the binary is missing, which is right for
-      # a contributor's laptop and wrong for CI: a silent skip here means the
-      # dependency surface stops being checked and nothing says so. Installed
-      # ahead of the gate so the skip branch is never the one CI takes.
-      #
-      # The upstream release binary, checked against the digest its release
-      # records, rather than `cargo install`: that compiled the crate graph for
-      # minutes on every cache miss. musl, so the binary does not depend on the
-      # runner's glibc. The version check proves the pin is what installed.
-      - name: Install cargo-audit
-        if: matrix.lane == 'portable'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          name="cargo-audit-x86_64-unknown-linux-musl-v$CARGO_AUDIT_VERSION"
-          ./scripts/install-release-binary.sh rustsec/rustsec \
-            "cargo-audit/v$CARGO_AUDIT_VERSION" "$name.tgz" "$name/cargo-audit"
-          cargo audit --version | grep -qxF "cargo-audit-audit $CARGO_AUDIT_VERSION"
-
       # The Python here generates the problem bank and drives two integration
       # harnesses, and `ruff check` is its only linter. The gate skips when the
       # binary is missing, which is right on a laptop and wrong here. pipx is on
@@ -366,7 +375,7 @@ jobs:
             target
           key: ${{ steps.cargo-cache.outputs.key }}
 
-  # The one status: every gate lane passed, and on a pull request the mutation
+  # The one status: every gate lane and audit passed, and on a PR the mutation
   # plan and every shard did too. Planning only runs on pull requests, and the
   # shards only after a plan that found mutants, so a skipped shard job after a
   # successful plan means the plan counted none. A push or a merge group plans
@@ -377,7 +386,7 @@ jobs:
   # reaches this job and fails it. Not on a schedule or a dispatch, which run
   # no gates.
   check:
-    needs: [gates, plan-mutants, mutants]
+    needs: [gates, audit, plan-mutants, mutants]
     if: ${{ !cancelled() && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -385,11 +394,16 @@ jobs:
       - name: Require every gate lane and mutation shard
         env:
           GATES: ${{ needs.gates.result }}
+          AUDIT: ${{ needs.audit.result }}
           PLAN: ${{ needs.plan-mutants.result }}
           MUTANTS: ${{ needs.mutants.result }}
         run: |
           if [ "$GATES" != success ]; then
             echo "::error::gate lanes: $GATES. This job only collects them; the failed gates lane has the cause."
+            exit 1
+          fi
+          if [ "$AUDIT" != success ]; then
+            echo "::error::security audit: $AUDIT. See the audit job for new vulnerabilities or an incomplete scan."
             exit 1
           fi
           case "$MUTANTS/$PLAN" in
@@ -653,11 +667,11 @@ jobs:
   # compiles `web/` (including its WASM) into it. Native runners avoid a
   # cross-platform linker or packaging toolchain.
   #
-  # After `gates` rather than `check`: on a push `check` adds nothing, and the
-  # mutation jobs it waits on are skipped, which the default `success()` reads
+  # After `gates` and `audit` rather than `check`: on a push `check` adds
+  # nothing, and its mutation jobs are skipped, which the default `success()` reads
   # as a reason to skip everything downstream.
   build:
-    needs: gates
+    needs: [gates, audit]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: ${{ matrix.name }}
     timeout-minutes: 45
@@ -970,7 +984,7 @@ jobs:
   # One rolling release for the current main build. GitHub releases require a
   # tag; `latest` avoids exposing an implementation SHA as a release name.
   release:
-    needs: [gates, build]
+    needs: [gates, audit, build]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15

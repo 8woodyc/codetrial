@@ -1,0 +1,14 @@
+name: Install cargo-audit
+description: Install the pinned, digest-checked RustSec release binary.
+runs:
+  using: composite
+  steps:
+    - shell: sh
+      env:
+        GH_TOKEN: ${{ github.token }}
+        CARGO_AUDIT_VERSION: 0.22.2
+      run: |
+        name="cargo-audit-x86_64-unknown-linux-musl-v$CARGO_AUDIT_VERSION"
+        ./scripts/install-release-binary.sh rustsec/rustsec \
+          "cargo-audit/v$CARGO_AUDIT_VERSION" "$name.tgz" "$name/cargo-audit"
+        cargo audit --version | grep -qxF "cargo-audit-audit $CARGO_AUDIT_VERSION"
