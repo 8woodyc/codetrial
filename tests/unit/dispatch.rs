@@ -78,6 +78,132 @@ async fn the_configured_cap_is_the_one_enforced() {
     );
 }
 
+/// The no-show-aware entry point must retain the local dispatcher's admission
+/// checks instead of accepting a room without reserving or staffing it.
+#[tokio::test]
+async fn no_show_dispatch_enforces_the_configured_cap() {
+    let state = Arc::new(Mutex::new(DispatchState::default()));
+    state
+        .lock()
+        .unwrap()
+        .live
+        .insert("interview-first".to_string(), true);
+    let dispatcher = LocalDispatcher {
+        config: crate::config::load_from_pairs([
+            ("LIVEKIT_URL", "wss://primary.example"),
+            ("LIVEKIT_API_KEY", "primary-key"),
+            ("LIVEKIT_API_SECRET", "primary-secret"),
+            ("GOOGLE_API_KEY", "primary-google"),
+        ])
+        .unwrap(),
+        runtime: tokio::runtime::Handle::current(),
+        state,
+        max_concurrent: 1,
+    };
+    let provider = Provider {
+        id: crate::config::PRIMARY_PROVIDER_ID.to_string(),
+        url: "wss://primary.example".to_string(),
+        api_key: "primary-key".to_string(),
+        api_secret: "primary-secret".to_string(),
+        google_api_keys: Vec::new(),
+    };
+
+    assert_eq!(
+        dispatcher.ensure_agent_with_no_show_release("interview-second", &provider, None),
+        Err(DispatchRefusal::AtCapacity)
+    );
+}
+
+/// Removes a temporary account database even when its test unwinds early.
+struct Scratch(std::path::PathBuf);
+
+impl Scratch {
+    fn new(label: &str) -> Self {
+        Self(std::env::temp_dir().join(format!(
+            "codetrial-{label}-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        )))
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", self.0.display()));
+        }
+    }
+}
+
+/// The task's shared cleanup helper is the production edge between a no-show
+/// outcome and the database release. Exercising it directly makes removing the
+/// call observable without waiting through a LiveKit room deadline.
+#[tokio::test]
+async fn release_no_show_gives_the_claimed_room_back() {
+    let path = Scratch::new("dispatch-release");
+    crate::accounts::initialize_account_database(&path.0).unwrap();
+    let accounts = Arc::new(
+        crate::accounts::Accounts::open(crate::accounts::GitHubLoginConfig {
+            oauth: None,
+            session_secret: "session".into(),
+            db_path: path.0.clone(),
+            oauth_base_url: String::new(),
+            api_base_url: String::new(),
+        })
+        .unwrap(),
+    );
+    let session = crate::accounts::create_session(
+        &accounts,
+        &crate::accounts::GitHubProfile {
+            github_id: -1,
+            login: "release-no-show".into(),
+            avatar_url: None,
+            verified_email: None,
+        },
+    )
+    .unwrap();
+    let account_id = crate::accounts::session_user(&accounts, &session)
+        .unwrap()
+        .unwrap()
+        .id;
+    let interview_id = "interview-release-no-show";
+    let room_name = "interview-release-room";
+    crate::accounts::create_interview(&accounts, interview_id, account_id, "v1", 1)
+        .unwrap()
+        .unwrap();
+    assert!(
+        crate::accounts::claim_interview_room(&accounts, interview_id, account_id, room_name)
+            .unwrap()
+    );
+
+    release_no_show(
+        Some(NoShowConsent::new(
+            Arc::clone(&accounts),
+            interview_id.into(),
+            account_id,
+            room_name.into(),
+        )),
+        room_name,
+    )
+    .await;
+
+    let room: Option<String> = accounts
+        .with(|connection| {
+            connection.query_row(
+                "SELECT room_name FROM interviews WHERE id = ?1",
+                [interview_id],
+                |row| row.get(0),
+            )
+        })
+        .unwrap();
+    assert_eq!(room, None);
+
+    drop(accounts);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_concurrent_burst_never_overbooks_and_released_capacity_returns() {
     let state = Arc::new(Mutex::new(DispatchState::default()));

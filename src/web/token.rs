@@ -7,14 +7,13 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use axum::body::{Body, to_bytes};
+use axum::body::{Body, Bytes, to_bytes};
 use axum::extract::{ConnectInfo, State};
 use axum::http::{Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use ring::rand::SecureRandom;
 use serde_json::{Value, json};
 
-use crate::accounts::{blocking, release_interview_room};
 use crate::config::{DEFAULT_DURATION_MIN, MAX_DURATION_MIN, MIN_DURATION_MIN};
 use crate::current_epoch_seconds;
 use crate::token::{LivekitTokenInput, TOKEN_TTL_SECONDS, livekit_observer_token, livekit_token};
@@ -23,8 +22,8 @@ use super::auth::{Owner, current_user};
 use super::consent::{checked_consent, claim_consent};
 use super::pool::{ProviderChoice, room_and_available_provider};
 use super::{
-    AppState, MAX_BODY_BYTES, client_ip, json_response, number_json, rate_limited_response,
-    unauthorized_response,
+    AppState, MAX_BODY_BYTES, NoShowConsent, client_ip, json_response, number_json,
+    rate_limited_response, unauthorized_response,
 };
 
 /// No `Debug`, for the reason [`crate::config::AgentConfig`] has none: one
@@ -90,6 +89,24 @@ pub struct TokenResponse {
 pub const TOKEN_RATE_LIMIT: u32 = 30;
 
 pub(crate) const TOKEN_RATE_WINDOW: Duration = Duration::from_secs(60);
+
+/// A partial upload must not hold a token request open forever. This deadline
+/// ends before any room is reserved, consent is claimed, or agent is started.
+const TOKEN_BODY_READ_LIMIT: Duration = Duration::from_secs(10);
+
+#[derive(Debug, PartialEq, Eq)]
+enum TokenBodyReadError {
+    TimedOut,
+    Rejected,
+}
+
+async fn read_token_body(body: Body, limit: Duration) -> Result<Bytes, TokenBodyReadError> {
+    match tokio::time::timeout(limit, to_bytes(body, MAX_BODY_BYTES)).await {
+        Err(_) => Err(TokenBodyReadError::TimedOut),
+        Ok(Err(_)) => Err(TokenBodyReadError::Rejected),
+        Ok(Ok(body)) => Ok(body),
+    }
+}
 
 /// The key is what the route can name a caller by. `/api/token` and
 /// `/api/login` are reachable without a credential, so they key on the address;
@@ -533,28 +550,29 @@ async fn dispatch_or_release_consent(
         return None;
     };
 
+    let no_show = owner.zip(interview).map(|(owner, interview)| {
+        NoShowConsent::new(
+            owner.accounts.clone(),
+            interview.clone(),
+            owner.user.id,
+            room_name.to_string(),
+        )
+    });
+
     let dispatch_result = if owner.is_none() {
         dispatcher.ensure_guest_agent(room_name, provider)
     } else {
-        dispatcher.ensure_agent(room_name, provider)
+        dispatcher.ensure_agent_with_no_show_release(room_name, provider, no_show.clone())
     };
 
     let Err(refusal) = dispatch_result else {
         return None;
     };
 
-    if let (Some(owner), Some(interview)) = (owner, interview) {
-        let accounts = owner.accounts.clone();
-        let interview = interview.clone();
-        let room_name = room_name.to_string();
-        let owner_id = owner.user.id;
-
-        if let Err(error) =
-            blocking(move || release_interview_room(&accounts, &interview, owner_id, &room_name))
-                .await
-        {
-            eprintln!("could not release interview consent after a refused dispatch: {error}");
-        }
+    if let Some(no_show) = no_show
+        && let Err(error) = no_show.release().await
+    {
+        eprintln!("could not release interview consent after a refused dispatch: {error}");
     }
 
     let error = match refusal {
@@ -614,8 +632,17 @@ pub(crate) async fn token_handler(
         Err(response) => return response,
     };
 
-    let Ok(body) = to_bytes(request.into_body(), MAX_BODY_BYTES).await else {
-        return StatusCode::PAYLOAD_TOO_LARGE.into_response();
+    let body = match read_token_body(request.into_body(), TOKEN_BODY_READ_LIMIT).await {
+        Ok(body) => body,
+        Err(TokenBodyReadError::TimedOut) => {
+            return json_response(
+                StatusCode::REQUEST_TIMEOUT,
+                json!({ "error": "Session request body timed out." }),
+            );
+        }
+        Err(TokenBodyReadError::Rejected) => {
+            return StatusCode::PAYLOAD_TOO_LARGE.into_response();
+        }
     };
 
     // Before the token is minted, and therefore before any Egress call can be

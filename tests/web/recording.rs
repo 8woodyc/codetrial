@@ -546,6 +546,286 @@ async fn a_refused_interview_leaves_its_consent_unspent() {
     remove_database(path).await;
 }
 
+/// A dispatcher that only implements `ensure_agent` still staffs recorded
+/// interviews through the trait's no-show-aware default method.
+#[tokio::test]
+async fn recorded_tokens_use_the_default_dispatcher_method() {
+    let (mut config, cookie, path) = signed_in_web_config("default-recording-dispatcher");
+    config.recording = Some(recording_config());
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            "UPDATE users SET email = 'one@example.test', email_verified = 1 WHERE id = 1",
+            [],
+        )
+        .unwrap();
+    let dispatcher = std::sync::Arc::new(DefaultMethodDispatcher::default());
+    let (base, server) =
+        spawn_web_server_with_dispatcher(config, std::sync::Arc::clone(&dispatcher)).await;
+    let client = http_client();
+
+    let interview = start_interview(&client, &base, &cookie).await;
+    let response = client
+        .post(format!("{base}/api/token"))
+        .header("cookie", cookie)
+        .json(&json!({ "interviewId": interview }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 200);
+    assert_eq!(dispatcher.rooms().len(), 1);
+
+    server.shutdown().await;
+    remove_database(path).await;
+}
+
+/// Evidence for issue #380: a deadline at the browser cannot tell whether the
+/// request is still before dispatch or whether only the response path stalled.
+/// The two cases have different ownership and therefore cannot share the same
+/// cleanup rule.
+#[tokio::test]
+async fn token_stalls_before_and_after_dispatch_have_different_side_effects() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let (mut config, cookie, path) = signed_in_web_config("token-stall-phases");
+    config.recording = Some(recording_config());
+    {
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .execute(
+                "UPDATE users SET email = 'one@example.test', email_verified = 1 WHERE id = 1",
+                [],
+            )
+            .unwrap();
+    }
+    let dispatcher = std::sync::Arc::new(RecordingDispatcher::default());
+    let (base, server) =
+        spawn_web_server_with_dispatcher(config, std::sync::Arc::clone(&dispatcher)).await;
+    let address = base.strip_prefix("http://").unwrap();
+    let client = http_client();
+
+    // Case 1: advertise a JSON body larger than the bytes actually sent. The
+    // server admits the caller, then waits while reading the body. Nothing has
+    // reserved a room, claimed consent, or dispatched an agent at this point.
+    let pending_interview = start_interview(&client, &base, &cookie).await;
+    let partial_body = format!(r#"{{"interviewId":"{pending_interview}""#);
+    let mut socket = tokio::net::TcpStream::connect(address).await.unwrap();
+    socket
+        .write_all(
+            format!(
+                "POST /api/token HTTP/1.1\r\nHost: {address}\r\nCookie: {cookie}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{partial_body}",
+                partial_body.len() + 100
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let before_started = std::time::Instant::now();
+    let mut byte = [0u8; 1];
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), socket.read(&mut byte))
+            .await
+            .is_err(),
+        "an incomplete request body should leave the handler awaiting body bytes"
+    );
+    let mut response = Vec::new();
+    tokio::time::timeout(Duration::from_secs(11), socket.read_to_end(&mut response))
+        .await
+        .expect("the server-side body deadline should finish the request")
+        .unwrap();
+    let response = String::from_utf8(response).unwrap();
+    assert!(
+        response.starts_with("HTTP/1.1 408 Request Timeout\r\n"),
+        "the body deadline should answer 408, got {response:?}"
+    );
+    assert!(
+        before_started.elapsed() >= Duration::from_secs(10),
+        "the production deadline should not fire early"
+    );
+    let pending_room: Option<String> = rusqlite::Connection::open(&path)
+        .unwrap()
+        .query_row(
+            "SELECT room_name FROM interviews WHERE id = ?1",
+            [&pending_interview],
+            |row| row.get(0),
+        )
+        .unwrap();
+    eprintln!(
+        "issue380 before_dispatch pending_ms={} dispatched_rooms={} consent_room={pending_room:?}",
+        before_started.elapsed().as_millis(),
+        dispatcher.rooms().len()
+    );
+    assert!(dispatcher.rooms().is_empty());
+    assert_eq!(pending_room, None);
+
+    // Case 2: a reverse proxy forwards the complete request and receives the
+    // upstream response, but withholds that response from the browser. The
+    // browser still sees a pending fetch although dispatch and consent claim
+    // have already completed on the server.
+    let dispatched_interview = start_interview(&client, &base, &cookie).await;
+    let (upstream_done_tx, upstream_done_rx) = tokio::sync::oneshot::channel();
+    let upstream_done_tx = std::sync::Arc::new(std::sync::Mutex::new(Some(upstream_done_tx)));
+    let proxy_base = base.clone();
+    let proxy_signal = std::sync::Arc::clone(&upstream_done_tx);
+    let proxy = axum::Router::new().route(
+        "/api/token",
+        axum::routing::post(move |request: axum::extract::Request| {
+            let proxy_base = proxy_base.clone();
+            let proxy_signal = std::sync::Arc::clone(&proxy_signal);
+            async move {
+                let cookie = request
+                    .headers()
+                    .get(axum::http::header::COOKIE)
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_string();
+                let body = axum::body::to_bytes(request.into_body(), MAX_BODY_BYTES)
+                    .await
+                    .unwrap();
+                let upstream = http_client()
+                    .post(format!("{proxy_base}/api/token"))
+                    .header("cookie", cookie)
+                    .header("content-type", "application/json")
+                    .body(body)
+                    .send()
+                    .await
+                    .unwrap();
+                if let Some(done) = proxy_signal.lock().unwrap().take() {
+                    let _ = done.send(upstream.status().as_u16());
+                }
+                std::future::pending::<axum::response::Response>().await
+            }
+        }),
+    );
+    let proxy_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_address = proxy_listener.local_addr().unwrap();
+    let proxy_task = tokio::spawn(async move {
+        axum::serve(
+            proxy_listener,
+            proxy.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+    });
+    let downstream_started = std::time::Instant::now();
+    let downstream_interview = dispatched_interview.clone();
+    let downstream = tokio::spawn({
+        let cookie = cookie.clone();
+        async move {
+            http_client()
+                .post(format!("http://{proxy_address}/api/token"))
+                .header("cookie", cookie)
+                .json(&json!({ "interviewId": downstream_interview }))
+                .send()
+                .await
+        }
+    });
+    let upstream_status = tokio::time::timeout(Duration::from_secs(2), upstream_done_rx)
+        .await
+        .expect("the real token handler should finish")
+        .unwrap();
+    assert_eq!(upstream_status, 200);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let dispatched_room: Option<String> = rusqlite::Connection::open(&path)
+        .unwrap()
+        .query_row(
+            "SELECT room_name FROM interviews WHERE id = ?1",
+            [&dispatched_interview],
+            |row| row.get(0),
+        )
+        .unwrap();
+    eprintln!(
+        "issue380 after_dispatch downstream_pending_ms={} dispatched_rooms={} consent_room={dispatched_room:?}",
+        downstream_started.elapsed().as_millis(),
+        dispatcher.rooms().len()
+    );
+    assert!(
+        !downstream.is_finished(),
+        "the proxy withheld response headers"
+    );
+    assert_eq!(dispatcher.rooms().len(), 1);
+    assert!(dispatched_room.is_some());
+
+    let dispatched_room = dispatched_room.unwrap();
+    let guarded_release = dispatcher.no_show_release(&dispatched_room);
+    let replacement_room = "interview-replacement-room";
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            "UPDATE interviews SET room_name = ?1 WHERE id = ?2",
+            rusqlite::params![replacement_room, &dispatched_interview],
+        )
+        .unwrap();
+    guarded_release.release().await.unwrap();
+    let room_after_stale_release: Option<String> = rusqlite::Connection::open(&path)
+        .unwrap()
+        .query_row(
+            "SELECT room_name FROM interviews WHERE id = ?1",
+            [&dispatched_interview],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(room_after_stale_release.as_deref(), Some(replacement_room));
+
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            "UPDATE interviews SET room_name = ?1 WHERE id = ?2",
+            rusqlite::params![&dispatched_room, &dispatched_interview],
+        )
+        .unwrap();
+    let pending_after_reload = start_interview(&client, &base, &cookie).await;
+    assert_ne!(pending_after_reload, dispatched_interview);
+
+    // Returning the claimed row to pending would violate the one-pending-row
+    // index while the reload's row exists, so the no-show release must wait.
+    dispatcher
+        .no_show_release(&dispatched_room)
+        .release()
+        .await
+        .unwrap();
+    let (room_while_pending, pending_room): (Option<String>, Option<String>) =
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .query_row(
+                "SELECT claimed.room_name, pending.room_name
+                 FROM interviews AS claimed, interviews AS pending
+                 WHERE claimed.id = ?1 AND pending.id = ?2",
+                rusqlite::params![&dispatched_interview, &pending_after_reload],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+    assert_eq!(
+        room_while_pending.as_deref(),
+        Some(dispatched_room.as_str())
+    );
+    assert_eq!(pending_room, None);
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            "DELETE FROM interviews WHERE id = ?1",
+            [&pending_after_reload],
+        )
+        .unwrap();
+    dispatcher.release_no_show(&dispatched_room).await;
+    let released_room: Option<String> = rusqlite::Connection::open(&path)
+        .unwrap()
+        .query_row(
+            "SELECT room_name FROM interviews WHERE id = ?1",
+            [&dispatched_interview],
+            |row| row.get(0),
+        )
+        .unwrap();
+    eprintln!("issue380 after_no_show consent_room={released_room:?}");
+    assert_eq!(released_room, None);
+
+    downstream.abort();
+    proxy_task.abort();
+    server.shutdown().await;
+    remove_database(path).await;
+}
+
 /// The per-batch caps bound one request and the stored quota bounds what an
 /// interview keeps. Neither bounds how often one account may ask, and an ask
 /// that is not refused before the body is a parse and a stored batch. This is

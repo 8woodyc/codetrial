@@ -198,9 +198,8 @@ pub fn interview_for_account(
 ///
 /// The claim is spent before the interviewer is dispatched, so that two
 /// requests racing on one interview cannot both start a room. A dispatcher that
-/// refuses then leaves a consent bound to a room nobody will join, and the
-/// candidate is told to retry a request that would be refused. This is that
-/// retry working.
+/// refuses or a dispatched room whose candidate never arrives would otherwise
+/// leave consent bound to a room nobody will join. This gives that claim back.
 ///
 /// Guarded on the room it is giving back, so a release arriving late cannot
 /// unbind a room some other request has since claimed.
@@ -219,7 +218,16 @@ pub fn release_interview_room(
         connection.execute(
             "
         UPDATE interviews SET room_name = NULL
-        WHERE id = ?1 AND account_id = ?2 AND room_name = ?3
+        WHERE id = ?1
+          AND account_id = ?2
+          AND room_name = ?3
+          AND NOT EXISTS (
+              SELECT 1 FROM interviews AS pending
+              WHERE pending.account_id = interviews.account_id
+                AND pending.consent_version = interviews.consent_version
+                AND pending.room_name IS NULL
+                AND pending.consent_withdrawn_at IS NULL
+          )
         ",
             (id, account_id, room_name),
         )?;

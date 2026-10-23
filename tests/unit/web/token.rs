@@ -21,6 +21,17 @@ fn peer() -> SocketAddr {
     SocketAddr::from(([10, 0, 0, 9], 4000))
 }
 
+#[tokio::test]
+async fn token_body_read_has_a_deadline() {
+    let stalled = futures_util::stream::pending::<Result<Bytes, std::io::Error>>();
+    let body = Body::from_stream(stalled);
+
+    assert_eq!(
+        read_token_body(body, Duration::from_millis(10)).await,
+        Err(TokenBodyReadError::TimedOut),
+    );
+}
+
 #[test]
 fn generated_candidate_identity_has_the_livekit_prefix() {
     let generated = generated_candidate_identity();

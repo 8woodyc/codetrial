@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use crate::config::{AgentConfig, Provider};
-use crate::web::{DispatchRefusal, RoomDispatcher};
+use crate::web::{DispatchRefusal, NoShowConsent, RoomDispatcher};
 
 const MAX_CONCURRENT_GUEST_INTERVIEWS: usize = 2;
 
@@ -46,7 +46,16 @@ impl RoomDispatcher for LocalDispatcher {
     }
 
     fn ensure_agent(&self, room_name: &str, provider: &Provider) -> Result<(), DispatchRefusal> {
-        self.ensure_agent_with_kind(room_name, provider, false)
+        self.ensure_agent_with_kind(room_name, provider, false, None)
+    }
+
+    fn ensure_agent_with_no_show_release(
+        &self,
+        room_name: &str,
+        provider: &Provider,
+        no_show: Option<NoShowConsent>,
+    ) -> Result<(), DispatchRefusal> {
+        self.ensure_agent_with_kind(room_name, provider, false, no_show)
     }
 
     fn ensure_guest_agent(
@@ -54,7 +63,7 @@ impl RoomDispatcher for LocalDispatcher {
         room_name: &str,
         provider: &Provider,
     ) -> Result<(), DispatchRefusal> {
-        self.ensure_agent_with_kind(room_name, provider, true)
+        self.ensure_agent_with_kind(room_name, provider, true, None)
     }
 }
 
@@ -64,6 +73,7 @@ impl LocalDispatcher {
         room_name: &str,
         provider: &Provider,
         guest: bool,
+        no_show: Option<NoShowConsent>,
     ) -> Result<(), DispatchRefusal> {
         let slot = match self.reserve_with_kind(room_name, guest) {
             Reservation::Existing => return Ok(()),
@@ -93,7 +103,7 @@ impl LocalDispatcher {
         // outlives the response by the length of the interview.
         self.runtime.spawn(async move {
             eprintln!("codetrial dispatch room={}", slot.room_name);
-            if let Err(error) = crate::livekit::run_room_with_slot(
+            match crate::livekit::run_room_with_slot(
                 &config,
                 &slot.room_name,
                 crate::web::current_epoch_seconds(),
@@ -101,10 +111,30 @@ impl LocalDispatcher {
             )
             .await
             {
-                eprintln!("codetrial agent_failed room={}: {error}", slot.room_name);
+                Ok(crate::livekit::RoomRunOutcome::NoCandidate) => {
+                    release_no_show(no_show, &slot.room_name).await;
+                }
+                Ok(crate::livekit::RoomRunOutcome::FailedBeforeCandidate(error)) => {
+                    eprintln!("codetrial agent_failed room={}: {error}", slot.room_name);
+                    release_no_show(no_show, &slot.room_name).await;
+                }
+                Ok(crate::livekit::RoomRunOutcome::Completed) => {}
+                Err(error) => {
+                    eprintln!("codetrial agent_failed room={}: {error}", slot.room_name);
+                }
             }
         });
         Ok(())
+    }
+}
+
+async fn release_no_show(no_show: Option<NoShowConsent>, room_name: &str) {
+    if let Some(no_show) = no_show
+        && let Err(error) = no_show.release().await
+    {
+        eprintln!(
+            "could not release interview consent after a no-show in room={room_name}: {error}"
+        );
     }
 }
 

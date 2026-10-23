@@ -861,7 +861,7 @@ test("a refused interview says why instead of silently degrading", () => {
   const script = interviewSource();
   const connect = functionBody(script, "connect");
 
-  assert.match(connect, /providerUiState\("degraded", error\?\.message\)/);
+  assert.match(connect, /providerUiState\("degraded", failure\?\.message\)/);
   // The reason has to reach the candidate, not only the console.
   const bannerAt = connect.indexOf('setBanner("connection", degraded.message)');
   const offlineAt = connect.indexOf("Offline mode is ready");

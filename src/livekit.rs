@@ -1531,6 +1531,12 @@ struct OpenSession<'a> {
     restarts: usize,
 }
 
+enum OpenSessionOutcome<'a> {
+    Started(Box<OpenSession<'a>>),
+    NoCandidate,
+    FailedBeforeCandidate(Box<dyn std::error::Error + Send + Sync>),
+}
+
 /// Joins, waits for a candidate, brings up audio and Gemini, and greets.
 ///
 /// Split from [`run_room`] because none of it repeats: it runs once, in order,
@@ -1538,29 +1544,40 @@ struct OpenSession<'a> {
 /// before it starts. What is left in `run_room` is the part that runs many
 /// times, which is the part worth reading as a loop.
 ///
-/// `Ok(None)` is nobody joined. That is not an error: the room was named, the
-/// candidate never arrived, and there is nothing to run or report.
+/// `NoCandidate` is nobody joined. That is not an error: the room was named,
+/// the candidate never arrived, and there is nothing to run or report.
 async fn open_session<'a>(
     config: &'a AgentConfig,
     keys: &Arc<GeminiKeys>,
     room_name: &'a str,
     now_seconds: u64,
     session_id: u64,
-) -> Result<Option<OpenSession<'a>>, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<OpenSessionOutcome<'a>, Box<dyn std::error::Error + Send + Sync>> {
     let agent_identity = agent_identity(room_name);
-    let (room, mut events) = join_room(config, room_name, &agent_identity, now_seconds).await?;
+    let (room, mut events) = match join_room(config, room_name, &agent_identity, now_seconds).await
+    {
+        Ok(joined) => joined,
+        Err(error) => return Ok(OpenSessionOutcome::FailedBeforeCandidate(error)),
+    };
     let room = RoomLink::live(room);
     let mut agent_state = session::AgentState::default();
-    session::publish_opening_attributes(&room, &mut agent_state, config.gemini_silence_ms).await?;
+    if let Err(error) =
+        session::publish_opening_attributes(&room, &mut agent_state, config.gemini_silence_ms).await
+    {
+        return Ok(OpenSessionOutcome::FailedBeforeCandidate(error));
+    }
 
     // The candidate's metadata picks the problem, so nothing else can start
     // until someone joins.
     let mut deferred_events = Vec::new();
-    let Some((candidate_identity, candidate_metadata)) =
-        candidate_metadata(room.connected(), &mut events, &mut deferred_events).await?
-    else {
+    let candidate =
+        match candidate_metadata(room.connected(), &mut events, &mut deferred_events).await {
+            Ok(candidate) => candidate,
+            Err(error) => return Ok(OpenSessionOutcome::FailedBeforeCandidate(error)),
+        };
+    let Some((candidate_identity, candidate_metadata)) = candidate else {
         eprintln!("no candidate joined room={room_name}; leaving it");
-        return Ok(None);
+        return Ok(OpenSessionOutcome::NoCandidate);
     };
     let events = tokio::sync::Mutex::new(events);
     let boot = candidate_bootstrap(config, room_name, Some(&candidate_metadata));
@@ -1699,7 +1716,7 @@ async fn open_session<'a>(
     turn.activity
         .mark_prompted(Instant::now(), Some(&greeting), false);
 
-    Ok(Some(OpenSession {
+    Ok(OpenSessionOutcome::Started(Box::new(OpenSession {
         room,
         events,
         agent_identity,
@@ -1711,7 +1728,7 @@ async fn open_session<'a>(
         turn,
         started_at,
         restarts,
-    }))
+    })))
 }
 
 /// The room loop's own bookkeeping, distinct from the session it runs on.
@@ -2585,7 +2602,37 @@ pub async fn run_room(
     room_name: &str,
     now_seconds: u64,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    run_room_with_slot(config, room_name, now_seconds, None).await
+    match run_room_with_slot(config, room_name, now_seconds, None).await? {
+        RoomRunOutcome::Completed | RoomRunOutcome::NoCandidate => Ok(()),
+        RoomRunOutcome::FailedBeforeCandidate(error) => Err(error),
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum RoomRunOutcome {
+    Completed,
+    NoCandidate,
+    FailedBeforeCandidate(Box<dyn std::error::Error + Send + Sync>),
+}
+
+fn startup_failure_line(
+    model: &str,
+    room_name: &str,
+    session_id: u64,
+    error: &(dyn std::error::Error + Send + Sync + 'static),
+) -> String {
+    // A socket may have opened before the failure, so no count is claimed; no
+    // generation was asked for, so there is no usage.
+    let outcome = LiveOutcome::from_error(error, LiveOutcome::Error);
+    live_usage_line(
+        room_name,
+        session_id,
+        model,
+        0,
+        outcome,
+        None,
+        &crate::gemini::TokenUsage::default(),
+    )
 }
 
 pub(crate) async fn run_room_with_slot(
@@ -2593,7 +2640,7 @@ pub(crate) async fn run_room_with_slot(
     room_name: &str,
     now_seconds: u64,
     slot: Option<&crate::dispatch::Slot>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<RoomRunOutcome, Box<dyn std::error::Error + Send + Sync>> {
     // Names this run on every usage line. Milliseconds rather than the
     // dispatch's seconds, so a room retried within the same second is not
     // summed with the run before it.
@@ -2603,7 +2650,36 @@ pub(crate) async fn run_room_with_slot(
             u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
         });
     let keys = Arc::new(GeminiKeys::from_config(config));
-    let Some(OpenSession {
+    let session = open_session(config, &keys, room_name, now_seconds, session_id)
+        .await
+        .inspect_err(|error| {
+            eprintln!(
+                "{}",
+                startup_failure_line(
+                    &config.gemini_live_model,
+                    room_name,
+                    session_id,
+                    error.as_ref(),
+                )
+            );
+        })?;
+    let session = match session {
+        OpenSessionOutcome::Started(session) => session,
+        OpenSessionOutcome::NoCandidate => return Ok(RoomRunOutcome::NoCandidate),
+        OpenSessionOutcome::FailedBeforeCandidate(error) => {
+            eprintln!(
+                "{}",
+                startup_failure_line(
+                    &config.gemini_live_model,
+                    room_name,
+                    session_id,
+                    error.as_ref(),
+                )
+            );
+            return Ok(RoomRunOutcome::FailedBeforeCandidate(error));
+        }
+    };
+    let OpenSession {
         room,
         events,
         agent_identity,
@@ -2615,30 +2691,7 @@ pub(crate) async fn run_room_with_slot(
         mut turn,
         started_at,
         restarts,
-    }) = open_session(config, &keys, room_name, now_seconds, session_id)
-        .await
-        .inspect_err(|error| {
-            // The interview never started, and the summary is where an operator
-            // counts those, a first open a depleted project refused above all.
-            // A socket may have opened before the failure, so no count is
-            // claimed; no generation was asked for, so there is no usage.
-            let outcome = LiveOutcome::from_error(error.as_ref(), LiveOutcome::Error);
-            eprintln!(
-                "{}",
-                live_usage_line(
-                    room_name,
-                    session_id,
-                    &config.gemini_live_model,
-                    0,
-                    outcome,
-                    None,
-                    &crate::gemini::TokenUsage::default(),
-                )
-            );
-        })?
-    else {
-        return Ok(());
-    };
+    } = *session;
 
     let interview = InterviewContext {
         config,
@@ -2910,7 +2963,7 @@ pub(crate) async fn run_room_with_slot(
             &turn.activity.live_usage,
         )
     );
-    result
+    result.map(|()| RoomRunOutcome::Completed)
 }
 
 /// A session's usage summary, in the one spelling the log analyzer reads.
