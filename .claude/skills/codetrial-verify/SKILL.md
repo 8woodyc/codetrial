@@ -64,7 +64,9 @@ the copy. Its file set is in `scripts/indent.sh` and includes the issue forms,
 which ride along to be parsed. A formatter the files need is required
 everywhere except the gate, which passes `--skip-missing` and lists the skip:
 `make indent-check` is the same check failing on a missing tool, and the
-pre-commit hook runs it as `--staged` against the index.
+pre-commit hook runs it as `--staged` against the index. A pull request whose
+commits are all Dependabot's has its drift reported in CI rather than failed;
+with no merge queue on main yet, it is fixed before merging or it fails main.
 
 ## Drift is the usual failure
 

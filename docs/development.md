@@ -121,7 +121,11 @@ so a commit that touches only Rust does not need Prettier, but one that
 touches JavaScript does. Only the gate passes `--skip-missing`, which skips the
 lane, ends with `Formatting clean for the lanes that ran; not checked:` and
 the tools it skipped instead of `Formatting clean.`, and joins the
-gate's summary, which CI fails on.
+gate's summary, which CI fails on. CI reports rather than fails formatting
+drift on a pull request Dependabot opened and wrote, because it can bump
+Prettier but cannot run `make indent`. Nothing fails it after that until main
+has a merge queue, so whoever merges such a pull request runs `make indent` on
+it first, or the push to main and every later pull request fail on the drift.
 
 `npm ci` installs the pinned Prettier version used for HTML, JavaScript (`.js`,
 `.mjs` and `.cjs`) and the issue forms under `.github/ISSUE_TEMPLATE/`. The

@@ -100,9 +100,11 @@ once moved to `.git/hooks/<name>.local`, after ours.
 `cargo build` runs the same installer whenever that check fails, and skips it
 once the hooks are in effect; what needs you shows up as a Cargo warning.
 
-Formatting is required of every contributor. The pre-commit hook refuses a
-commit whose staged files need a formatter you have not installed, and `make
-indent-check` checks the tree the same way without rewriting it.
+Formatting is required of every contributor; only a pull request Dependabot
+opened and wrote has formatting drift reported rather than failed. The pre-commit
+hook refuses a commit whose staged files need a formatter you have not
+installed, and `make indent-check` checks the tree the same way without
+rewriting it.
 
 The gate ends by naming any lane it skipped; read that rather than assuming
 green means covered. [docs/development.md](docs/development.md) has

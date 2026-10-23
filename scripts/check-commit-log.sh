@@ -18,6 +18,20 @@ failed=0
 # person adds to the same branch is still read.
 dependabot='49699333+dependabot[bot]@users.noreply.github.com'
 
+# --bot-only asks a narrower question of the same address: whether every commit
+# on standard input is Dependabot's, with at least one to judge. The indent gate
+# asks it before letting a pull request's formatting drift through as a report.
+if [ "${1:-}" = --bot-only ]; then
+    seen=0
+    while read -r commit; do
+        [ -n "$commit" ] || continue
+        [ "$(git show -s --format=%ae "$commit")" = "$dependabot" ] || exit 1
+        seen=1
+    done
+    [ "$seen" -eq 1 ]
+    exit
+fi
+
 while read -r commit; do
     [ -n "$commit" ] || continue
     [ "$(git show -s --format=%ae "$commit")" = "$dependabot" ] && continue

@@ -372,9 +372,27 @@ gate fmt cargo fmt --check --manifest-path "$ROOT/Cargo.toml"
 # missing formatter skip its lane rather than fail, and the skip joins this
 # run's summary, which CI fails on; overlapping with the fmt gate above costs
 # nothing and reads better when it is `cargo fmt` alone that drifted.
-gate indent with_reported_skips formatting \
-    's/^indent\.sh: \(.* not installed\), skipping that lane.*/\1/p' \
-    "$ROOT/scripts/indent.sh" --check --skip-missing
+#
+# Dependabot bumps Prettier with nobody at a keyboard to run `make indent`, so
+# when it wrote every commit in INDENT_ADVISORY_RANGE (CI's base..head of the
+# pull request) the drift is printed rather than failed, for whoever merges the
+# pull request to fix. A commit of a person's on the same branch, a merge from
+# the "Update branch" button included, is held to it again.
+indent_gate()
+{
+    with_reported_skips formatting \
+        's/^indent\.sh: \(.* not installed\), skipping that lane.*/\1/p' \
+        "$ROOT/scripts/indent.sh" --check --skip-missing
+    status=$?
+    if [ "$status" -eq 1 ] && [ -n "${INDENT_ADVISORY_RANGE:-}" ] \
+        && (cd "$ROOT" && git rev-list "$INDENT_ADVISORY_RANGE" \
+            | ./scripts/check-commit-log.sh --bot-only); then
+        echo "Formatting drift reported, not failed: Dependabot wrote every commit." >&2
+        return 0
+    fi
+    return "$status"
+}
+gate indent indent_gate
 
 # CONTRIBUTING.md keeps test bodies out of src/: a module declares its tests
 # with #[path] and the body lives under tests/unit/. A test attribute, or a

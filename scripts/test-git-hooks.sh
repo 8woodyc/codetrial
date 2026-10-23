@@ -417,6 +417,15 @@ git commit -q --allow-empty --no-verify -m "$bump"
 expect 1 "the same message from anyone else is" \
     sh -c 'git rev-parse HEAD | ./scripts/check-commit-log.sh'
 
+# The same address decides whether a pull request's formatting drift is a bot's
+# to report: only when every commit is Dependabot's, and there is one.
+expect 0 "Dependabot's commits alone are a bot's" \
+    sh -c 'git rev-parse HEAD~1 | ./scripts/check-commit-log.sh --bot-only'
+expect 1 "a person's commit beside them is not" \
+    sh -c 'git rev-list HEAD~2..HEAD | ./scripts/check-commit-log.sh --bot-only'
+expect 1 "no commit at all is not" \
+    sh -c ': | ./scripts/check-commit-log.sh --bot-only'
+
 # The pushes above went to main of a remote that is not upstream and passed,
 # because until now this clone had no upstream remote to compare against. It
 # gets one here, never fetched: its tracking ref is written by hand, so no case
