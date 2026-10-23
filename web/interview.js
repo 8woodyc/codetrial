@@ -598,6 +598,8 @@ const nodes = {
   audioStepMic: document.querySelector("#audio-step-mic"),
   audioStepCamera: document.querySelector("#audio-step-camera"),
   cameraState: document.querySelector("#camera-state"),
+  cameraPreviewContainer: document.querySelector(".camera-preview-container"),
+  cameraPreview: document.querySelector("#camera-preview"),
   cameraNameDisclosure: document.querySelector("#camera-name-disclosure"),
   cameraSkip: document.querySelector("#camera-skip"),
   cameraIntegrityVideo: document.querySelector("#camera-integrity-video"),
@@ -1339,6 +1341,56 @@ function runAudioCheck() {
     // and read from the face check, so whether the camera worked depended on
     // who had run most recently.
     const cameraReady = () => videoTrackReady(pool.trackOf("video"));
+
+    let previewTrack = null;
+
+    const stopCameraPreview = () => {
+      if (previewTrack) {
+        previewTrack.removeEventListener("mute", updateCameraPreview);
+        previewTrack.removeEventListener("unmute", updateCameraPreview);
+        previewTrack = null;
+      }
+
+      const video = nodes.cameraPreview;
+      nodes.cameraPreviewContainer.hidden = true;
+      video.pause();
+      video.srcObject = null;
+    };
+
+    const updateCameraPreview = () => {
+      const track = pool.trackOf("video");
+
+      if (!videoTrackReady(track) || finished) {
+        const video = nodes.cameraPreview;
+        nodes.cameraPreviewContainer.hidden = true;
+        video.pause();
+        video.srcObject = null;
+        return;
+      }
+
+      const video = nodes.cameraPreview;
+
+      if (video.srcObject?.getVideoTracks()[0] !== track) {
+        video.srcObject = new MediaStream([track]);
+      }
+
+      nodes.cameraPreviewContainer.hidden = false;
+      void video.play().catch(() => {});
+    };
+
+    const startCameraPreview = () => {
+      const track = pool.trackOf("video");
+      if (!track || finished) return;
+
+      stopCameraPreview();
+
+      previewTrack = track;
+      track.addEventListener("mute", updateCameraPreview);
+      track.addEventListener("unmute", updateCameraPreview);
+
+      updateCameraPreview();
+    };
+
     const faceCheck = createFaceCheck({
       video: nodes.cameraIntegrityVideo,
       trackOf: () => pool.trackOf("video"),
@@ -1434,6 +1486,7 @@ function runAudioCheck() {
       meter.stop();
       pool.cancelRetry();
       faceCheck.close();
+      stopCameraPreview();
       void context?.close().catch(() => {});
     };
 
@@ -1578,12 +1631,20 @@ function runAudioCheck() {
     // paint the step green over a black square.
     pool.configure("video", {
       accept: (track) => videoTrackReady(track),
-      onTrack: () => void faceCheck.start(),
+
+      onTrack: () => {
+        startCameraPreview();
+        void faceCheck.start();
+      },
+
       // The pool drops an ended camera on its own now. A check still bound to
       // that track would keep judging its last frame, and `start` refuses to
       // run while one is already running, so the replacement would never be
       // watched at all.
-      onLost: () => faceCheck.reset(),
+      onLost: () => {
+        stopCameraPreview();
+        faceCheck.reset();
+      },
     });
     pool.start();
     refresh();
