@@ -49,9 +49,28 @@
             <span class="step-number" aria-hidden="true">1</span>
             <div>
               <h2 id="challenge-heading">Choose a problem</h2>
-              <p>Get a random problem at your level, or pick one by name.</p>
+              <p>Choose a difficulty for your next interview.</p>
             </div>
           </div>
+          <p class="setting-label">
+            <label for="selection-mode">Selection</label>
+          </p>
+          <select id="selection-mode">
+            <option value="practice">Practice</option>
+            <option value="strict">Strict Interview</option>
+          </select>
+          <p
+            class="duration-note"
+            id="selection-note"
+            aria-live="polite"
+            hidden
+          >
+            Sign in with GitHub to use Strict Interview. Strict assigns a
+            problem at your selected difficulties after media preflight.
+            Reloading starts a new attempt with a different problem at those
+            difficulties, if one is available, after another preflight.
+          </p>
+
           <!-- Medium is checked because a candidate who touches nothing has to end
            up on the server's own default length, and app.js derives the length
            from this box. A section with an aria-label is a region, not a group,
@@ -1921,8 +1940,7 @@
           </details>
 
           <section class="start-row">
-            <!-- Enabled by app.js once a problem is chosen, so the button cannot
-             start an interview on a problem the page has not picked yet. -->
+            <!-- app.js enables Start once this selection mode is ready. -->
             <h3 id="next-steps-label" class="setting-label">
               What happens next
             </h3>

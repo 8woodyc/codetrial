@@ -267,6 +267,7 @@ function pageHarness(phase = "live") {
   nodes.endingTitle.textContent = "Jim is writing up your evaluation...";
   nodes.leaveRoom.textContent = "Taking too long? Leave the room";
   const scope = {
+    strict: false,
     state: { phase, room, connected: true },
     nodes,
     topics,
