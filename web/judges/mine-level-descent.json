@@ -94,6 +94,46 @@
         ]
       ],
       "expected": -6
+    },
+    {
+      "label": "cheapest values not connected",
+      "input": [
+        [
+          [
+            -1
+          ],
+          [
+            2,
+            3
+          ],
+          [
+            1,
+            -1,
+            -3
+          ]
+        ]
+      ],
+      "expected": -1
+    },
+    {
+      "label": "cheaper step misses the deep saving",
+      "input": [
+        [
+          [
+            1
+          ],
+          [
+            2,
+            3
+          ],
+          [
+            4,
+            5,
+            -10
+          ]
+        ]
+      ],
+      "expected": -6
     }
   ],
   "paramNames": [
