@@ -1187,24 +1187,18 @@ public:
     );
   }
 
-  // Compiles a flatten candidate into the harness and returns its results.
-  // The timeout keeps a serializer that walks forever from hanging the lane.
-  async function runFlatten(language, candidate) {
-    const dir = mkdtempSync(join(tmpdir(), `codetrial-${language}-flatten-`));
+  // Compiles a candidate into the named judge's harness and returns its
+  // results. The timeout keeps a serializer that walks forever from hanging
+  // the lane.
+  async function runJudge(language, id, candidate) {
+    const dir = mkdtempSync(join(tmpdir(), `codetrial-${language}-${id}-`));
     try {
       const source = join(
         dir,
-        language === "java" ? "Main.java" : `flatten.${language}`,
+        language === "java" ? "Main.java" : `candidate.${language}`,
       );
-      const binary = join(dir, "flatten");
-      writeFileSync(
-        source,
-        generateHarness(
-          language,
-          judges["flatten-binary-tree-to-linked-list"],
-          candidate,
-        ),
-      );
+      const binary = join(dir, "candidate");
+      writeFileSync(source, generateHarness(language, judges[id], candidate));
       if (language === "java") await run("javac", [source]);
       else
         await run(language === "c" ? "cc" : "g++", [
@@ -1289,7 +1283,11 @@ public:
       { skip },
       async () => {
         const judge = judges["flatten-binary-tree-to-linked-list"];
-        const results = await runFlatten(language, cyclicFlatten[language]);
+        const results = await runJudge(
+          language,
+          "flatten-binary-tree-to-linked-list",
+          cyclicFlatten[language],
+        );
         assert.equal(results.length, judge.cases.length);
         judge.cases.forEach((testCase, index) => {
           const result = results[index];
@@ -1344,8 +1342,9 @@ public:
         { skip },
         async () => {
           const judge = judges["flatten-binary-tree-to-linked-list"];
-          const results = await runFlatten(
+          const results = await runJudge(
             language,
+            "flatten-binary-tree-to-linked-list",
             twinChildren[language](shared),
           );
           assert.equal(results.length, judge.cases.length);
@@ -1423,66 +1422,42 @@ public:
     }
 }`,
   };
-  const cyclicCopyRuns = {
-    c: { skip: noCc, file: "copy.c" },
-    cpp: { skip: noGpp, file: "copy.cpp" },
-    java: { skip: noJava, file: "Main.java" },
-  };
-  for (const [language, { skip, file }] of Object.entries(cyclicCopyRuns)) {
+  const cyclicCopyRuns = [
+    ["c", noCc],
+    ["cpp", noGpp],
+    ["java", noJava],
+  ];
+  for (const [language, skip] of cyclicCopyRuns) {
     it(
       `${language} harness refuses a copied random list that loops back into itself`,
       { skip },
       async () => {
         const spec = judges["copy-list-with-random-pointer"];
-        const dir = mkdtempSync(join(tmpdir(), `codetrial-${language}-copy-`));
-        try {
-          const source = join(dir, file);
-          const binary = join(dir, "copy");
-          writeFileSync(
-            source,
-            generateHarness(language, spec, cyclicCopies[language]),
-          );
-          let command = binary;
-          let args = [];
-          if (language === "c")
-            await run("cc", ["-std=c17", source, "-o", binary]);
-          if (language === "cpp")
-            await run("g++", ["-std=c++20", source, "-o", binary]);
-          if (language === "java") {
-            await run("javac", [source]);
-            command = "java";
-            args = ["-cp", dir, "Main"];
+        const results = await runJudge(
+          language,
+          "copy-list-with-random-pointer",
+          cyclicCopies[language],
+        );
+        spec.cases.forEach((testCase, index) => {
+          const result = results[index];
+          if (testCase.expected.length === 0) {
+            assert.deepEqual(result.actual, [], testCase.label);
+            return;
           }
-          // A serializer that walks the ring forever fails here instead of
-          // hanging the lane.
-          const { stdout } = await run(command, args, {
-            encoding: "utf8",
-            timeout: 10000,
-          });
-          const { results } = parseCompilerResults(stdout);
-          spec.cases.forEach((testCase, index) => {
-            const result = results[index];
-            if (testCase.expected.length === 0) {
-              assert.deepEqual(result.actual, [], testCase.label);
-              return;
-            }
-            assert.match(
-              result.error ?? "",
-              /Returned list must not reach a node twice\./,
-              testCase.label,
-            );
-          });
-        } finally {
-          rmSync(dir, { recursive: true, force: true });
-        }
+          assert.match(
+            result.error ?? "",
+            /Returned list must not reach a node twice\./,
+            testCase.label,
+          );
+        });
       },
     );
   }
 
   // C used to print these two refusals where the answer goes, so the case
-  // failed as a wrong answer with no reason. C++, Java, JavaScript and Python
-  // throw them, and C reports them through the same error field. A shallow
-  // copy that also loops is refused as a shallow copy, as those four refuse
+  // failed as a wrong answer with no reason. C++ and Java throw them, and C
+  // reports them through the same error field. A shallow copy that also
+  // loops is refused as a shallow copy, as the other four harnesses refuse
   // it, because the original head comes before any revisit.
   const deepCopy = "Returned list must be a deep copy.";
   const strayRandom =
@@ -1522,34 +1497,25 @@ public:
   for (const { name, message, candidate } of strayCopies) {
     it(`c harness reports ${name} as an error`, { skip: noCc }, async () => {
       const spec = judges["copy-list-with-random-pointer"];
-      const dir = mkdtempSync(join(tmpdir(), "codetrial-c-stray-"));
-      try {
-        const source = join(dir, "copy.c");
-        const binary = join(dir, "copy");
-        writeFileSync(source, generateHarness("c", spec, candidate));
-        await run("cc", ["-std=c17", source, "-o", binary]);
-        const { stdout } = await run(binary, [], {
-          encoding: "utf8",
-          timeout: 10000,
-        });
-        const { results } = parseCompilerResults(stdout);
-        spec.cases.forEach((testCase, index) => {
-          const result = results[index];
-          const nodes = testCase.input[0];
-          const strays =
-            message === deepCopy
-              ? nodes.length > 0
-              : nodes.some(([, random]) => random !== null);
-          if (!strays) {
-            assert.deepEqual(result.actual, testCase.expected, testCase.label);
-            return;
-          }
-          assert.equal(result.actual, null, testCase.label);
-          assert.equal(result.error, message, testCase.label);
-        });
-      } finally {
-        rmSync(dir, { recursive: true, force: true });
-      }
+      const results = await runJudge(
+        "c",
+        "copy-list-with-random-pointer",
+        candidate,
+      );
+      spec.cases.forEach((testCase, index) => {
+        const result = results[index];
+        const nodes = testCase.input[0];
+        const strays =
+          message === deepCopy
+            ? nodes.length > 0
+            : nodes.some(([, random]) => random !== null);
+        if (!strays) {
+          assert.deepEqual(result.actual, testCase.expected, testCase.label);
+          return;
+        }
+        assert.equal(result.actual, null, testCase.label);
+        assert.equal(result.error, message, testCase.label);
+      });
     });
   }
 });
