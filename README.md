@@ -270,7 +270,7 @@ make clean           # remove build output
 make fetch-vendor    # fetch pinned browser assets
 make verify-vendor   # verify vendor checksums
 make check           # test gate plus live Gemini credential check
-make hooks           # install the git hooks; uninstall-hooks removes them
+make hooks           # install the git hooks and verify they are in effect
 ./scripts/test.sh    # credential-free CI gate
 ```
 

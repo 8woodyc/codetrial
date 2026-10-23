@@ -164,8 +164,32 @@ function reachable from `cargo test`, is the direction it should travel.
 and runs in the gate, so a hook that stops rejecting fails here rather than on
 somebody's next commit.
 
-`make hooks` installs wrappers in `.git/hooks` that resolve the active
-worktree's `scripts/git-*.sh`. The pre-commit hook
+`make hooks` installs a wrapper in `.git/hooks` for each `scripts/git-*.sh`
+that resolves the active worktree's copy, then verifies each is the current
+wrapper and executable, and exits nonzero otherwise. A wrapper names itself on
+its second line, so one an older install wrote is reported `STALE` and
+rewritten. A hook it did not write is left in place and reported as `FOREIGN`,
+and the install exits nonzero. Once you move it to `<name>.local` and run
+`make hooks` again, it runs after ours with the same arguments and stdin, and
+`make uninstall-hooks` moves it back. A `core.hooksPath` outside the
+repository is reported as `SHARED` and nothing is written there. A checkout
+from before the scripts existed has nothing to run and commits as before.
+`./scripts/install-git-hooks.sh --check` runs the verification alone.
+
+`build.rs` runs that check whenever the build script reruns and the install
+only when it fails. The script runs on the first `cargo build`, `cargo check`
+or rust-analyzer pass in a clone or worktree, and again when the installer or
+the hooks directory changes, so a deleted hook comes back on the next build.
+A refusal reaches the terminal as a Cargo warning and never fails the build.
+
+The hooks run the `scripts/` of the checkout they fire in, as `build.rs` does
+on a build, so review a branch before committing on it as you would before
+building it. No script of ours runs while a merge is concluded: by the time
+its commit-msg or prepare-commit-msg fires the incoming tree is written, and
+running it would make `git pull` execute what it pulled, so the wrapper skips
+it, and there is no pre-merge-commit hook. CI checks a pull request's content.
+
+The pre-commit hook
 runs `rustfmt`, ESLint, Prettier, `ruff`, `shellcheck`, `shfmt` and
 `commentflow` over a
 checkout of the index, so an unstaged edit neither fails a commit nor passes
