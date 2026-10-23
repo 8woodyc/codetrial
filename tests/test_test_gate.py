@@ -435,20 +435,30 @@ gate()
                 found = shutil.which(tool)
                 self.assertIsNotNone(found, tool)
                 (tools / tool).symlink_to(found)
-            result = subprocess.run(
-                [shutil.which("sh"), "scripts/indent.sh", "--check"],
-                cwd=work,
-                env={"PATH": str(tools), "HOME": directory},
-                capture_output=True,
-                text=True,
-                timeout=60,
-                check=False,
-            )
+
+            def indent(*flags):
+                return subprocess.run(
+                    [shutil.which("sh"), "scripts/indent.sh", *flags],
+                    cwd=work,
+                    env={"PATH": str(tools), "HOME": directory},
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    check=False,
+                )
+
+            result = indent("--check", "--skip-missing")
+            # Outside the gate a missing formatter is a failure, not a pass
+            # with a footnote.
+            strict = indent("--check")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(
             "formatting, commentflow not installed",
             self.reported_skips("formatting", result.stderr),
         )
+        self.assertIn("not checked: commentflow shfmt.", result.stdout)
+        self.assertEqual(strict.returncode, 2, strict.stderr)
+        self.assertIn("commentflow: install", strict.stderr)
 
     def test_python_skips_join_the_summary(self):
         with tempfile.TemporaryDirectory() as directory:

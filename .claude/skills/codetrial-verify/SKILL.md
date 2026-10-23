@@ -52,16 +52,21 @@ proves them.
 
 The `indent` gate is the one that surprises people. `scripts/indent.sh --check`
 copies the tree, runs the whole formatter chain over the copy, and diffs:
-comment reflow with `commentflow`, then `cargo fmt`, `ruff format` and `shfmt`.
+comment reflow with `commentflow`, then `rustfmt`, `ruff format` and `shfmt`.
 Checking the composition rather than each tool is not a flourish. commentflow
-puts a blank line before a comment inside a method chain and `cargo fmt` takes
+puts a blank line before a comment inside a method chain and rustfmt takes
 it straight back out, so `commentflow --check` alone can never be satisfied on
 Rust. `make indent` runs the same script with `--write`, so the fix for a
 failure is always that one command. Never pass `shfmt` a style flag; it reads
 `.editorconfig`. Prettier sits beside the chain rather than in it: it shares no
 file with the others, so the check runs it in place with `--cache`, alongside
 the copy. Its file set is in `scripts/indent.sh` and includes the issue forms,
-which ride along to be parsed. Without `npm ci` it skips with a note.
+which ride along to be parsed. A formatter the files need is required
+everywhere except the gate, which passes `--skip-missing` and lists the skip:
+`make indent-check` is the same check failing on a missing tool, and the
+pre-commit hook runs it as `--staged` against the index. A pull request whose
+commits are all Dependabot's has its drift reported in CI rather than failed;
+with no merge queue on main yet, it is fixed before merging or it fails main.
 
 ## Drift is the usual failure
 
@@ -180,11 +185,14 @@ the report.
 `make hooks` installs the fast half of the gate at commit time, once per clone
 and before the first commit there; how to read its output is in
 [conventions](../codetrial-conventions/SKILL.md#commit-messages):
-`scripts/git-pre-commit.sh` runs `rustfmt`, ESLint, Prettier, `ruff` and
-`shellcheck` over a checkout of the index, so an unstaged edit neither fails a
-commit nor sneaks through one, plus `commentflow --check` and `shfmt -d` on
-staged shell. It does not build, test or check generated-artifact drift; that
-is what the gate is for. `scripts/git-commit-msg.sh` holds the message to the
+`scripts/git-pre-commit.sh` runs ESLint, `ruff check` and `shellcheck`, then
+`scripts/indent.sh --staged`, over a checkout of the index, so an unstaged edit
+neither fails a commit nor sneaks through one; a staged formatter setting
+widens the formatting check to every file. No script of ours runs while a merge
+is concluded, since it would execute the merged-in scripts. A formatter a staged file needs refuses
+the commit when missing; a missing linter is named in the closing line instead
+of reported as passed. It does not build, test or check generated-artifact
+drift; that is what the gate is for. `scripts/git-commit-msg.sh` holds the message to the
 rules it prints with `--rules`, `scripts/git-prepare-commit-msg.sh` splices the
 template above a `commit -v` scissors line, and `scripts/git-pre-push.sh`
 replays the rules over commits a rebase or an amend rewrote after the fact.

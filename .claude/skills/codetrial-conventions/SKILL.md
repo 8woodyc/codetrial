@@ -22,15 +22,17 @@ user's approval first.
 
 ## Commit messages
 
-Before the first commit in a clone, run `make hooks`, and read both its exit
-status and its output. It is safe to repeat, and a worktree shares the clone's
-hooks, so once per clone covers every branch. Exit 0 with `OK` or `HOOK` for
-each `scripts/git-*.sh` means the message rules will run; a nonzero exit, or a
-hook with no line at all, means that hook failed to install, since a wrapper
-that cannot be written prints nothing. `KEEP` means a hook of the user's own
-already sits there and ours is not installed: say so, and leave it for the user
-to settle, since deleting it is how a local workflow disappears. `NOTE` means
-`core.hooksPath` points elsewhere; check that the wrappers landed there. Never
+Before the first commit in a clone, run `make hooks`. It is safe to repeat, and
+a worktree shares the clone's hooks, so once per clone covers every branch. It
+verifies what it installed, and exit 0 means every hook is in effect: one `OK`
+line per `scripts/git-*.sh`. A nonzero exit means at least one is not, and the
+lines say which. `FOREIGN` means a hook of the user's own already sits there and
+ours is not installed, and `SHARED` means `core.hooksPath` points outside the
+repository, where nothing was written: say so, and leave it for the user to
+settle with the integration the output prints, since deleting their hook or
+writing into a shared directory is how a local workflow disappears. `STALE`
+is an older wrapper of ours, which `make hooks` rewrites without asking.
+`./scripts/install-git-hooks.sh --check` re-asks without writing. Never
 commit with `--no-verify` or `-n`, and when the commit-msg hook refuses a
 message, rewrite the message: the pre-push hook and CI replay the same rules
 later, when fixing them costs a rebase.

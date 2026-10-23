@@ -368,14 +368,60 @@ gate mutants-exclusions mutants_exclusions
 gate fmt cargo fmt --check --manifest-path "$ROOT/Cargo.toml"
 
 # Comment reflow and shell formatting, checked against a copy of the tree so a
-# gate never rewrites what it is judging. Both tools are optional locally and
-# installed in CI, so the check skips a lane rather than failing on a missing
-# tool, and the skip joins this run's summary; overlapping with the fmt gate
-# above costs nothing and reads better when it is `cargo fmt` alone that
-# drifted.
-gate indent with_reported_skips formatting \
-    's/^indent\.sh: \(.* not installed\), skipping that lane.*/\1/p' \
-    "$ROOT/scripts/indent.sh" --check
+# gate never rewrites what it is judging. This is the one caller that lets a
+# missing formatter skip its lane rather than fail, and the skip joins this
+# run's summary, which CI fails on; overlapping with the fmt gate above costs
+# nothing and reads better when it is `cargo fmt` alone that drifted.
+#
+# Dependabot bumps Prettier with nobody at a keyboard to run `make indent`, so
+# when it wrote every commit in INDENT_ADVISORY_RANGE (CI's base..head of the
+# pull request) the drift is printed rather than failed, for whoever merges the
+# pull request to fix. A commit of a person's on the same branch, a merge from
+# the "Update branch" button included, is held to it again.
+indent_gate()
+{
+    with_reported_skips formatting \
+        's/^indent\.sh: \(.* not installed\), skipping that lane.*/\1/p' \
+        "$ROOT/scripts/indent.sh" --check --skip-missing
+    status=$?
+    if [ "$status" -eq 1 ] && [ -n "${INDENT_ADVISORY_RANGE:-}" ] \
+        && (cd "$ROOT" && git rev-list "$INDENT_ADVISORY_RANGE" \
+            | ./scripts/check-commit-log.sh --bot-only); then
+        echo "Formatting drift reported, not failed: Dependabot wrote every commit." >&2
+        return 0
+    fi
+    return "$status"
+}
+gate indent indent_gate
+
+# CONTRIBUTING.md keeps test bodies out of src/: a module declares its tests
+# with #[path] and the body lives under tests/unit/. A test attribute, or a
+# cfg(test) module with its body inline, compound cfgs and an attribute on the
+# same line included, is the mechanical half of that rule. A negated cfg is
+# never judged a test, which misses `all(test, not(x))` rather than refuse a
+# production module behind `not(any(test, x))`. cfg(test) items that are not
+# modules stay allowed, since a test-only recorder or constructor is
+# implementation the tests reach through `super::`.
+src_test_bodies()
+{
+    (cd "$ROOT" && find src -name '*.rs' -exec awk '
+        function flag() { print FILENAME ":" FNR ": " $0; bad = 1 }
+        FNR == 1 { cfg = 0 }
+        /^[[:space:]]*#\[([a-z_]+::)*test[\](]/ { flag(); next }
+        /^[[:space:]]*#\[/ && /#\[cfg\(([^)]*[(, ])?test[,)]/ && !/not\(/ { cfg = 1 }
+        /^[[:space:]]*(#\[.*\][[:space:]]*)?(pub(\([a-z]+\))? )?mod [A-Za-z_0-9]+ *\{/ {
+            if (cfg) flag()
+            cfg = 0
+            next
+        }
+        /^[[:space:]]*(#\[|\/\/)/ { next }
+        { cfg = 0 }
+        END { exit bad }
+    ' {} +) && return 0
+    echo "Move these test bodies under tests/unit/; CONTRIBUTING.md shows the #[path] form." >&2
+    return 1
+}
+gate src-test-bodies src_test_bodies
 
 # webrtc-sys needs Clang 21+ on Linux, and without one clippy and cargo-test
 # fail on a build script rather than on anything this tree did. The Makefile's

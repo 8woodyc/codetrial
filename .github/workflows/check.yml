@@ -285,7 +285,22 @@ jobs:
           "v$ACTIONLINT_VERSION"
           "actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" actionlint
 
+      # A pull request Dependabot opened and wrote has its formatting drift
+      # reported rather than failed (scripts/test.sh says why). The opener
+      # cannot be forged, unlike a commit's author; the commits are still read,
+      # so a person's commit on the branch is held to the drift. The range runs
+      # to the pull request's head rather than the merge ref, so a person's
+      # merge into the branch counts as theirs. Every other event gets no range
+      # and stays strict. Main has no merge queue yet, so nothing after this
+      # stops the drift landing: the indent gate reads the whole tree, and the
+      # push to main and every later pull request fail on it until it is fixed.
       - name: Run gates
+        env:
+          INDENT_ADVISORY_RANGE: >-
+            ${{ github.event_name == 'pull_request'
+            && github.event.pull_request.user.login == 'dependabot[bot]'
+            && format('{0}..{1}', github.event.pull_request.base.sha,
+            github.event.pull_request.head.sha) || '' }}
         run: ./scripts/test.sh "${{ matrix.lane }}"
 
       # A merge group runs on a queue ref that is deleted once it lands, and a

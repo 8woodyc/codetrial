@@ -820,9 +820,9 @@ class PrSweepTests(SweepCase):
         # codetrial-conventions tells an agent to read make hooks' output by
         # these labels, so renaming one has to move that text too.
         installer = (ROOT / "scripts" / "install-git-hooks.sh").read_text()
-        for label in ("OK", "HOOK", "KEEP", "NOTE"):
+        for label in ("OK", "HOOK", "FOREIGN", "SHARED"):
             with self.subTest(label=label):
-                self.assertIn(f"printf '  {label} ", installer)
+                self.assertIn(f"  {label} ", installer)
 
     def test_a_skipped_gates_lane_is_not_a_pass_and_a_skipped_shard_is_nothing(self):
         skipped = checked(("check", "SUCCESS"), ("gates (rust)", "SKIPPED"))

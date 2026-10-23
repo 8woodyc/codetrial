@@ -47,8 +47,9 @@ existing exclusions.
 
 Every skip the gate sees joins its `not checked by this run:` summary: a gate's
 own skip, a Node browser test's skip or todo, a missing formatter in
-`scripts/indent.sh`, and a skipped Python case. A Rust test that skips itself
-when sqlite3 or Playwright is missing is not in it, because `cargo test` hides
+`scripts/indent.sh --skip-missing`, and a skipped Python case. A Rust test that
+skips itself when sqlite3 or Playwright is missing is not in it, because `cargo
+test` hides
 a passing test's output. With `CI=true` the summary fails the run, and those
 Rust tests fail rather than skip. Optional tools still skip on a local run. Each Node browser test has a
 five-minute timeout, so a stalled test fails by name before its lane's job
@@ -105,11 +106,26 @@ than mold does the work. It stays a CI setting for that reason.
 ## Formatting
 
 `scripts/indent.sh` holds the formatter chain: comment reflow with
-`commentflow`, then `cargo fmt`, `ruff format` and `shfmt`, in that order
+`commentflow`, then `rustfmt`, `ruff format` and `shfmt`, in that order
 because the formatters have to have the last word over the reflow. `make
-indent` runs it with `--write` and the gate runs it with `--check`, against a
-copy of the tree so a check never rewrites what it is judging. `shfmt` takes
-its style from `.editorconfig` and is passed no style flags anywhere.
+indent` runs it with `--write`, `make indent-check` and the gate with
+`--check`, against a copy of the tree so a check never rewrites what it is
+judging, and the pre-commit hook with `--staged`, against a checkout of the
+index. The file lists, the vendor exclusion and the order live only there.
+`shfmt` takes its style from `.editorconfig` and is passed no style flags
+anywhere.
+
+A formatter that the selected files need is required: `make indent`, `make
+indent-check` and the hook fail on a missing one and say how to install it,
+so a commit that touches only Rust does not need Prettier, but one that
+touches JavaScript does. Only the gate passes `--skip-missing`, which skips the
+lane, ends with `Formatting clean for the lanes that ran; not checked:` and
+the tools it skipped instead of `Formatting clean.`, and joins the
+gate's summary, which CI fails on. CI reports rather than fails formatting
+drift on a pull request Dependabot opened and wrote, because it can bump
+Prettier but cannot run `make indent`. Nothing fails it after that until main
+has a merge queue, so whoever merges such a pull request runs `make indent` on
+it first, or the push to main and every later pull request fail on the drift.
 
 `npm ci` installs the pinned Prettier version used for HTML, JavaScript (`.js`,
 `.mjs` and `.cjs`) and the issue forms under `.github/ISSUE_TEMPLATE/`. The
@@ -126,7 +142,7 @@ chain, with `--cache` so a rerun skips unchanged files. The generated
 problem-card section in `web/index.html` has a `prettier-ignore` marker so the
 rest of the page can be formatted without changing the generator's output. As
 with the other formatter lanes, an absent Prettier is reported and skipped
-locally; CI installs it through `npm ci`.
+in the gate; CI installs it through `npm ci`.
 
 The commits that only reformatted are listed in `.git-blame-ignore-revs`, so
 `git blame` skips them. GitHub reads the file on its own; a local blame needs
@@ -164,14 +180,46 @@ function reachable from `cargo test`, is the direction it should travel.
 and runs in the gate, so a hook that stops rejecting fails here rather than on
 somebody's next commit.
 
-`make hooks` installs wrappers in `.git/hooks` that resolve the active
-worktree's `scripts/git-*.sh`. The pre-commit hook
-runs `rustfmt`, ESLint, Prettier, `ruff`, `shellcheck`, `shfmt` and
-`commentflow` over a
-checkout of the index, so an unstaged edit neither fails a commit nor passes
-one; the commit-msg hook
+`make hooks` installs a wrapper in `.git/hooks` for each `scripts/git-*.sh`
+that resolves the active worktree's copy, then verifies each is the current
+wrapper and executable, and exits nonzero otherwise. A wrapper names itself on
+its second line, so one an older install wrote is reported `STALE` and
+rewritten. A hook it did not write is left in place and reported as `FOREIGN`,
+and the install exits nonzero. Once you move it to `<name>.local` and run
+`make hooks` again, it runs after ours with the same arguments and stdin, and
+`make uninstall-hooks` moves it back. A `core.hooksPath` outside the
+repository is reported as `SHARED` and nothing is written there. A checkout
+from before the scripts existed has nothing to run and commits as before.
+`./scripts/install-git-hooks.sh --check` runs the verification alone.
+
+`build.rs` runs that check whenever the build script reruns and the install
+only when it fails. The script runs on the first `cargo build`, `cargo check`
+or rust-analyzer pass in a clone or worktree, and again when the installer or
+the hooks directory changes, so a deleted hook comes back on the next build.
+A refusal reaches the terminal as a Cargo warning and never fails the build.
+
+The hooks run the `scripts/` of the checkout they fire in, as `build.rs` does
+on a build, so review a branch before committing on it as you would before
+building it. No script of ours runs while a merge is concluded: by the time
+its commit-msg or prepare-commit-msg fires the incoming tree is written, and
+running it would make `git pull` execute what it pulled, so the wrapper skips
+it, and there is no pre-merge-commit hook. CI checks a pull request's content.
+
+The pre-commit hook runs ESLint, `ruff check` and `shellcheck`, then
+`scripts/indent.sh --staged`, over a checkout of the index, so an unstaged edit
+neither fails a commit nor passes one, and it never stages anything itself.
+The formatting check is what `make indent` would change in the staged files,
+and in every file when the commit changes a formatter setting (`.editorconfig`,
+`rustfmt.toml`, `ruff.toml`, the Prettier config or the version pinned in
+`package.json`, or `scripts/indent.sh`). The edition comes from `Cargo.toml`
+for both, and `rustfmt.toml`, empty of settings, keeps a `~/.rustfmt.toml` out.
+Paths are read with `core.quotePath` off, so a name past ASCII is checked under
+its own name; one git still quotes, or one with a blank, is refused by name
+rather than skipped. A file added with `--intent-to-add` carries no content
+into the commit and is not judged. A missing formatter refuses the commit; a
+missing linter is skipped and named in the closing line. The commit-msg hook
 holds the subject to 50 characters and the body to 72, imperative and ASCII.
-Whatever is missing locally reports itself as skipped. The pre-push hook
+The pre-push hook
 replays the same message rules over commits a rebase or an amend rewrote after
 the fact, and CI runs them over a pull request's own commits.
 

@@ -79,8 +79,9 @@ crate and reaches only the public API, which would have meant publishing
 internals for the tests' benefit. Never name such a file `tests/<dir>/main.rs`:
 Cargo compiles that as a second crate root, where every `super::` in it fails.
 
-No gate enforces the rule, so `grep -rn '#\[test\]' src/` is the check, and it
-returns nothing today.
+The `src-test-bodies` gate in `scripts/test.sh` enforces it: a test attribute
+anywhere under `src/`, or a `#[cfg(test)]` module with its body inline, fails.
+Test-only helpers that are not modules stay allowed.
 
 ## Running the gate
 
@@ -91,7 +92,19 @@ make hooks           # once per clone; installs every scripts/git-*.sh hook
 
 `make hooks` installs a wrapper for each `scripts/git-*.sh`, so the push is
 gated as well as the commit and a rebase that rewrote a message is caught before
-it reaches GitHub.
+it reaches GitHub. It exits 0 only when every hook is in effect; a hook of your
+own already in the way, or a `core.hooksPath` shared with other repositories, is
+left alone and reported with how to integrate it. Your own hook keeps running
+once moved to `.git/hooks/<name>.local`, after ours.
+`./scripts/install-git-hooks.sh --check` asks the same question without writing.
+`cargo build` runs the same installer whenever that check fails, and skips it
+once the hooks are in effect; what needs you shows up as a Cargo warning.
+
+Formatting is required of every contributor; only a pull request Dependabot
+opened and wrote has formatting drift reported rather than failed. The pre-commit
+hook refuses a commit whose staged files need a formatter you have not
+installed, and `make indent-check` checks the tree the same way without
+rewriting it.
 
 The gate ends by naming any lane it skipped; read that rather than assuming
 green means covered. [docs/development.md](docs/development.md) has
