@@ -130,6 +130,40 @@
               <div class="problem-filter-group">
                 <fieldset class="practice-filters">
                   <legend>Filter problems</legend>
+                  <div class="problem-search-field">
+                    <label for="problem-search">Title</label>
+                    <div class="problem-search-content">
+                      <input
+                        id="problem-search"
+                        type="search"
+                        placeholder="Search scenario titles"
+                        autocomplete="off"
+                      />
+                      <div
+                        class="problem-search-modes"
+                        role="group"
+                        aria-label="Search by"
+                      >
+                        <label>
+                          <input
+                            type="radio"
+                            name="problem-search-mode"
+                            value="scenario"
+                            checked
+                          />
+                          Scenario title
+                        </label>
+                        <label>
+                          <input
+                            type="radio"
+                            name="problem-search-mode"
+                            value="leetcode"
+                          />
+                          LeetCode title
+                        </label>
+                      </div>
+                    </div>
+                  </div>
                   <label for="problem-topic">Topic</label>
                   <select id="problem-topic" disabled>
                     <option value="">All topics</option>

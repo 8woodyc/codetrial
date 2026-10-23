@@ -8,12 +8,25 @@ export function availableTopics(problems) {
 
 export function filterProblems(
   problems,
-  { difficulties = new Set(), topic = "" } = {},
+  {
+    difficulties = new Set(),
+    topic = "",
+    query = "",
+    searchBy = "scenario",
+  } = {},
 ) {
+  const needle = query.trim().toLowerCase();
   return problems.filter(
     (problem) =>
       (!difficulties.size || difficulties.has(problem.difficulty)) &&
-      (!topic || problem.topics.includes(topic)),
+      (!topic || problem.topics.includes(topic)) &&
+      (!needle ||
+        (
+          (searchBy === "leetcode" ? problem.leetcodeTitle : problem.title) ??
+          ""
+        )
+          .toLowerCase()
+          .includes(needle)),
   );
 }
 
