@@ -686,6 +686,8 @@ fn static_problem_bank_and_judges_cover_each_problem() {
         ),
         ("merge-intervals", "unsorted"),
         ("valid-parentheses", "interleaved"),
+        ("triangle", "cheapest values not connected"),
+        ("triangle", "cheaper step misses the deep saving"),
     ] {
         let labels = judges[id]["cases"]
             .as_array()
