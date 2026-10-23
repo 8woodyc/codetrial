@@ -122,6 +122,7 @@ import {
   AUDIO_OUTPUT_KEY,
   MEET_PRESENTATION_KEY,
   applyAudioOutput,
+  createJimVolume,
   initAudioOutput,
   readStored,
   refreshAudioOutputs,
@@ -523,6 +524,13 @@ const nodes = {
   transcriptTab: document.querySelector("#transcript-tab"),
   agentState: document.querySelector("#agent-state"),
   presenceBanner: document.querySelector("#presence-banner"),
+  jimVolumeRange: document.querySelector("#jim-volume"),
+  jimVolumeRow: document.querySelector("#jim-volume-row"),
+  jimVolumeValue: document.querySelector("#jim-volume-value"),
+  jimMute: document.querySelector("#jim-mute"),
+  jimVolumeReset: document.querySelector("#jim-volume-reset"),
+  jimMutedIndicator: document.querySelector("#jim-muted-indicator"),
+  jimVolumeUnsupported: document.querySelector("#jim-volume-unsupported"),
   audioPlaybackNotice: document.querySelector("#audio-playback-notice"),
   resumeAudio: document.querySelector("#resume-audio"),
   audioPlaybackStatus: document.querySelector("#audio-playback-status"),
@@ -634,11 +642,16 @@ let jimAudio = null;
 // The track attached to `jimAudio`, so a reconnect can take the element off it
 // before handing the element to the new track.
 let jimTrack = null;
+const jimVolume = createJimVolume({
+  element: () => jimAudio,
+  onChange: renderJimVolume,
+});
 const audioPlayback = createAudioPlayback({
   notice: nodes.audioPlaybackNotice,
   button: nodes.resumeAudio,
   focusTarget: nodes.jimStage,
   announcement: nodes.audioPlaybackStatus,
+  reapply: () => jimVolume.apply(),
 });
 
 // Before `init`, because the queue's first producer is inside it. The bindings
@@ -927,7 +940,28 @@ function applyEditorEdit(next) {
   editor.setSelectionRange(next.start, next.end, direction);
 }
 
+function renderJimVolume() {
+  if (!jimVolume.supported && document.activeElement === nodes.jimVolumeRange)
+    nodes.jimMute.focus({ preventScroll: true });
+  nodes.jimVolumeRow.hidden = !jimVolume.supported;
+  nodes.jimVolumeUnsupported.hidden = jimVolume.supported;
+  nodes.jimVolumeRange.value = jimVolume.muted ? "0" : String(jimVolume.level);
+  nodes.jimVolumeValue.textContent = `${nodes.jimVolumeRange.value}%`;
+  nodes.jimVolumeRange.setAttribute(
+    "aria-valuetext",
+    jimVolume.muted ? "Muted" : `${jimVolume.level}%`,
+  );
+  nodes.jimMute.setAttribute("aria-pressed", String(jimVolume.muted));
+  nodes.jimMutedIndicator.hidden = !jimVolume.muted;
+}
+
 function bindEvents() {
+  nodes.jimVolumeRange.addEventListener("input", () =>
+    jimVolume.setVolume(Number(nodes.jimVolumeRange.value)),
+  );
+  nodes.jimMute.addEventListener("click", () => jimVolume.toggleMute());
+  nodes.jimVolumeReset.addEventListener("click", () => jimVolume.reset());
+  renderJimVolume();
   renderRoundPlan();
   nodes.problemTab.addEventListener("click", () => selectTab("problem"));
   nodes.transcriptTab.addEventListener("click", () => selectTab("transcript"));
@@ -2208,6 +2242,7 @@ function playRemoteAudio(track, participant) {
   element.id = "jim-audio";
   jimAudio = element;
   jimTrack = track;
+  jimVolume.apply();
   if (!element.isConnected) document.body.appendChild(element);
   void audioPlayback.play(element);
   // The candidate may have chosen an output before Jim's track arrived.
@@ -2224,7 +2259,10 @@ function dropRemoteAudio(track) {
   for (const element of track.detach?.() || []) {
     audioPlayback.forget(element);
     element.remove();
-    if (element === jimAudio) jimAudio = jimTrack = null;
+    if (element === jimAudio) {
+      jimAudio = jimTrack = null;
+      jimVolume.apply();
+    }
   }
   // Only if it was the analyser's own track. The guard above already refuses to
   // drop Jim's element for someone else's track; without the same guard here, a
@@ -4035,6 +4073,10 @@ function placeJimStageBelowToolbar(toolbar) {
     // scrollable, so widening or shortening its contents can restore it.
     nodes.jimStage.classList.remove("scrollable");
     const stage = nodes.jimStage.getBoundingClientRect();
+    document.documentElement.style.setProperty(
+      "--jim-stage-height",
+      `${Math.ceil(stage.height)}px`,
+    );
     nodes.jimStage.classList.toggle(
       "scrollable",
       stage.top < 0 || stage.bottom > window.innerHeight,

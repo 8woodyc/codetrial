@@ -20,7 +20,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function fixture() {
+function fixture({ reapply = () => {} } = {}) {
   const notice = { hidden: true };
   const document = { activeElement: null };
   const button = new EventTarget();
@@ -38,6 +38,7 @@ function fixture() {
     button,
     focusTarget,
     announcement,
+    reapply,
   });
   playback.setRoom(room, "playback");
   return {
@@ -385,4 +386,87 @@ test("report recovery keeps playback tracked; only the rendered report ends it",
   interviewFunction("renderReport", own)();
   assert.equal(f.notice.hidden, true);
   assert.equal(f.room.listenerCount("playback"), 0);
+});
+
+test("playback recovery restores session mute after LiveKit unmutes its elements", async () => {
+  const { createJimVolume } = await import("../../web/audio-output.js");
+  let refused = true;
+  const element = {
+    volume: 1,
+    muted: false,
+    play: async () => {
+      if (refused) throw blocked();
+    },
+  };
+  const volume = createJimVolume({ element: () => element, storage: null });
+  volume.setVolume(25);
+  volume.toggleMute();
+  const f = fixture({ reapply: () => volume.apply() });
+  await f.playback.play(element);
+  f.room.startAudio = async () => {
+    element.muted = false;
+  };
+  refused = false;
+  f.click();
+  await tick();
+  assert.equal(f.notice.hidden, true);
+  assert.equal(element.muted, true);
+  assert.equal(element.volume, 0.25);
+  element.muted = false;
+  f.status(true);
+  assert.equal(element.muted, true);
+});
+
+test("a late old-room recovery reapplies preferences to the currently attached element", async () => {
+  const { createJimVolume } = await import("../../web/audio-output.js");
+  let current = { ...denied(), volume: 1, muted: false };
+  const volume = createJimVolume({ element: () => current, storage: null });
+  volume.toggleMute();
+  const f = fixture({ reapply: () => volume.apply() });
+  await f.playback.play(current);
+  const held = deferred();
+  f.room.startAudio = () =>
+    held.promise.then(() => {
+      current.muted = false;
+    });
+  f.click();
+  // The interview reconnects: a new room and a new element arrive while the
+  // old room's recovery is still pending.
+  const next = new EventEmitter();
+  next.canPlaybackAudio = true;
+  next.startAudio = async () => {};
+  f.playback.setRoom(next, "playback");
+  current = { ...playing(), volume: 1, muted: false };
+  await f.playback.play(current);
+  held.resolve();
+  await tick();
+  assert.equal(current.muted, true);
+});
+
+test("synchronous startAudio unmute is corrected before a stalled resume can play", async () => {
+  let muted = true;
+  const playedMuted = [];
+  const element = {
+    play: async () => {
+      playedMuted.push(muted);
+      throw blocked();
+    },
+  };
+  const f = fixture({
+    reapply: () => {
+      muted = true;
+    },
+  });
+  await f.playback.play(element);
+  const held = deferred();
+  f.room.startAudio = () => {
+    muted = false;
+    return held.promise;
+  };
+  playedMuted.length = 0;
+  f.click();
+  assert.equal(muted, true);
+  assert.deepEqual(playedMuted, [true]);
+  held.resolve();
+  await tick();
 });

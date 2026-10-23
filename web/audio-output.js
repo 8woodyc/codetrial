@@ -144,3 +144,92 @@ export function writeStored(key, value, storage = storageArea("localStorage")) {
     // Private browsing refuses writes; a preference is not worth failing on.
   }
 }
+
+export const JIM_VOLUME_KEY = "codetrial:jimVolume";
+
+const sameVolume = (a, b) => Math.abs(a - b) < 0.001;
+
+/// Some browsers ignore or reject a volume write; read it back to tell.
+function setsVolume(audio, value) {
+  try {
+    audio.volume = value;
+    return sameVolume(audio.volume, value);
+  } catch {
+    return false;
+  }
+}
+
+/// Zero is a session mute, never a persisted level: reloading must restore the
+/// last positive setting instead of starting a new interviewer silently.
+export function createJimVolume({
+  storage = storageArea("localStorage"),
+  element = () => null,
+  onChange = () => {},
+} = {}) {
+  const stored = readStored(JIM_VOLUME_KEY, storage);
+  let level = /^(?:[1-9][0-9]?|100)$/.test(stored ?? "") ? Number(stored) : 100;
+  let muted = false;
+  let supported = true;
+  let tested = null;
+  const restore = () => {
+    const audio = element();
+    if (
+      audio &&
+      (audio.muted !== muted ||
+        (supported && !sameVolume(audio.volume, level / 100)))
+    )
+      apply();
+  };
+  function apply() {
+    const audio = element();
+    const fresh = tested !== audio;
+    if (fresh) {
+      tested?.removeEventListener?.("volumechange", restore);
+      tested = audio;
+    }
+    if (audio) {
+      // At 100%, a no-op setter and a working setter read identically. Probe
+      // another level synchronously, then restore the requested attenuation.
+      if (fresh) supported = setsVolume(audio, 0.5);
+      if (supported) supported = setsVolume(audio, level / 100);
+      audio.muted = muted;
+      if (fresh) audio.addEventListener?.("volumechange", restore);
+    }
+    onChange();
+  }
+  function setVolume(value) {
+    if (!Number.isInteger(value) || value < 0 || value > 100) return;
+    // A muted slider sits at 0, so a single step up reads as 1%. Unmute at
+    // the saved level rather than saving that step; a value the candidate
+    // pointed at or jumped to directly is taken as chosen.
+    if (muted && value === 1) {
+      muted = false;
+      apply();
+      return;
+    }
+    muted = value === 0;
+    if (value > 0) {
+      level = value;
+      writeStored(JIM_VOLUME_KEY, String(level), storage);
+    }
+    apply();
+  }
+  return {
+    get level() {
+      return level;
+    },
+    get muted() {
+      return muted;
+    },
+    get supported() {
+      return supported;
+    },
+    apply,
+    setVolume,
+    toggleMute() {
+      muted = !muted;
+      apply();
+    },
+    reset: () => setVolume(100),
+  };
+}
