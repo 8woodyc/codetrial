@@ -1777,23 +1777,29 @@ async fn on_interruption(
     // activity detection, so a cut with the candidate mid-sentence is barge-in
     // working. A cut with nothing transcribed is usually speaker echo or room
     // noise, and naming those makes the log actionable without pretending the
-    // server can tell them apart.
-    let heard = context.turns.candidate.tail(80);
+    // server can tell them apart. The words trail the cut, so this line names
+    // the cut and goes out now, where no exit from the room can lose it, and
+    // the line quoting them follows once the turn after the cut closes.
+    let at = log_clock(context.state);
     eprintln!(
-        "timing: Gemini cut its own turn, {:.1}s of it unplayed; candidate audio so far: {}",
-        unplayed.as_secs_f64(),
-        if heard.is_empty() {
-            "(nothing transcribed; check speaker echo or background noise)"
-        } else {
-            heard
-        }
+        "timing: Gemini cut its own turn at={at}, {:.1}s of it unplayed",
+        unplayed.as_secs_f64()
     );
+
+    // A cut still waiting would be replaced below, so it is settled here, with
+    // the turn that holds its words, whatever the voice state.
+    if let Some(line) = context.turns.take_cut_line(Instant::now(), false) {
+        eprintln!("{line}");
+    }
 
     // A cut-off turn is still over. Without this the next thing either party
     // says appends to the abandoned turn under its segment id, so the panel
     // would glue two separate utterances into one row and the report prompt
     // would read them as one line.
     close_turns(room, context);
+
+    // After the close: the turn it closed held the answer being replied to.
+    context.turns.note_cut(at, Instant::now());
 
     set_agent_state(room, context.agent_state, AGENT_STATE_LISTENING);
     Ok(())
@@ -2861,13 +2867,21 @@ fn take_stale_playout(
 /// Both turns are counted in the ledger before either is published. The count
 /// is what the report reads; the publish only tells the panel, and a failed
 /// one used to leave the other speaker's closed turn uncounted.
+///
+/// A cut waiting for its words is settled here too, unless the candidate is
+/// still speaking.
 pub(super) fn close_turns(room: &RoomLink, context: &mut GeminiEventContext<'_>) {
-    let closing = close_both_turns(
+    let (cut_line, closing) = close_turns_settling_cut(
         context.turns,
         &mut context.state.evidence_ledger,
         crate::current_epoch_millis(),
         context.media.identity.as_deref(),
+        Instant::now(),
+        context.activity.candidate_voice_active,
     );
+    if let Some(line) = cut_line {
+        eprintln!("{line}");
+    }
     for segment in closing {
         context.transcripts.publish(room, segment);
     }
@@ -2885,6 +2899,22 @@ fn close_interviewer_turn(room: &RoomLink, context: &mut GeminiEventContext<'_>)
     ) {
         context.transcripts.publish(room, segment);
     }
+}
+
+/// `close_both_turns`, and the line for the cut that was waiting for these
+/// turns to close. The line is read first, because closing the candidate's turn
+/// clears the words it quotes.
+pub(super) fn close_turns_settling_cut(
+    turns: &mut SpeakerTurns,
+    ledger: &mut crate::agent::EvidenceLedger,
+    receipt_timestamp_ms: u64,
+    candidate_identity: Option<&str>,
+    now: Instant,
+    speaking: bool,
+) -> (Option<String>, Vec<Segment>) {
+    let cut_line = turns.take_cut_line(now, speaking);
+    let closing = close_both_turns(turns, ledger, receipt_timestamp_ms, candidate_identity);
+    (cut_line, closing)
 }
 
 /// The room-free half of `close_turns`: finishes each open turn, counts it in

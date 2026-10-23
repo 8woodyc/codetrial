@@ -703,27 +703,19 @@ impl SpeakerTurn {
         spoken
     }
 
-    /// Stable for the life of one turn, so the browser patches one row instead
-    /// of appending a new one per fragment.
-    /// The tail of what this speaker has said in the turn so far.
+    /// The start of what this speaker has said in the turn so far.
     ///
-    /// For the log only, and bounded: a cut turn is diagnosable from what the
-    /// candidate was heard saying at the moment it was cut, and a full turn in
-    /// a log line is not.
-    pub fn tail(&self, max: usize) -> &str {
-        let text = self.text.trim();
-
-        // No length test beside this. `nth_back` already answers it: it yields
-        // nothing when there are fewer than `max` characters, and when there
-        // are exactly `max` it lands on the first one, so the slice is the
-        // whole string either way. The condition that used to be here could be
-        // written as `>` or `>=` without changing a single result.
-        match text.char_indices().nth_back(max.saturating_sub(1)) {
-            Some((start, _)) => &text[start..],
-            None => text,
-        }
+    /// For the log only, and bounded: a full turn in a log line is not
+    /// diagnosable, and the start is where the words that caused a cut are.
+    /// Taken from the cleaned turn: room noise arrives as the transcription
+    /// artifact, and quoting it would make a cut with no words read as one
+    /// with words.
+    pub fn head(&self, max: usize) -> String {
+        self.text().chars().take(max).collect()
     }
 
+    /// Stable for the life of one turn, so the browser patches one row instead
+    /// of appending a new one per fragment.
     pub fn segment_id(&self, speaker: &str) -> String {
         format!("{speaker}-{}", self.index)
     }

@@ -147,7 +147,8 @@ interview ended by the browser: room=interview-local topic=control
 ```
 
 The browser joined the room, Jim answered turn after turn (`codetrial turn_timing`
-with `outcome=audio`), barge-in worked (`Gemini cut its own turn`),
+with `outcome=audio`), barge-in worked (`Gemini cut its own turn` at the
+cut, then `candidate audio since the cut` once the words are transcribed),
 and the session ended on the candidate pressing End interview. Voice runs both
 ways: the microphone reaches the agent and Jim's audio reaches the browser.
 

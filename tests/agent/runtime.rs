@@ -1660,7 +1660,7 @@ fn a_detail_that_reorders_or_hides_text_is_dropped_but_localized_text_survives()
 /// any non-Latin script would otherwise panic on a byte index inside a
 /// character, and the failure would land in the middle of an interview.
 #[test]
-fn a_cut_turn_quotes_a_bounded_tail_of_what_was_heard() {
+fn a_cut_turn_quotes_a_bounded_head_of_what_was_heard() {
     let mut transcript = Vec::new();
     let mut turn = SpeakerTurn::default();
     turn.record(
@@ -1668,10 +1668,10 @@ fn a_cut_turn_quotes_a_bounded_tail_of_what_was_heard() {
         "Candidate",
         "so the question is to implement a trie",
     );
-    assert_eq!(turn.tail(80), "so the question is to implement a trie");
+    assert_eq!(turn.head(80), "so the question is to implement a trie");
 
-    // The tail, not the head: what was being said as the cut landed.
-    assert_eq!(turn.tail(10), "ent a trie");
+    // The head, not the tail: the words that caused a cut come first.
+    assert_eq!(turn.head(10), "so the que");
 
     // Multi-byte on purpose and deliberately not prose: what this pins is that
     // a byte index can fall inside a character, which any non-ASCII transcript
@@ -1679,12 +1679,32 @@ fn a_cut_turn_quotes_a_bounded_tail_of_what_was_heard() {
     // byte-counted tail splits one of them.
     let mut wide = SpeakerTurn::default();
     wide.record(&mut transcript, "Candidate", "αβγδεζηθ\u{1F3A5}");
-    assert_eq!(wide.tail(4).chars().count(), 4);
-    assert_eq!(wide.tail(100), "αβγδεζηθ\u{1F3A5}");
+    assert_eq!(wide.head(4).chars().count(), 4);
+    assert_eq!(wide.head(100), "αβγδεζηθ\u{1F3A5}");
 
     // Nothing heard is the case that matters most: it separates a candidate
     // talking over the interviewer from a microphone hearing the interviewer.
-    assert_eq!(SpeakerTurn::default().tail(80), "");
+    assert_eq!(SpeakerTurn::default().head(80), "");
+}
+
+/// Room noise arrives as the transcription artifact, and a quote of the raw
+/// turn made a cut with no words read as one with words.
+#[test]
+fn the_head_of_a_cut_turn_leaves_the_transcription_artifact_out() {
+    let mut transcript = Vec::new();
+    let mut turn = SpeakerTurn::default();
+    turn.record(&mut transcript, "Candidate", " #hashtag");
+    assert_eq!(
+        turn.head(80),
+        "",
+        "nothing but the artifact is nothing heard"
+    );
+
+    // Split across fragments the artifact is still found, and the words around
+    // it stay.
+    turn.record(&mut transcript, "Candidate", " wait #hash");
+    turn.record(&mut transcript, "Candidate", "tag. one more");
+    assert_eq!(turn.head(80), "wait one more");
 }
 
 /// The same bundle, spelled a second time in the browser.
@@ -1901,28 +1921,28 @@ fn grounding_is_empty_only_when_every_list_is() {
     assert!(InterviewGrounding::default().is_empty());
 }
 
-/// The transcript tail is the last `max` characters, counted in characters.
+/// The transcript head is the first `max` characters, counted in characters.
 ///
 /// It goes into a log line beside a cut turn, and slicing by bytes would panic
 /// on the multi-byte text the interview is full of.
 #[test]
-fn a_turn_tail_is_the_last_characters_and_never_splits_one() {
+fn a_turn_head_is_the_first_characters_and_never_splits_one() {
     let turn = |text: &str| {
         let mut turn = SpeakerTurn::default();
         turn.record(&mut Vec::new(), "Candidate", text);
         turn
     };
-    assert_eq!(turn("  hello  ").tail(80), "hello");
+    assert_eq!(turn("  hello  ").head(80), "hello");
     assert_eq!(
-        turn("abcdef").tail(6),
+        turn("abcdef").head(6),
         "abcdef",
         "exactly max is not trimmed"
     );
-    assert_eq!(turn("abcdef").tail(5), "bcdef", "one over max drops one");
+    assert_eq!(turn("abcdef").head(5), "abcde", "one over max drops one");
 
     // Two bytes each, so a byte slice at the same offset would panic.
     let greek = "\u{03b1}\u{03b2}\u{03b3}\u{03b4}";
-    assert_eq!(turn(greek).tail(2), "\u{03b3}\u{03b4}");
+    assert_eq!(turn(greek).head(2), "\u{03b1}\u{03b2}");
 }
 
 /// The browser's hidden-character set and the agent's, held against each other

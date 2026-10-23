@@ -4530,6 +4530,423 @@ fn closing_both_turns_counts_each_before_anything_is_published() {
     assert_eq!(state.evidence_ledger.conversation.candidate_turns, 1);
 }
 
+/// The line quoting a cut names what the candidate said over it, and how long
+/// after the cut that was settled.
+///
+/// `Interrupted` arrives with the start of the candidate's activity, before the
+/// words behind it are transcribed, and the turn being replied to is still open
+/// until the cut closes it. Quoting at the cut printed that answer for every
+/// interruption; quoting only what followed the reply printed nothing for
+/// speech. The line waits for the turn that follows the cut instead.
+#[test]
+fn a_cut_line_quotes_what_the_candidate_said_over_the_cut() {
+    let start = Instant::now();
+    let mut state = RuntimeState::default();
+    let mut turns = SpeakerTurns::default();
+    turns.candidate.record(
+        &mut state.transcript,
+        CANDIDATE_SPEAKER,
+        "the input is two linked lists",
+    );
+
+    // The cut closes the answer being replied to, so it is not what follows.
+    let (line, _) = close_turns_settling_cut(
+        &mut turns,
+        &mut state.evidence_ledger,
+        1,
+        None,
+        start,
+        false,
+    );
+    assert_eq!(line, None, "no cut was waiting for that turn");
+    turns.note_cut("1:33.555".to_string(), start);
+
+    // The transcription trails the cut and arrives in pieces.
+    turns
+        .candidate
+        .record(&mut state.transcript, CANDIDATE_SPEAKER, "wait,");
+    turns
+        .candidate
+        .record(&mut state.transcript, CANDIDATE_SPEAKER, " one more thing");
+    let settled = start + Duration::from_millis(4900);
+    let (line, _) = close_turns_settling_cut(
+        &mut turns,
+        &mut state.evidence_ledger,
+        2,
+        None,
+        settled,
+        false,
+    );
+    assert_eq!(
+        line.as_deref(),
+        Some(
+            "timing: candidate audio since the cut at=1:33.555, settled 4.9s later: \
+             wait, one more thing"
+        )
+    );
+
+    // Once: the next close has no cut left to settle.
+    let (line, _) = close_turns_settling_cut(
+        &mut turns,
+        &mut state.evidence_ledger,
+        3,
+        None,
+        settled,
+        false,
+    );
+    assert_eq!(line, None);
+}
+
+/// A cut with no words after it is the case the log exists to name, so it has
+/// to read as wordless and not as the answer that was being replied to.
+#[test]
+fn a_cut_followed_by_no_words_says_nothing_was_transcribed() {
+    let start = Instant::now();
+    let mut state = RuntimeState::default();
+    let mut turns = SpeakerTurns::default();
+    turns.candidate.record(
+        &mut state.transcript,
+        CANDIDATE_SPEAKER,
+        "the input is two linked lists",
+    );
+    close_turns_settling_cut(
+        &mut turns,
+        &mut state.evidence_ledger,
+        1,
+        None,
+        start,
+        false,
+    );
+    turns.note_cut("0:47.000".to_string(), start);
+
+    let settled = start + Duration::from_millis(1500);
+    let (line, segments) = close_turns_settling_cut(
+        &mut turns,
+        &mut state.evidence_ledger,
+        2,
+        None,
+        settled,
+        false,
+    );
+    assert_eq!(
+        line.as_deref(),
+        Some(
+            "timing: candidate audio since the cut at=0:47.000, settled 1.5s later: \
+             (nothing transcribed; check speaker echo or background noise)"
+        )
+    );
+    assert!(segments.is_empty(), "no words, so no turn to publish");
+}
+
+/// Room noise is transcribed as an artifact and no words, so a cut over it is
+/// still a wordless one and must not quote the artifact as speech.
+#[test]
+fn a_cut_followed_only_by_the_transcription_artifact_reads_as_wordless() {
+    let start = Instant::now();
+    let mut state = RuntimeState::default();
+    let mut turns = SpeakerTurns::default();
+    turns.note_cut("0:30.000".to_string(), start);
+    turns
+        .candidate
+        .record(&mut state.transcript, CANDIDATE_SPEAKER, "#hashtag");
+
+    let (line, segments) = close_turns_settling_cut(
+        &mut turns,
+        &mut state.evidence_ledger,
+        1,
+        None,
+        start,
+        false,
+    );
+    let line = line.expect("the cut is settled by the close");
+    assert!(
+        line.ends_with(
+            "settled 0.0s later: (nothing transcribed; check speaker echo or background noise)"
+        ),
+        "{line}"
+    );
+    assert!(segments.is_empty(), "the artifact is not a turn to publish");
+}
+
+/// The words that caused a cut come first, so a long reply is quoted from its
+/// start and not from the end that has nothing to do with the cut.
+#[test]
+fn a_long_reply_over_a_cut_is_quoted_from_its_start() {
+    let start = Instant::now();
+    let mut state = RuntimeState::default();
+    let mut turns = SpeakerTurns::default();
+    turns.note_cut("2:00.000".to_string(), start);
+    let speech = "wait, before you go on I have a question about the space complexity of \
+                  the approach we just discussed, and about the empty input";
+    turns
+        .candidate
+        .record(&mut state.transcript, CANDIDATE_SPEAKER, speech);
+
+    let (line, _) = close_turns_settling_cut(
+        &mut turns,
+        &mut state.evidence_ledger,
+        1,
+        None,
+        start,
+        false,
+    );
+    let line = line.expect("the cut is settled by the close");
+    assert!(line.ends_with(&speech[..80]), "{line}");
+    assert!(!line.contains("empty input"));
+}
+
+/// A close that lands while the candidate is still speaking does not settle the
+/// cut: the words that caused it are still on their way, and reading them as
+/// absent is the misdiagnosis this line exists to prevent. The close does clear
+/// the turn, so the words it held stay with the cut and lead the quote.
+#[test]
+fn a_cut_keeps_waiting_while_the_candidate_is_still_speaking() {
+    let start = Instant::now();
+    let mut state = RuntimeState::default();
+    let mut turns = SpeakerTurns::default();
+    turns.note_cut("0:10.000".to_string(), start);
+    turns
+        .candidate
+        .record(&mut state.transcript, CANDIDATE_SPEAKER, "wait,");
+
+    let (line, _) = close_turns_settling_cut(
+        &mut turns,
+        &mut state.evidence_ledger,
+        1,
+        None,
+        start + Duration::from_millis(200),
+        true,
+    );
+    assert_eq!(line, None, "the candidate is still speaking");
+
+    turns
+        .candidate
+        .record(&mut state.transcript, CANDIDATE_SPEAKER, "one more thing");
+    let (line, _) = close_turns_settling_cut(
+        &mut turns,
+        &mut state.evidence_ledger,
+        2,
+        None,
+        start + Duration::from_secs(3),
+        false,
+    );
+    let line = line.expect("the cut was kept for the close that follows speech");
+    assert!(
+        line.ends_with("settled 3.0s later: wait, one more thing"),
+        "{line}"
+    );
+}
+
+/// The words kept across closes are bounded like the rest of the quote, so a
+/// long speech with several late turn ends cannot grow the line.
+#[test]
+fn the_words_kept_across_closes_stay_within_the_quote() {
+    let start = Instant::now();
+    let mut state = RuntimeState::default();
+    let mut turns = SpeakerTurns::default();
+    turns.note_cut("0:10.000".to_string(), start);
+    let speech = "wait, before you go on I have a question about the space complexity of \
+                  the approach we just discussed, and about the empty input";
+    for fragment in [speech, " and one more thing"] {
+        turns
+            .candidate
+            .record(&mut state.transcript, CANDIDATE_SPEAKER, fragment);
+        close_turns_settling_cut(&mut turns, &mut state.evidence_ledger, 1, None, start, true);
+    }
+    turns
+        .candidate
+        .record(&mut state.transcript, CANDIDATE_SPEAKER, "last words");
+
+    let line = turns
+        .take_cut_line(start + Duration::from_secs(1), false)
+        .expect("the cut waited for the speech to end");
+    let quote = line
+        .split("settled 1.0s later: ")
+        .nth(1)
+        .expect("the line quotes what was heard");
+    assert_eq!(quote, &speech[..80], "{line}");
+}
+
+/// A cut still waiting is settled before the next one replaces it, whatever the
+/// voice state, with the words that were said in between.
+#[test]
+fn a_waiting_cut_is_settled_before_the_next_cut_replaces_it() {
+    let start = Instant::now();
+    let mut state = RuntimeState::default();
+    let mut turns = SpeakerTurns::default();
+    turns.note_cut("0:10.000".to_string(), start);
+    turns
+        .candidate
+        .record(&mut state.transcript, CANDIDATE_SPEAKER, "mm");
+
+    let line = turns
+        .take_cut_line(start + Duration::from_secs(2), false)
+        .expect("the first cut is settled");
+    assert!(
+        line.contains("at=0:10.000") && line.ends_with("settled 2.0s later: mm"),
+        "{line}"
+    );
+
+    // The close in `on_interruption` ends the turn that held those words.
+    close_both_turns(&mut turns, &mut state.evidence_ledger, 1, None);
+    turns.note_cut("0:20.000".to_string(), start + Duration::from_secs(10));
+
+    turns
+        .candidate
+        .record(&mut state.transcript, CANDIDATE_SPEAKER, "hold on");
+    let line = turns
+        .take_cut_line(start + Duration::from_secs(11), false)
+        .expect("the second cut waits for its own turn");
+    assert!(
+        line.contains("at=0:20.000") && line.ends_with("settled 1.0s later: hold on"),
+        "{line}"
+    );
+}
+
+/// A room that ends with a cut waiting settles it from the turn as it stands:
+/// the exits that skip `close_turns` never close that turn, and the voice state
+/// is no reason to hold the quote back once the room is gone.
+#[test]
+fn a_cut_waiting_at_teardown_is_settled_from_the_turn_as_it_stands() {
+    let start = Instant::now();
+    let mut state = RuntimeState::default();
+    let mut turns = SpeakerTurns::default();
+    turns.note_cut("1:11.733".to_string(), start);
+    turns.candidate.record(
+        &mut state.transcript,
+        CANDIDATE_SPEAKER,
+        "wait, one more thing",
+    );
+
+    let line = turns
+        .take_cut_line(start + Duration::from_secs(2), false)
+        .expect("the waiting cut is settled without a close");
+    assert_eq!(
+        line,
+        "timing: candidate audio since the cut at=1:11.733, settled 2.0s later: \
+         wait, one more thing"
+    );
+    assert_eq!(
+        turns.take_cut_line(start + Duration::from_secs(3), false),
+        None,
+        "once"
+    );
+}
+
+/// Closing turns that no cut preceded prints no cut line.
+#[test]
+fn closing_turns_without_a_cut_prints_no_cut_line() {
+    let mut state = RuntimeState::default();
+    let mut turns = SpeakerTurns::default();
+    turns
+        .candidate
+        .record(&mut state.transcript, CANDIDATE_SPEAKER, "Wait,");
+    let (line, segments) = close_turns_settling_cut(
+        &mut turns,
+        &mut state.evidence_ledger,
+        1,
+        None,
+        Instant::now(),
+        false,
+    );
+    assert_eq!(line, None);
+    assert_eq!(segments.len(), 1);
+}
+
+/// `on_interruption` closes the answer's turn before it notes the cut. The
+/// other order settles the new cut with that answer, or at once with nothing,
+/// and a test of the pieces by hand cannot tell the two apart.
+#[tokio::test]
+async fn an_interruption_waits_for_the_words_that_caused_it() {
+    let mut harness = Harness::new().await;
+    harness
+        .event(GeminiEvent::InputTranscript(
+            "the input is two linked lists".into(),
+        ))
+        .await;
+    harness.event(reply_audio()).await;
+    harness.event(GeminiEvent::Interrupted).await;
+    harness
+        .event(GeminiEvent::InputTranscript("wait, one more thing".into()))
+        .await;
+
+    let line = harness
+        .turn
+        .turns
+        .take_cut_line(Instant::now(), false)
+        .expect("the cut waits for its words");
+    assert!(line.ends_with(": wait, one more thing"), "{line}");
+    assert!(!line.contains("linked lists"), "{line}");
+}
+
+/// After `Interrupted`, a late transcript of the cut reply makes its
+/// `TurnComplete` look like a new reply's, and it reaches `close_turns` while
+/// the candidate is still speaking. That close must leave the cut waiting for
+/// the words.
+#[tokio::test]
+async fn the_late_end_of_a_cut_reply_does_not_settle_the_cut() {
+    let mut harness = Harness::new().await;
+    harness
+        .event(GeminiEvent::InputTranscript(
+            "the input is two linked lists".into(),
+        ))
+        .await;
+    harness.event(reply_audio()).await;
+    harness.event(GeminiEvent::Interrupted).await;
+    harness.turn.activity.candidate_voice_active = true;
+    harness
+        .event(GeminiEvent::OutputTranscript("Could you".into()))
+        .await;
+    harness.event(GeminiEvent::TurnComplete).await;
+    harness
+        .event(GeminiEvent::InputTranscript("wait, one more thing".into()))
+        .await;
+    harness.turn.activity.candidate_voice_active = false;
+
+    let line = harness
+        .turn
+        .turns
+        .take_cut_line(Instant::now(), false)
+        .expect("the cut was still waiting for its words");
+    assert!(line.ends_with(": wait, one more thing"), "{line}");
+}
+
+/// The words transcribed before a close that lands mid-utterance are the ones
+/// the quote exists to show. The close clears the turn that holds them, so the
+/// cut has to carry them to the line that is written after the rest arrives.
+///
+/// A `TurnComplete` after the candidate's words never gets here: their arrival
+/// sets the discard, which swallows it. The closes that do are the ones the
+/// loop makes outside an event, a pause or a socket replacement, so this
+/// drives `close_turns` as those do.
+#[tokio::test]
+async fn the_words_said_before_a_mid_speech_close_lead_the_quote() {
+    let mut harness = Harness::new().await;
+    harness
+        .event(GeminiEvent::InputTranscript(
+            "the input is two linked lists".into(),
+        ))
+        .await;
+    harness.event(reply_audio()).await;
+    harness.event(GeminiEvent::Interrupted).await;
+    harness.turn.activity.candidate_voice_active = true;
+    harness
+        .event(GeminiEvent::InputTranscript("wait,".into()))
+        .await;
+    harness.close();
+    harness
+        .event(GeminiEvent::InputTranscript("one more thing".into()))
+        .await;
+    harness.turn.activity.candidate_voice_active = false;
+
+    let line = harness
+        .turn
+        .turns
+        .take_cut_line(Instant::now(), false)
+        .expect("the close mid-speech left the cut waiting");
+    assert!(line.ends_with(": wait, one more thing"), "{line}");
+}
+
 /// One room loop's worth of state, around a room that records what it is
 /// sent and a Gemini socket that never answers, so the handlers themselves
 /// can be driven: the same `handle_gemini_event` the loop calls, in the order
@@ -4574,6 +4991,18 @@ impl Harness {
         handle_gemini_event(&self.room, &mut context, event, Interruptible::Yes)
             .await
             .unwrap();
+    }
+
+    /// A close the loop makes outside any Gemini event, as a pause, a hold
+    /// cut-off or a socket replacement does.
+    fn close(&mut self) {
+        let mut context = self.turn.context(
+            &mut self.output,
+            &mut self.gemini,
+            &mut self.board,
+            &mut self.media,
+        );
+        close_turns(&self.room, &mut context);
     }
 
     /// The transcript segments the page was sent, once the writer has sent
