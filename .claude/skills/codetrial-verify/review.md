@@ -73,6 +73,7 @@ text, never against a summary:
 | prompts, the report schema, `tests/golden/` | [interview contract versions](../../../docs/interview-contract-versions.md) |
 | how long an interview runs, what the endpoints enforce | [interview length](../../../docs/interview-length.md) |
 | a data-channel topic | [codetrial-web](../codetrial-web/SKILL.md) and its wire fixtures |
+| the room, its tokens, agent dispatch, or the LiveKit crates | [codetrial-livekit](../codetrial-livekit/SKILL.md) and the contracts it names |
 | the avatar | [avatar contract](../../../docs/avatar-contract.md) |
 | `problem-bank/` | [adding a problem](../../../docs/adding-a-problem.md) |
 | timing or latency logs | [turn timing](../../../docs/turn-timing.md), [latency observability](../../../docs/latency-observability.md) |
