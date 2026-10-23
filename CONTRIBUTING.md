@@ -79,8 +79,9 @@ crate and reaches only the public API, which would have meant publishing
 internals for the tests' benefit. Never name such a file `tests/<dir>/main.rs`:
 Cargo compiles that as a second crate root, where every `super::` in it fails.
 
-No gate enforces the rule, so `grep -rn '#\[test\]' src/` is the check, and it
-returns nothing today.
+The `src-test-bodies` gate in `scripts/test.sh` enforces it: a test attribute
+anywhere under `src/`, or a `#[cfg(test)]` module with its body inline, fails.
+Test-only helpers that are not modules stay allowed.
 
 ## Running the gate
 

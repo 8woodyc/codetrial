@@ -376,6 +376,35 @@ gate indent with_reported_skips formatting \
     's/^indent\.sh: \(.* not installed\), skipping that lane.*/\1/p' \
     "$ROOT/scripts/indent.sh" --check --skip-missing
 
+# CONTRIBUTING.md keeps test bodies out of src/: a module declares its tests
+# with #[path] and the body lives under tests/unit/. A test attribute, or a
+# cfg(test) module with its body inline, compound cfgs and an attribute on the
+# same line included, is the mechanical half of that rule. A negated cfg is
+# never judged a test, which misses `all(test, not(x))` rather than refuse a
+# production module behind `not(any(test, x))`. cfg(test) items that are not
+# modules stay allowed, since a test-only recorder or constructor is
+# implementation the tests reach through `super::`.
+src_test_bodies()
+{
+    (cd "$ROOT" && find src -name '*.rs' -exec awk '
+        function flag() { print FILENAME ":" FNR ": " $0; bad = 1 }
+        FNR == 1 { cfg = 0 }
+        /^[[:space:]]*#\[([a-z_]+::)*test[\](]/ { flag(); next }
+        /^[[:space:]]*#\[/ && /#\[cfg\(([^)]*[(, ])?test[,)]/ && !/not\(/ { cfg = 1 }
+        /^[[:space:]]*(#\[.*\][[:space:]]*)?(pub(\([a-z]+\))? )?mod [A-Za-z_0-9]+ *\{/ {
+            if (cfg) flag()
+            cfg = 0
+            next
+        }
+        /^[[:space:]]*(#\[|\/\/)/ { next }
+        { cfg = 0 }
+        END { exit bad }
+    ' {} +) && return 0
+    echo "Move these test bodies under tests/unit/; CONTRIBUTING.md shows the #[path] form." >&2
+    return 1
+}
+gate src-test-bodies src_test_bodies
+
 # webrtc-sys needs Clang 21+ on Linux, and without one clippy and cargo-test
 # fail on a build script rather than on anything this tree did. The Makefile's
 # default, for a run that did not come through `make check`: a caller's own CXX
