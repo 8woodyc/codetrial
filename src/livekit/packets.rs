@@ -260,8 +260,6 @@ pub(super) async fn apply_data_packet(
     payload: &serde_json::Value,
     received: bool,
 ) -> Result<ControlFlow<()>, Box<dyn std::error::Error + Send + Sync>> {
-    let resume_debt = ResumeDebt::capture(context.state);
-
     // One reading per packet, shared by every entry the packet produces.
     let receipt_timestamp_ms = crate::current_epoch_millis();
     let packet_at = Instant::now();
@@ -345,34 +343,6 @@ pub(super) async fn apply_data_packet(
             ),
         }
     }
-    if let Some(paused) = result.pause_changed {
-        // The state changes first. It is what stops the interviewer, and a
-        // publish that fails or stalls ahead of it left the queue playing under
-        // a page that may already say paused.
-        update_pause_activity(
-            context.state,
-            context.activity,
-            context.output_audio,
-            Instant::now(),
-        );
-        if paused {
-            session::finish_turn_timing(
-                room.name(),
-                context.activity,
-                &log_clock(context.state),
-                timing::TimingOutcome::Paused,
-                &mut std::io::stderr().lock(),
-            );
-            close_turns(room, context);
-            set_agent_state(room, context.agent_state, AGENT_STATE_LISTENING);
-        }
-        publish_control(
-            room,
-            &serde_json::json!({ "type": "pause_state", "paused": paused }),
-            "the pause state",
-        )
-        .await;
-    }
     if let Some(status) = result.round_changed {
         publish_control(
             room,
@@ -405,16 +375,7 @@ pub(super) async fn apply_data_packet(
             &prompt,
         )
         .await;
-        match record_event_prompt(
-            context.state,
-            context.activity,
-            &prompt,
-            resume_debt
-                .as_ref()
-                .filter(|_| result.pause_changed == Some(false)),
-            sent,
-            Instant::now(),
-        ) {
+        match record_event_prompt(context.activity, &prompt, sent, Instant::now()) {
             Ok(()) => {
                 delivered = true;
                 if result.carries_thinking_debt {
@@ -436,8 +397,8 @@ pub(super) async fn apply_data_packet(
                 );
             }
             Err(error) => {
-                // A failed resume is owed by `record_event_prompt`; the debt it
-                // carried is still in the state, unpaid, for the next socket.
+                // The debt the prompt carried is still in the state, unpaid,
+                // for the next socket.
                 if owes_failed_reply(&result) {
                     context
                         .activity
@@ -568,8 +529,7 @@ pub(super) fn test_run_line<'a>(
 
 /// Whether a reply this packet asked for, and that failed to send, is still
 /// owed. Only one that carried a thinking hold's debt is: the debt stays in
-/// the state for the next socket. A resume is owed by `record_event_prompt`
-/// instead, which moves its debt onto the activity itself.
+/// the state for the next socket.
 pub(super) fn owes_failed_reply(result: &crate::agent::DataEventResult) -> bool {
-    result.carries_thinking_debt && result.pause_changed != Some(false)
+    result.carries_thinking_debt
 }

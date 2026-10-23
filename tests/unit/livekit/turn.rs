@@ -7,23 +7,23 @@
 use super::*;
 use crate::agent::{InterviewLoop, ThinkingHold};
 
-/// A pause arms the discard so a turn already in flight cannot speak over
-/// the resume. Arming it on a turn that has finished is the failure: its
+/// A hold arms the discard so a turn already in flight cannot speak over
+/// the release. Arming it on a turn that has finished is the failure: its
 /// completion event has already passed, so nothing disarms it and the first
-/// reply after the resume is swallowed instead, which is silence exactly
+/// reply after the release is swallowed instead, which is silence exactly
 /// where the candidate is waiting to be answered.
 #[test]
 fn only_a_turn_still_being_produced_leaves_output_to_discard() {
     let now = Instant::now();
     let mut activity = RuntimeActivity::new(now);
     activity.floor = Floor::Speaking;
-    assert!(pause_leaves_output_in_flight(&activity, now));
+    assert!(hold_leaves_output_in_flight(&activity, now));
     activity.floor = Floor::AwaitingPlayout;
-    assert!(!pause_leaves_output_in_flight(&activity, now));
+    assert!(!hold_leaves_output_in_flight(&activity, now));
     activity.floor = Floor::Listening;
-    assert!(!pause_leaves_output_in_flight(&activity, now));
+    assert!(!hold_leaves_output_in_flight(&activity, now));
     activity.note_output(now);
-    assert!(pause_leaves_output_in_flight(&activity, now));
+    assert!(hold_leaves_output_in_flight(&activity, now));
 
     // A generation silent for a stall is dead, and nothing will end its turn,
     // including the floor its audio took.
@@ -31,19 +31,19 @@ fn only_a_turn_still_being_produced_leaves_output_to_discard() {
     let just_short = stalled - Duration::from_millis(1);
     activity.note_reply_audible();
     assert_eq!(activity.floor, Floor::Speaking);
-    assert!(pause_leaves_output_in_flight(&activity, just_short));
-    assert!(!pause_leaves_output_in_flight(&activity, stalled));
+    assert!(hold_leaves_output_in_flight(&activity, just_short));
+    assert!(!hold_leaves_output_in_flight(&activity, stalled));
 
     // A tool continuation stalls the same way.
     let mut continuation = RuntimeActivity::new(now);
     continuation.note_tool_response(now);
-    assert!(pause_leaves_output_in_flight(&continuation, just_short));
-    assert!(!pause_leaves_output_in_flight(&continuation, stalled));
+    assert!(hold_leaves_output_in_flight(&continuation, just_short));
+    assert!(!hold_leaves_output_in_flight(&continuation, stalled));
 
     // A prompt nothing has answered yet still has its reply on the way.
     let mut prompted = RuntimeActivity::new(now);
     prompted.mark_prompted(now, None, false);
-    assert!(pause_leaves_output_in_flight(&prompted, stalled));
+    assert!(hold_leaves_output_in_flight(&prompted, stalled));
 }
 
 #[test]
@@ -135,7 +135,7 @@ fn a_pause_is_read_only_when_the_room_is_actually_idle() {
     /// One way the room is busy: the thing to break, and why it disqualifies
     /// the pause.
     type Busy = (&'static str, fn(&mut RuntimeActivity, &mut RuntimeState));
-    let busy: [Busy; 8] = [
+    let busy: [Busy; 7] = [
         (
             "Jim is mid-sentence, so the stretch is not finished",
             |activity, _| {
@@ -163,12 +163,6 @@ fn a_pause_is_read_only_when_the_room_is_actually_idle() {
             |activity, _| {
                 activity.last_user_speech +=
                     INTERIM_COOLDOWN + INTERIM_IDLE - Duration::from_secs(1);
-            },
-        ),
-        (
-            "a paused interview is not idle, it is stopped",
-            |_, state| {
-                state.paused = true;
             },
         ),
         ("a stretch already read is not read again", |_, state| {
@@ -309,7 +303,7 @@ fn an_evidence_line_that_goes_away_is_retracted() {
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
     };
-    let shown = lines(&["tests: not run", "session: paused"]);
+    let shown = lines(&["tests: not run", "session: ended"]);
     assert_eq!(
         evidence_delta(Some(&shown), &lines(&["tests: not run"])),
         "session: none"
@@ -317,7 +311,7 @@ fn an_evidence_line_that_goes_away_is_retracted() {
     assert_eq!(
         evidence_delta(
             Some(&shown),
-            &lines(&["tests: 1 of 2 passing", "session: paused"])
+            &lines(&["tests: 1 of 2 passing", "session: ended"])
         ),
         "tests: 1 of 2 passing"
     );
@@ -576,26 +570,25 @@ fn a_cut_hidden_by_new_input_is_still_seen_at_the_trigger() {
 fn context_refresh_waits_for_candidate_output_tools_and_owed_replies() {
     let now = Instant::now();
     let mut activity = RuntimeActivity::new(now);
-    assert!(!activity.can_refresh_context(false, false, false, now));
+    assert!(!activity.can_refresh_context(false, false, now));
     activity.tokens.context_refresh_pending = true;
-    assert!(activity.can_refresh_context(false, false, false, now));
-    assert!(!activity.can_refresh_context(true, false, false, now));
-    assert!(!activity.can_refresh_context(false, true, false, now));
-    assert!(!activity.can_refresh_context(false, false, true, now));
+    assert!(activity.can_refresh_context(false, false, now));
+    assert!(!activity.can_refresh_context(true, false, now));
+    assert!(!activity.can_refresh_context(false, true, now));
     activity.generating = true;
-    assert!(!activity.can_refresh_context(false, false, false, now));
+    assert!(!activity.can_refresh_context(false, false, now));
     activity.generating = false;
     activity.socket.tool_response_outstanding = true;
-    assert!(!activity.can_refresh_context(false, false, false, now));
+    assert!(!activity.can_refresh_context(false, false, now));
     activity.socket.tool_response_outstanding = false;
     activity.floor = Floor::Speaking;
-    assert!(!activity.can_refresh_context(false, false, false, now));
+    assert!(!activity.can_refresh_context(false, false, now));
     activity.floor = Floor::Listening;
     activity.awaiting_reply_since = Some(now);
-    assert!(!activity.can_refresh_context(false, false, false, now));
+    assert!(!activity.can_refresh_context(false, false, now));
     activity.awaiting_reply_since = None;
     activity.owe_prompt(now, None);
-    assert!(!activity.can_refresh_context(false, false, false, now));
+    assert!(!activity.can_refresh_context(false, false, now));
 }
 
 /// Speech reaches Gemini before its transcript reaches the room, so a turn
@@ -607,14 +600,13 @@ fn context_refresh_waits_for_the_microphone_to_go_quiet() {
     let mut activity = RuntimeActivity::new(Instant::now());
     activity.tokens.context_refresh_pending = true;
     activity.candidate_voice_at = Some(now);
-    assert!(!activity.can_refresh_context(false, false, false, now));
+    assert!(!activity.can_refresh_context(false, false, now));
     assert!(!activity.can_refresh_context(
-        false,
         false,
         false,
         now + CHECKPOINT_VOICE_QUIET - Duration::from_millis(1)
     ));
-    assert!(activity.can_refresh_context(false, false, false, now + CHECKPOINT_VOICE_QUIET));
+    assert!(activity.can_refresh_context(false, false, now + CHECKPOINT_VOICE_QUIET));
 }
 
 #[test]
@@ -737,10 +729,6 @@ fn a_checkpoint_is_due_only_while_the_interview_runs() {
         },
         RuntimeState {
             end_requested: true,
-            ..RuntimeState::default()
-        },
-        RuntimeState {
-            paused: true,
             ..RuntimeState::default()
         },
     ] {
@@ -1139,24 +1127,16 @@ fn a_silent_declared_hold_ends_in_one_check_in() {
     };
     assert!(!state.claim_thinking_check_in(start, 0));
     assert!(!state.claim_thinking_check_in(start + limit - second, 0));
-
-    // Paused, it cannot fire; resumed, the count starts again.
-    state.paused = true;
-    assert!(!state.claim_thinking_check_in(start + limit, 0));
-    let resumed = start + limit;
-    state.paused = false;
-    state.restart_thinking_clock(resumed);
-    assert!(!state.claim_thinking_check_in(resumed + limit - second, 0));
-    assert!(state.claim_thinking_check_in(resumed + limit, 7));
+    assert!(state.claim_thinking_check_in(start + limit, 7));
     assert!(!state.thinking_hold.is_active());
     assert_eq!(state.evidence_ledger.lifecycle.transitions, 1);
-    assert!(!state.claim_thinking_check_in(resumed + limit * 2, 8));
+    assert!(!state.claim_thinking_check_in(start + limit * 2, 8));
 
     // A provisional request is not a declared hold.
     state.thinking_hold = ThinkingHold::Requested {
         since: std::time::Instant::now(),
     };
-    assert!(!state.claim_thinking_check_in(resumed + limit * 5, 9));
+    assert!(!state.claim_thinking_check_in(start + limit * 5, 9));
 }
 
 #[test]
@@ -1173,25 +1153,6 @@ fn a_new_hold_does_not_inherit_the_last_ones_clock() {
     state.declare_thinking(again, 2);
     assert!(!state.claim_thinking_check_in(start + limit, 3));
     assert!(state.claim_thinking_check_in(again + limit, 4));
-}
-
-#[test]
-fn a_resume_restarts_the_check_in_clock_through_the_reducer() {
-    let mut state = RuntimeState {
-        thinking_hold: ThinkingHold::Held {
-            since: Instant::now() - Duration::from_secs(crate::agent::THINKING_CHECK_IN_S * 2),
-        },
-        ..RuntimeState::default()
-    };
-    for paused in [true, false] {
-        crate::agent::apply_data_event(
-            &mut state,
-            crate::runtime::TOPIC_CONTROL,
-            &serde_json::json!({"type":"pause_interview","paused":paused}),
-            0.0,
-        );
-    }
-    assert!(!state.claim_thinking_check_in(Instant::now(), 0));
 }
 
 #[test]
@@ -1312,7 +1273,9 @@ fn a_release_the_open_turn_never_answers_is_asked_for_once() {
     // Held, ended, or with Jim talking, it waits.
     for held in [
         RuntimeState {
-            paused: true,
+            thinking_hold: ThinkingHold::Held {
+                since: Instant::now(),
+            },
             ..RuntimeState::default()
         },
         RuntimeState {
@@ -1372,10 +1335,6 @@ fn apply_control(
 fn a_reply_owed_after_a_discard_waits_for_the_floor_and_is_dropped_by_the_ending() {
     let mut activity = RuntimeActivity::new(Instant::now());
     for held in [
-        RuntimeState {
-            paused: true,
-            ..RuntimeState::default()
-        },
         RuntimeState {
             thinking_hold: ThinkingHold::Held {
                 since: Instant::now(),
@@ -1589,11 +1548,7 @@ fn the_phase_judge_follows_a_candidate_turn_within_seconds() {
     );
     assert!(activity.claim_phase_judge(&spoke(), idle + PHASE_JUDGE_COOLDOWN));
 
-    let mut paused = spoke();
-    paused.paused = true;
-    assert!(!activity.claim_phase_judge(&paused, idle + PHASE_JUDGE_COOLDOWN * 3));
-
-    // Each of the other holds refuses it on its own, whatever else is settled.
+    // Each of these holds refuses it on its own, whatever else is settled.
     let mut closing = spoke();
     closing.end_requested = true;
     assert!(
@@ -1891,7 +1846,7 @@ fn provider_activity_holds_prompts_until_speech_ends_after_prior_transcription()
     let end = now + Duration::from_secs(82);
     assert!(activity.watch_prompt(&mut state, end).is_none());
     activity.tokens.context_refresh_pending = true;
-    assert!(!activity.can_refresh_context(false, false, false, end));
+    assert!(!activity.can_refresh_context(false, false, end));
     assert!(!activity.interim_review_due(&state, end));
     activity.note_candidate_voice_activity(false, end);
     assert!(
@@ -2065,13 +2020,16 @@ fn completed_coding_idle_backoff_preserves_behavioral_and_hold_voice_gates() {
     let mut state = completed_coding_idle_state(start);
     let mut activity = RuntimeActivity::new(start);
     activity.completed_coding_nudges = 2;
-    state.paused = true;
+    // Declared just now, so the check-in is not what answers this tick.
+    state.thinking_hold = ThinkingHold::Held {
+        since: start + Duration::from_secs(300),
+    };
     assert!(
         activity
             .watch_prompt(&mut state, start + Duration::from_secs(300))
             .is_none()
     );
-    state.paused = false;
+    state.thinking_hold = ThinkingHold::Off;
     activity.note_candidate_voice_activity(true, start + Duration::from_secs(300));
     assert!(
         activity

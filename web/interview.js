@@ -432,7 +432,6 @@ const interviewProfile = {
 };
 const interviewGrounding = consumeGroundingPacket(tabStorage);
 const state = {
-  paused: false,
   candidateThinking: false,
   // Published by the agent; see `turnWindowMs`. Null draws no ring.
   turnWindowMs: null,
@@ -442,19 +441,9 @@ const state = {
   agentThinking: false,
   codeByLanguage: { ...problem?.starterCode },
   language: "python",
-  // Thresholds already announced. A latch is released when the room pauses only
-  // if it was set inside the pause round trip, because the agent drops either
-  // packet while paused and the browser does not learn it is paused until that
-  // echo arrives -- so a threshold crossed inside that window is published,
-  // latched, and dropped, and re-asking is the only way it is ever heard. A
-  // threshold announced before the request went out was heard, and the agent
-  // dedupes only the round transition, so re-asking that one says the time
-  // warning twice. See togglePause, tickTimer and applyPause.
+  // Thresholds already announced, so tickTimer publishes each one once.
   roundTransitionSent: false,
   timeWarningSent: false,
-  /// What had already been announced when the pause request left, or `null`
-  /// outside that round trip. Read once, by the echo it was taken for.
-  latchedBeforePause: null,
   // Wall-clock deadline, set when the interview starts. The countdown is
   // derived from it rather than accumulated, so throttling and suspend cannot
   // bend it.
@@ -565,7 +554,6 @@ const nodes = {
   roundPlanSummary: document.querySelector("#round-plan-summary"),
 
   mic: document.querySelector("#mic"),
-  pause: document.querySelector("#pause"),
   thinking: document.querySelector("#thinking"),
   yieldTurn: document.querySelector("#yield-turn"),
   turnStatus: document.querySelector("#turn-status"),
@@ -783,7 +771,6 @@ async function init() {
     nodes.editor.disabled = true;
     nodes.run.disabled = true;
     nodes.end.disabled = true;
-    nodes.pause.disabled = true;
   }
   bindEvents();
   if (whiteboard) initWhiteboard();
@@ -808,7 +795,6 @@ async function init() {
           locked: () =>
             !board.ready ||
             state.phase !== "live" ||
-            state.paused ||
             frameworkRound !== "coding",
           publish: (blob, strokes) => publishBoard(blob, strokes, ""),
           connected: () => Boolean(state.room && state.connected),
@@ -909,7 +895,6 @@ async function init() {
   if (started === false) return;
   if (strict) {
     nodes.end.disabled = false;
-    nodes.pause.disabled = false;
   }
   publishCode();
   state.endsAt = Date.now() + durationMin * 60 * 1000;
@@ -1144,12 +1129,6 @@ function bindEvents() {
   nodes.problemTab.addEventListener("click", () => selectTab("problem"));
   nodes.transcriptTab.addEventListener("click", () => selectTab("transcript"));
   nodes.mic.addEventListener("click", toggleMicrophone);
-  // A candidate whose machine or network interrupts them still needs a way to
-  // stop the interviewer talking into an empty room. The deadline keeps running
-  // (see tickTimer), and the pause is recorded so the gap is visible in the
-  // report rather than passing as thinking time.
-  nodes.pause.hidden = false;
-  nodes.pause.addEventListener("click", togglePause);
   nodes.thinking.addEventListener("click", toggleThinking);
   nodes.yieldTurn.addEventListener("click", yieldTurn);
   nodes.turnRing.addEventListener("click", yieldTurn);
@@ -2978,74 +2957,39 @@ function tickTimer() {
   const tick = countdown(state.endsAt, Date.now());
   nodes.timer.textContent = formatTime(tick.remaining);
   nodes.timer.classList.toggle("urgent", tick.urgent);
-  // A pause stops the conversation, not the deadline: the agent says so where
-  // it handles the packet, and its own clock runs on wall time either way. So
-  // the countdown above and the ending below run regardless, and what a pause
-  // holds back is only what would talk into a room nobody is listening in --
-  // plus the replay stage frame, which would otherwise repeat a clock nobody
-  // is watching every fifteen seconds.
-  //
-  // Returning early on `paused`, as this used to, meant a paused interview
-  // never reached `time_up` at all. It sat until the agent's own deadline --
-  // the full duration plus a two-minute grace -- behind a frozen timer, which
-  // is issue 31's symptom arriving by a second route.
-  if (!state.paused) {
-    recordStageTick(tick.remaining);
+  recordStageTick(tick.remaining);
 
-    // Latched levels, not crossings. A crossing is one tick wide and this tick
-    // is missable twice over: a hidden tab is throttled to roughly one firing
-    // a minute, and a pause now lets the clock run past the threshold with the
-    // publish suppressed. Either one loses the event for the rest of the
-    // interview, so the reserve never opens and the warning is never spoken.
-    // Asking whether the clock is past the threshold is true on every tick
-    // after it, so nothing has to be caught. The flag makes it happen once, and
-    // `applyPause` releases it, because a publish the agent drops while paused
-    // has announced nothing.
-    if (
-      interviewLoop === "coding_behavioral" &&
-      !state.roundTransitionSent &&
-      tick.remaining <= behavioralMinutes * 60
-    ) {
-      state.roundTransitionSent = true;
-      // No remainingSeconds: the agent decides the round boundary from its own
-      // clock, and a number on the wire that nothing reads is one the next
-      // reader assumes is checked.
-      publish(topics.control, {
-        type: "round_transition",
-        round: "behavioral",
-      });
-      recordReplay("lifecycle", {
-        state: "round_reserve_started",
-        round: "behavioral",
-        remainingSeconds: tick.remaining,
-        interviewLoop,
-      });
-    }
-    if (tick.urgent && !state.timeWarningSent) {
-      state.timeWarningSent = true;
-      publish(topics.control, timeWarningPayload(tick.remaining));
-    }
+  // Latched levels, not crossings. A crossing is one tick wide and this tick
+  // is missable: a hidden tab is throttled to roughly one firing a minute,
+  // which loses the event for the rest of the interview, so the reserve never
+  // opens and the warning is never spoken. Asking whether the clock is past
+  // the threshold is true on every tick after it, so nothing has to be caught,
+  // and the flag makes it happen once.
+  if (
+    interviewLoop === "coding_behavioral" &&
+    !state.roundTransitionSent &&
+    tick.remaining <= behavioralMinutes * 60
+  ) {
+    state.roundTransitionSent = true;
+    // No remainingSeconds: the agent decides the round boundary from its own
+    // clock, and a number on the wire that nothing reads is one the next
+    // reader assumes is checked.
+    publish(topics.control, {
+      type: "round_transition",
+      round: "behavioral",
+    });
+    recordReplay("lifecycle", {
+      state: "round_reserve_started",
+      round: "behavioral",
+      remainingSeconds: tick.remaining,
+      interviewLoop,
+    });
+  }
+  if (tick.urgent && !state.timeWarningSent) {
+    state.timeWarningSent = true;
+    publish(topics.control, timeWarningPayload(tick.remaining));
   }
   if (tick.expired) endInterview("time_up");
-}
-
-function togglePause() {
-  if (state.phase !== "live") return;
-  // Taken as the request goes out, so the echo can tell a threshold that was
-  // announced from one that was published into the round trip and dropped by an
-  // agent already paused. Only the second kind is worth asking again.
-  state.latchedBeforePause = {
-    roundTransitionSent: state.roundTransitionSent,
-    timeWarningSent: state.timeWarningSent,
-  };
-  publish(topics.control, { type: "pause_interview", paused: !state.paused });
-  // No room, no acknowledgement coming, so this browser is the authority.
-  // `state.room`, not `state.joinedRoom`: the latter stays true for the rest
-  // of the session once an interviewer has been present, and a disconnect
-  // nulls the room, so testing both left the pause button dead for the whole
-  // remainder of a practice interview that lost its connection - `publish`
-  // dropped the packet and nothing applied the change locally either.
-  if (!state.room) applyPause(!state.paused);
 }
 
 let frameworkPhases = [];
@@ -3117,11 +3061,6 @@ function receiveControl(bytes) {
     ) {
       applyThinking(message.thinking);
     } else if (
-      message.type === "pause_state" &&
-      typeof message.paused === "boolean"
-    ) {
-      applyPause(message.paused);
-    } else if (
       message.type === "interviewer_state" &&
       typeof message.reconnecting === "boolean"
     ) {
@@ -3176,15 +3115,9 @@ function codingClosed() {
   return frameworkRound === "behavioral" || state.phase !== "live";
 }
 
-/// Neither control means anything without a live interviewer to hear it, and
-/// a paused interview is already holding the floor.
+/// Neither control means anything without a live interviewer to hear it.
 function canTakeTurnAction() {
-  return (
-    state.connected &&
-    state.interviewerPresent &&
-    !state.paused &&
-    state.phase === "live"
-  );
+  return state.connected && state.interviewerPresent && state.phase === "live";
 }
 
 /// The state flips when the agent answers with `thinking_state`, not here, so
@@ -3303,46 +3236,6 @@ function applyThinking(thinking) {
   recordReplay("lifecycle", {
     state: thinking ? "thinking_started" : "thinking_ended",
   });
-}
-
-function applyPause(paused) {
-  if (paused === state.paused) return;
-  state.paused = paused;
-  // The deadline is absolute and pause no longer moves it, matching the
-  // server, which stopped extending its own when practice mode went. The
-  // countdown keeps painting through a pause, so there is no stale display to
-  // correct on resume. Adding the paused time back, as this used to, would
-  // promise minutes the server has already decided to end the interview
-  // without.
-  //
-  // A threshold latch is released here only if it was set inside the pause
-  // round trip. The agent drops a round transition or a time warning that
-  // arrives while it is paused, and this echo is the first the page hears of
-  // that, so one published into that window was announced to nobody and has to
-  // be asked again on the first tick after the resume.
-  //
-  // Releasing unconditionally, as this used to, also re-asked thresholds that
-  // had already been heard. The agent dedupes a second round transition on its
-  // own `round_transition_seen`, but nothing dedupes `time_warning` -- it
-  // treats each one as news -- so every pause and resume inside the last five
-  // minutes had Jim break in with "exactly N minutes remain" all over again.
-  if (paused) {
-    const announced = state.latchedBeforePause;
-    state.latchedBeforePause = null;
-    if (!announced?.roundTransitionSent) state.roundTransitionSent = false;
-    if (!announced?.timeWarningSent) state.timeWarningSent = false;
-  }
-  nodes.pause.textContent = paused ? "Resume" : "Pause";
-  // Resuming must not hand back a control the round already retired. The
-  // behavioral round disables the editor and the runner on purpose, and a
-  // pause taken during it used to give both back on the way out.
-  nodes.editor.disabled = paused || codingClosed();
-  if (whiteboard) paintBoard();
-  else exampleBoard?.refresh();
-  updateRunAvailability();
-  recordReplay("lifecycle", { state: paused ? "paused" : "resumed" });
-  recordStage();
-  tickTimer();
 }
 
 /// The test results open or closed, with the toggle saying which: its
@@ -3604,7 +3497,7 @@ function removeCandidateCase(index) {
 }
 
 function updateRunAvailability() {
-  const restoreOff = state.paused || codingClosed();
+  const restoreOff = codingClosed();
   // Disabling the control that has focus drops focus to the body, so a keyboard
   // user who armed it is moved first, to the language picker, which this never
   // disables, as the board buttons do.
@@ -3616,7 +3509,6 @@ function updateRunAvailability() {
     !editorOptions.execution ||
     (strict && !state.connected) ||
     state.runningTests ||
-    state.paused ||
     codingClosed() ||
     !languages.includes(state.language);
 }
@@ -4885,23 +4777,18 @@ function paintBoard() {
 }
 
 /// Whether the board takes edits: not until the connect attempt has settled,
-/// not while paused, not once the behavioral round has started, and not once
-/// the interview has ended.
+/// not once the behavioral round has started, and not once the interview has
+/// ended.
 ///
 /// Before the room is joined, the replay is not yet recording and there is no
 /// room to send a board to, so a stroke drawn then would be missing from the
 /// replay, a later undo in the replay would take off the wrong one, and the
-/// interviewer would not see the board until the next stroke. Paused and
-/// behavioral are the two moments the editor is disabled for the same
-/// reasons: a paused interview is not collecting evidence, and a board left
-/// live through it sent Jim work drawn while he had been told to wait. And an
-/// ended interview has already sent its final board.
+/// interviewer would not see the board until the next stroke. The behavioral
+/// round disables the editor, and the board follows it. And an ended interview
+/// has already sent its final board.
 function boardLocked() {
   return (
-    !board.ready ||
-    state.paused ||
-    frameworkRound === "behavioral" ||
-    state.phase !== "live"
+    !board.ready || frameworkRound === "behavioral" || state.phase !== "live"
   );
 }
 

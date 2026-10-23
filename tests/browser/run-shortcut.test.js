@@ -293,18 +293,15 @@ test("a disabled-execution interview sends its choice with the token request", a
 });
 
 /// Waits until Run tests is enabled. The disabled button refuses a press while
-/// a run is going or while the interview is paused, so a test that expects a
-/// run waits here before pressing, or a press that came too soon would fail
-/// it. This wait skips past that refusal, so the in-flight and paused cases
-/// press without it, and they are what pin the refusal.
+/// a run is going, so a test that expects a run waits here before pressing, or
+/// a press that came too soon would fail it. This wait skips past that
+/// refusal, so the in-flight case presses without it, and it is what pins the
+/// refusal.
 const runButtonReady = (page) =>
   page.waitForFunction(() => !document.querySelector("#run-tests").disabled);
 
 /// A browser of this test's own with a fake microphone and camera, closed when
-/// the test ends. Only the paused case needs one: pausing needs a running
-/// clock, and only the real preflight starts it. With the preflight merely
-/// hidden the deadline is still zero, so the timer tick a pause makes ends the
-/// interview, and a press taken then is refused as ended, not as paused.
+/// the test ends, for a case that has to clear the real preflight.
 async function mediaBrowser(t) {
   const { chromium } = await import("playwright");
   const media = await chromium.launch({
@@ -474,34 +471,6 @@ test("a second press while a run is in flight starts no second run", async (t) =
     });
     await runButtonReady(page);
     assert.equal(await runs(page), 1);
-    assert.deepEqual(
-      errors,
-      [],
-      `the shortcut threw in the browser: ${errors[0]}`,
-    );
-  } finally {
-    await page.close();
-  }
-});
-
-test("the shortcut starts no run while the interview is paused", async (t) => {
-  const ctx = await interviewPage(t, { started: false, media: true });
-  if (!ctx) return;
-  const { page, errors } = ctx;
-  try {
-    await clearPreflight(page);
-    await page.click("#pause");
-    // Paused and still live. A pause that ended the interview shows the ending
-    // overlay, then the report in its place 300 ms later, and the press would
-    // be refused as ended, passing for the wrong reason.
-    assert.equal(await page.locator("#pause").textContent(), "Resume");
-    assert.equal(await page.locator("#ending-overlay").isHidden(), true);
-    assert.equal(await page.locator("#report-modal").isHidden(), true);
-    await page.keyboard.press("ControlOrMeta+Enter");
-    assert.equal(await runs(page), 0);
-    // Asserted, because a press that reached no listener would pass this
-    // test without testing anything.
-    assert.equal(await enterDefaultPrevented(page), true);
     assert.deepEqual(
       errors,
       [],

@@ -170,8 +170,8 @@ fn an_unstarted_reply_waits_through_interruptions_and_socket_replacement() {
 fn a_local_cut_closes_the_turn_even_before_output() {
     let (start, mut trace) = traced();
     trace.voice(start);
-    let paused = trace.boundary(Boundary::Paused, ms(start, 100)).unwrap();
-    assert_eq!(paused["stage"], "paused");
+    let held = trace.boundary(Boundary::Held, ms(start, 100)).unwrap();
+    assert_eq!(held["stage"], "held");
     assert!(
         trace
             .boundary(Boundary::TurnComplete, ms(start, 200))
@@ -278,18 +278,16 @@ fn a_new_origin_and_a_pending_origin_keep_their_actual_sockets() {
 
 #[test]
 fn local_cuts_discard_pending_inputs_instead_of_timing_the_hold() {
-    for boundary in [Boundary::Held, Boundary::Paused] {
-        let (start, mut trace) = traced();
-        trace.voice(start);
-        trace.audio(ms(start, 100));
-        trace.voice(ms(start, 200));
-        trace.voice_end(ms(start, 300));
-        trace.boundary(boundary, ms(start, 400));
-        trace.voice(ms(start, 45_000));
-        let record = trace.audio(ms(start, 45_500)).unwrap();
-        assert_eq!(record["elapsed_ms"], 500);
-        assert_eq!(record["provider_voice_end_ms"], Value::Null);
-    }
+    let (start, mut trace) = traced();
+    trace.voice(start);
+    trace.audio(ms(start, 100));
+    trace.voice(ms(start, 200));
+    trace.voice_end(ms(start, 300));
+    trace.boundary(Boundary::Held, ms(start, 400));
+    trace.voice(ms(start, 45_000));
+    let record = trace.audio(ms(start, 45_500)).unwrap();
+    assert_eq!(record["elapsed_ms"], 500);
+    assert_eq!(record["provider_voice_end_ms"], Value::Null);
 }
 
 #[test]
@@ -486,19 +484,17 @@ fn pending_yield_does_not_survive_a_new_utterance_or_prompt() {
 
 #[test]
 fn local_cuts_discard_pending_candidate_yields() {
-    for boundary in [Boundary::Paused, Boundary::Held] {
-        let (start, mut trace) = traced();
-        trace.voice(start);
-        trace.audio(ms(start, 100));
-        trace.voice_start();
-        trace.voice(ms(start, 200));
-        trace.yielded(ms(start, 400));
-        trace.boundary(boundary, ms(start, 500));
-        trace.voice(ms(start, 600));
-        let record = trace.audio(ms(start, 900)).unwrap();
-        assert_eq!(record["candidate_yield_ms"], Value::Null);
-        assert_eq!(record["elapsed_ms"], 300);
-    }
+    let (start, mut trace) = traced();
+    trace.voice(start);
+    trace.audio(ms(start, 100));
+    trace.voice_start();
+    trace.voice(ms(start, 200));
+    trace.yielded(ms(start, 400));
+    trace.boundary(Boundary::Held, ms(start, 500));
+    trace.voice(ms(start, 600));
+    let record = trace.audio(ms(start, 900)).unwrap();
+    assert_eq!(record["candidate_yield_ms"], Value::Null);
+    assert_eq!(record["elapsed_ms"], 300);
 }
 
 #[test]
@@ -760,15 +756,13 @@ fn yielding_before_a_release_prompt_freezes_its_origin_until_speech_restarts() {
 
 #[test]
 fn local_cuts_reset_a_yield_even_when_no_trace_was_opened() {
-    for boundary in [Boundary::Held, Boundary::Paused] {
-        let (start, mut trace) = traced();
-        trace.yielded(start);
-        assert!(trace.boundary(boundary, ms(start, 100)).is_none());
-        trace.voice(ms(start, 200));
-        let record = trace.audio(ms(start, 500)).unwrap();
-        assert_eq!(record["origin"], "last_voiced_pcm");
-        assert_eq!(record["elapsed_ms"], 300);
-    }
+    let (start, mut trace) = traced();
+    trace.yielded(start);
+    assert!(trace.boundary(Boundary::Held, ms(start, 100)).is_none());
+    trace.voice(ms(start, 200));
+    let record = trace.audio(ms(start, 500)).unwrap();
+    assert_eq!(record["origin"], "last_voiced_pcm");
+    assert_eq!(record["elapsed_ms"], 300);
 }
 
 /// A long utterance holds one input per voiced frame only as far back as an

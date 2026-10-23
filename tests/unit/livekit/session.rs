@@ -180,7 +180,7 @@ fn timing_emission_writes_one_line_per_measurement_with_session_identity() {
         "room-a",
         &mut activity,
         "0:02.000",
-        TimingOutcome::Paused,
+        TimingOutcome::Held,
         &mut output,
     );
     finish_turn_timing(
@@ -201,25 +201,21 @@ fn timing_emission_writes_one_line_per_measurement_with_session_identity() {
     assert!(lines[0].ends_with("outcome=audio"));
     assert!(lines[1].contains("turn=2 at=0:02.000 "));
     assert!(lines[1].contains("wait_ms=unknown "));
-    assert!(lines[1].ends_with("outcome=paused"));
+    assert!(lines[1].ends_with("outcome=held"));
     assert!(log.ends_with('\n'));
 }
 
 #[test]
 fn voice_observations_preserve_runtime_and_timing_hold_filters() {
     let start = Instant::now();
-    for (paused, held, discarding, has_audio) in [
-        (false, false, false, true),
-        (true, false, false, true),
-        (false, true, false, true),
-        (false, false, true, true),
-        (false, false, false, false),
+    for (held, discarding, has_audio) in [
+        (false, false, true),
+        (true, false, true),
+        (false, true, true),
+        (false, false, false),
     ] {
         for active in [true, false] {
-            let mut state = RuntimeState {
-                paused,
-                ..RuntimeState::default()
-            };
+            let mut state = RuntimeState::default();
             if held {
                 state.thinking_hold = ThinkingHold::Held { since: start };
             }
@@ -235,10 +231,10 @@ fn voice_observations_preserve_runtime_and_timing_hold_filters() {
                 start,
                 has_audio,
             );
-            assert_eq!(observed, !paused && has_audio);
+            assert_eq!(observed, has_audio);
             assert_eq!(activity.incoming_speech_active(start), observed && active);
             let summary = activity.turn_timing.finish(start, TimingOutcome::NoAudio);
-            assert_eq!(summary.is_some(), !paused && !held && !discarding);
+            assert_eq!(summary.is_some(), !held && !discarding);
             if let Some(summary) = summary {
                 assert_eq!(
                     summary.turn_close_reason,
@@ -347,10 +343,6 @@ fn continuity_reminders_leave_opening_default_and_inactive_inputs_alone() {
             thinking_hold: ThinkingHold::Held {
                 since: Instant::now(),
             },
-            ..state.clone()
-        },
-        RuntimeState {
-            paused: true,
             ..state.clone()
         },
         RuntimeState {
@@ -608,10 +600,10 @@ fn an_unpublished_checklist_is_retried_and_resent_to_a_rejoined_page() {
         "the candidate rejoined, so the page is told again"
     );
 }
-/// A pause silences output for as long as it lasts, and nothing about the
+/// A hold silences output for as long as it lasts, and nothing about the
 /// event changes that.
 #[test]
-fn a_pause_drops_output_and_passes_everything_else_through() {
+fn a_hold_drops_output_and_passes_everything_else_through() {
     let audio = GeminiEvent::Audio {
         bytes: vec![0],
         mime_type: "audio/pcm".to_string(),
@@ -630,7 +622,7 @@ fn a_pause_drops_output_and_passes_everything_else_through() {
         OutputDisposition::Drop
     );
 
-    // Not output, so never the thing a pause silences: a tool call still has to
+    // Not output, so never the thing a hold silences: a tool call still has to
     // be answered or Gemini waits on a response that is never sent.
     assert_eq!(
         output_disposition(&GeminiEvent::ToolCall(Vec::new()), false, true),
@@ -676,10 +668,10 @@ fn a_discard_lasts_exactly_one_turn() {
     );
 }
 /// The ordering the two rules are checked in. A turn that ends while the
-/// interview is still paused has to serve the discard, or the sentence outlives
-/// the turn it belonged to and the next reply is dropped as well.
+/// hold is still on has to serve the discard, or the sentence outlives the
+/// turn it belonged to and the next reply is dropped as well.
 #[test]
-fn a_turn_ending_under_a_pause_still_ends_the_discard() {
+fn a_turn_ending_under_a_hold_still_ends_the_discard() {
     assert_eq!(
         output_disposition(&GeminiEvent::TurnComplete, true, true),
         OutputDisposition::EndsTheDiscard
@@ -1259,126 +1251,122 @@ fn the_evidence_that_completes_coding_releases_the_follow_ups_once() {
 fn coding_only_completion_leaves_the_remaining_time_to_the_candidate() {
     for passed in [2, 4] {
         for elapsed in [803, 1740, 1860] {
-            for paused in [false, true] {
-                let mut state = RuntimeState {
-                    interview_loop: crate::agent::InterviewLoop::CodingOnly,
-                    coding_minutes: 30,
-                    behavioral_minutes: 0,
-                    started_at: Instant::now()
-                        .checked_sub(Duration::from_secs(elapsed))
-                        .unwrap(),
-                    code: "def solve(nums):\n    return sorted(nums)\n".to_string(),
-                    ..RuntimeState::default()
-                };
-                let run = serde_json::json!({
-                    "passed": passed, "total": 4,
-                    "code": state.code, "language": state.language
-                });
-                crate::agent::apply_data_event(
+            let mut state = RuntimeState {
+                interview_loop: crate::agent::InterviewLoop::CodingOnly,
+                coding_minutes: 30,
+                behavioral_minutes: 0,
+                started_at: Instant::now()
+                    .checked_sub(Duration::from_secs(elapsed))
+                    .unwrap(),
+                code: "def solve(nums):\n    return sorted(nums)\n".to_string(),
+                ..RuntimeState::default()
+            };
+            let run = serde_json::json!({
+                "passed": passed, "total": 4,
+                "code": state.code, "language": state.language
+            });
+            crate::agent::apply_data_event(
+                &mut state,
+                crate::runtime::TOPIC_TEST_RESULTS,
+                &run,
+                99.0,
+            );
+            for phase in ["test", "optimizations"] {
+                record_framework_evidence(
                     &mut state,
-                    crate::runtime::TOPIC_TEST_RESULTS,
-                    &run,
-                    99.0,
-                );
-                for phase in ["test", "optimizations"] {
-                    record_framework_evidence(
-                        &mut state,
-                        &serde_json::json!({
-                            "phase": phase, "source": observed_source(phase), "kind": "observed",
-                            "confidence": 90, "summary": format!("Candidate finished {phase}.")
-                        }),
-                    )
-                    .unwrap();
-                }
-                assert!(crate::agent::coding_round_complete(&state));
-                state.paused = paused;
-                let ending = execute_tool_call(
-                    &mut state,
-                    &GeminiFunctionCall {
-                        id: "1".to_string(),
-                        name: TOOL_END_INTERVIEW.to_string(),
-                        args: serde_json::json!({}),
-                    },
-                );
-                assert!(
-                    !state.end_requested,
-                    "model must not end a coding-only session"
-                );
-                assert!(!state.ended);
-                assert!(
-                    ending["error"]
-                        .as_str()
-                        .unwrap()
-                        .contains("platform timer expires")
-                );
-                let refusal = ending["error"].as_str().unwrap();
-                assert!(refusal.contains("Do not say goodbye"));
-                if passed == 2 {
-                    assert!(refusal.contains("diagnose one unresolved failing case"));
-                }
+                    &serde_json::json!({
+                        "phase": phase, "source": observed_source(phase), "kind": "observed",
+                        "confidence": 90, "summary": format!("Candidate finished {phase}.")
+                    }),
+                )
+                .unwrap();
+            }
+            assert!(crate::agent::coding_round_complete(&state));
+            let ending = execute_tool_call(
+                &mut state,
+                &GeminiFunctionCall {
+                    id: "1".to_string(),
+                    name: TOOL_END_INTERVIEW.to_string(),
+                    args: serde_json::json!({}),
+                },
+            );
+            assert!(
+                !state.end_requested,
+                "model must not end a coding-only session"
+            );
+            assert!(!state.ended);
+            assert!(
+                ending["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("platform timer expires")
+            );
+            let refusal = ending["error"].as_str().unwrap();
+            assert!(refusal.contains("Do not say goodbye"));
+            if passed == 2 {
+                assert!(refusal.contains("diagnose one unresolved failing case"));
+            }
 
-                // The five-minute warning names failures only when there are
-                // some.
-                let warning = crate::agent::time_warning(&state);
-                if passed == 4 {
-                    assert!(warning.contains("confirm any final change"), "{warning}");
-                    assert!(!warning.contains("unresolved failures"), "{warning}");
-                } else {
+            // The five-minute warning names failures only when there are some.
+            let warning = crate::agent::time_warning(&state);
+            if passed == 4 {
+                assert!(warning.contains("confirm any final change"), "{warning}");
+                assert!(!warning.contains("unresolved failures"), "{warning}");
+            } else {
+                assert!(
+                    warning.contains("prioritize the unresolved failures"),
+                    "{warning}"
+                );
+            }
+            for prompt in [
+                crate::agent::silence_nudge(&state, "", None),
+                crate::agent::proactive_review(&state, "", None),
+                crate::agent::cold_restart(&state),
+                crate::agent::resumed_context(&state, false, None),
+                crate::agent::time_warning(&state),
+            ] {
+                assert!(prompt.contains("platform timer expires"), "{prompt}");
+                assert!(
+                    !prompt.contains("wrap up the coding discussion"),
+                    "{prompt}"
+                );
+                assert!(!prompt.contains("coding problem is solved"), "{prompt}");
+                if passed == 2 {
                     assert!(
-                        warning.contains("prioritize the unresolved failures"),
-                        "{warning}"
-                    );
-                }
-                for prompt in [
-                    crate::agent::silence_nudge(&state, "", None),
-                    crate::agent::proactive_review(&state, "", None),
-                    crate::agent::cold_restart(&state),
-                    crate::agent::resumed_context(&state, false, None),
-                    crate::agent::time_warning(&state),
-                ] {
-                    assert!(prompt.contains("platform timer expires"), "{prompt}");
-                    assert!(
-                        !prompt.contains("wrap up the coding discussion"),
+                        prompt.contains("diagnose one unresolved failing case"),
                         "{prompt}"
                     );
-                    assert!(!prompt.contains("coding problem is solved"), "{prompt}");
-                    if passed == 2 {
-                        assert!(
-                            prompt.contains("diagnose one unresolved failing case"),
-                            "{prompt}"
-                        );
-                    }
                 }
-                if passed == 4 {
-                    let prompt = crate::agent::test_results_reaction(
-                        "4/4 passed",
-                        true,
-                        crate::agent::TestRecord::Settled,
-                        None,
-                        &state,
-                        crate::agent::SincePrevious::Unchanged,
-                    );
-                    assert!(prompt.contains("platform timer expires"));
-                    assert!(!prompt.contains("wrap it up"));
-                }
+            }
+            if passed == 4 {
+                let prompt = crate::agent::test_results_reaction(
+                    "4/4 passed",
+                    true,
+                    crate::agent::TestRecord::Settled,
+                    None,
+                    &state,
+                    crate::agent::SincePrevious::Unchanged,
+                );
+                assert!(prompt.contains("platform timer expires"));
+                assert!(!prompt.contains("wrap it up"));
+            }
 
-                // Neither a refusal nor incomplete code may block an explicit
-                // End or the timer, which both use the control path.
-                for reason in ["candidate_ended", "time_up"] {
-                    let mut ended = state.clone();
-                    let result = crate::agent::apply_data_event(
-                        &mut ended,
-                        crate::runtime::TOPIC_CONTROL,
-                        &serde_json::json!({
-                            "type": "end_interview", "reason": reason,
-                            "code": "def solve(nums):\n    return sor", "language": "python"
-                        }),
-                        99.0,
-                    );
-                    assert!(ended.ended);
-                    assert_eq!(result.finish_interview.as_deref(), Some(reason));
-                    assert_eq!(ended.code, "def solve(nums):\n    return sor");
-                }
+            // Neither a refusal nor incomplete code may block an explicit End
+            // or the timer, which both use the control path.
+            for reason in ["candidate_ended", "time_up"] {
+                let mut ended = state.clone();
+                let result = crate::agent::apply_data_event(
+                    &mut ended,
+                    crate::runtime::TOPIC_CONTROL,
+                    &serde_json::json!({
+                        "type": "end_interview", "reason": reason,
+                        "code": "def solve(nums):\n    return sor", "language": "python"
+                    }),
+                    99.0,
+                );
+                assert!(ended.ended);
+                assert_eq!(result.finish_interview.as_deref(), Some(reason));
+                assert_eq!(ended.code, "def solve(nums):\n    return sor");
             }
         }
     }
@@ -1899,11 +1887,6 @@ fn a_spoken_hold_cuts_generation_so_the_next_reply_is_tracked_as_its_own() {
 fn output_dropped_by_a_hold_is_disowned_when_the_hold_ends() {
     let mut state = RuntimeState::default();
     let mut activity = RuntimeActivity::new(Instant::now());
-    state.paused = true;
-    drop_output(&mut state, &mut activity);
-    assert!(!state.thinking_unheard_reply, "a pause owes nothing here");
-    assert!(!activity.socket.discarding_output);
-    state.paused = false;
     state.thinking_hold = ThinkingHold::Held {
         since: std::time::Instant::now(),
     };
@@ -1997,7 +1980,7 @@ fn a_hold_refuses_hints_and_endings_and_the_refusal_is_counted() {
     assert!(read.get("error").is_none());
 }
 
-/// A hold that cuts Jim off mid-turn applies the pause's rule: a generation
+/// A hold that cuts Jim off mid-turn: a generation
 /// still producing is discarded, one that stalled is not, though its late
 /// ending is kept from settling what the hold's release asks for. A discard
 /// already under way is kept either way.
@@ -2713,7 +2696,6 @@ fn evidence_batch_carries_a_changed_editor_once_before_the_spoken_answer() {
         );
         state.code.push_str("\n// a later change");
         for suppress in [
-            |state: &mut RuntimeState| state.paused = true,
             |state: &mut RuntimeState| state.behavioral_round_started = true,
             |state: &mut RuntimeState| state.ended = true,
             |state: &mut RuntimeState| state.end_requested = true,
@@ -2809,7 +2791,6 @@ fn editor_review_sharing_preserves_paging_and_runtime_guards() {
     assert!(reviewed[0].1.get("editorReview").is_none());
     for suppress in [
         |state: &mut RuntimeState| state.code_shown = state.code.clone(),
-        |state: &mut RuntimeState| state.paused = true,
         |state: &mut RuntimeState| state.behavioral_round_started = true,
         |state: &mut RuntimeState| state.end_requested = true,
         |state: &mut RuntimeState| state.ended = true,
@@ -3286,10 +3267,6 @@ fn self_contained_recovery_retains_unique_data_and_owed_question_policy() {
             ..state.clone()
         },
         RuntimeState {
-            paused: true,
-            ..state.clone()
-        },
-        RuntimeState {
             ended: true,
             ..state.clone()
         },
@@ -3586,10 +3563,6 @@ fn tool_continuity_waits_for_a_plausible_cut_and_an_open_floor() {
     assert!(continued(&state));
     assert!(!continued(&RuntimeState {
         context_cut_plausible: false,
-        ..state.clone()
-    }));
-    assert!(!continued(&RuntimeState {
-        paused: true,
         ..state.clone()
     }));
     assert!(continuity_input(&state, "next").contains("Evidenced steps: none."));
@@ -4368,9 +4341,6 @@ async fn a_tool_acknowledgement_fits_only_with_nothing_else_to_hear() {
     state.thinking_hold = ThinkingHold::Held { since: start };
     assert!(!tool_ack_fits(&state, &output, &read, start), "floor held");
     state.thinking_hold = ThinkingHold::default();
-    state.paused = true;
-    assert!(!tool_ack_fits(&state, &output, &read, start), "paused");
-    state.paused = false;
     output.playout_deadline = start + Duration::from_millis(1);
     assert!(
         !tool_ack_fits(&state, &output, &read, start),
@@ -5820,7 +5790,6 @@ fn delivery_uncertainty_flags_a_page_continuation_into_a_marked_turn() {
 fn floor_resets_flush_once_before_socket_identity_changes() {
     use crate::livekit::floor::Event;
     for outcome in [
-        TimingOutcome::Paused,
         TimingOutcome::Held,
         TimingOutcome::Replaced,
         TimingOutcome::Ended,
@@ -5862,7 +5831,11 @@ async fn floor_ignores_tool_output_during_discard_or_hold() {
     for (discarding, held) in [(true, false), (false, true)] {
         let mut harness = Harness::new().await;
         harness.turn.activity.socket.discarding_output = discarding;
-        harness.turn.state.paused = held;
+        if held {
+            harness.turn.state.thinking_hold = ThinkingHold::Held {
+                since: Instant::now(),
+            };
+        }
         let start = Instant::now();
         let mut records = Vec::new();
         harness

@@ -53,8 +53,8 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 /// the reconnect and the agent's exit behind a peer that was already gone.
 pub(crate) const CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
 /// How often the room loop pings. A socket nobody is writing to cannot fail a
-/// write, and a paused interview writes nothing, so without a ping a peer that
-/// went away there would not be noticed until something was finally said.
+/// write, so without a ping a peer that went away would not be noticed until
+/// something was finally said.
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
 /// Silence the reader accepts before it treats the peer as gone. Gemini answers
 /// a ping within milliseconds, so three missed intervals is not a slow network;

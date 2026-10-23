@@ -418,8 +418,8 @@ where
 }
 
 /// Takes in a board that just arrived: its counts, its checkpoint, and the
-/// image `read_board` and the next send will use. Sends nothing, so a paused
-/// interview and an ending one can keep a board without showing it.
+/// image `read_board` and the next send will use. Sends nothing, so an ending
+/// interview can keep a board without showing it.
 ///
 /// The counts land in the interview state whether or not the image ever
 /// reaches the socket, because they are what the candidate drew.

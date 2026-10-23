@@ -51,7 +51,6 @@ pub(super) enum TimingOutcome {
     NoAudio,
     Interrupted,
     Replaced,
-    Paused,
     Held,
     Ended,
 }
@@ -63,7 +62,6 @@ impl TimingOutcome {
             Self::NoAudio => "no_audio",
             Self::Interrupted => "interrupted",
             Self::Replaced => "replaced",
-            Self::Paused => "paused",
             Self::Held => "held",
             Self::Ended => "ended",
         }

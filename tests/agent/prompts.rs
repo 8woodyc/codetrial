@@ -239,8 +239,8 @@ fn prompt_golden_digest_matches_versions() {
     // its hash is a string nothing checks. The pair is still asserted, because
     // the failure worth catching is a version bumped with the golden left
     // alone, which a digest comparison on its own reads as fine.
-    let recorded_versions = (30, 23);
-    let recorded_digest = "d729da5e7a47514cb51953d0e0b3063e243929fc9d2c2bc4f1170474de07ac4f";
+    let recorded_versions = (31, 23);
+    let recorded_digest = "c08f45877fc5b2a65a8e9acbfddc1cbab3140df8cfa74efce9229c133f332bec";
 
     assert_eq!(
         (LIVE_PROMPT_VERSION, REPORT_PROMPT_VERSION),
@@ -253,44 +253,14 @@ fn prompt_golden_digest_matches_versions() {
     );
 }
 
-/// A cold restart during a pause is owed a briefing, and unpausing is what
-/// pays it. Without this the resumed interview hands "continue with your REACTO
-/// step" to an interviewer that has never heard this candidate, which is the
-/// exact state `cold_restart` exists to prevent.
-#[test]
-fn unpausing_delivers_the_cold_brief_the_pause_deferred() {
-    let mut state = RuntimeState {
-        paused: true,
-        needs_cold_brief: true,
-        code: "def two_sum(nums, target):".to_string(),
-        ..RuntimeState::default()
-    };
-
-    let resumed = apply_data_event(
-        &mut state,
-        TOPIC_CONTROL,
-        &json!({ "type": "pause_interview", "paused": false }),
-        0.0,
-    );
-
-    let reply = resumed.generate_reply.expect("resuming makes Jim speak");
-    assert!(
-        reply.contains("Restored memory may be stale: reconcile it with this current local record")
-    );
-    assert!(reply.contains("def two_sum"));
-
-    // Paid once sent, so it is not delivered again on the next pause, and a
-    // resume that fails to send leaves it for the next socket.
-    assert!(resumed.carries_thinking_debt);
-    assert!(state.needs_cold_brief);
-}
-
 /// The briefing a cold restart sends is stamped once, by the one stamp on the
 /// way out of `apply_data_event`.
 #[test]
 fn the_cold_restart_briefing_reads_the_timer_once() {
     let mut state = RuntimeState {
-        paused: true,
+        thinking_hold: ThinkingHold::Held {
+            since: std::time::Instant::now(),
+        },
         needs_cold_brief: true,
         ..RuntimeState::default()
     };
@@ -298,11 +268,11 @@ fn the_cold_restart_briefing_reads_the_timer_once() {
     let reply = apply_data_event(
         &mut state,
         TOPIC_CONTROL,
-        &json!({ "type": "pause_interview", "paused": false }),
+        &json!({ "type": "thinking", "thinking": false }),
         0.0,
     )
     .generate_reply
-    .expect("resuming makes Jim speak");
+    .expect("ending the hold makes Jim speak");
 
     assert_eq!(
         reply.matches("TIMER: about").count(),
@@ -1405,16 +1375,16 @@ fn interview_contract_versions_are_one_closed_bundle() {
         "the bundle table has no row for {INTERVIEW_CONTRACT_BUNDLE_VERSION}"
     );
 
-    assert_eq!(INTERVIEW_CONTRACT_BUNDLE_VERSION, 39);
-    assert_eq!(LIVE_PROMPT_VERSION, 30);
+    assert_eq!(INTERVIEW_CONTRACT_BUNDLE_VERSION, 40);
+    assert_eq!(LIVE_PROMPT_VERSION, 31);
     assert_eq!(REPORT_PROMPT_VERSION, 23);
     assert_eq!(RUBRIC_VERSION, 1);
     assert_eq!(REPORT_SCHEMA_VERSION, 3);
     assert_eq!(
         interview_contract_json(),
         json!({
-            "bundleVersion": 39,
-            "livePromptVersion": 30,
+            "bundleVersion": 40,
+            "livePromptVersion": 31,
             "reportPromptVersion": 23,
             "rubricVersion": 1,
             "reportSchemaVersion": 3,

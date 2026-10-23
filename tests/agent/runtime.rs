@@ -433,7 +433,9 @@ fn a_stage_direction_carries_the_countdown_the_model_cannot_see() {
     let mut state = RuntimeState {
         coding_minutes: 15,
         behavioral_minutes: 0,
-        paused: true,
+        thinking_hold: ThinkingHold::Held {
+            since: std::time::Instant::now(),
+        },
         ..RuntimeState::default()
     };
     assert_eq!(minutes_left(&state), 15);
@@ -441,7 +443,7 @@ fn a_stage_direction_carries_the_countdown_the_model_cannot_see() {
     let resumed = apply_data_event(
         &mut state,
         TOPIC_CONTROL,
-        &json!({ "type": "pause_interview", "paused": false }),
+        &json!({ "type": "thinking", "thinking": false }),
         0.0,
     );
 
@@ -779,40 +781,6 @@ fn participant_metadata_parsing_handles_frontend_metadata() {
     );
     assert_eq!(hostile_profile.profile.seniority, None);
     assert!(hostile_profile.profile.target_company.is_empty());
-}
-
-/// Pause outlived the practice mode that used to gate it.
-///
-/// It is the one coaching control that survived, because a candidate whose
-/// machine or network interrupts them still needs to stop the clock, and the
-/// pause is recorded so the gap shows up rather than passing as thinking time.
-/// What it must still do is freeze progression: an editor or test packet that
-/// arrives while paused is not evidence of work done inside the interview.
-#[test]
-fn a_paused_interview_accepts_no_progress_until_it_resumes() {
-    let pause = json!({"type":"pause_interview","paused":true});
-    let mut state = RuntimeState::default();
-    assert_eq!(
-        apply_data_event(&mut state, TOPIC_CONTROL, &pause, 99.0).pause_changed,
-        Some(true)
-    );
-    assert!(state.paused);
-
-    let ignored = apply_data_event(
-        &mut state,
-        TOPIC_CODE_UPDATE,
-        &json!({"code":"forged while paused","language":"python"}),
-        99.0,
-    );
-    assert_eq!(ignored, DataEventResult::default());
-    assert!(state.code.is_empty());
-
-    let resume = json!({"type":"pause_interview","paused":false});
-    assert_eq!(
-        apply_data_event(&mut state, TOPIC_CONTROL, &resume, 99.0).pause_changed,
-        Some(false)
-    );
-    assert!(!state.paused);
 }
 
 /// The editor is unbounded on the way in, and an idle-window review has twelve
@@ -2250,11 +2218,10 @@ fn the_time_warning_threshold_is_the_same_number_on_both_sides() {
     );
 }
 
-/// The browser retries a warning after a pause because the first packet may
-/// have arrived while the server was paused. Once one reached the interviewer,
-/// though, a second one is an interruption rather than recovery.
+/// Once a warning reached the interviewer, a second one is an interruption
+/// rather than recovery.
 #[test]
-fn a_delivered_time_warning_is_not_replayed_after_a_pause() {
+fn a_delivered_time_warning_is_not_replayed() {
     // Far enough in that the clock check below accepts it; what is under test
     // here is the second one, not the first.
     let default = RuntimeState::default();
@@ -2276,19 +2243,6 @@ fn a_delivered_time_warning_is_not_replayed_after_a_pause() {
         .is_some()
     );
     assert!(state.time_warning_seen);
-
-    state.paused = true;
-    assert!(
-        apply_data_event(
-            &mut state,
-            TOPIC_CONTROL,
-            &warning,
-            TEST_REACTION_COOLDOWN_S
-        )
-        .generate_reply
-        .is_none()
-    );
-    state.paused = false;
     assert!(
         apply_data_event(
             &mut state,

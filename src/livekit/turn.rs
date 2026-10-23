@@ -172,8 +172,8 @@ pub(super) struct ReplyDebt {
 /// is cleared with the rest without anyone remembering to.
 #[derive(Debug, Default, PartialEq)]
 pub(super) struct SocketWork {
-    /// A pause can arrive between Gemini producing a reply and this loop
-    /// receiving its final event. Drop that old turn after resume too.
+    /// A hold can arrive between Gemini producing a reply and this loop
+    /// receiving its final event. Drop that old turn after the release too.
     pub(super) discarding_output: bool,
     /// Transcription from before Thinking was chosen, arriving after it, is
     /// not the candidate speaking again; see `ignore_input_before_hold`.
@@ -192,9 +192,9 @@ pub(super) struct SocketWork {
     /// Output from a newer generation also disarms it, so a server that ever
     /// skipped the second event costs one spurious recovery, not a lost turn.
     pub(super) interrupted_turn_pending: bool,
-    /// A pause cut off a generation that had stalled, so no discard was armed
+    /// A hold cut off a generation that had stalled, so no discard was armed
     /// for it, but it may yet end. Its `Interrupted` or `TurnComplete` belongs
-    /// to that old turn and must not settle the resume prompt sent since:
+    /// to that old turn and must not settle the release prompt sent since:
     /// swallowed here, the way `interrupted_turn_pending` swallows the second
     /// ending of an interrupted turn. New output disarms it.
     ///
@@ -542,22 +542,22 @@ pub(super) struct Stalls {
     pub(super) spend_restart: bool,
 }
 
-/// Whether a pause landing now leaves output still on its way.
+/// Whether a hold landing now leaves output still on its way.
 ///
 /// Only a turn still being produced can deliver more events. Once it is
 /// complete and merely draining, its `TurnComplete` has already been and gone,
 /// so arming the discard on that state leaves it armed: nothing arrives to
-/// disarm it, and the first reply after the resume is swallowed whole.
+/// disarm it, and the first reply after the release is swallowed whole.
 ///
 /// A generation or tool continuation that has produced nothing for
 /// `PROMPT_STALL` is not on its way either, the way `settle_stalls` stops
-/// counting a prompt then. A live one ends when the resume prompt reaches
+/// counting a prompt then. A live one ends when the release prompt reaches
 /// Gemini, which interrupts it and so ends the discard; a dead one never ends,
-/// and a discard armed on it dropped the answer to the resume prompt until the
+/// and a discard armed on it dropped the answer to the release prompt until the
 /// watchdog asked again. That covers the floor too: audio a stalled generation
 /// already delivered took `Floor::Speaking`, and only its `TurnComplete` would
 /// have handed the floor back.
-pub(super) fn pause_leaves_output_in_flight(activity: &RuntimeActivity, now: Instant) -> bool {
+pub(super) fn hold_leaves_output_in_flight(activity: &RuntimeActivity, now: Instant) -> bool {
     let continuation_live = activity.socket.tool_response_outstanding
         && activity
             .tool_response_at
@@ -591,20 +591,18 @@ impl RuntimeActivity {
     ) -> bool {
         !state.ended
             && !state.end_requested
-            && self.can_refresh_context(state.paused, audio_playing, candidate_open, now)
+            && self.can_refresh_context(audio_playing, candidate_open, now)
     }
 
     /// A pending checkpoint implies a compression window: only
     /// `observe_turn_complete` sets it, and only under one.
     pub(super) fn can_refresh_context(
         &self,
-        paused: bool,
         audio_playing: bool,
         candidate_open: bool,
         now: Instant,
     ) -> bool {
         self.tokens.context_refresh_pending
-            && !paused
             && !candidate_open
             && !self.candidate_voice_active
             && self
@@ -892,8 +890,9 @@ impl RuntimeActivity {
         self.prompt_text = text.map(str::to_string);
     }
 
-    /// Provider events can create new debt after the pause cut off the turn.
-    /// Preserve that debt on resume, but exclude paused time from its deadline.
+    /// Moves the reply deadlines up to `now`, keeping whatever is owed, so
+    /// candidate speech still under way, or a hold the page has just released,
+    /// does not count toward its timeout.
     pub(super) fn resume_reply_wait(&mut self, now: Instant) {
         for at in [&mut self.awaiting_reply_since, &mut self.prompted_at]
             .into_iter()
@@ -1384,7 +1383,7 @@ impl RuntimeActivity {
         at: Instant,
         receipt: u64,
     ) {
-        if state.ended || state.paused || self.predates_hold(at) {
+        if state.ended || self.predates_hold(at) {
             return;
         }
         let Some(next) = crate::agent::thinking_change(state.thinking_hold, text) else {
@@ -1554,12 +1553,12 @@ impl RuntimeActivity {
     /// Whether this pause is worth spending an idle-window review on.
     ///
     /// Every condition here is "nothing is happening": nobody holds the floor,
-    /// no reply or tool response is owed, the interview is neither paused nor
-    /// over, and the candidate has been quiet long enough that a call started
-    /// now will probably finish before they speak again. The last one is not
-    /// about the room at all -- it asks whether anything has been said since
-    /// the last review, because a pause in a silent stretch is not new
-    /// evidence, it is the same silence.
+    /// no reply or tool response is owed, the interview is not over, and the
+    /// candidate has been quiet long enough that a call started now will
+    /// probably finish before they speak again. The last one is not about the
+    /// room at all -- it asks whether anything has been said since the last
+    /// review, because a pause in a silent stretch is not new evidence, it is
+    /// the same silence.
     ///
     /// Nothing here blocks the interview. A `false` costs a comparison, and a
     /// `true` starts a call that runs beside the room loop; the interview is
@@ -1591,8 +1590,7 @@ impl RuntimeActivity {
     /// interviewer to finish replying arrives after the reply that should have
     /// been able to rely on it.
     pub(super) fn claim_phase_judge(&mut self, state: &RuntimeState, now: Instant) -> bool {
-        if state.paused
-            || self.candidate_voice_active
+        if self.candidate_voice_active
             || state.end_requested
             || now.saturating_duration_since(self.last_user_speech) < PHASE_JUDGE_IDLE
             || now.saturating_duration_since(self.last_code_change) < PHASE_JUDGE_IDLE
@@ -1637,20 +1635,13 @@ impl RuntimeActivity {
     /// waiting for one. A judgment that finished on a snapshot older than the
     /// candidate's latest words does not release it; see
     /// `held_transition_needs_judgment`.
-    ///
-    /// Never while paused: the transition is refused during a pause, and the
-    /// page, which sent it before the pause, does not send it again, so
-    /// releasing it then would lose the round boundary for good. It waits for
-    /// the first tick after the resume, its deadline long past by then.
     pub(super) fn parked_transition_ready(&self, state: &RuntimeState, now: Instant) -> bool {
-        !state.paused
-            && self
-                .pending_round_transition
-                .as_ref()
-                .is_some_and(|parked| {
-                    now >= parked.deadline
-                        || (!self.phase_judge.is_running() && !crate::agent::phase_judge_due(state))
-                })
+        self.pending_round_transition
+            .as_ref()
+            .is_some_and(|parked| {
+                now >= parked.deadline
+                    || (!self.phase_judge.is_running() && !crate::agent::phase_judge_due(state))
+            })
     }
 
     /// Whether a held transition needs another judgment started: what the
@@ -1676,8 +1667,7 @@ impl RuntimeActivity {
     fn interim_review_due(&self, state: &RuntimeState, now: Instant) -> bool {
         let planned =
             Duration::from_secs(u64::from(state.coding_minutes + state.behavioral_minutes) * 60);
-        !state.paused
-            && !self.candidate_voice_active
+        !self.candidate_voice_active
             && !state.end_requested
             && now.saturating_duration_since(state.started_at)
                 + crate::gemini::INTERIM_ATTEMPT_TIMEOUT

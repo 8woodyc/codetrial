@@ -66,8 +66,11 @@ by reading the state rather than assuming it.
    one immediately, so the table has a long window and a short one to compare.
    Leave at least one interviewer turn unanswered, so there is a window holding
    no transcript.
-4. Pause the interview once, for long enough to notice, and resume it. This is
-   the only cause of a long window the page can name on the window itself.
+4. Press Thinking once while the interviewer is waiting on you, stay silent for
+   long enough to notice but under the two-minute check-in, and press Continue.
+   A thinking hold is the only cause of a long window the page can name on the
+   window itself. Do not ask for thinking time aloud anywhere else in the
+   interview, since a spoken request declares a hold too.
 5. End the interview.
 6. Open `/replay.html`, select that recording, and read the timeline.
 
@@ -86,8 +89,8 @@ All six must hold. Any failure is a fail row, and the row names which one broke.
 - An ordinary answered question does not say it holds no transcript. This is the
   delivery race `DONE.md` records a fix for, and a real interview is the only
   thing that has ever exercised it.
-- The window covering the pause from step 4 says "interview paused or thinking
-  time requested during this window", and no other window does.
+- The window covering the thinking hold from step 4 says "interview paused or
+  thinking time requested during this window", and no other window does.
 
 ## The judgement
 
@@ -123,10 +126,10 @@ when the answer is that nothing should change.
    something else, and no number between them has been observed. This is the
    shape the interviewer's own silence nudge leaves behind, and the panel cannot
    currently point at it.
-4. **Was the pause mark alone enough, or does the break want its own timeline
+4. **Was the hold mark alone enough, or does the hold want its own timeline
    entry?** The page receives `lifecycle` rows and draws none of them, so it
-   knows the interview was paused for six minutes and shows only that one window
-   overlapped it.
+   knows the candidate held the floor for two minutes and shows only that one
+   window overlapped it.
 
 ## Privacy
 
@@ -152,11 +155,13 @@ answer.
 | 1. Coarse window enough? | | |
 | 2. Closing turn rendered or dropped? | | |
 | 3. Consecutive empty windows worth marking (a number) | | |
-| 4. Pause mark enough, or its own entry? | | |
+| 4. Hold mark enough, or its own entry? | | |
 
 Explicit thinking time is a declared conversation hold. Its `thinking_started`
-and `thinking_ended` lifecycle rows mark an overlapping response window the
-same way a declared pause does; the panel names both possibilities. Neither
-requests a candidate judgment or changes the deadline. A subsequent interviewer
-speaking row bounds a missing end row, since the runtime suppresses speech
-while the hold is active.
+and `thinking_ended` lifecycle rows mark an overlapping response window. The
+interview no longer has a Pause button, but a recording saved before it was
+removed keeps its `paused` and `resumed` rows, and the replay still reads them,
+so a window overlapping one of those breaks is marked the same way; the panel's
+wording names both possibilities. Neither requests a candidate judgment or
+changes the deadline. A subsequent interviewer speaking row bounds a missing end
+row, since the runtime suppresses speech while the hold is active.

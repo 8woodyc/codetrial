@@ -1161,9 +1161,10 @@ collapse narrowed to the kinds that restate a whole value, `editor` and `stage`,
 so the `avatar` and `lifecycle` transition histories survive. The replay page
 needs the first to compute the response window described under Integrity
 evidence in `docs/integrity-evidence.md`, and the second to say that a window
-overlapped a pause;
-without the pause rows a break renders as thinking time, which is what
-`applyPause` records them to prevent. It is the one
+overlapped a break. The interview no longer has a Pause button, so nothing
+writes a `lifecycle` `paused` or `resumed` row now, but a recording saved
+before it was removed keeps them, and the replay still reads them: without
+those rows a break renders as thinking time. It is the one
 parameter the recording template's own read does not accept, because a template
 joining late wants Jim's current state and not the history of it. It applies to
 the snapshot only: the tail collapses nothing already, so a request carrying

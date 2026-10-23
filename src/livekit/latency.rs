@@ -46,8 +46,6 @@ impl Origin {
 pub(super) enum Boundary {
     TurnComplete,
     Interrupted,
-    /// The interview paused and cut the turn locally.
-    Paused,
     /// A thinking hold cut the turn locally.
     Held,
     /// The socket was replaced; a reply not yet started keeps waiting.
@@ -59,7 +57,6 @@ impl Boundary {
         match self {
             Self::TurnComplete => "turn_complete",
             Self::Interrupted => "interrupted",
-            Self::Paused => "paused",
             Self::Held => "held",
             Self::SocketReplaced => "socket_replaced",
         }
@@ -670,7 +667,7 @@ impl ReplyLatency {
     }
 
     pub(super) fn boundary(&mut self, boundary: Boundary, now: Instant) -> Option<Value> {
-        if matches!(boundary, Boundary::Paused | Boundary::Held) {
+        if matches!(boundary, Boundary::Held) {
             self.voice_ended = false;
             self.voice_started = false;
         }
@@ -703,7 +700,7 @@ impl ReplyLatency {
         }
         self.trace = None;
         let pending = self.pending.take();
-        if matches!(boundary, Boundary::Paused | Boundary::Held) {
+        if matches!(boundary, Boundary::Held) {
             return Some(record);
         }
         if pending.is_none() {

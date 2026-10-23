@@ -395,7 +395,6 @@ pub struct HintState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct LifecycleState {
-    pub paused: bool,
     pub ended: bool,
     pub behavioral_round_started: bool,
     pub transitions: u32,
@@ -404,8 +403,6 @@ pub struct LifecycleState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LifecycleTransition {
-    Paused,
-    Resumed,
     BehavioralStarted,
     ThinkingStarted,
     ThinkingEnded,
@@ -675,7 +672,6 @@ impl EvidenceLedger {
     fn session_line(&self) -> Option<String> {
         let lifecycle = &self.lifecycle;
         let flags = [
-            (lifecycle.paused, "paused"),
             (lifecycle.ended, "ended"),
             (
                 lifecycle.behavioral_round_started,
@@ -713,7 +709,7 @@ impl EvidenceLedger {
 
     /// Counts an event at the browser boundary before reducers accept or
     /// discard it. This is intentionally separate from ledger entries: a
-    /// malformed or paused packet is still received, but is not evidence.
+    /// malformed or refused packet is still received, but is not evidence.
     pub(crate) fn record_received_event(&mut self) {
         self.metrics.raw_events_received += 1;
     }
@@ -1074,8 +1070,6 @@ impl EvidenceLedger {
         transition: LifecycleTransition,
     ) {
         match transition {
-            LifecycleTransition::Paused => self.lifecycle.paused = true,
-            LifecycleTransition::Resumed => self.lifecycle.paused = false,
             LifecycleTransition::BehavioralStarted => {
                 self.lifecycle.behavioral_round_started = true
             }

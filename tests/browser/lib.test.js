@@ -3077,9 +3077,10 @@ test("no window opens before the interviewer has been heard speaking", () => {
 });
 
 test("a window the interview was paused during says so", () => {
-  // `applyPause` in web/interview.js records a `lifecycle` paused row, and its
-  // own comment says why: so the gap is visible rather than passing as thinking
-  // time. The response window is exactly the thing it would otherwise pass as,
+  // While the interview page had a Pause button it recorded a `lifecycle`
+  // paused row, so the gap was visible rather than passing as thinking time,
+  // and saved recordings keep those rows (docs/recording-contract.md). The
+  // response window is exactly the thing it would otherwise pass as,
   // and a five-minute break rendered as a five-minute silence is the one reading
   // on this panel that misleads a reviewer outright.
   // Paused during the candidate's own turn, which is the ordinary case: no
@@ -3099,7 +3100,7 @@ test("a window the interview was paused during says so", () => {
     "the duration is not shortened, it is explained",
   );
 
-  // Paused while the interviewer is mid-turn: src/livekit.rs publishes
+  // Paused while the interviewer is mid-turn: src/livekit.rs published
   // `listening`, so the window this opens is the break itself. The two rows are
   // written by two different sides and either can land first, so both orders
   // have to mark it.
@@ -3171,9 +3172,9 @@ test("the interview ending is not a question, and a lost resume is not the rest 
   // A dropped batch can take the `resumed` row with it. Marking every window
   // after it as paused would spread one lost row across the whole interview, and
   // that mark is the only affirmative claim this panel makes. The interviewer
-  // speaking is what bounds it: `watch_prompt` returns nothing while paused and
-  // `handle_gemini_event` drops every audio event then, so there is no path from
-  // a paused interview to a `speaking` row.
+  // speaking is what bounds it: `watch_prompt` returned nothing while paused and
+  // `handle_gemini_event` dropped every audio event then, so there was no path
+  // from a paused interview to a `speaking` row.
   const lost = responseWindows([
     avatar(0, "speaking"),
     avatar(10_000, "listening"),

@@ -78,9 +78,13 @@ where it shows them, alongside the bound above:
   reaction, time warning, round transition and wrap-up all end in speech, and so
   does a candidate interrupting; a window also follows a moment when the
   interviewer published no state at all, and one where it dropped out and came
-  back, and one where the candidate paused the interview. That last one is the
-  only cause the replay can name, because the browser records a `paused` event
-  for it, and a window overlapping one says so on itself.
+  back, and one where the candidate asked for thinking time. That last one is
+  the only cause the replay can name, because the browser records a
+  `thinking_started` and a `thinking_ended` lifecycle row for it, and a window
+  overlapping the hold says so on itself. The interview no longer has a Pause
+  button, but a recording saved before it was removed keeps its `paused` and
+  `resumed` rows, and a window overlapping one of those breaks is marked the
+  same way.
 - A window with no duration is one the recording ended inside, or one where that
   clock ran backwards between the two rows.
 - Everything above describes a browser reporting honestly. The replay is
@@ -103,15 +107,16 @@ where it shows them, alongside the bound above:
   oversized batch, a proxy, a `5xx` — drops it. A lost closing row merges two
   windows and doubles the duration; a lost `listening` row omits a question
   entirely; a lost `transcript` row makes an answered question look unanswered;
-  a lost `resumed` row would mark the rest of the interview as paused, except
-  that the interviewer speaking proves it is not, which bounds that one to the
-  window it happened in; and a lost `ended` row brings back the phantom window
-  the interviewer's goodbye would otherwise open, on an interview where nothing
-  else went wrong. All five are disclosed rather than corrected, because the
-  sequence numbers are allocated server-side and a batch that never arrived
-  leaves no gap to notice. Each loss costs the windows it touches and no more:
-  a window opens on the `avatar` row before it rather than on anything
-  cumulative, so the rest of the interview still renders.
+  a lost `thinking_ended` row, or a lost `resumed` row in a recording from
+  before the Pause button was removed, would mark the rest of the interview,
+  except that the interviewer speaking proves the hold or break is over, which
+  bounds that one to the window it happened in; and a lost `ended` row brings
+  back the phantom window the interviewer's goodbye would otherwise open, on an
+  interview where nothing else went wrong. All five are disclosed rather than
+  corrected, because the sequence numbers are allocated server-side and a batch
+  that never arrived leaves no gap to notice. Each loss costs the windows it
+  touches and no more: a window opens on the `avatar` row before it rather than
+  on anything cumulative, so the rest of the interview still renders.
 
 A window is a place in the recording to go and watch. It is not a finding: a
 candidate who is thinking is slow too, and the number cannot tell the two

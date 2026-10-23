@@ -115,23 +115,16 @@ test("only a report copy available to Past attempts counts as persisted", () => 
   assert.equal(reportIsPersisted(null), false);
 });
 
-test("a completed test run keeps pause and round locks", () => {
+test("a completed test run keeps the round lock", () => {
   const interview = read("interview.js");
 
-  // Both places that hand the runner back use the same guard. A finished test
-  // run was the one that got it right; resuming from a pause was the one that
-  // did not, and gave the editor and the runner back during the behavioral
-  // round that had just retired them.
+  // A finished test run hands the runner back through the same guard
+  // everything else does, so it cannot give the editor and the runner back
+  // during the behavioral round that has retired them.
   assert.match(
     functionBody(interview, "runTests"),
     /updateRunAvailability\(\)/,
   );
-  const applyPause = functionBody(interview, "applyPause");
-  assert.match(
-    applyPause,
-    /nodes\.editor\.disabled = paused \|\| codingClosed\(\)/,
-  );
-  assert.match(applyPause, /updateRunAvailability\(\)/);
   // Asserted as two facts rather than one spelling: the guard is `codingClosed`
   // itself now, not a DOM attribute that happens to track it.
   const updateRunAvailability = functionBody(
@@ -173,10 +166,9 @@ test("the lobby offers an editor or a whiteboard and carries the choice into the
   // selection mode offers the old scored/coached assessment switch.
   assert.doesNotMatch(app + lobby + interview, /"scored"/);
   assert.match(interview, /interviewMode: mode/);
-  // Pause stayed; the two coaching controls went with the mode that gated them.
-  assert.match(page, /id="pause"/);
+  // The two coaching controls went with the mode that gated them.
   assert.doesNotMatch(interview, /retryPractice/);
-  // Pause moves no deadline any more; see the note in applyPause.
+  // Nothing moves the deadline once it is set.
   assert.doesNotMatch(interview + read("lib.js"), /resumeDeadline/);
   assert.doesNotMatch(interview, /practiceGuide/);
   // One framework on screen at a time, ticked from what the interviewer banks,

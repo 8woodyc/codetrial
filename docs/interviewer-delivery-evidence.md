@@ -14,19 +14,18 @@ spoken words cannot create or remove a cancellation record. Candidate lines
 are never marked or rewritten.
 
 Attribute accepted audio's existing playout deadline to its interviewer line.
-Audio received before the first transcript fragment waits for that line to
-open. This waiting attribution belongs to that generation and socket;
-completion (after its final padded audio frame), replacement, or a cut ends
-the wait if no line opened. It cannot
-attach to a later generation. Retain all lines with pending deadlines, including generations already
-closed by TurnComplete. Every cut marks the lines with audio still queued. It
-also marks the open interviewer line when it stops something: a running
-generation, or completed output still playing. A cut that stops nothing, such
-as a pause after the audio drained, marks nothing. This covers provider
-interruption, candidate stale-playout cancellation, the stale-playout backstop
-on the next generation's audio, thinking holds, pause and socket handoff.
-Partly captured and never captured turns use the same policy; no heard prefix
-is inferred.
+Audio received before the first transcript fragment waits for that line to open.
+This waiting attribution belongs to that generation and socket; completion
+(after its final padded audio frame), replacement, or a cut ends the wait if no
+line opened. It cannot attach to a later generation. Retain all lines with
+pending deadlines, including generations already closed by TurnComplete. Every
+cut marks the lines with audio still queued. It also marks the open interviewer
+line when it stops something: a running generation, or completed output still
+playing. A cut that stops nothing, such as a thinking hold after the audio
+drained, marks nothing. This covers provider interruption, candidate
+stale-playout cancellation, the stale-playout backstop on the next generation's
+audio, thinking holds and socket handoff. Partly captured and never captured
+turns use the same policy; no heard prefix is inferred.
 
 Output transcription trails audio, so a line opened after a completion and
 before the next generation's audio cannot be told apart from that output's
@@ -127,10 +126,10 @@ Handler tests cover both ordinary cancellation paths, late fragments and the
 next completion, fragments before and after a candidate playout cut, the reply
 that follows one, the backstop's ambiguous line, cold and resumed replacement
 replies, fully delivered and protected controls. Metadata tests cover partial
-capture, overlapping queued lines, audio before transcription, idle and
-playing pauses, holds and handoffs, sealing, and the other queue cuts. Verify
-every reader, behavioral-round insertion, stable conversation paging,
-interim reviews that are not rewound and unchanged candidate lines.
+capture, overlapping queued lines, audio before transcription, idle and playing
+holds and handoffs, sealing, and the other queue cuts. Verify every reader,
+behavioral-round insertion, stable conversation paging, interim reviews that are
+not rewound and unchanged candidate lines.
 
 The marking, window and sealing rules live in `InterviewerDelivery` in
 `src/agent.rs`, where mutation testing reaches them. The event handlers that

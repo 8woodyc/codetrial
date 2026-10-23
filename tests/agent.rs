@@ -276,8 +276,6 @@ fn prompt_samples() -> Value {
     let reaction_test_summary = format_test_run_for_reaction(&sample_test_run, 1);
     let report_test_summary = format_test_run(Some(&sample_test_run), 1);
     let mut prompts = json!({
-        "resume": resume(false),
-        "resumeBehavioral": resume(true),
         "roundStarted": round_started(),
         "roundSkipped": round_skipped(InterviewMode::Coding),
         "roundSkippedBoard": round_skipped(InterviewMode::Whiteboard),
@@ -368,15 +366,13 @@ fn prompt_samples() -> Value {
         "coldRestart": cold_restart(&cold_state),
         "coldRestartEmpty": cold_restart(&RuntimeState::default()),
 
-        // The forms a recovery actually sends when a reply was owed: a cold
-        // briefing naming the lost event, and a resume line owing the
-        // candidate's own turn. Joined at the call sites rather than built by
-        // one builder, so without these the digest could not see them.
+        // The form a recovery actually sends when a reply was owed: a cold
+        // briefing naming the lost event. Joined at the call site rather than
+        // built by one builder, so without this the digest could not see it.
         "coldRestartOwed": with_owed_reply(
             cold_restart(&cold_state),
             Some(Some("[SYSTEM EVENT] The candidate just ran the built-in test cases and every one passed.")),
         ),
-        "resumeOwed": with_owed_reply(resume(false), Some(None)),
         "review": proactive_review(&RuntimeState::default(), &working_changed, Some(&excerpt)),
         "reviewWithoutExcerpt": proactive_review(&RuntimeState::default(), &working, None),
         "time": time_warning(&RuntimeState::default()),

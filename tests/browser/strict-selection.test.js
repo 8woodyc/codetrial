@@ -391,7 +391,6 @@ test("Strict refresh keeps difficulty, ignores URL problem and joins a fresh ass
   page.on("dialog", () => warnings++);
   assert.equal(calls.length, 0);
   assert.equal(await page.locator("#end").isDisabled(), true);
-  assert.equal(await page.locator("#pause").isDisabled(), true);
   assert.equal(
     await page.locator("#problem-title").textContent(),
     "Strict Interview",
@@ -403,7 +402,6 @@ test("Strict refresh keeps difficulty, ignores URL problem and joins a fresh ass
   await page.locator("#editor").fill("previous attempt code");
   const firstTitle = await page.locator("#problem-title").textContent();
   assert.equal(await page.locator("#end").isEnabled(), true);
-  assert.equal(await page.locator("#pause").isEnabled(), true);
   assert.equal(calls[0].selectionMode, "strict");
   assert.equal(calls[0].exampleDrawing, true);
   assert.equal(await page.locator("#example-board").isVisible(), true);
@@ -1768,7 +1766,7 @@ for (const outcome of ["success", "failure"]) {
   });
 }
 
-test("Strict Run follows reconnect, pause, terminal disconnect and ending states", async (t) => {
+test("Strict Run follows reconnect, terminal disconnect and ending states", async (t) => {
   const calls = [];
   const page = await interview(t, "selection=strict", (route) => {
     calls.push(route.request().postDataJSON());
@@ -1786,19 +1784,6 @@ test("Strict Run follows reconnect, pause, terminal disconnect and ending states
       if (!handlers?.length) throw new Error(`Missing ${name} handler`);
       for (const callback of handlers) callback();
     }, name);
-  const acknowledgePause = (paused) =>
-    page.evaluate(async (paused) => {
-      const handlers = window.roomEvents.DataReceived;
-      if (!handlers?.length) throw new Error("Missing control handler");
-      const payload = new TextEncoder().encode(
-        JSON.stringify({ type: "pause_state", paused }),
-      );
-      await Promise.all(
-        handlers.map((handler) =>
-          handler(payload, { kind: "AGENT" }, null, "control"),
-        ),
-      );
-    }, paused);
   const blockedRun = async () => {
     assert.equal(await page.locator("#run-tests").isDisabled(), true);
     await page.evaluate(() => {
@@ -1816,14 +1801,6 @@ test("Strict Run follows reconnect, pause, terminal disconnect and ending states
   await page.locator("#language-select").selectOption("javascript");
   await blockedRun();
   await event("Reconnected");
-  assert.equal(await page.locator("#run-tests").isEnabled(), true);
-  await page.locator("#pause").click();
-  await acknowledgePause(true);
-  await event("Reconnecting");
-  await event("Reconnected");
-  await blockedRun();
-  await page.locator("#pause").click();
-  await acknowledgePause(false);
   assert.equal(await page.locator("#run-tests").isEnabled(), true);
   await event("Disconnected");
   await blockedRun();

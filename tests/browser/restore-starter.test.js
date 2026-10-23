@@ -1420,67 +1420,15 @@ test("a disabled editor is not restored", async (t) => {
   }
 });
 
-/// Pausing needs a running clock, and only the real preflight starts it. With
-/// the preflight merely hidden the deadline is still zero, so the timer tick a
-/// pause makes ends the interview. This is the way run-shortcut.test.js gets a
-/// live page, with a fake microphone and camera in a browser of its own.
-test("the control is disabled while paused and back on resume", async (t) => {
-  if (!browser) {
-    t.skip("playwright chromium unavailable");
-    return;
-  }
-  const { chromium } = await import("playwright");
-  const media = await chromium.launch({
-    args: [
-      "--use-fake-device-for-media-stream",
-      "--use-fake-ui-for-media-stream",
-      FAKE_SPEECH_CAPTURE,
-    ],
-  });
-  t.after(() => media.close());
-  const page = await media.newPage();
-  await page.addInitScript(WITHOUT_EDITING_COMMAND);
-  const errors = [];
-  page.on("pageerror", (error) => errors.push(error.message));
+test("the behavioral round disables the control when the agent opens it", async (t) => {
+  const ctx = await connectedPage(t, { withoutEditingCommand: true });
+  if (!ctx) return;
+  const { page } = ctx;
   try {
-    await page.goto(`${base}/interview.html?problem=${PROBLEM}`, {
-      waitUntil: "domcontentloaded",
-    });
-    await page.waitForFunction(
-      () => document.querySelector("#candidate-case-input").placeholder !== "",
-    );
-    await page.getByRole("button", { name: "Play test tone" }).click();
-    await page.getByRole("button", { name: "I heard it" }).click();
-    await page.waitForFunction(
-      () => !document.querySelector("#audio-check-join").disabled,
-    );
-    await page.click("#audio-check-join");
-    await page.waitForFunction(
-      () => document.querySelector("#timer").textContent !== "00:00",
-    );
     const button = page.locator("#editor-restore-starter");
-    await overwrite(page, "work before the pause\n");
+    await overwrite(page, "coding round work\n");
     assert.equal(await button.isDisabled(), false);
-    await press(page);
-    assert.equal(await armed(page), true, "armed before the pause");
-    // Not a click on the Pause button: that would move focus off the control
-    // and end the arm through the blur instead of through the pause.
-    await page.evaluate(() => document.querySelector("#pause").click());
-    await page.waitForFunction(
-      () => document.querySelector("#pause").textContent === "Resume",
-    );
-    // Paused and still live: a pause that ended the interview would disable
-    // the control for the wrong reason.
-    assert.equal(await page.locator("#ending-overlay").isHidden(), true);
-    assert.equal(await button.isDisabled(), true, "paused: nothing to press");
-    assert.equal(await armed(page), false, "the pause ended the arm");
-    assert.equal(await page.locator("#editor-restore-prompt").isHidden(), true);
-    assert.equal(
-      await page.evaluate(() => document.activeElement?.id),
-      "language-select",
-      "focus moved to the picker, not dropped to the body",
-    );
-    assert.equal(await value(page), "work before the pause\n");
+
     // A disabled button has to look disabled, and `.font-size-button` only
     // dimmed itself for aria-disabled, so it read as fully active and still
     // brightened under the pointer. Compared as computed style, since a rule
@@ -1495,32 +1443,14 @@ test("the control is disabled while paused and back on resume", async (t) => {
           color: style.color,
         };
       });
-    // The arm taken before the pause is dropped with a colour transition, so
-    // take the resting look once two reads in a row agree.
-    let rest = await look();
-    for (let reads = 0; reads < 40; reads += 1) {
-      await page.waitForTimeout(100);
-      const next = await look();
-      if (JSON.stringify(next) === JSON.stringify(rest)) break;
-      rest = next;
-    }
-    assert.equal(rest.opacity, "0.6", "dimmed while disabled");
-    assert.equal(rest.cursor, "not-allowed");
-    const box = await button.boundingBox();
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    // The highlight is a transition, so give one time to show before judging
-    // that none is coming; the enabled case below proves one does.
-    await page.waitForTimeout(500);
-    assert.deepEqual(await look(), rest, "no hover highlight while disabled");
-    await page.click("#pause");
-    await page.waitForFunction(
-      () => document.querySelector("#pause").textContent === "Pause",
-    );
-    assert.equal(await button.isDisabled(), false, "resumed: usable again");
-    assert.equal(await armed(page), false, "and not still armed from before");
+
+    // The enabled control first, since the round cannot be closed again: full
+    // strength, and a hover that does highlight, which is what makes the
+    // disabled case below mean something.
     await page.mouse.move(0, 0);
     const idle = await look();
-    assert.equal(idle.opacity, "1", "full strength again");
+    assert.equal(idle.opacity, "1", "full strength while enabled");
+    const box = await button.boundingBox();
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.waitForFunction(
       ({ idle }) => {
@@ -1532,24 +1462,12 @@ test("the control is disabled while paused and back on resume", async (t) => {
       { idle },
       { timeout: 5000 },
     );
-    await restore(page);
-    assert.equal(await value(page), starters.python);
-    assert.deepEqual(errors, []);
-  } finally {
-    await page.close();
-  }
-});
 
-test("the behavioral round disables the control when the agent opens it", async (t) => {
-  const ctx = await connectedPage(t, { withoutEditingCommand: true });
-  if (!ctx) return;
-  const { page } = ctx;
-  try {
-    const button = page.locator("#editor-restore-starter");
-    await overwrite(page, "coding round work\n");
-    assert.equal(await button.isDisabled(), false);
     await press(page);
     assert.equal(await armed(page), true, "armed before the round opens");
+
+    // Off the control, so the resting look below is read without a hover.
+    await page.mouse.move(0, 0);
     // What the agent sends when the behavioral round opens, delivered through
     // the handler the page registered on the room, as LiveKit would.
     await page.evaluate(() =>
@@ -1576,6 +1494,30 @@ test("the behavioral round disables the control when the agent opens it", async 
       "language-select",
       "focus moved to the picker, not dropped to the body",
     );
+
+    // The arm taken before the round opened is dropped with a colour
+    // transition, so the resting look is read once every animation on the
+    // control has finished. Two reads agreeing is not enough: a starved
+    // renderer can hold a transition at the same midpoint across both.
+    const settled = () =>
+      button.evaluate((node) =>
+        Promise.all(
+          node
+            .getAnimations()
+            .map((animation) => animation.finished.catch(() => {})),
+        ),
+      );
+    await settled();
+    const rest = await look();
+    assert.equal(rest.opacity, "0.6", "dimmed while disabled");
+    assert.equal(rest.cursor, "not-allowed");
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    // The highlight is a transition, so give one time to show before judging
+    // that none is coming; the enabled case above proves one does.
+    await page.waitForTimeout(500);
+    await settled();
+    assert.deepEqual(await look(), rest, "no hover highlight while disabled");
+
     await page.evaluate(() => {
       const node = document.querySelector("#editor-restore-starter");
       node.click();

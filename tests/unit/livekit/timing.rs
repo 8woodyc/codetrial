@@ -233,7 +233,6 @@ fn non_audio_endings_flush_once_and_never_reuse_old_times_or_tools() {
         TimingOutcome::NoAudio,
         TimingOutcome::Interrupted,
         TimingOutcome::Replaced,
-        TimingOutcome::Paused,
         TimingOutcome::Held,
         TimingOutcome::Ended,
     ] {
