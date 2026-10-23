@@ -1965,5 +1965,103 @@ class SkillRefsTests(unittest.TestCase):
         self.assertEqual(len(lines), len(DANGLING_REPORT))
 
 
+ROUTING_SPEC = importlib.util.spec_from_file_location(
+    "check_skill_routing", ROOT / "scripts" / "check-skill-routing.py"
+)
+routing = importlib.util.module_from_spec(ROUTING_SPEC)
+ROUTING_SPEC.loader.exec_module(routing)
+
+
+class SkillRoutingTests(unittest.TestCase):
+    def test_a_skill_fires_by_invocation_or_by_reading_its_file(self):
+        skills = ["codetrial-web", "codetrial-verify"]
+
+        def used(name, **args):
+            content = [{"type": "tool_use", "name": name, "input": args}]
+            return routing.first_skill(
+                {"type": "assistant", "message": {"content": content}}, skills
+            )
+
+        self.assertEqual(used("Skill", skill="codetrial-web"), "codetrial-web")
+        self.assertEqual(used("Skill", skill="proj:codetrial-web"), "codetrial-web")
+        path = "/tmp/x/.claude/skills/codetrial-verify/review.md"
+        self.assertEqual(used("Read", file_path=path), "codetrial-verify")
+        # Another skill, another file, or a user message decides nothing.
+        self.assertIsNone(used("Skill", skill="gh-review"))
+        self.assertIsNone(used("Read", file_path="/tmp/x/docs/install.md"))
+        self.assertIsNone(routing.first_skill({"type": "user"}, skills))
+
+    def test_a_run_that_failed_is_an_error_not_a_near_miss(self):
+        skill_use = {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "name": "Skill",
+                        "input": {"skill": "codetrial-web"},
+                    }
+                ]
+            },
+        }
+        cases = {
+            "fired": (json.dumps(skill_use), 0, "codetrial-web"),
+            "nothing fired": ('{"type": "result", "is_error": false}', 0, "none"),
+            "error result": ('{"type": "result", "is_error": true}', 0, "error"),
+            "crashed": ("", 1, "error"),
+            "never finished": ('{"type": "system"}', 0, "error"),
+        }
+        for name, (line, code, want) in cases.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as bin_dir:
+                support.write_executable(
+                    Path(bin_dir) / "claude",
+                    f"#!/bin/sh\nprintf '%s\\n' '{line}'\nexit {code}\n",
+                )
+                # The fake by path and the timeout as an argument: the gate
+                # runs cases in one process at once, so a patched PATH or
+                # module global would reach another case, or the real claude.
+                fake = str(Path(bin_dir) / "claude")
+                got = routing.run_query("q", bin_dir, ["codetrial-web"], 30, fake)
+                self.assertEqual(got, want)
+
+    def test_a_claude_that_cannot_start_is_an_error(self):
+        self.assertEqual(
+            routing.run_query("q", ".", [], 1, "/nonexistent/claude"), "error"
+        )
+
+    def test_zero_runs_is_refused_rather_than_passed(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "scripts" / "check-skill-routing.py"),
+                "--runs",
+                "0",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--runs must be at least 1", result.stderr)
+
+    def test_a_run_past_the_timeout_is_an_error(self):
+        with tempfile.TemporaryDirectory() as bin_dir:
+            support.write_executable(
+                Path(bin_dir) / "claude", "#!/bin/sh\nexec sleep 30\n"
+            )
+            fake = str(Path(bin_dir) / "claude")
+            self.assertEqual(routing.run_query("q", bin_dir, [], 0.5, fake), "error")
+
+    def test_the_fixture_carries_the_skills_and_nothing_ignored(self):
+        names = routing.fixture_names()
+        self.assertIn(".claude/skills/codetrial-verify/SKILL.md", names)
+        # No project hook or setting, no build output, and of the env files only
+        # the tracked template, never a per-person credential file.
+        claude = {n for n in names if n.startswith(".claude/")}
+        self.assertTrue(all(n.startswith(".claude/skills/") for n in claude))
+        self.assertFalse(any(n.startswith("target/") for n in names))
+        env = [n for n in names if n.startswith("config/") and ".env." in n]
+        self.assertEqual(env, ["config/codetrial.env.example"])
+
+
 if __name__ == "__main__":
     unittest.main()
