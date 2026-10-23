@@ -3,17 +3,24 @@ description: Restore the build tree the check workflow's Rust lane saves.
 
 # One definition of the key for every job that reads this cache: the Rust lane,
 # which also saves it under `outputs.key`, the mutation shards and the avatar
-# check. Needs the toolchain installed first, since its version is in the key.
+# check. Needs the toolchain installed and CXX exported first, since both are
+# in the key: a job that restored before the WebRTC compiler step would compute
+# a different key from the lane that saved it and never get a hit.
 #
 # `registry/src` is deliberately absent: it is unpacked from `registry/cache` on
 # demand, so caching both stores every dependency twice.
 #
 # Keyed on the lockfile, so a dependency bump rebuilds and a source edit does
-# not, and on the check workflow, whose build flags are part of every object in
-# target/: a cache saved under old flags would otherwise be restored forever and
-# rebuilt from scratch every run. The restore key lets either bump start from
-# the previous tree instead of from nothing. The rustc version is in both, so a
-# toolchain bump does not inherit objects the new compiler rebuilds anyway.
+# not, and on what compiles every object in target/: rustc, the C++ compiler
+# webrtc-sys builds with through `cc`, and the flags the workflow exports. A
+# cache saved under an old one would otherwise be restored forever and rebuilt
+# from scratch every run. Those inputs, not the file that sets them: hashing
+# check.yml rotated a 1.6 GB entry on every workflow edit, 35 of them in 60
+# days against 23 lockfile changes, while changing nothing a compiler reads.
+#
+# The restore key lets a lockfile bump start from the previous tree instead of
+# from nothing. The compilers and flags are in both, so changing one does not
+# inherit objects that would all be rebuilt anyway.
 outputs:
   key:
     description: The exact key, for the step that saves the tree.
@@ -27,9 +34,21 @@ runs:
     - id: key
       shell: sh
       env:
-        INPUTS: ${{ hashFiles('Cargo.lock', '.github/workflows/check.yml') }}
+        INPUTS: ${{ hashFiles('Cargo.lock') }}
       run: |
-        prefix="cargo-$RUNNER_OS-$(rustc -V | sha256sum | cut -c1-12)-"
+        # The C++ compiler by its own banner rather than its path, since CXX is
+        # a fixed path whatever Clang revision sits behind it. Asked on its own
+        # line and not inside the pipeline below: there a compiler that would
+        # not run cut the hashed text short, and `cut` gave the step a zero
+        # status, so the key lost every flag without a word. Here `-e` fails
+        # the step and names CXX, which also catches a restore placed before
+        # the step that exports it. Flags by prefix, so one added later needs
+        # no edit here.
+        cxx=$("${CXX:?export CXX before restoring the cargo cache}" --version)
+        build=$({ rustc -V; echo "$cxx"; env | grep -E \
+          '^(RUSTFLAGS|RUSTDOCFLAGS|CARGO_PROFILE_[A-Z0-9_]+|CARGO_BUILD_[A-Z0-9_]+|CARGO_INCREMENTAL|CC|CXX|CFLAGS|CXXFLAGS)=' \
+          | sort; } | sha256sum | cut -c1-12)
+        prefix="cargo-$RUNNER_OS-$build-"
         echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
         echo "key=$prefix$INPUTS" >> "$GITHUB_OUTPUT"
     - id: restore

@@ -55,6 +55,42 @@ def condition(text, name):
     return match[1] if match else ""
 
 
+def action_script(name):
+    """The run script of a composite action under .github/actions."""
+    return support.run_block((ROOT / f".github/actions/{name}/action.yml").read_text())
+
+
+def stubbed(tmp, script, stubs):
+    """A runner for script under bash -eo pipefail, the shell a composite
+    `shell: bash` step gets, with stubs first on PATH.
+
+    Each call takes the environment it adds and returns the lines the stubs
+    logged to $CALLS. `timeout` is always stubbed to run its command.
+    """
+    bin_dir = Path(tmp) / "bin"
+    bin_dir.mkdir()
+    for name, body in {"timeout": 'shift; exec "$@"', **stubs}.items():
+        support.write_executable(bin_dir / name, f"#!/bin/sh\n{body}\n")
+    calls = Path(tmp) / "calls"
+
+    def run(**env):
+        calls.write_text("")
+        subprocess.run(
+            ["bash", "-eo", "pipefail", "-c", script],
+            env=os.environ
+            | {
+                "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                "CALLS": str(calls),
+            }
+            | env,
+            check=True,
+            capture_output=True,
+        )
+        return calls.read_text().splitlines()
+
+    return run
+
+
 class TestGateLanes(unittest.TestCase):
     def run_lane(
         self,
@@ -400,6 +436,147 @@ printf 'python:%s\\n' "$*" >> "$CALLS"
                 "browser tests, 1 todo: write it",
             ],
         )
+
+    def test_cargo_cache_key_tracks_build_settings(self):
+        for tool in ("rustc", "sha256sum"):
+            if not shutil.which(tool):
+                self.skipTest(f"cache key check needs {tool}")
+        script = action_script("restore-cargo-cache")
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "output"
+            # One path whose banner changes, as a Clang bump unpacked over the
+            # same directory does.
+            compiler = Path(tmp) / "clang++"
+
+            def install_clang(revision):
+                support.write_executable(
+                    compiler, f"#!/bin/sh\necho clang {revision}\n"
+                )
+
+            install_clang("1")
+
+            def key(**settings):
+                output.write_text("")
+                subprocess.run(
+                    ["sh", "-eu", "-c", script],
+                    env=os.environ
+                    | {
+                        "GITHUB_OUTPUT": str(output),
+                        "RUNNER_OS": "Linux",
+                        "INPUTS": "lock",
+                        "CXX": str(compiler),
+                    }
+                    | settings,
+                    check=True,
+                    capture_output=True,
+                )
+                return output.read_text()
+
+            baseline = key()
+            for name in (
+                "CARGO_PROFILE_DEV_DEBUG",
+                "CARGO_PROFILE_TEST_DEBUG",
+                "CARGO_BUILD_RUSTFLAGS",
+                "RUSTFLAGS",
+                "RUSTDOCFLAGS",
+                "CARGO_INCREMENTAL",
+                "CC",
+                "CFLAGS",
+                "CXXFLAGS",
+            ):
+                with self.subTest(variable=name):
+                    self.assertNotEqual(key(**{name: "changed"}), baseline)
+            self.assertEqual(key(UNRELATED_SETTING="changed"), baseline)
+            install_clang("2")
+            self.assertNotEqual(key(), baseline)
+            # A compiler that does not run fails the step rather than leaving
+            # a key that silently lost what came after it.
+            with self.assertRaises(subprocess.CalledProcessError):
+                key(CXX=str(Path(tmp) / "missing-c++"))
+
+    def test_apt_install_asks_only_for_what_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            install = stubbed(
+                tmp,
+                action_script("apt-install"),
+                {
+                    # Installed means named in $INSTALLED.
+                    "dpkg-query": 'case " $INSTALLED " in *" $3 "*) '
+                    "printf installed ;; *) exit 1 ;; esac",
+                    "sudo": 'exec "$@"',
+                    "dpkg": 'printf "dpkg %s\\n" "$*" >> "$CALLS"',
+                    # With $STALE set the first install fails, as a stale list
+                    # does; the log it just wrote says whether this is the first.
+                    "apt-get": 'shift 4; printf "apt %s\\n" "$*" >> "$CALLS"\n'
+                    '[ -n "${STALE:-}" ] && [ "$1" = install ] '
+                    '&& [ "$(grep -c "^apt install" "$CALLS")" = 1 ] && exit 100\n'
+                    "exit 0",
+                },
+            )
+            self.assertEqual(
+                install(PACKAGES="sqlite3 shellcheck", INSTALLED="sqlite3 shellcheck"),
+                [],
+            )
+            self.assertEqual(
+                install(PACKAGES="libglib2.0-dev mold sqlite3", INSTALLED="sqlite3"),
+                ["apt install -y libglib2.0-dev mold"],
+            )
+            self.assertEqual(
+                install(PACKAGES="mold", INSTALLED="", STALE="1"),
+                [
+                    "apt install -y mold",
+                    "dpkg --configure -a",
+                    "apt update",
+                    "apt install -y mold",
+                ],
+            )
+
+    def test_chromium_installs_system_libraries_only_when_one_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            install = stubbed(
+                tmp,
+                action_script("chromium"),
+                {
+                    "npx": 'printf "npx %s\\n" "$*" >> "$CALLS"',
+                    "node": 'printf "node\\n" >> "$CALLS"',
+                    # What the loader prints, found or not.
+                    "ldd": 'printf "%s\\n" "$LDD"',
+                },
+            )
+            shell = Path(tmp) / ".cache/ms-playwright/chromium_headless_shell-1"
+            shell.mkdir(parents=True)
+            # A renamed executable leaves ldd nothing to complain about, so no
+            # shell at all has to fail rather than pass as "nothing missing".
+            with self.assertRaises(subprocess.CalledProcessError):
+                install(HOME=tmp, LDD="")
+            (shell / "chrome-headless-shell").write_text("")
+            install_shell = "npx playwright install --only-shell chromium"
+            self.assertEqual(
+                install(HOME=tmp, LDD="\tlibnss3.so => /usr/lib/libnss3.so"),
+                [install_shell, "node"],
+            )
+            self.assertEqual(
+                install(HOME=tmp, LDD="\tlibnss3.so => not found"),
+                [
+                    install_shell,
+                    "npx playwright install-deps chromium-headless-shell",
+                    "node",
+                ],
+            )
+
+    def test_every_browser_launch_is_headless(self):
+        # The chromium action installs only the headless shell, so a headed or
+        # channel launch would find no browser. Say so here, not in CI.
+        launchers = [
+            *(ROOT / "tests/browser").glob("*.js"),
+            *(ROOT / "scripts").glob("*.cjs"),
+            *(ROOT / "scripts").glob("*.sh"),
+        ]
+        for path in launchers:
+            with self.subTest(path=path.name):
+                self.assertNotRegex(
+                    path.read_text(), r"\bheadless:(?!\s*true\b)|\bchannel:"
+                )
 
     def test_avatar_reuses_the_gate_caches_without_saving_them(self):
         avatar = support.job("avatar")

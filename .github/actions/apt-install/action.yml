@@ -1,0 +1,48 @@
+name: Install apt packages
+description: Install the named Debian packages the runner image does not already have.
+
+# Every lane that asked for a package paid `apt-get update` and a mirror round
+# trip for it, including the ones the image already ships: the logs report
+# sqlite3 and shellcheck as "already the newest version". Across 39 runs the
+# step had a median of 12s and a tail past 180s, and the tail was the Azure
+# mirror, once serving a 1 MB package at 41 kB/s. A package dpkg reports as
+# installed is dropped from the request, and a request left empty touches no
+# mirror at all.
+#
+# `db:Status-Status` rather than presence in `dpkg -l`: a package removed but not
+# purged, or one whose configure step failed, still has a line there, and only
+# `installed` means its files are on disk and usable.
+#
+# The image's own lists are tried before an update, since an update is a dozen
+# index downloads on the same mirror. A list too stale to name a version the
+# mirror still has fails fast with a 404, and that is the case the update after
+# it is for. Each apt call is bounded, so a wedged mirror fails the step by name
+# instead of running out the job's clock. A bound that fires mid-unpack leaves
+# dpkg interrupted, and every later apt call refuses to run until it is
+# finished, so the retry finishes it first; with nothing pending it is a no-op.
+inputs:
+  packages:
+    description: Package names, separated by spaces.
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+      run: |
+        missing=()
+        for package in $PACKAGES; do
+          status=$(dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null || true)
+          [ "$status" = installed ] || missing+=("$package")
+        done
+        if [ "${#missing[@]}" -eq 0 ]; then
+          echo "already installed: $PACKAGES"
+          exit 0
+        fi
+        echo "installing: ${missing[*]}"
+        apt() {
+          sudo timeout 10m apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 "$@"
+        }
+        apt install -y "${missing[@]}" \
+          || { sudo dpkg --configure -a && apt update && apt install -y "${missing[@]}"; }

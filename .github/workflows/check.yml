@@ -42,10 +42,10 @@ env:
   # mold replaces the linker itself. It is the tool built for this shape of
   # problem, many large static inputs, and it is an apt package on this image.
   #
-  # Both change the build fingerprint, which is why the cargo cache key below
-  # hashes this file. Without that, a cache saved under the old flags would be
-  # restored forever and rebuilt from scratch every run, which is worse than
-  # having no cache at all.
+  # Both change the build fingerprint, which is why the cargo cache key hashes
+  # them (restore-cargo-cache says how). Without that, a cache saved under the
+  # old flags would be restored forever and rebuilt from scratch every run,
+  # which is worse than having no cache at all.
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
   CARGO_PROFILE_TEST_DEBUG: line-tables-only
   RUSTFLAGS: -Clink-arg=-fuse-ld=mold
@@ -192,12 +192,9 @@ jobs:
 
       - name: Install system packages
         if: matrix.packages
-        env:
-          PACKAGES: ${{ matrix.packages }}
-        run: |
-          sudo apt-get update
-          # shellcheck disable=SC2086 # one word per package
-          sudo apt-get install -y $PACKAGES
+        uses: ./.github/actions/apt-install
+        with:
+          packages: ${{ matrix.packages }}
       - name: Install WebRTC C++ compiler
         if: matrix.lane == 'rust'
         uses: ./.github/actions/webrtc-clang
@@ -567,7 +564,9 @@ jobs:
         uses: ./.github/actions/reclaim-disk
 
       - name: Install native build dependency
-        run: sudo apt-get update && sudo apt-get install -y libglib2.0-dev mold sqlite3
+        uses: ./.github/actions/apt-install
+        with:
+          packages: libglib2.0-dev mold sqlite3
       - name: Install WebRTC C++ compiler
         uses: ./.github/actions/webrtc-clang
 
@@ -1105,7 +1104,9 @@ jobs:
       - uses: actions/checkout@v7
       # browser-check.sh builds the server, and webrtc-sys needs Clang 21+.
       - name: Install system packages
-        run: sudo apt-get update && sudo apt-get install -y libglib2.0-dev mold
+        uses: ./.github/actions/apt-install
+        with:
+          packages: libglib2.0-dev mold
       - name: Install WebRTC C++ compiler
         uses: ./.github/actions/webrtc-clang
       - name: Install Rust
