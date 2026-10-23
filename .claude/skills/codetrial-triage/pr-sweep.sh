@@ -642,6 +642,7 @@ collide=$(find "$work" -name '*.diff' -exec awk \
         section = 1; header = 1; hunks = 0; path = git_path($0)
         next
     }
+    header && /^rename to / { path = substr($0, 11); next }
     header && /^(---|\+\+\+) / {
         if ((p = header_path($0)) != "/dev/null") path = p
         next

@@ -52,11 +52,12 @@ review yet means ready for a first review, not approved. Mark a PR whose
 `author_is_maintainer` is true as a maintainer's own, and one by `viewer` as
 the reader's own, which needs another reviewer.
 
-End with the merge order the snapshot records, `prerequisites`, `overlap` and
-`collide` (with each collision's path and function), read as
+End with the merge order the snapshot records, `prerequisites` and `collide`
+(with each collision's path and function), read as
 [pulls.md](../codetrial-triage/pulls.md#similar-pull-requests) says, and name
 `collide_unread` PRs as not compared. Say nothing about order the snapshot
-does not record.
+does not record. `overlap` sets no order: list its pairs apart, as two PRs
+closing one issue.
 
 Then what moved, read as the end of [Rank by size and merge
 confidence](../codetrial-triage/pulls.md#rank-by-size-and-merge-confidence)

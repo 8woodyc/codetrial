@@ -936,11 +936,12 @@ class PrSweepTests(SweepCase):
         self.assertEqual(swept["collide_unread"], [4])
 
     def test_a_binary_file_both_prs_change_collides_whole(self):
+        # A name holding " b/" still splits right, since both halves match.
         binary = (
-            "diff --git a/web/logo.png b/web/logo.png\n"
-            "index 1..2 100644\nBinary files a/web/logo.png and b/web/logo.png differ\n"
+            "diff --git a/web/a b/logo.png b/web/a b/logo.png\n"
+            "index 1..2 100644\nBinary files differ\n"
         )
-        shared = listed({"path": "web/logo.png", "additions": 0, "deletions": 0})
+        shared = listed({"path": "web/a b/logo.png", "additions": 0, "deletions": 0})
         swept = self.run_pulls(
             pull(1, files=shared),
             pull(2, files=shared),
@@ -948,7 +949,7 @@ class PrSweepTests(SweepCase):
         )
         self.assertEqual(
             [(c["a"], c["b"], c["path"]) for c in swept["collide"]],
-            [(1, 2, "web/logo.png")],
+            [(1, 2, "web/a b/logo.png")],
         )
 
     def test_gates_prefix_matches_the_check_workflow_job_name(self):
@@ -1722,6 +1723,7 @@ class PostInlineTests(unittest.TestCase):
 ODDS = SKILLS / "codetrial-odds"
 
 
+@unittest.skipUnless(shutil.which("jq"), "jq is not installed")
 class OddsTests(unittest.TestCase):
     def test_it_is_typed_only_and_named_for_its_directory(self):
         # Routing never offers it, so the plain-language ranking request
@@ -1739,7 +1741,7 @@ class OddsTests(unittest.TestCase):
             "  *) jq -n '{status: [], args: $ARGS.positional}' --args \"$@\" ;;\n"
             "esac\n"
         )
-        snapshot = ".git/codetrial-triage/pr-sweep.json"
+        snapshot = ".git/codetrial-triage/pr-sweep-sysprog21-codetrial.json"
         with tempfile.TemporaryDirectory() as scratch:
             repo = Path(scratch)
             subprocess.run(["git", "init", "-q", str(repo)], check=True)
@@ -1774,7 +1776,7 @@ class OddsTests(unittest.TestCase):
                     self.assertIn("the last snapshot is kept", result.stderr)
                     self.assertEqual(saved.read_text(), kept)
                     self.assertEqual(
-                        [p.name for p in saved.parent.iterdir()], ["pr-sweep.json"]
+                        [p.name for p in saved.parent.iterdir()], [saved.name]
                     )
 
 

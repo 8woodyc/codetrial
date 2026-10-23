@@ -9,11 +9,16 @@ function header_path(line,    p) {
     return p == "/dev/null" ? p : substr(p, 3)
 }
 
-# The new path on a diff --git line, the only one a section with no hunk
-# (binary, renamed, mode only) may carry, with git's quotes dropped.
-function git_path(line,    p) {
-    p = line
-    sub(/^diff --git "?a\/.* "?b\//, "", p)
-    sub(/"$/, "", p)
+# The path on a diff --git line, the only one a section with no hunk (binary,
+# mode only) may carry, with git's quotes dropped. A name holding " b/" makes
+# the split ambiguous, but an unrenamed file names one path twice, so the
+# halves settle it; a rename's "rename to" line says the rest.
+function git_path(line,    p, n) {
+    p = substr(line, 12)
+    gsub(/"/, "", p)
+    n = (length(p) - 1) / 2
+    if (n == int(n) && substr(p, 3, n - 2) == substr(p, n + 4))
+        return substr(p, n + 4)
+    sub(/^a\/.* b\//, "", p)
     return p
 }
