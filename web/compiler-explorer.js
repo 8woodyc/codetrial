@@ -392,7 +392,8 @@ static struct Node* randomList(int values[][2], int size) { originalRandomNodesS
 static struct Node* graphNode(int** adjacency, int size, int* colSize) { originalGraphNodesSize = size; if (!size) return NULL; struct Node** nodes = calloc(size, sizeof(*nodes)); for (int i = 0; i < size; i++) { nodes[i] = calloc(1, sizeof(*nodes[i])); nodes[i]->val = i + 1; nodes[i]->numNeighbors = colSize[i]; nodes[i]->neighbors = calloc(colSize[i], sizeof(*nodes[i]->neighbors)); originalGraphNodes[i] = nodes[i]; } for (int i = 0; i < size; i++) for (int j = 0; j < colSize[i]; j++) nodes[i]->neighbors[j] = nodes[adjacency[i][j] - 1]; struct Node* first = nodes[0]; free(nodes); return first; }
 static struct Node* nextTree(int* values, bool* nulls, int size) { if (!size || nulls[0]) return NULL; struct Node** nodes = calloc(size, sizeof(*nodes)); for (int i = 0; i < size; i++) if (!nulls[i]) { nodes[i] = calloc(1, sizeof(*nodes[i])); nodes[i]->val = values[i]; } for (int i = 0, child = 1; i < size && child < size; i++) { if (!nodes[i]) continue; if (child < size) nodes[i]->left = nodes[child++]; if (child < size) nodes[i]->right = nodes[child++]; } struct Node* root = nodes[0]; free(nodes); return root; }
 static void json_int_array(FILE* out, const int* values, int size) { fputc('[', out); for (int i = 0; i < size; i++) { if (i) fputc(',', out); fprintf(out, "%d", values[i]); } fputc(']', out); }
-static void json_double_array(FILE* out, const double* values, int size) { fputc('[', out); for (int i = 0; i < size; i++) { if (i) fputc(',', out); fprintf(out, "%.17g", values[i]); } fputc(']', out); }
+static void json_double(FILE* out, double value) { if (isfinite(value)) fprintf(out, "%.17g", value); else fputs("null", out); }
+static void json_double_array(FILE* out, const double* values, int size) { fputc('[', out); for (int i = 0; i < size; i++) { if (i) fputc(',', out); json_double(out, values[i]); } fputc(']', out); }
 static void json_string_array(FILE* out, char** values, int size) { fputc('[', out); for (int i = 0; i < size; i++) { if (i) fputc(',', out); json_string(out, values[i]); } fputc(']', out); }
 static void json_int_matrix(FILE* out, int** values, int size, int* colSize) { fputc('[', out); for (int i = 0; i < size; i++) { if (i) fputc(',', out); json_int_array(out, values[i], colSize[i]); } fputc(']', out); }
 static void json_char_matrix(FILE* out, char** values, int size, int* colSize) { fputc('[', out); for (int i = 0; i < size; i++) { if (i) fputc(',', out); fputc('[', out); for (int j = 0; j < colSize[i]; j++) { if (j) fputc(',', out); char item[2] = { values[i][j], 0 }; json_string(out, item); } fputc(']', out); } fputc(']', out); }
@@ -485,7 +486,7 @@ function cPrintActual(spec) {
   if (spec.outputType === "quadTree") return `json_quad_tree(stdout, ${name});`;
   if (type === "boolean") return `printf(${name} ? "true" : "false");`;
   if (type === "integer") return `printf("%d", ${name});`;
-  if (type === "double") return `printf("%.17g", ${name});`;
+  if (type === "double") return `json_double(stdout, ${name});`;
   if (type === "string") return `json_string(stdout, ${name});`;
   if (type === "integer[]" || type === "list<integer>")
     return `json_int_array(stdout, ${name}, ${Number.isInteger(spec.outputParam) ? `${name}Size` : "returnSize"});`;

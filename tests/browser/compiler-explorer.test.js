@@ -354,6 +354,83 @@ const noJava =
     : "javac/java are not available";
 
 describe("toolchain harnesses", { concurrency: true }, () => {
+  for (const value of ["INFINITY", "-INFINITY", "NAN"]) {
+    it(
+      `C double harness preserves all cases when returning ${value}`,
+      { skip: noCc },
+      async () => {
+        const dir = mkdtempSync(join(tmpdir(), "codetrial-c-double-"));
+        try {
+          const source = join(dir, "growth.c");
+          const binary = join(dir, "growth");
+          writeFileSync(
+            source,
+            generateHarness(
+              "c",
+              judges["powx-n"],
+              `double growthOverPeriods(double x, int n) {
+    if (n < 0) return ${value};
+    double result = 1.0;
+    for (int i = 0; i < n; i++) result *= x;
+    return result;
+}`,
+            ),
+          );
+          await run("cc", ["-std=c17", source, "-o", binary]);
+          const parsed = parseCompilerResults((await run(binary)).stdout);
+          assert.equal(parsed.setupError, undefined);
+          assert.deepEqual(
+            parsed.results.map((result) => result.actual),
+            [1024, 9.261000000000001, null, 1, null, null],
+          );
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      },
+    );
+  }
+
+  it(
+    "C double array harness preserves finite elements beside non-finite values",
+    { skip: noCc },
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "codetrial-c-double-array-"));
+      try {
+        const source = join(dir, "array.c");
+        const binary = join(dir, "array");
+        const spec = {
+          kind: "function",
+          entry: "numbers",
+          paramNames: [],
+          paramTypes: [],
+          returnType: "double[]",
+          cases: [{ input: [], expected: [1.25, null, null, null, 2.5] }],
+        };
+        writeFileSync(
+          source,
+          generateHarness(
+            "c",
+            spec,
+            `double* numbers(int* returnSize) {
+    static double values[] = {1.25, INFINITY, -INFINITY, NAN, 2.5};
+    *returnSize = 5;
+    return values;
+}`,
+          ),
+        );
+        await run("cc", ["-std=c17", source, "-o", binary]);
+        const parsed = parseCompilerResults((await run(binary)).stdout);
+        assert.equal(parsed.setupError, undefined);
+        assert.deepEqual(
+          parsed.results.map((result) => result.actual),
+          [[1.25, null, null, null, 2.5]],
+        );
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
   it(
     "C Two Sum harness can produce passing Compiler Explorer JSON",
     { skip: noCc },
