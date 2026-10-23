@@ -42,8 +42,8 @@ jobs:
           # Closed issues count too: reopening keeps existing subscribers.
           found=$(gh api --paginate --slurp --method GET "repos/$GH_REPO/issues" \
             -f state=all -f 'creator=github-actions[bot]' -f per_page=100 \
-            | jq -r --arg title "$title" '[.[][] | select(.pull_request == null and .user.login == "github-actions[bot]" and .title == $title)][0] // empty | "\(.number) \(.state)"')
-          read -r issue state <<< "$found"
+            | jq -r --arg title "$title" '[.[][] | select(.pull_request == null and .user.login == "github-actions[bot]" and .title == $title)][0] // empty | "\(.number) \(.state) \(.closed_at // "")"')
+          read -r issue state closed <<< "$found"
           if [ "$FINDINGS" != true ]; then
             # The clean body replaces the old fingerprint, so findings that
             # return later count as a change and notify subscribers again.
@@ -60,16 +60,12 @@ jobs:
           current=$(fingerprint < "$RUNNER_TEMP/audit.md")
           previous=$(gh issue view "$issue" --json body --jq .body | fingerprint)
           # Keep the old fingerprint until notification succeeds so failures
-          # retry, but skip the comment if a failed edit left it posted. On a
-          # closed issue the last comment predates the clean scan, so recurring
-          # findings always notify.
+          # retry, but skip the comment if a failed edit left it posted. Only
+          # comments since a close count, so recurring findings notify again.
           if [ "$previous" != "$current" ]; then
-            notified=
-            if [ "$state" = open ]; then
-              notified=$(gh api --paginate --slurp "repos/$GH_REPO/issues/$issue/comments" \
-                | jq -r '[.[][] | select(.user.login == "github-actions[bot]")] | last | .body // ""' \
-                | fingerprint)
-            fi
+            notified=$(gh api --paginate --slurp "repos/$GH_REPO/issues/$issue/comments" \
+              | jq -r --arg since "$closed" '[.[][] | select(.user.login == "github-actions[bot]" and .created_at > $since)] | last | .body // ""' \
+              | fingerprint)
             if [ "$notified" != "$current" ]; then
               gh issue comment "$issue" --body-file "$RUNNER_TEMP/audit.md"
             fi

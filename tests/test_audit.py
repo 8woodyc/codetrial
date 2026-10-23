@@ -127,6 +127,10 @@ class AuditTests(unittest.TestCase):
         tracking = support.step(job, "Track remediation")
         self.assertIn("steps.audit.outputs.findings != ''", tracking)
         self.assertIn("if: github.ref == 'refs/heads/main'", job)
+        self.assertIn(
+            "    permissions:\n      contents: read\n      issues: write\n", job
+        )
+        self.assertIn("\npermissions:\n  contents: read\n\n", workflow)
         triggers = support.section(
             workflow, "\non:\n", "\npermissions:", "audit triggers"
         )
@@ -158,15 +162,18 @@ class AuditTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("jq"), "jq is not installed")
     def test_tracking_notifies_only_when_findings_change_and_preserves_retry(self):
         issue = ISSUE
-        closed = {**issue, "state": "closed"}
+        closed = {**issue, "state": "closed", "closed_at": "2026-01-03T00:00:00Z"}
         unchanged = "Findings fingerprint: `same`\n"
         changed = "Findings fingerprint: `new`\n"
         bot = {"login": "github-actions[bot]"}
-        posted = [{"user": bot, "body": "Report\n" + changed}]
+        before = "2026-01-02T00:00:00Z"
+        after = "2026-01-04T00:00:00Z"
+        posted = [{"user": bot, "created_at": before, "body": "Report\n" + changed}]
+        reposted = [{**posted[0], "created_at": after}]
         stale = [
-            {"user": bot, "body": "Report\n" + changed},
-            {"user": bot, "body": "Report\n" + unchanged},
-            {"user": {"login": "outsider"}, "body": changed},
+            {"user": bot, "created_at": before, "body": "Report\n" + changed},
+            {"user": bot, "created_at": before, "body": "Report\n" + unchanged},
+            {"user": {"login": "outsider"}, "created_at": after, "body": changed},
         ]
         notify = ["view", "comments", "comment", "edit"]
         for pages, findings, old, current, fail, comments, actions in (
@@ -212,7 +219,18 @@ class AuditTests(unittest.TestCase):
                 changed,
                 "",
                 posted,
-                ["view", "comment", "edit", "reopen"],
+                notify + ["reopen"],
+            ),
+            # A comment posted after the close, whose edit then failed, is not
+            # posted again.
+            (
+                [[closed]],
+                "true",
+                "Clean report",
+                changed,
+                "",
+                reposted,
+                ["view", "comments", "edit", "reopen"],
             ),
             ([[issue]], "false", unchanged, "Clean report", "", (), ["edit", "close"]),
             ([[closed]], "false", unchanged, "Clean report", "", (), []),
