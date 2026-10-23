@@ -3,7 +3,10 @@
 A green gate says the change builds and its tests pass. A review asks what the
 tests do not, and most of what goes wrong here breaks a contract in `docs/`
 rather than a test. The review is a local report: it changes nothing and posts
-nothing until the user picks what to fix or what to post. Order governs how the
+nothing until the user picks what to fix or what to post. The one exception is
+a bare `/codetrial-triage`, whose review of low and blocked PRs posts its
+verified findings under
+[review-prs.md](../codetrial-triage/review-prs.md). Order governs how the
 report reads, never when a finding is told: a leaked key or candidate material
 in a public PR is said the moment it is seen.
 
@@ -164,8 +167,9 @@ walkthrough (`CONTRIBUTING.md`, Pull requests): each posted finding is one
 inline comment in plain words, under the GitHub rule in
 [codetrial-conventions](../codetrial-conventions/SKILL.md).
 
-When the review ran through gh-review, post through it. A review done here
-posts as one review, so the author gets one notification. Check every anchor
+A sweep's review of a low or blocked PR posts its own way, comment by
+comment, under [review-prs.md](../codetrial-triage/review-prs.md). A review
+done here posts as one review, so the author gets one notification. Check every anchor
 against the diff first, which moves a finding on a line outside every hunk
 into the body instead of letting it fail the whole review, and show the user
 the checked text, moved findings included, with the PR's `updatedAt`:

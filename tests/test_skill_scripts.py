@@ -865,24 +865,55 @@ class PrSweepTests(SweepCase):
             [{"pr": 1, "author": "contributor", "reason": "conflicts"}],
         )
 
-    def test_current_fixed_request_is_not_repeated_or_hidden(self):
+    def test_a_later_rebase_review_does_not_withdraw_an_earlier_request(self):
+        # The sweep posts the rebase request as the maintainer account, so it
+        # lands after that account's own substantive request on the same head.
+        work = review("maint", "CHANGES_REQUESTED", 5, "Handle the empty list.")
+        rebase = review("maint", "CHANGES_REQUESTED", 1, FIXED) | {"id": "R_2"}
+        node = pull(1, mergeable="CONFLICTING", reviews=listed(work, rebase))
+        self.assertEqual(self.grades(node), {1: "blocked"})
+        # An approval after both answers them.
+        ok = review("maint", "APPROVED", 0) | {"id": "R_3"}
+        node = pull(1, reviews=listed(work, rebase, ok))
+        self.assertNotEqual(self.grades(node)[1], "blocked")
+
+    def test_current_fixed_review_is_not_repeated_or_hidden(self):
+        reviews = listed(review("maint", "CHANGES_REQUESTED", 5, FIXED))
+        swept = self.run_pulls(pull(1, mergeable="CONFLICTING", reviews=reviews))
+        self.assertEqual(swept["rebase"], [])
+        self.assertEqual(swept["hide"], [])
+
+    def test_current_fixed_comment_still_gets_the_review_and_is_hidden(self):
         swept = self.run_pulls(
             pull(1, mergeable="CONFLICTING", comments=listed(request("IC_1", 5, FIXED)))
         )
+        self.assertEqual([entry["pr"] for entry in swept["rebase"]], [1])
+        self.assertEqual([entry["id"] for entry in swept["hide"]], ["IC_1"])
+
+    def test_a_later_comment_never_hides_the_review_that_holds_the_request(self):
+        reviews = listed(review("maint", "CHANGES_REQUESTED", 5, FIXED))
+        comments = listed(request("IC_1", 1, FIXED))
+        swept = self.run_pulls(
+            pull(1, mergeable="CONFLICTING", reviews=reviews, comments=comments)
+        )
         self.assertEqual(swept["rebase"], [])
-        self.assertEqual(swept["hide"], [])
+        self.assertEqual([entry["id"] for entry in swept["hide"]], ["IC_1"])
 
     def test_current_hand_written_request_supersedes_an_older_fixed_one(self):
         comments = listed(
             request("IC_old", 20, FIXED),
             request("IC_new", 5, "Rebase latest `main` to pick up the zip fix."),
         )
-        for mergeable in ("MERGEABLE", "CONFLICTING"):
-            with self.subTest(mergeable=mergeable):
-                swept = self.run_pulls(pull(1, mergeable=mergeable, comments=comments))
-                self.assertEqual([entry["id"] for entry in swept["hide"]], ["IC_old"])
-                self.assertEqual(swept["hide_ask"], [])
-                self.assertEqual(swept["rebase"], [])
+        swept = self.run_pulls(pull(1, comments=comments))
+        self.assertEqual([entry["id"] for entry in swept["hide"]], ["IC_old"])
+        self.assertEqual(swept["hide_ask"], [])
+        self.assertEqual(swept["rebase"], [])
+        # Conflicting, it still gets the review, and the hand-written comment is
+        # offered for hiding with its body rather than hidden.
+        swept = self.run_pulls(pull(1, mergeable="CONFLICTING", comments=comments))
+        self.assertEqual([entry["pr"] for entry in swept["rebase"]], [1])
+        self.assertEqual([entry["id"] for entry in swept["hide"]], ["IC_old"])
+        self.assertEqual([entry["id"] for entry in swept["hide_ask"]], ["IC_new"])
 
 
 RELATED = SKILLS / "codetrial-contribute" / "related.sh"
@@ -1382,6 +1413,430 @@ class PostReviewTests(unittest.TestCase):
                 # nothing was posted.
                 self.assertEqual((result.returncode, result.stdout), (3, ""))
                 self.assertIn(said, result.stderr)
+
+
+POST_INLINE = SKILLS / "codetrial-triage" / "post-inline.sh"
+
+# The PR's head, diff and review threads, and each posted comment echoed back
+# as "posted path:line" in place of its URL.
+FAKE_GH_INLINE = """#!/bin/sh
+case "$*" in
+  "api user --jq .login") echo viewer ;;
+  "api repos/sysprog21/codetrial/issues/5/comments --paginate") echo '[]' ;;
+  # FAKE_PUSHED_AFTER names a file the first post creates: a push mid-way.
+  "pr view 5 "*)
+    if [ -e "${FAKE_PUSHED_AFTER:-/nonexistent}" ]; then echo h2
+    else echo "${FAKE_HEAD:-h1}"; fi ;;
+  "pr diff 5 "*) cat "$FAKE_DIFF" ;;
+  "api repos/sysprog21/codetrial/pulls/5/comments --paginate") cat "$FAKE_THREADS" ;;
+  "api repos/sysprog21/codetrial/pulls/5/comments --input "*)
+    [ "$(jq -r .line "$4")" != "${FAKE_REFUSE_LINE:-}" ] || exit 1
+    [ -z "${FAKE_PUSHED_AFTER:-}" ] || : > "$FAKE_PUSHED_AFTER"
+    jq -r '"posted \\(.path):\\(.line) at \\(.commit_id)"' "$4" ;;
+  "pr comment 5 "*) echo "summary posted" ;;
+  *) echo "unexpected gh call: $*" >&2; exit 1 ;;
+esac
+"""
+
+
+def review_comment(login, path, line, at="h1", body="x"):
+    return {
+        "user": {"login": login},
+        "path": path,
+        "line": line,
+        "side": "RIGHT",
+        "commit_id": at,
+        "body": body,
+    }
+
+
+@unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+class PostInlineTests(unittest.TestCase):
+    def post(self, comments, threads=(), summary=None, env=()):
+        draft = {"sha": "h1", "comments": comments, "summary": summary}
+        return run_fake(
+            POST_INLINE,
+            [5, "$FAKE_DRAFT"],
+            FAKE_GH_INLINE,
+            {
+                "FAKE_DIFF": DIFF,
+                "FAKE_DRAFT": json.dumps(draft),
+                "FAKE_THREADS": json.dumps(list(threads)),
+            },
+            env=env,
+        )
+
+    def test_a_hunk_cubic_commented_on_is_skipped_and_the_file_is_not(self):
+        def note(path, line):
+            return {"path": path, "line": line, "body": "x"}
+
+        result = self.post(
+            [note("web/a.js", 12), note("web/a b.txt", 1), note("web/a.js", 40)],
+            [
+                review_comment("cubic-dev-ai[bot]", "web/a.js", 11),
+                # Outdated: GitHub keeps its old line, which must not count
+                # against this head's hunk. A human's claims none either.
+                review_comment("cubic-dev-ai[bot]", "web/a b.txt", 1, at="h0"),
+                review_comment("maint", "web/a b.txt", 1),
+            ],
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "posted web/a b.txt:1 at h1\n")
+        self.assertIn("dropped web/a.js:12, in a hunk cubic", result.stderr)
+        self.assertIn("dropped web/a.js:40, outside the diff", result.stderr)
+
+    def test_a_rerun_posts_only_what_did_not_land(self):
+        notes = [
+            {"path": "web/a.js", "line": 11, "body": "landed"},
+            {"path": "web/a.js", "line": 12, "body": "refused last time"},
+        ]
+        result = self.post(
+            notes, [review_comment("viewer", "web/a.js", 11, body="landed")]
+        )
+        self.assertEqual(result.stdout, "posted web/a.js:12 at h1\n")
+        self.assertIn("dropped web/a.js:11, already posted", result.stderr)
+
+    def test_a_push_mid_way_stops_the_rest(self):
+        notes = [
+            {"path": "web/a.js", "line": 11, "body": "first"},
+            {"path": "web/a.js", "line": 12, "body": "second"},
+        ]
+        with tempfile.TemporaryDirectory() as scratch:
+            result = self.post(notes, env={"FAKE_PUSHED_AFTER": f"{scratch}/pushed"})
+        self.assertEqual(result.returncode, 3)
+        self.assertEqual(result.stdout, "posted web/a.js:11 at h1\n")
+        self.assertIn("moved from h1 to h2", result.stderr)
+
+    def test_a_refused_comment_leaves_failure_status_and_posts_the_rest(self):
+        result = self.post(
+            [
+                {"path": "web/a.js", "line": 11, "body": "refused"},
+                {"path": "web/a.js", "line": 12, "body": "accepted"},
+            ],
+            env={"FAKE_REFUSE_LINE": "11"},
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "posted web/a.js:12 at h1\n")
+        self.assertIn("refused web/a.js:11", result.stderr)
+
+    def test_posts_the_summary_only_when_the_draft_has_one(self):
+        note = {"path": "web/a.js", "line": 11, "body": "x"}
+        self.assertNotIn("summary", self.post([note]).stdout)
+        result = self.post([note], summary="This loses the report.")
+        self.assertEqual(result.stdout, "posted web/a.js:11 at h1\nsummary posted\n")
+
+    def test_the_summary_waits_until_a_finding_lands(self):
+        outside = {"path": "web/a.js", "line": 40, "body": "x"}
+        result = self.post([outside], summary="This loses the report.")
+        self.assertEqual(result.stdout, "")
+        self.assertIn("summary held back", result.stderr)
+        refused = {"path": "web/a.js", "line": 11, "body": "x"}
+        result = self.post(
+            [refused], summary="This loses the report.", env={"FAKE_REFUSE_LINE": "11"}
+        )
+        self.assertNotIn("summary posted", result.stdout)
+        # One finding landed, but the summary may name the one that did not.
+        landed = {"path": "web/a.js", "line": 11, "body": "x"}
+        result = self.post([landed, outside], summary="This loses the report.")
+        self.assertEqual(result.stdout, "posted web/a.js:11 at h1\n")
+        self.assertIn("summary held back", result.stderr)
+
+    def test_a_moved_head_posts_nothing(self):
+        result = self.post(
+            [{"path": "web/a.js", "line": 11, "body": "x"}], env={"FAKE_HEAD": "h2"}
+        )
+        self.assertEqual((result.returncode, result.stdout), (3, ""))
+        self.assertIn("moved from h1 to h2", result.stderr)
+
+
+HYGIENE = SKILLS / "codetrial-triage" / "hygiene.sh"
+
+# The PR and its commits; every other call fails, so ci-failure.sh yields no
+# diagnosis and no CI item, which is also what a failed lookup must do.
+FAKE_GH_HYGIENE = """#!/bin/sh
+case "$*" in
+  "api user --jq .login") echo viewer ;;
+  *collaborators*) [ -z "${FAKE_NO_PUSHERS:-}" ] || exit 1; printf 'maint\\nviewer\\n' ;;
+  "pr view 5 --repo sysprog21/codetrial --json number,"*) cat "$FAKE_PR" ;;
+  "pr view 5 --repo sysprog21/codetrial --json headRefOid --jq .headRefOid") echo h1 ;;
+  "api repos/sysprog21/codetrial/pulls/5/commits --paginate") cat "$FAKE_COMMITS" ;;
+  "api repos/sysprog21/codetrial/pulls/5/comments --paginate")
+    if [ -n "${FAKE_INLINE:-}" ]; then printf '%s\n' "$FAKE_INLINE"; else echo '[]'; fi ;;
+  "api repos/sysprog21/codetrial/commits/h1/check-suites "*)
+    [ -z "${FAKE_NO_SUITE:-}" ] || exit 0
+    echo "${FAKE_PUSHED:-2026-10-20T12:00:00Z}" ;;
+  *) exit 1 ;;
+esac
+"""
+
+GOOD_MESSAGE = "Add a thing\n\nThe lobby needed it, and this says why in one line.\n"
+
+
+def commit(message, parents=1, at="2026-10-20T00:00:00Z"):
+    return {
+        "sha": "h1",
+        "author": {"login": "contributor"},
+        "parents": [{}] * parents,
+        "commit": {"message": message, "committer": {"date": at}},
+    }
+
+
+# One commit for each commit rule: a bad message, an agent co-author, a merge.
+EVERY_RULE = [
+    commit("added a thing."),
+    commit(GOOD_MESSAGE + "\nCo-authored-by: Claude <noreply@anthropic.com>\n"),
+    commit("Merge branch 'main' into topic", parents=2),
+]
+
+
+def failing_job(gates, on_main=False, name="gates (portable)"):
+    return {"name": name, "current": True, "gates": gates, "on_main": on_main}
+
+
+def agent_marked(messages):
+    """ai_marker from agent-marker.jq over each message, in one jq call."""
+    result = subprocess.run(
+        [
+            "jq",
+            "-c",
+            "-L",
+            str(SKILLS / "codetrial-triage"),
+            'include "agent-marker"; map(ai_marker)',
+        ],
+        input=json.dumps(messages),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return json.loads(result.stdout)
+
+
+@unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+class HygieneTests(unittest.TestCase):
+    def hygiene(self, commits, said=(), env=(), ci=None, **fields):
+        pr = {
+            "number": 5,
+            "headRefOid": "h1",
+            "headRefName": "topic",
+            "isCrossRepository": True,
+            "isDraft": False,
+            "baseRefName": "main",
+            "mergeable": "MERGEABLE",
+            "author": {"login": "contributor"},
+            "body": "Adds a thing.",
+            "files": [{"path": "src/a.rs"}],
+            "reviews": [],
+            "comments": list(said),
+        } | fields
+        result = run_fake(
+            HYGIENE,
+            [5],
+            FAKE_GH_HYGIENE,
+            {"FAKE_PR": json.dumps(pr), "FAKE_COMMITS": json.dumps(commits)}
+            | (
+                {"FAKE_CI": json.dumps(ci), "HYGIENE_CI": 'cat "$FAKE_CI"\n'}
+                if ci is not None
+                else {}
+            ),
+            env=env,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        out = json.loads(result.stdout)
+        self.assertEqual(out["body"], "\n\n".join(i["text"] for i in out["items"]))
+        return out
+
+    def keys(self, *args, **kwargs):
+        out = self.hygiene(*args, **kwargs)
+        return out["skip"], [item["key"] for item in out["items"]]
+
+    def test_each_rule_fires_on_its_own_evidence(self):
+        commits = EVERY_RULE
+        skip, keys = self.keys(
+            commits, headRefName="main", files=[{"path": "web/index.html"}]
+        )
+        self.assertIsNone(skip)
+        self.assertEqual(
+            keys,
+            ["fork_main", "merge_commit", "commit_rules", "co_authored", "screenshot"],
+        )
+        # A clean PR, a person credited as co-author, and a page change that
+        # shows a screenshot.
+        self.assertEqual(self.keys([commit(GOOD_MESSAGE)]), (None, []))
+        shown = "Before and after:\n\n![lobby](https://github.com/user-attachments/assets/x)"
+        self.assertEqual(
+            self.keys(
+                [commit(GOOD_MESSAGE)], files=[{"path": "web/styles.css"}], body=shown
+            ),
+            (None, []),
+        )
+
+    def test_only_an_agent_address_is_an_attribution_marker(self):
+        agents = (
+            "Claude <noreply@anthropic.com>",
+            "Claude Opus 5 (1M context) <noreply@anthropic.com>",
+            "Agent <codex@openai.com>",
+            "Agent <cursoragent@cursor.com>",
+            "Agent <devin-ai-integration[bot]@users.noreply.github.com>",
+            # GitHub's noreply form for an app or bot account: ID+login.
+            "Agent <158243242+devin-ai-integration[bot]@users.noreply.github.com>",
+            "Copilot <198982749+Copilot@users.noreply.github.com>",
+            "Agent <copilot@github.com>",
+        )
+        people = (
+            "Ada Lovelace <ada@example.com>",
+            "Claude Shannon <claude@example.com>",
+            "Ada Lovelace <ada@openai.com>",
+            "Ada Lovelace <ada@anthropic.com>",
+            "Ada Lovelace <ada@cursor.com>",
+            "Ada Lovelace <ada@cursor.sh>",
+            "Ada Lovelace <ada@devin.ai>",
+            "Ada Lovelace <copilot-research@example.com>",
+            # A person's own noreply address has the same ID+login shape,
+            # and a bot that is not an agent is credited for other reasons.
+            "Ada Lovelace <12345+ada@users.noreply.github.com>",
+            "CI <1+github-actions[bot]@users.noreply.github.com>",
+        )
+        marked = agent_marked(
+            [f"{GOOD_MESSAGE}\nCo-authored-by: {who}\n" for who in agents + people]
+        )
+        self.assertEqual(marked, [True] * len(agents) + [False] * len(people))
+        # The footer an agent writes, against prose that names a tool.
+        footer = f"{GOOD_MESSAGE}\n\U0001f916 Generated with [Claude Code](https://x)\n"
+        prose = f"{GOOD_MESSAGE}\nFix the parser for files generated by codex.\n"
+        self.assertEqual(agent_marked([footer, prose]), [True, False])
+
+    def test_a_request_already_made_at_this_head_is_not_repeated(self):
+        def said(at):
+            return {
+                "author": {"login": "maint"},
+                "createdAt": at,
+                "body": "Hint: run `make hooks`.",
+            }
+
+        bad = [commit("added a thing.")]
+        self.assertEqual(self.keys(bad, [said("2026-10-21T00:00:00Z")]), (None, []))
+        # Said before the last push: the new commits have not heard it.
+        self.assertEqual(
+            self.keys(bad, [said("2026-10-19T00:00:00Z")]), (None, ["commit_rules"])
+        )
+        # Dependabot writes its own messages, and CI skips its commits by
+        # address, so the same address is never asked to reword one here.
+        bot = commit("bump the thing.")
+        bot["commit"]["author"] = {
+            "email": "49699333+dependabot[bot]@users.noreply.github.com"
+        }
+        self.assertEqual(self.keys([bot]), (None, []))
+        # Asked on a line of this head, rather than in a review body; a line
+        # comment left on an older head has not been heard by this one.
+        inline = [
+            {"user": {"login": "maint"}, "commit_id": head, "body": "Run `make hooks`."}
+            for head in ("h1",)
+        ]
+        self.assertEqual(
+            self.keys(bad, env={"FAKE_INLINE": json.dumps(inline)}), (None, [])
+        )
+        inline[0]["commit_id"] = "h0"
+        self.assertEqual(
+            self.keys(bad, env={"FAKE_INLINE": json.dumps(inline)}),
+            (None, ["commit_rules"]),
+        )
+        # The push is dated by GitHub's first check suite, not the commit: a
+        # commit made before the request but pushed after it has not heard it.
+        self.assertEqual(
+            self.keys(
+                bad,
+                [said("2026-10-21T00:00:00Z")],
+                env={"FAKE_PUSHED": "2026-10-22T00:00:00Z"},
+            ),
+            (None, ["commit_rules"]),
+        )
+
+    def test_each_commit_rule_fires_on_its_own_evidence_alone(self):
+        # One rule's evidence at a time, so a predicate that leaned on another
+        # rule's evidence would fire on the wrong case or miss its own.
+        agent = GOOD_MESSAGE + "\nCo-authored-by: Claude <noreply@anthropic.com>\n"
+        cases = {
+            "commit_rules": ([commit("added a thing.")], {}),
+            "co_authored": ([commit(agent)], {}),
+            "merge_commit": ([commit(GOOD_MESSAGE), commit("Merge it", parents=2)], {}),
+            "fork_main": ([commit(GOOD_MESSAGE)], {"headRefName": "main"}),
+            "screenshot": ([commit(GOOD_MESSAGE)], {"files": [{"path": "web/a.css"}]}),
+        }
+        for key, (commits, fields) in cases.items():
+            with self.subTest(key):
+                self.assertEqual(self.keys(commits, **fields), (None, [key]))
+
+    def test_ci_items_need_a_failure_the_branch_made_at_this_head(self):
+        good = [commit(GOOD_MESSAGE)]
+        job = failing_job
+
+        def keys(*jobs, head="h1", **fields):
+            ci = {"head": head, "stale_base": False, "failing": list(jobs)}
+            return self.keys(good, ci=ci, **fields)[1]
+
+        self.assertEqual(keys(job(["indent"])), ["indent"])
+        self.assertEqual(keys(job(["clippy"])), ["ci_regression"])
+        # A mutation job names no gate and still failed for this branch.
+        self.assertEqual(keys(job([], name="mutants (0)")), ["ci_regression"])
+        # main fails it too, the log could not be read, only the aggregate
+        # check failed, the diagnosis read another head, or a rebase comes
+        # first: none of these is the author's to fix here.
+        self.assertEqual(keys(job(["indent"], on_main=True)), [])
+        self.assertEqual(keys(job(None)), [])
+        self.assertEqual(keys(job([], name="check")), [])
+        self.assertEqual(keys(job(["clippy"]), head="h0"), [])
+        self.assertEqual(keys(job(["clippy"]), mergeable="CONFLICTING"), [])
+        self.assertEqual(keys(job(["clippy"]), mergeable="UNKNOWN"), [])
+
+    def test_a_posted_review_holds_back_every_item_it_carried(self):
+        # Each item's marker has to recognize its own text, or the next sweep
+        # posts the same review again at the same head.
+        commits = EVERY_RULE
+        fields = {"headRefName": "main", "files": [{"path": "web/index.html"}]}
+        ci = {
+            "head": "h1",
+            "failing": [
+                failing_job(["indent"], name="lint"),
+                failing_job(["rust"], name="unit"),
+            ],
+        }
+        out = self.hygiene(commits, ci=ci, **fields)
+        self.assertEqual(len(out["items"]), 7)
+        posted = review("maint", "CHANGES_REQUESTED", 0, out["body"], oid="h1")
+        self.assertEqual(
+            self.keys(commits, ci=ci, reviews=[posted], **fields), (None, [])
+        )
+
+    def test_a_pr_nobody_should_be_asked_about_is_skipped(self):
+        bad = [commit("added a thing.")]
+        self.assertEqual(self.keys(bad, isDraft=True), ("draft", []))
+        # gh names a bot app/<slug> and flags it, never <slug>[bot].
+        bot = {"login": "app/dependabot", "is_bot": True}
+        self.assertEqual(self.keys(bad, author=bot), ("a bot's pull request", []))
+        self.assertEqual(
+            self.keys(bad, author={"login": "maint"}),
+            ("a maintainer's pull request", []),
+        )
+        # Nobody can be told apart as a maintainer, even with comments to read.
+        said = [
+            {
+                "author": {"login": "maint"},
+                "createdAt": "2026-10-21T00:00:00Z",
+                "body": "x",
+            }
+        ]
+        self.assertEqual(
+            self.keys(bad, said, env={"FAKE_NO_PUSHERS": "1"}),
+            ("the push listing failed", []),
+        )
+        # Nothing dates the push, so no request can be read as already asked.
+        self.assertEqual(
+            self.keys(bad, env={"FAKE_NO_SUITE": "1"}),
+            ("no check suite dates the push", []),
+        )
+        # Commits listed after a push belong to another head.
+        moved = [commit("added a thing.") | {"sha": "h2"}]
+        self.assertEqual(self.keys(moved), ("the head moved while it was read", []))
 
 
 GOOD_TARGET = """\

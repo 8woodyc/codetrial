@@ -33,11 +33,15 @@ matters most here, where some actions apply without asking.
 
 ## What a sweep may apply without asking
 
-Asking to sweep the PRs ("sweep the PRs", "run the PR sweep") authorizes three
-actions, because none carries text drafted during the sweep, each is cheap to
-undo or harmless, and holding them for a confirmation only stalls a
-contributor. A bare "continue" after an issue report is not that request: it
-carries the work on, and these actions go on the confirmed list instead.
+Asking to sweep the PRs ("sweep the PRs", "run the PR sweep") authorizes the
+first three actions below, because none carries text drafted during the sweep,
+each is cheap to undo or harmless, and holding them for a confirmation only
+stalls a contributor. A bare `/codetrial-triage` also authorizes the fourth,
+and the inline review of each low or blocked PR with its similar-work notices
+([review-prs.md](review-prs.md)), which are drafted, but in a form the
+maintainer approved and each verified at the head before it is posted. A bare
+"continue" after an issue report is not that request: it carries the work on,
+and these actions go on the confirmed list instead.
 
 - Approving a run in `approve` whose `first_time` is true and whose
   `touches_workflows` and `files_truncated` are false. A run waits there because
@@ -77,22 +81,32 @@ carries the work on, and these actions go on the confirmed list instead.
   (the definition is `stale_base` in `ci-failure.sh`). "Ask the conflicting PRs
   to rebase" asks for the `conflicts` entries alone, as "Approve the held runs"
   does for approvals; report the conflicting PRs it skips (the account's own,
-  and those holding a current request) so the count matches the banner.
+  and those holding a current rebase review) so the count matches the banner.
+- On a bare `/codetrial-triage` only, requesting changes on each open PR
+  whose `hygiene.sh` output has items, as
+  [Contributor hygiene](#contributor-hygiene) describes. Each item is a rule a
+  script decides and carries a wording the maintainers already used, so this
+  too is text the maintainer approved by writing it. "Sweep the PRs" alone
+  lists the items and posts none.
 
 ```sh
 gh api -X POST "repos/$repo/actions/runs/$run/approve"
 gh api graphql -F id="$thread" -f query='
   mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) {
     thread { isResolved } } }'
-gh pr comment "$pr" --repo "$repo" \
-  --body-file .claude/skills/codetrial-triage/rebase.md
+gh api "repos/$repo/pulls/$pr/reviews" -f commit_id="$head" \
+  -f event=REQUEST_CHANGES -F body=@.claude/skills/codetrial-triage/rebase.md
 gh api graphql -F id="$id" -f query='
   mutation($id: ID!) { minimizeComment(input: {subjectId: $id,
     classifier: OUTDATED}) { minimizedComment { isMinimized } } }'
 ```
 
-The same call hides a review (`PRR_` id) or a comment (`IC_` id), and
-`OUTDATED` is the classifier for every rebase request, hand-written or not.
+A Request changes review names the head it was checked at (`$head`, from
+`prs`), so a push between the check and the post leaves the review on the old
+head, where the next sweep reads it as not current, instead of on code nobody
+looked at. The same minimize call hides a review (`PRR_` id) or a comment
+(`IC_` id), and `OUTDATED` is the classifier for every rebase request,
+hand-written or not.
 
 An inspection request ("what needs attention") still applies nothing. Runner
 time is the one thing an approval risks, and any file the tests execute can
@@ -107,6 +121,56 @@ and the maintainer should decide. A pending run on an older SHA is not in
 `approve` at all; it is superseded and needs nothing. GitHub's list of runs
 awaiting approval still shows those, usually dozens beside the current ones;
 report the sweep's `superseded` count rather than approving or cancelling them.
+
+## Contributor hygiene
+
+Most changes requested here are the same few requests typed again: run
+`make hooks` and fix the commit messages, run `make indent`, rebase instead of
+merge, open the PR from a topic branch, drop the AI attribution, fix the CI
+regressions before asking for review, show a screenshot of a page change.
+`hygiene.sh` decides each of them for one PR at its current head and prints
+the review text, the maintainers' own wording for every item that applies:
+
+```sh
+for pr in $(jq -r '.prs[].number' "$SCRATCH/sweep.json"); do
+  { .claude/skills/codetrial-triage/hygiene.sh "$pr" > "$SCRATCH/hygiene-$pr.json" ||
+    rm -f "$SCRATCH/hygiene-$pr.json"; } &
+done
+wait
+```
+
+Run it for every open PR at once, in the same response as the other no-ask
+actions; each call reads its own PR, so they do not wait on each other. The
+script reads every commit message through `scripts/git-commit-msg.sh`, the
+rules the hook and CI apply, and the failing checks through `ci-failure.sh`;
+its `item` calls are the list of rules, each with its evidence, and its
+header says which PRs it skips and when a maintainer already asked. The
+conflict is not an item: `rebase` owns it.
+
+Post a non-empty `body` as one Request changes review on the head the
+script read, so the PR shows as blocked until the author pushes and the
+evidence and the review name the same commit:
+
+```sh
+# A bare wait reports nothing about the jobs it waited on, so a failed run
+# removed its file: no file is a PR to report as unchecked, never to post.
+jq -er '.body | select(length > 0)' "$SCRATCH/hygiene-$pr.json" \
+  > "$SCRATCH/hygiene-$pr.md" &&
+gh api "repos/$repo/pulls/$pr/reviews" \
+  -f commit_id="$(jq -r .head "$SCRATCH/hygiene-$pr.json")" \
+  -f event=REQUEST_CHANGES -F body=@"$SCRATCH/hygiene-$pr.md"
+```
+
+The fixed `rebase.md` request and this review go out in the same response,
+so `hygiene.sh` cannot see the first. It holds the CI item back on a
+conflicting PR for that reason, and the two reviews otherwise ask for different
+things.
+
+The posted review is itself the request at that head, so the next sweep finds
+it and asks nothing again until the author pushes. When the maintainers type a
+new recurring request by hand, add it to `hygiene.sh` as an item with their
+wording and a marker that recognizes it, and a case in
+`tests/test_skill_scripts.py`.
 
 ## Similar pull requests
 
@@ -172,22 +236,31 @@ collaborators carry the same COLLABORATOR badge and do not count, and "I will
 rebase this after #400 lands" is not a request. A review counts as current when
 it was left on the PR's current head, a comment when it is newer than the last
 push as GitHub dated it (the head's first check suite or a force push, not the
-commit date). A PR with a current request is not listed, whatever its wording,
-including #326's "Rebase latest `main` branch to eliminate known
-vulnerabilities.": that request still stands, and asking again only adds a
-notification.
+commit date). A conflicting PR with a current changes-requested review is not
+listed, whatever its wording, including #326's "Rebase latest `main` branch to
+eliminate known vulnerabilities.": that request still stands, and asking again
+only adds a notification. A current comment does not keep a conflicting PR
+out, since it leaves the PR unblocked in the list: the PR gets the review, and
+the comment lands in `hide` when it is in a known wording and in `hide_ask`
+otherwise (#422 and #285 held only comments). A stale base still counts either
+kind.
 
-The request is a plain comment whose body is [rebase.md](rebase.md), posted as
-the file itself. A comment leaves no changes-requested state behind for a
-reviewer to clear once the branch merges again. The script also counts the other
-wordings maintainers type by hand for the same request (the list is `known` in
-`pr-sweep.sh`), so earlier copies land in `hide`. When the maintainers adopt a
-new wording, add it there, or the next sweep asks again and leaves the old copy
-visible.
+The request is a Request changes review whose body is [rebase.md](rebase.md),
+posted as the file itself, because that is how the maintainers ask for it: the
+PR shows as blocked in the list until the author pushes, and the review, left
+on the head it names, stops counting as current once they do. Its
+changes-requested state stays until a maintainer re-reviews, which the merge
+needs anyway. The script also counts the other wordings maintainers type by
+hand for the same request (the list is `known` in `pr-sweep.sh`), so earlier
+copies land in `hide`. When the maintainers adopt a new wording, add it there,
+or the next sweep asks again and leaves the old copy visible.
 
 The sweep is a snapshot, and an author may push between it and the post. Check
-each PR again right before posting, and skip it unless it still conflicts and
-its head still matches `head` in `prs`:
+each PR again right before posting, and skip it unless its head still matches
+`head` in `prs`. A `conflicts` entry also needs `mergeable` still
+`CONFLICTING`, since `main` can move past a conflict while the head stays put,
+and `UNKNOWN` waits for the next sweep; a `stale_base` entry needs only the
+head:
 
 ```sh
 gh pr view "$pr" --repo "$repo" --json mergeable,headRefOid \
@@ -285,9 +358,11 @@ The grade reads only what GitHub records. The table in `grade()` in
 `pr-sweep.sh` is the rule, one row per condition with the grade it caps a PR
 at, and the PR gets the worst row it matches, so adding a problem never raises
 a grade; read the table rather than a summary of it here. `why` lists each
-row's reason. Two readings the rows do not spell out: each maintainer's latest
-review counts, so one approval does not hide another's changes request, and a
-request counts as a rebase only when it opens with the word. `high` includes a
+row's reason. Two readings the rows do not spell out: every changes request a
+maintainer made since their own last approval counts, so one approval does not
+hide another's request and the sweep's later rebase review does not hide an
+earlier substantive one, and a request counts as a rebase only when it opens
+with the word. `high` includes a
 PR nobody has reviewed yet, so `decision` null with `high` means ready for a
 first review, not approved.
 
@@ -367,7 +442,9 @@ the head or `updatedAt` moved.
 Similar-PR and unanswered-review notices are text on someone else's thread and
 follow "Apply only the confirmed list" in SKILL.md: the exact text per PR,
 one confirmation, and each PR's `updatedAt` (in `prs`) refetched before
-posting.
+posting. The one exception is a similar-work notice the review of a low or
+blocked PR finds, which a bare `/codetrial-triage` posts under
+[review-prs.md](review-prs.md) once both diffs were read.
 
 ```sh
 gh pr comment "$pr" --repo "$repo" --body-file "$SCRATCH/reply.md"
