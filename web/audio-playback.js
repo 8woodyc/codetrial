@@ -22,6 +22,7 @@ export function createAudioPlayback({
   button,
   focusTarget,
   announcement,
+  reapply = () => {},
 }) {
   let room = null;
   let event = null;
@@ -49,7 +50,10 @@ export function createAudioPlayback({
   }
 
   function status() {
-    if (element) observe({ type: "status", allowed: room?.canPlaybackAudio });
+    if (element) {
+      reapply();
+      observe({ type: "status", allowed: room?.canPlaybackAudio });
+    }
   }
 
   /// Drops the current source silently: a source that went away was not
@@ -82,6 +86,7 @@ export function createAudioPlayback({
     revision += 1;
     element = nextElement;
     pending = false;
+    reapply();
     render();
     if (room.canPlaybackAudio === false)
       observe({ type: "status", allowed: false });
@@ -112,11 +117,14 @@ export function createAudioPlayback({
     // Both calls start inside the click gesture. Awaiting startAudio first
     // can spend transient activation before the element's play request. The
     // executor runs synchronously, and turns a throw into a rejection.
+    // startAudio can unmute the element synchronously, so reapply runs between
+    // the two: the play request must never start with Jim's mute undone.
     const start = (call) => new Promise((resolve) => resolve(call()));
-    void Promise.allSettled([
-      start(() => room.startAudio()),
-      start(() => element.play()),
-    ]).then(([, played]) => {
+    const unlocked = start(() => room.startAudio());
+    reapply();
+    const attempts = [unlocked, start(() => element.play())];
+    void Promise.allSettled(attempts).then(([, played]) => {
+      reapply();
       if (current !== revision) return;
       pending = false;
       observe(

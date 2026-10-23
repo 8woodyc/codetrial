@@ -335,6 +335,15 @@ test("on a phone the self view does not grow the card over the wait", async (t) 
       document.querySelector("#captions-text").textContent =
         "Thanks for walking me through that. ".repeat(30);
     });
+    await page.waitForFunction(
+      () =>
+        parseFloat(
+          getComputedStyle(document.querySelector("#ending-overlay"))
+            .paddingBottom,
+        ) >=
+        document.querySelector("#jim-stage").getBoundingClientRect().height +
+          47,
+    );
     const under = await page.evaluate(() => {
       const card = document.querySelector("#jim-stage").getBoundingClientRect();
       return [...document.querySelectorAll("#ending-overlay button")]

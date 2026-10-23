@@ -37,6 +37,14 @@ const steps = [
   "Enable <strong>Share tab audio</strong> before clicking Share.",
 ];
 
+// docs/meet-tab-audio-manual-check.md has the operator reset Jim's volume by
+// these names before recording. A rename here strands that step.
+test("audio controls keep the labels the Meet manual check names", () => {
+  assert.match(page, /<summary>Audio controls<\/summary>/);
+  assert.match(page, />\s*Reset volume\s*</);
+  assert.match(page, />\s*Mute Jim\s*</);
+});
+
 test("meet-mode instructions", () => {
   for (const step of steps) {
     assert.ok(

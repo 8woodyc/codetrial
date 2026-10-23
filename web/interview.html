@@ -155,6 +155,10 @@
                 <select id="meet-output-select"></select>
               </div>
               <p id="meet-output-note" class="muted small" hidden></p>
+              <p class="muted small">
+                Jim's local volume and mute may also change what Meet
+                participants hear. Check their audio after adjusting it.
+              </p>
               <p id="meet-mode-privacy" class="muted small">
                 Once you share the tab, Google Meet controls who receives this
                 interview. Recordings or copies made in Meet, or by anyone in
@@ -771,6 +775,47 @@
         <!-- On the stage, not in the sidebar: the wait for the report makes
              the sidebar inert while Jim may still be speaking, and the stage
              is what stays reachable over that overlay. -->
+        <details class="jim-volume-controls">
+          <summary>Audio controls</summary>
+          <div id="jim-volume-row">
+            <label for="jim-volume">Jim volume</label>
+            <output id="jim-volume-value" for="jim-volume" aria-live="off"
+              >100%</output
+            >
+            <input
+              id="jim-volume"
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              value="100"
+            />
+          </div>
+          <p id="jim-volume-unsupported" class="muted small" hidden>
+            Use your device volume controls. Mute is still available.
+          </p>
+          <div class="jim-volume-actions">
+            <button
+              id="jim-mute"
+              class="pill-button"
+              type="button"
+              aria-pressed="false"
+            >
+              Mute Jim
+            </button>
+            <button id="jim-volume-reset" class="pill-button" type="button">
+              Reset volume
+            </button>
+          </div>
+        </details>
+        <p
+          id="jim-muted-indicator"
+          class="jim-muted-indicator small"
+          role="status"
+          hidden
+        >
+          Jim is muted on this device
+        </p>
         <div id="audio-playback-notice" class="audio-playback-notice" hidden>
           <p>
             Your browser blocked audio playback. Resume audio to hear the

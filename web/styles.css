@@ -2093,22 +2093,25 @@ table.phase-scores {
   border-top: 0;
 }
 
+/* Expanded controls and a playback warning can outgrow the wait's remaining
+   space on a phone. Keep that card scrollable rather than covering its actions. */
+#ending-overlay:not([hidden]) ~ .jim-stage.compact {
+  max-height: 35vh;
+  overflow-y: auto;
+  pointer-events: auto;
+}
+
 /* The compact card runs along the bottom edge, where a long closing line would
    grow it over the wait's buttons and take their taps. During the wait its
-   captions keep to a few lines (they still scroll), and the wait keeps that
-   much room clear below its own content. */
+   captions keep to a few lines (they still scroll). */
 #ending-overlay:not([hidden]) ~ .jim-stage.compact .captions-bar {
   max-height: 4.5rem;
 }
 
+/* The wait keeps the measured card height clear below its own content,
+   including open audio controls and notices. */
 #ending-overlay:has(~ .jim-stage.compact) {
-  padding-bottom: 7.5rem;
-}
-
-/* The blocked-audio notice rides in the same card and
-   adds its own text and Resume button to that height. */
-#ending-overlay:has(~ .jim-stage.compact .audio-playback-notice:not([hidden])) {
-  padding-bottom: 15rem;
+  padding-bottom: max(7.5rem, calc(var(--jim-stage-height, 0px) + 3rem));
 }
 
 /* Withdrawing consent is not the way on from the wait, so it sits apart, in
@@ -4004,4 +4007,47 @@ body:not([data-recording]) .replay-detail > :not(header) {
    hidden="until-found" state managed by problem-grid.js. */
 .lobby .problem-grid.title-search-unavailable {
   display: none !important;
+}
+
+.jim-volume-controls {
+  margin-top: 0.35rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
+  background: var(--float-surface);
+  color: var(--ink);
+  font-size: 0.75rem;
+  pointer-events: auto;
+}
+
+.jim-volume-controls summary {
+  cursor: pointer;
+}
+
+.jim-volume-controls label {
+  display: block;
+  margin-top: 0.35rem;
+}
+
+.jim-volume-controls input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.jim-volume-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.jim-volume-actions button {
+  padding: 0.25rem 0.5rem;
+  font-size: inherit;
+}
+
+.jim-muted-indicator {
+  margin: 0.35rem 0 0;
+  padding: 0.35rem;
+  color: var(--ink);
+  background: var(--float-surface);
 }
