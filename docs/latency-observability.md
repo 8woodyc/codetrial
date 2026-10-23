@@ -169,6 +169,40 @@ out, and input transport before the agent on the way in, are outside this
 record. A browser-perceived figure needs a matched audio measurement in the
 browser.
 
+## Browser audio smoke evidence
+
+The credentialed `voice` and `barge` browser-check flows also capture
+`jimAudio`: received byte/packet deltas, peak decoded RMS, playback-blocked
+state and a bounded result per observed audio subscription. The harness uses
+LiveKit's public track-specific `getRTCStatsReport()` and an analyser on the
+same native track attached as Jim. It records no device labels or audio
+samples.
+
+Sampling waits up to 120 seconds for Speaking, then samples at 100 ms
+intervals for at most 10 seconds, stopping early once both counters grow and
+RMS exceeds 0.001. Counter resets and receiver changes start a new baseline;
+different track generations never share deltas. At most 64 subscriptions are
+sampled; exceeding that limit is an unavailable observation, not a healthy
+verdict.
+
+`unavailable` means there were insufficient counter pairs or decoded samples,
+no attached Jim track, no Speaking interval, cancellation, a sampling error or
+a subscription limit. `transport-silent` means bytes or packets, either one,
+did not grow across the observed counter pairs, and `decoded-silent` means both
+grew but decoded RMS stayed at or below the floor. These are separate failures.
+The capture retains failed observations, and each resubscription that keeps its
+track through its sampling window must pass independently. A generation whose
+track is replaced, unsubscribed or disconnected before Speaking or within its
+first second of it, before both counters grew and RMS exceeded the floor, is
+marked `superseded`, since losing the track cut its window short and a fresh
+analyser first reads near zero; it cannot fail an otherwise healthy
+replacement, and the last generation must pass. A generation that sampled
+longer is judged on its evidence even if its track then ends. Unmeasured
+counters and RMS are `null`, not observed zeroes. This measures transport and
+decoded signal during Speaking, not output-device audibility, physical level or
+per-word delivery. The RMS floor is a smoke-check threshold, not a calibrated
+speech detector. Local loopback tests do not replace the isolated provider run.
+
 ## Validation
 
 The credential-free gate covers the trace lifecycle, the waterfall and the

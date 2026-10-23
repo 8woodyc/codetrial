@@ -10,6 +10,7 @@
 const { chromium } = require(process.env.PLAYWRIGHT_PATH);
 const assert = require("node:assert/strict");
 const fs = require("fs");
+const { mediaProbeSource, assertJimAudio } = require("./media-probe.cjs");
 const { installBargeReplay } = require("./barge-replay.cjs");
 const {
   FloorCapture,
@@ -793,6 +794,8 @@ async function isolateRustAgent(
   try {
     const page = await browser.newPage();
     let bargeReplay = null;
+    let jimAudio = null;
+    let probingAudio = false;
     if (process.env.BROWSER_CHECK_FLOW === "barge") {
       await page.addInitScript(
         installBargeReplay,
@@ -2310,6 +2313,10 @@ PatternLexicon.prototype.search = function(word) {
     }
 
     await page.goto(interviewUrl(PROBLEM_IDS.twoSum));
+    probingAudio = credentialed && ["voice", "barge"].includes(flow);
+    if (probingAudio) {
+      await page.evaluate(mediaProbeSource());
+    }
     await clearMediaGate(page);
     if (credentialed && !rustAgentIdentity) {
       roomName = await page
@@ -2478,6 +2485,14 @@ PatternLexicon.prototype.search = function(word) {
             );
           }
         }
+        if (probingAudio) {
+          jimAudio = await page.evaluate(() =>
+            globalThis.__finishJimAudioProbe(),
+          );
+          if (process.env.BROWSER_CHECK_CAPTURE)
+            writeIncompleteCapture({ jimAudio, bargeReplay });
+          assertJimAudio(jimAudio);
+        }
         if (credentialed && flow === "barge") {
           if (!floorLogPath)
             throw new Error(
@@ -2543,6 +2558,7 @@ PatternLexicon.prototype.search = function(word) {
                   ? readFloorRecords(floorLogPath)
                   : [],
                 bargeReplay,
+                jimAudio,
                 latencyLog: (agentOutput.join("") + "\n" + readServerLog())
                   .split("\n")
                   .filter((line) => line.includes("codetrial latency "))
@@ -2557,10 +2573,16 @@ PatternLexicon.prototype.search = function(word) {
       })(),
       agentFailure ?? never,
     ]).catch(async (error) => {
-      if (process.env.BROWSER_CHECK_CAPTURE && floorLogPath)
+      if (probingAudio && !jimAudio) {
+        jimAudio = await page
+          .evaluate(() => globalThis.__finishJimAudioProbe(true))
+          .catch(() => null);
+      }
+      if (process.env.BROWSER_CHECK_CAPTURE && (floorLogPath || probingAudio))
         writeIncompleteCapture({
-          floorRecords: readFloorRecords(floorLogPath),
+          floorRecords: floorLogPath ? readFloorRecords(floorLogPath) : [],
           bargeReplay,
+          jimAudio,
         });
       console.error(
         redact(
