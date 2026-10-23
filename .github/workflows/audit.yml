@@ -1,0 +1,80 @@
+name: security audit
+
+on:
+  schedule:
+    - cron: '43 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-audit
+
+jobs:
+  audit:
+    # Only trusted main code may update the repository's tracking issue.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install cargo-audit
+        uses: ./.github/actions/install-audit
+      - name: Audit main
+        id: audit
+        run: python3 scripts/audit.py --report "$RUNNER_TEMP/audit.md"
+      - name: Track remediation
+        if: ${{ !cancelled() && steps.audit.outputs.findings != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          FINDINGS: ${{ steps.audit.outputs.findings }}
+        run: |
+          title='Dependency security audit'
+          fingerprint() { sed -n '/^Findings fingerprint:/p'; }
+          # gh refuses --slurp with --jq, so filter the slurped pages with jq.
+          # Closed issues count too: reopening keeps existing subscribers.
+          found=$(gh api --paginate --slurp --method GET "repos/$GH_REPO/issues" \
+            -f state=all -f 'creator=github-actions[bot]' -f per_page=100 \
+            | jq -r --arg title "$title" '[.[][] | select(.pull_request == null and .user.login == "github-actions[bot]" and .title == $title)][0] // empty | "\(.number) \(.state)"')
+          read -r issue state <<< "$found"
+          if [ "$FINDINGS" != true ]; then
+            # The clean body replaces the old fingerprint, so findings that
+            # return later count as a change and notify subscribers again.
+            if [ "$state" = open ]; then
+              gh issue edit "$issue" --body-file "$RUNNER_TEMP/audit.md"
+              gh issue close "$issue" --reason completed
+            fi
+            exit 0
+          fi
+          if [ -z "$issue" ]; then
+            gh issue create --title "$title" --body-file "$RUNNER_TEMP/audit.md"
+            exit 0
+          fi
+          current=$(fingerprint < "$RUNNER_TEMP/audit.md")
+          previous=$(gh issue view "$issue" --json body --jq .body | fingerprint)
+          # Keep the old fingerprint until notification succeeds so failures
+          # retry, but skip the comment if a failed edit left it posted. On a
+          # closed issue the last comment predates the clean scan, so recurring
+          # findings always notify.
+          if [ "$previous" != "$current" ]; then
+            notified=
+            if [ "$state" = open ]; then
+              notified=$(gh api --paginate --slurp "repos/$GH_REPO/issues/$issue/comments" \
+                | jq -r '[.[][] | select(.user.login == "github-actions[bot]")] | last | .body // ""' \
+                | fingerprint)
+            fi
+            if [ "$notified" != "$current" ]; then
+              gh issue comment "$issue" --body-file "$RUNNER_TEMP/audit.md"
+            fi
+          fi
+          gh issue edit "$issue" --body-file "$RUNNER_TEMP/audit.md"
+          if [ "$state" = closed ]; then
+            gh issue reopen "$issue"
+          fi

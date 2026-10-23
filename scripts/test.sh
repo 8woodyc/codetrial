@@ -307,11 +307,10 @@ ruff_gate()
 # gate. Repo-wide false positives are answered once in `.shellcheckrc`; the few
 # local ones carry a directive naming why, beside the code it is about.
 #
-# Optional the way cargo-audit is: CI installs it, and a contributor without it
-# gets a note rather than a failure they cannot act on. That note counts the
-# scripts off the same glob the loop walks, because the number was typed into
-# the sentence once and adding a script left it describing a tree that no longer
-# existed.
+# Optional: CI installs it, and a contributor without it gets a note rather than
+# a failure they cannot act on. That note counts the scripts off the same glob
+# the loop walks, because the number was typed into the sentence once and adding
+# a script left it describing a tree that no longer existed.
 shell_syntax()
 {
     status=0
@@ -464,6 +463,7 @@ gate study-plan-guards "$PYTHON" "$ROOT/scripts/check-study-plan-guards.py"
 gate calibration-fixtures "$PYTHON" "$ROOT/scripts/gen-calibration-fixtures.py" --check
 gate calibration-tests unittest_gate "$ROOT/tests/test_calibrate_framework.py"
 gate gemini-usage-tests unittest_gate "$ROOT/tests/test_analyze_gemini_usage.py"
+gate audit-tests unittest_gate "$ROOT/tests/test_audit.py"
 gate test-gate-tests unittest_gate "$ROOT/tests/test_test_gate.py"
 gate mutants-plan-tests unittest_gate "$ROOT/tests/test_mutants_plan.py"
 gate mutants-install-tests unittest_gate "$ROOT/tests/test_mutants_install.py"
@@ -477,7 +477,7 @@ gate skill-refs "$PYTHON" "$ROOT/scripts/check-skill-refs.py"
 gate skill-scripts-tests unittest_gate "$ROOT/tests/test_skill_scripts.py"
 gate --lane browser browser-tests browser_tests static
 gate eslint eslint_gate
-gate cargo-audit cargo_audit_gate
+gate --lane all cargo-audit cargo_audit_gate
 gate vendor-patches vendor_patches_gate
 gate actionlint actionlint_gate
 

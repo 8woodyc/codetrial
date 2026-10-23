@@ -15,12 +15,16 @@ make check                # every gate, plus a live Gemini credential check
 
 CI runs one `gates (<lane>)` job per lane in parallel: `gates (rust)`,
 `gates (portable)` and `gates (browser)`. The `check` job only collects their
-results and the mutation jobs', so its log does not say what failed: open the
-failing lane, or, when every lane is green, the failing `plan-mutants` job or
+results, the independent `audit` job and the mutation jobs', so its log does
+not say what failed: open the failing lane, `audit`, `plan-mutants` job or
 `mutants` shard. On a pull request the portable lane checks the commit
 messages first, and a bad message skips the rest of that lane only. A gate
 names its lane where it is declared, one naming none is portable, and a test
-proves the three lanes together cover the full run.
+proves the three lanes plus the independent audit cover the full run.
+`cargo-audit` runs only in the default local gate; CI uses `scripts/audit.py`
+for merge-relative PR checks and full main checks. See
+[dependency security checks](../../../docs/development.md#dependency-security-checks).
+Its regression suite is `tests/test_audit.py`.
 Reproduce a failure with the same lane locally.
 
 `scripts/test.sh` is a list of named gates that all run before it reports, so
@@ -149,16 +153,22 @@ What this adds is one call that reads all of it at the PR's head:
 Read its `failing` entries in this order. `current` false is history, not the
 current failure: say so and stop there. `current` or `on_main` null means its
 lookup failed, and `gates`, `errors` and `excerpt` null mean the job log could
-not be read; check either with the raw calls below. `on_main` true means the latest
-finished run on `main` fails the same job, so the failure is the maintainer's
-and the author is not asked to fix it. Otherwise `gates` names what
-`scripts/test.sh` failed and `errors` the lines that say why; rerun that lane
-locally with the same head. A `cargo-audit` failure on a PR whose base predates
-the advisory fix is a stale base, answered by a rebase (#334), not a code
-change; `stale_base` (defined in the script's header) says exactly that, and
-the PR sweep lists such a PR in `rebase` on its own. The aggregate `check` job
-only collects results, so its entry points at the failing job it collected,
-as in the lanes section above. A check outside Actions has only its link, and
+not be read; check either with the raw calls below. `on_main` true means the
+latest finished run on `main` fails the same job. Read whether the cause is
+shared before asking the author for a fix: the PR `audit` compares added
+findings, while main runs a full scan, so both can fail for different reasons.
+Otherwise `gates` names what `scripts/test.sh` failed and `errors` the lines
+that say why; rerun that lane locally with the same head. For historical runs
+that still put `cargo-audit` in the portable lane, a failure on a PR whose base
+predates the advisory fix is a stale base, answered by a rebase (#334), not a
+code change; `stale_base` (defined in the script's header) says exactly that,
+and the PR sweep lists such a historical PR in `rebase` on its own.
+The independent `audit` job already compares the proposed merge with the base
+tip: inherited findings are informational, while added findings and incomplete
+dependency-change scans require investigation rather than an automatic rebase.
+The aggregate `check` job only collects results, so its entry points at the
+failing job it collected, as in the lanes section above. A check outside
+Actions has only its link, and
 `held` checks have no log until a maintainer approves the run.
 
 The raw calls behind it, when one answer needs checking:

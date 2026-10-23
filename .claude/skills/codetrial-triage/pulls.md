@@ -335,14 +335,19 @@ says why it reads the whole log rather than `--log-failed`, and which markers
 count. A check outside Actions, cubic among them, comes back with its link
 only; read it from the PR's checks tab.
 
-A `cargo-audit` advisory that `main` also has is the maintainer's, and the PR
-must not carry a lockfile bump to clear it: #304 was told it "needs nothing from
-you", and #305 to drop its unrelated `Cargo.lock` change. Once `main` lands the
+For historical runs with `cargo-audit` in the portable lane, an advisory that
+`main` also has is the maintainer's, and the PR must not carry a lockfile bump
+to clear it: #304 was told it "needs nothing from you", and #305 to drop its
+unrelated `Cargo.lock` change. Once `main` lands the
 fix (#331 moved to zip 9), a PR still failing on that advisory has a stale base,
 and the sweep puts it in `rebase` under the same limits as a conflicting one,
 so a request in any wording on its head, such as #326's own, keeps it out. A
 PR that touches a Cargo file is never a stale base: read whether its lockfile
 change brought the advisory before asking for anything.
+
+The independent `audit` job compares the actual merge against its base tip;
+inherited findings do not fail it. Read its summary for newly introduced
+vulnerabilities or an incomplete scan instead of classifying it as stale.
 
 A clean merge does not establish readiness. For a dependent draft, check whether
 its prerequisite merged and whether the author still needs to rebase, remove

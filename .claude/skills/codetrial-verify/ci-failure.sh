@@ -20,7 +20,9 @@
 #               Actions, its link only. current and on_main are null when the
 #               lookup behind them failed, and gates, errors and excerpt when
 #               the job log could not be read.
-#   stale_base  true when every failing lane failed only gates that read
+#   stale_base  legacy portable-audit runs only; the independent audit job
+#               reports inherited findings without failing. True when every
+#               failing lane failed only gates that read
 #               outside data (the table in the last jq below: cargo-audit
 #               reads the advisory database), on the current head, main's
 #               latest run started after those runs and succeeded in each of

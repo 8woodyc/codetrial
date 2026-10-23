@@ -168,7 +168,8 @@ gate()
         self.assertEqual(rust & browser, shared)
         self.assertEqual(portable & browser, shared)
         self.assertEqual(browser - shared, {"browser-tests"})
-        self.assertEqual(rust | portable | browser, full)
+        self.assertEqual(rust | portable | browser | {"cargo-audit"}, full)
+        self.assertNotIn("cargo-audit", rust | portable | browser)
         self.assertEqual(self.run_lane()[1], results["all"][1])
 
     def test_new_gate_is_included_in_portable_lane(self):
@@ -221,27 +222,27 @@ gate()
                     self.assertIn("failed gates: skipped-gates", result.stderr)
 
     def run_status(self, command, **env):
+        passing = dict.fromkeys(("GATES", "AUDIT", "PLAN", "MUTANTS"), "success")
         return subprocess.run(
             ["bash", "-e", "-c", command],
-            env={**os.environ, **env},
+            env={**os.environ, **passing, **env},
             capture_output=True,
             check=False,
         ).returncode
 
     def test_check_requires_the_lanes_and_explains_every_mutation_skip(self):
         check = support.job("check")
-        self.assertIn("    needs: [gates, plan-mutants, mutants]\n", check)
+        self.assertIn("    needs: [gates, audit, plan-mutants, mutants]\n", check)
         self.assertIn(f"    if: ${{{{ !cancelled() && {NOT_AVATAR} }}}}\n", check)
         command = support.run_block(check)
         states = ("success", "failure", "cancelled", "skipped", "")
-        # The lanes are checked first, so one passing mutation answer stands in
-        # for the rest.
-        for gates in states:
-            with self.subTest(gates=gates):
-                status = self.run_status(
-                    command, GATES=gates, PLAN="success", MUTANTS="success"
-                )
-                self.assertEqual(status == 0, gates == "success")
+        # The lanes and audit are checked first, so one passing mutation answer
+        # stands in for the rest.
+        for lane in ("GATES", "AUDIT"):
+            for state in states:
+                with self.subTest(lane=lane, state=state):
+                    status = self.run_status(command, **{lane: state})
+                    self.assertEqual(status == 0, state == "success")
         accepted = {
             # Shards ran and passed.
             ("success", "success"),
@@ -253,16 +254,93 @@ gate()
         for plan in states:
             for mutants in states:
                 with self.subTest(plan=plan, mutants=mutants):
-                    status = self.run_status(
-                        command, GATES="success", PLAN=plan, MUTANTS=mutants
-                    )
+                    status = self.run_status(command, PLAN=plan, MUTANTS=mutants)
                     self.assertEqual(status == 0, (plan, mutants) in accepted)
+
+    def test_audit_dispatches_events_and_stops_on_git_or_scan_errors(self):
+        audit = support.job("audit")
+        command = support.run_block(audit)
+        self.assertIn("GROUP_BASE: ${{ github.event.merge_group.base_sha }}", audit)
+        self.assertIn("fetch-depth: 2", audit)
+        self.assertNotIn("Install cargo-audit", gates_job())
+        parent = ["git:rev-parse HEAD^1"]
+        group = ["git:cat-file -e group-base^{commit}"]
+        fetch = "git:fetch --no-tags --depth=1 origin group-base"
+        for event, fail, expected_status, expected_calls in (
+            ("push", "", 0, ["python:scripts/audit.py"]),
+            (
+                "pull_request",
+                "",
+                0,
+                parent + ["python:scripts/audit.py --base actual-parent"],
+            ),
+            (
+                "merge_group",
+                "",
+                0,
+                group + ["python:scripts/audit.py --base group-base"],
+            ),
+            (
+                "merge_group",
+                "missing-base",
+                0,
+                group + [fetch, "python:scripts/audit.py --base group-base"],
+            ),
+            ("merge_group", "fetch", 1, group + [fetch]),
+            ("pull_request", "rev-parse", 1, parent),
+            ("push", "scan", 2, ["python:scripts/audit.py"]),
+            ("unknown", "", 2, []),
+        ):
+            with self.subTest(event=event, fail=fail):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    support.write_executable(
+                        root / "git",
+                        """#!/bin/sh
+printf 'git:%s\\n' "$*" >> "$CALLS"
+case "$1" in
+    rev-parse) [ "$FAIL" != rev-parse ] || exit 1; echo actual-parent ;;
+    cat-file) [ "$FAIL" != missing-base ] && [ "$FAIL" != fetch ] ;;
+    fetch) [ "$FAIL" != fetch ] ;;
+    *) exit 99 ;;
+esac
+""",
+                    )
+                    support.write_executable(
+                        root / "python3",
+                        """#!/bin/sh
+printf 'python:%s\\n' "$*" >> "$CALLS"
+[ "$FAIL" != scan ] || exit 2
+""",
+                    )
+                    result = subprocess.run(
+                        ["bash", "-eo", "pipefail", "-c", command],
+                        cwd=root,
+                        env={
+                            **os.environ,
+                            "PATH": str(root) + os.pathsep + os.environ["PATH"],
+                            "CALLS": str(root / "calls"),
+                            "EVENT": event,
+                            "FAIL": fail,
+                            "GROUP_BASE": "group-base",
+                        },
+                        capture_output=True,
+                        text=True,
+                        timeout=60,
+                    )
+                    self.assertEqual(result.returncode, expected_status, result.stderr)
+                    calls = (
+                        (root / "calls").read_text().splitlines()
+                        if (root / "calls").exists()
+                        else []
+                    )
+                    self.assertEqual(calls, expected_calls)
 
     def test_publishing_waits_on_the_lanes_not_on_check(self):
         # A push skips the mutation jobs `check` waits on, and the default
         # `success()` would carry that skip through `check` to both of these.
-        self.assertIn("    needs: gates\n", support.job("build"))
-        self.assertIn("    needs: [gates, build]\n", support.job("release"))
+        self.assertIn("    needs: [gates, audit]\n", support.job("build"))
+        self.assertIn("    needs: [gates, audit, build]\n", support.job("release"))
 
     def test_each_lane_has_a_bounded_job(self):
         timeouts = {lane: int(entry["timeout"]) for lane, entry in lanes().items()}
@@ -369,7 +447,7 @@ gate()
             set(matrix["portable"]["packages"].split()), {"shellcheck", "shfmt"}
         )
         self.assertEqual(set(matrix["browser"]), {"lane", "timeout"})
-        for name in ("ruff", "commentflow", "actionlint", "cargo-audit"):
+        for name in ("ruff", "commentflow", "actionlint"):
             with self.subTest(tool=name):
                 self.assertEqual(
                     condition(gates, f"Install {name}"), "matrix.lane == 'portable'"
