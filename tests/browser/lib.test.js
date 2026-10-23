@@ -14,6 +14,9 @@ import {
 
 import {
   ACTIVE_CONTRACT,
+  MAX_REPORT_BODY_BYTES,
+  unclearLinesOf,
+  withUnclearLines,
   boardOpBatches,
   surfaceLabel,
   boardStreamOptions,
@@ -3711,5 +3714,52 @@ test("interviewer provenance survives report migration and storage without inven
     sanitizeReport({ interviewerAccent: "a".repeat(200) }).interviewerAccent
       .length,
     128,
+  );
+});
+
+test("unclear lines are clipped to 600 UTF-8 bytes with an ellipsis", () => {
+  const bytes = (text) => new TextEncoder().encode(text).length;
+  const exact = "x".repeat(600);
+  const [ascii, cjk, whole, short] = unclearLinesOf([
+    "x".repeat(5000),
+    "\u6e2c".repeat(1000),
+    exact,
+    "Go on.",
+  ]);
+  for (const clipped of [ascii, cjk]) {
+    assert.ok(bytes(clipped) <= 600);
+    assert.ok(bytes(clipped) > 590);
+    assert.ok(clipped.endsWith("\u2026"));
+  }
+  assert.equal(whole, exact);
+  assert.equal(short, "Go on.");
+});
+
+test("marks are dropped before they push the report body past the limit", () => {
+  const lines = Array.from({ length: 10 }, () => "y".repeat(600));
+  const small = { id: "a", report: { summary: "ok" } };
+  assert.deepEqual(withUnclearLines(small, lines).unclearLines, lines);
+  assert.deepEqual(withUnclearLines(small, []), small);
+
+  const size = (value) =>
+    new TextEncoder().encode(JSON.stringify(value)).length;
+  const room =
+    MAX_REPORT_BODY_BYTES - size({ id: "a", report: { summary: "" } });
+  const large = { id: "a", report: { summary: "z".repeat(room - 2000) } };
+  const trimmed = withUnclearLines(large, lines);
+  assert.ok(trimmed.unclearLines.length > 0);
+  assert.ok(trimmed.unclearLines.length < lines.length);
+  assert.ok(size(trimmed) <= MAX_REPORT_BODY_BYTES);
+
+  const full = { id: "a", report: { summary: "z".repeat(room) } };
+  assert.equal("unclearLines" in withUnclearLines(full, lines), false);
+});
+
+test("the report body limit matches the server's", () => {
+  assert.match(
+    readFileSync(new URL("../../src/web/mod.rs", import.meta.url), "utf8"),
+    new RegExp(
+      `MAX_REPORT_BYTES: usize = ${MAX_REPORT_BODY_BYTES / 1024} \\* 1024;`,
+    ),
   );
 });

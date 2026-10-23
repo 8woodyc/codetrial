@@ -17,6 +17,7 @@ import {
   replayTimeline,
   responseWindowLabel,
   sanitizeReport,
+  unclearLinesOf,
   whiteboardPhaseLabel,
 } from "/lib.js";
 import {
@@ -511,6 +512,7 @@ async function loadReport(interviewId, recordingId) {
   nodes.report.innerHTML = reportMarkup({
     report,
     problemTitle: saved.problemTitle || "",
+    unclearLines: unclearLinesOf(saved.unclearLines),
     ...final,
   });
 }

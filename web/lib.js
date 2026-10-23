@@ -1121,6 +1121,53 @@ function reportInterviewerStyle(value) {
   return text && text !== "Random" ? text : undefined;
 }
 
+export const MAX_UNCLEAR_LINES = 10;
+// UTF-8 bytes, the unit the history budget is measured in. Above the longest
+// interviewer turn measured (548 bytes), so a typical turn is kept whole; a
+// longer one is cut with an ellipsis that says so, in any script.
+const MAX_UNCLEAR_LINE_BYTES = 600;
+const UNCLEAR_LINE_ELLIPSIS = "\u2026";
+// MAX_REPORT_BYTES in src/web/mod.rs: the server refuses a larger POST body.
+export const MAX_REPORT_BODY_BYTES = 64 * 1024;
+
+/// Saved history is input an older build, devtools or the server can return,
+/// so marks are kept only as the array of strings the interview page saves,
+/// bounded like the report text beside them.
+export function unclearLinesOf(value) {
+  return Array.isArray(value) && value.every((line) => typeof line === "string")
+    ? value.slice(0, MAX_UNCLEAR_LINES).map(clipUnclearLine)
+    : [];
+}
+
+function clipUnclearLine(line) {
+  const text = boundedText(line, Infinity);
+  if (textEncoder.encode(text).length <= MAX_UNCLEAR_LINE_BYTES) return text;
+  const budget =
+    MAX_UNCLEAR_LINE_BYTES - textEncoder.encode(UNCLEAR_LINE_ELLIPSIS).length;
+  let kept = "";
+  let size = 0;
+  for (const char of text) {
+    size += textEncoder.encode(char).length;
+    if (size > budget) break;
+    kept += char;
+  }
+  return `${kept}${UNCLEAR_LINE_ELLIPSIS}`;
+}
+
+/// The history entry with as many marks as fit the report body limit.
+///
+/// The marks share the POST body with the report, so marks that would push it
+/// past the limit are dropped from the end, and the report is saved without
+/// them rather than refused with them.
+export function withUnclearLines(entry, lines) {
+  for (let kept = lines.length; kept > 0; kept--) {
+    const marked = { ...entry, unclearLines: lines.slice(0, kept) };
+    const size = textEncoder.encode(JSON.stringify(marked)).length;
+    if (size <= MAX_REPORT_BODY_BYTES) return marked;
+  }
+  return entry;
+}
+
 export function sanitizeReport(raw) {
   const { interviewContract, unsupported: unsupportedContract } =
     reportContract(raw);

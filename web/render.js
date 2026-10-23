@@ -291,6 +291,7 @@ export function reportMarkup({
   boardPhases,
   exampleDrawing,
   saveResult,
+  unclearLines = [],
 }) {
   const atBoard = heldAtBoard(report, board);
   // At a board the coding score is for the drawing, the trace and the cases
@@ -332,6 +333,11 @@ export function reportMarkup({
       </li>`,
           )
           .join("")}</ol></section>`;
+  const unclear = unclearLines.length
+    ? `<section><h3>Lines you marked as unclear</h3><ol>${unclearLines
+        .map((line) => `<li>${escapeHtml(line)}</li>`)
+        .join("")}</ol></section>`
+    : "";
   const debrief = report.debrief
     ? `<details class="report-debrief"><summary>What the interviewer held back</summary>
       <p>Spaced review will bring this problem back, so your next attempt tests recall.</p>
@@ -393,6 +399,7 @@ export function reportMarkup({
       ${atBoard ? boardTimelineMarkup(report, board, boardPhases) : ""}
       ${feedback}
       ${practiceNext}
+      ${unclear}
       ${debrief}
       ${rounds}${executionNote}
       ${phaseScores}
@@ -497,6 +504,8 @@ export function reportMarkdown({
   transcript,
   at,
   testHistory = [],
+  unclearLines = [],
+  unclearIds = [],
 }) {
   const atBoard = heldAtBoard(report, board);
   const workTitle = atBoard ? "Board work" : "Coding";
@@ -572,6 +581,16 @@ export function reportMarkdown({
           ]),
           "",
         ];
+  const unclear = unclearLines.length
+    ? [
+        "## Lines you marked as unclear",
+        "",
+        ...unclearLines.map(
+          (line, index) => `${index + 1}. Jim: "${mdText(line)}"`,
+        ),
+        "",
+      ]
+    : [];
   const debrief = report.debrief
     ? [
         "## What the interviewer held back",
@@ -648,15 +667,22 @@ export function reportMarkdown({
   const chainNote = mdText(chainSentence(report));
   // Missing storage is not evidence of silence: only a saved, empty transcript
   // can say that no speech was captured. Omitted fields have the same meaning.
+  const marked = new Set(unclearIds);
   const conversation =
     transcript == null
       ? "(transcript was not saved)"
       : transcript
           .filter((segment) => segment.final || segment.text.trim())
-          .map(
-            (segment) =>
-              `**${segment.speaker === "interviewer" ? "Jim" : "You"}:** ${mdText(segment.text.trim())}`,
-          )
+          .map((segment) => {
+            const text = segment.text.trim();
+            const who =
+              segment.speaker !== "interviewer"
+                ? "You"
+                : marked.has(segment.id)
+                  ? "Jim (marked unclear)"
+                  : "Jim";
+            return `**${who}:** ${mdText(text)}`;
+          })
           .join("\n\n");
   // Candidate code is the one field here that must not be escaped, so when it
   // contains a run of backticks the fence is what has to give. Without this, a
@@ -793,6 +819,7 @@ export function reportMarkdown({
     "",
     ...phaseScores,
     ...practiceNext,
+    ...unclear,
     ...debrief,
     ...frameworkTimeline,
     // A session with no evaluation can still be one that ended because the
@@ -921,7 +948,7 @@ export function createTranscriptView(document, panel) {
     upsert(id, speaker, text, final, at = Date.now()) {
       let row = rowOf.get(id);
       if (!row) {
-        row = { speaker, text: "", final, at, body: null };
+        row = { id, speaker, text: "", final, at, body: null };
         rows.push(row);
         rowOf.set(id, row);
       }

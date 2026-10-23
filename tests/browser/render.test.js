@@ -2413,3 +2413,87 @@ test("markdown export includes test run history", () => {
   assert.match(markdown, /Expected: 6/);
   assert.match(markdown, /Actual: 8/);
 });
+test("markdown lists unclear lines and tags them in the transcript", () => {
+  const markdown = reportMarkdown({
+    report: sanitizeReport({ decision: "HIRE" }),
+    problemTitle: "Two Sum",
+    language: "python",
+    code: "",
+    transcript: [
+      {
+        id: "jim-1",
+        speaker: "interviewer",
+        text: "Use a hash map.",
+        final: true,
+      },
+      {
+        id: "you-1",
+        speaker: "you",
+        text: "Sorry, could you repeat that?",
+        final: true,
+      },
+      {
+        id: "jim-2",
+        speaker: "interviewer",
+        text: "Try sorting.",
+        final: true,
+      },
+    ],
+    at: "2026-01-02",
+    unclearLines: ["Use a hash map."],
+    unclearIds: ["jim-1"],
+  });
+
+  assert.match(
+    markdown,
+    /## Lines you marked as unclear\n\n1\. Jim: "Use a hash map\."/,
+  );
+  assert.match(markdown, /\*\*Jim \(marked unclear\):\*\* Use a hash map\./);
+  assert.match(markdown, /\*\*Jim:\*\* Try sorting\./);
+});
+
+test("a report without unclear lines has no unclear section", () => {
+  const session = {
+    report: sanitizeReport({ decision: "HIRE" }),
+    problemTitle: "Two Sum",
+    language: "python",
+    code: "",
+    transcript: [],
+    at: "2026-01-02",
+  };
+  assert.doesNotMatch(reportMarkdown(session), /marked as unclear/);
+  assert.doesNotMatch(reportMarkup(session), /marked as unclear/);
+});
+test("markdown tags only the marked turn when Jim repeats himself", () => {
+  const markdown = reportMarkdown({
+    report: sanitizeReport({ decision: "HIRE" }),
+    problemTitle: "Two Sum",
+    language: "python",
+    code: "",
+    transcript: [
+      {
+        id: "jim-1",
+        speaker: "interviewer",
+        text: "Try sorting.",
+        final: true,
+      },
+      { id: "you-1", speaker: "you", text: "Sorry?", final: true },
+      {
+        id: "jim-2",
+        speaker: "interviewer",
+        text: "Try sorting.",
+        final: true,
+      },
+    ],
+    at: "2026-01-02",
+    unclearLines: ["Try sorting."],
+    unclearIds: ["jim-2"],
+  });
+
+  assert.match(markdown, /1\. Jim: "Try sorting\."/);
+  assert.equal(markdown.match(/Jim \(marked unclear\)/g)?.length, 1);
+  assert.match(
+    markdown,
+    /\*\*Jim:\*\* Try sorting\.\n\n\*\*You:\*\* Sorry\?\n\n\*\*Jim \(marked unclear\):\*\* Try sorting\./,
+  );
+});

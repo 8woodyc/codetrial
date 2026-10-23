@@ -519,6 +519,7 @@ test("the report card this page renders names no finding either", () => {
       },
     },
     { code: "" },
+    { unclearLines: ["Sxnote"] },
     // A whiteboard interview: the board timeline in place of the code block,
     // and the coding steps under the names the candidate was shown. Replay
     // keeps no board images, so the timeline says where they are.
@@ -554,6 +555,7 @@ test("the report card this page renders names no finding either", () => {
       problemTitle: "Sxtitle",
       language: "Sxlang",
       code: "code" in extra ? extra.code : "Sxcode",
+      unclearLines: extra.unclearLines,
     });
     rendered.push(markup);
     for (const word of markup.replace(/<[^>]*>/g, " ").split(/\s+/)) {
@@ -714,6 +716,7 @@ test("the report card this page renders names no finding either", () => {
       "Interviewer",
       "Judged",
       "Legacy/unversioned",
+      "Lines",
       "NO",
       "No",
       "Not",
@@ -748,6 +751,7 @@ test("the report card this page renders names no finding either", () => {
       "an",
       "and",
       "are",
+      "as",
       "attempt",
       "back",
       "back,",
@@ -810,6 +814,7 @@ test("the report card this page renders names no finding either", () => {
       "listed",
       "lobby",
       "malformed",
+      "marked",
       "mid-level",
       "min",
       "more",
@@ -862,6 +867,7 @@ test("the report card this page renders names no finding either", () => {
       "this",
       "through",
       "to",
+      "unclear",
       "unknown.",
       "unsupported",
       "used",
@@ -876,6 +882,7 @@ test("the report card this page renders names no finding either", () => {
       "will",
       "with",
       "work",
+      "you",
       "your",
     ]),
     "a word on the report card is a word somebody chose",

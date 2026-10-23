@@ -332,6 +332,16 @@ Keeping the last turn lets the candidate reread a hint or follow-up question
 while thinking, without switching away from the problem. The Transcript tab
 still keeps every turn.
 
+An "Unclear" button beside the "Live CC:" label marks the Jim turn on screen,
+and pressing it again unmarks it. It shows only while a Jim turn is on screen,
+and once `MAX_UNCLEAR_LINES` (10) turns are marked it is disabled on any turn
+not already marked. Jim is not told about a mark. When the report is saved,
+the marked turns are resolved to their transcript text and stored as
+`unclearLines` in the history entry, outside the report and its request. The
+report and its Markdown export list them, and the export tags them in the
+transcript. A report reopened from Past attempts or a replay keeps the list,
+but its export has no transcript to tag.
+
 Jim captions reveal gradually, even after final text arrives, because
 generation can finish while audio is still queued. An edit during the reveal
 is remembered for that Jim segment: its final text finishes revealing, then
