@@ -2381,6 +2381,28 @@ table.phase-scores {
   margin: 1.25rem 0;
 }
 
+.camera-preview-container {
+  width: 100%;
+  max-width: 400px;
+  margin-top: 0.75rem;
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: #111;
+}
+
+.camera-preview-container[hidden] {
+  display: none;
+}
+
+#camera-preview {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  transform: scaleX(-1);
+}
+
 .audio-check-actions {
   display: flex;
   flex-wrap: wrap;

@@ -610,16 +610,21 @@ test("a replacement preflight camera gets a fresh face check", () => {
   // calls the reset rather than what the reset does.
   assert.match(
     read("interview.js"),
-    /onLost: \(\) => faceCheck\.reset\(\)/,
-    "losing a camera must reset the face check",
+    /onLost: \(\) => \{\s*stopCameraPreview\(\);\s*faceCheck\.reset\(\);?\s*\}/,
+    "losing a camera must clear the preview and reset the face check",
   );
 
   // The preflight notices an ended camera per frame and the pool notices one on
   // a retry pass. Neither may reset the check by hand: `dropTrack` fires
   // `onLost` for the first and `requestDevice` for the second, and a caller
   // pairing the two by hand is what left the reset written at two sites.
+  const scriptWithoutOnLost = read("interview.js").replace(
+    /onLost: \(\) => \{\s*stopCameraPreview\(\);\s*faceCheck\.reset\(\);?\s*\}/,
+    "",
+  );
+
   assert.doesNotMatch(
-    read("interview.js"),
+    scriptWithoutOnLost,
     /faceCheck\.reset\(\);/,
     "the face check reset belongs to onLost, not to a call site",
   );
