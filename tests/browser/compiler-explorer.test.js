@@ -1478,6 +1478,80 @@ public:
       },
     );
   }
+
+  // C used to print these two refusals where the answer goes, so the case
+  // failed as a wrong answer with no reason. C++, Java, JavaScript and Python
+  // throw them, and C reports them through the same error field. A shallow
+  // copy that also loops is refused as a shallow copy, as those four refuse
+  // it, because the original head comes before any revisit.
+  const deepCopy = "Returned list must be a deep copy.";
+  const strayRandom =
+    "Returned random pointer must stay inside the copied list.";
+  const strayCopies = [
+    {
+      name: "a shallow copy",
+      message: deepCopy,
+      candidate: `struct Node* snapshotOutline(struct Node* head) { return head; }`,
+    },
+    {
+      name: "a shallow copy that loops",
+      message: deepCopy,
+      candidate: `struct Node* snapshotOutline(struct Node* head) {
+    struct Node* tail = head;
+    while (tail && tail->next) tail = tail->next;
+    if (tail) tail->next = head;
+    return head;
+}`,
+    },
+    {
+      name: "a random pointer into the original",
+      message: strayRandom,
+      candidate: `struct Node* snapshotOutline(struct Node* head) {
+    struct Node dummy = { 0 };
+    struct Node* tail = &dummy;
+    for (struct Node* p = head; p; p = p->next) {
+        tail->next = calloc(1, sizeof(*tail->next));
+        tail = tail->next;
+        tail->val = p->val;
+        tail->random = p->random;
+    }
+    return dummy.next;
+}`,
+    },
+  ];
+  for (const { name, message, candidate } of strayCopies) {
+    it(`c harness reports ${name} as an error`, { skip: noCc }, async () => {
+      const spec = judges["copy-list-with-random-pointer"];
+      const dir = mkdtempSync(join(tmpdir(), "codetrial-c-stray-"));
+      try {
+        const source = join(dir, "copy.c");
+        const binary = join(dir, "copy");
+        writeFileSync(source, generateHarness("c", spec, candidate));
+        await run("cc", ["-std=c17", source, "-o", binary]);
+        const { stdout } = await run(binary, [], {
+          encoding: "utf8",
+          timeout: 10000,
+        });
+        const { results } = parseCompilerResults(stdout);
+        spec.cases.forEach((testCase, index) => {
+          const result = results[index];
+          const nodes = testCase.input[0];
+          const strays =
+            message === deepCopy
+              ? nodes.length > 0
+              : nodes.some(([, random]) => random !== null);
+          if (!strays) {
+            assert.deepEqual(result.actual, testCase.expected, testCase.label);
+            return;
+          }
+          assert.equal(result.actual, null, testCase.label);
+          assert.equal(result.error, message, testCase.label);
+        });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
 });
 
 test("harness generator handles output parameter and output prefix specs", () => {
