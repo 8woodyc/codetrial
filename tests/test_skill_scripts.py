@@ -952,6 +952,23 @@ class PrSweepTests(SweepCase):
             [(1, 2, "web/a b/logo.png")],
         )
 
+    def test_a_rename_collides_under_its_new_name(self):
+        # The diff --git line alone would split this name at its last " b/".
+        rename = (
+            "diff --git a/web/a b/old.js b/web/a b/new.js\nsimilarity index 100%\n"
+            "rename from web/a b/old.js\nrename to web/a b/new.js\n"
+        )
+        shared = listed({"path": "web/a b/new.js", "additions": 0, "deletions": 0})
+        swept = self.run_pulls(
+            pull(1, files=shared),
+            pull(2, files=shared),
+            diffs={"1": rename, "2": rename},
+        )
+        self.assertEqual(
+            [(c["a"], c["b"], c["path"]) for c in swept["collide"]],
+            [(1, 2, "web/a b/new.js")],
+        )
+
     def test_gates_prefix_matches_the_check_workflow_job_name(self):
         # The grade reads "no gates lane passed" from this prefix; renaming the
         # job in check.yml without the script would mark every PR as such.
