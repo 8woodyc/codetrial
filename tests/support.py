@@ -49,10 +49,18 @@ def step(text, name):
 
 
 def run_block(text):
-    """The script of the first `run: |` in text, dedented."""
+    """The script of the first `run: |` in text, dedented to its key's indent.
+
+    Read from the text rather than assumed, since a workflow step and a
+    composite action's step sit at different depths.
+    """
+    key = re.search(r"^( *)run: \|\n", text, re.M)
+    if key is None:
+        raise AssertionError("run block is no longer in the workflow")
+    width = len(key[1]) + 2
     body = []
-    for line in section(text, "        run: |\n", "\0", "run block").splitlines():
-        if line and not line.startswith("          "):
+    for line in text[key.end() :].splitlines():
+        if line and not line.startswith(" " * width):
             break
-        body.append(line[10:])
+        body.append(line[width:])
     return "\n".join(body)

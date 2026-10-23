@@ -1,13 +1,30 @@
 name: Install Chromium
-description: Restore Playwright's Chromium and install its system libraries.
+description: Restore Playwright's Chromium and install the system libraries it lacks.
 
-# The browser binary, not the npm package. package-lock.json pins the
-# playwright version, and the version is what decides which build of Chromium
-# lands in this directory. Needs `npm ci` first, since it runs that playwright.
+# The browser binary, not the npm package. Keyed on playwright-core's
+# browsers.json, the file that decides which build of Chromium lands in this
+# directory, rather than on package-lock.json: an eslint bump changed the lock
+# and re-downloaded a browser nothing had changed. Needs `npm ci` first, since
+# it reads that file and runs that playwright.
 #
-# The install is one command on a cache hit too: it then only installs the
-# system libraries, which are not in the cached directory. Without it the
-# browser suites skip themselves and the gate passes while testing nothing.
+# The headless shell only. Every launch here is headless with no `channel`,
+# which is the shell's job, so the full browser beside it was half of every
+# download and of the cache entry restored on every run, for a binary nothing
+# started. A headed launch would fail at once naming the missing executable.
+#
+# The system libraries are not in the cached directory, and installing them
+# was most of this step's cost: `--with-deps` runs `apt-get update` and an
+# install every time, which across 39 runs had a median of 20s and a tail of
+# ten minutes on a slow mirror. In the logs read it installed only fonts and
+# upgrades; every library Chromium links against was already present. So the
+# libraries are asked for only when the loader says one is missing.
+#
+# `ldd` is the test, not a launch that fails. A launch fails for many reasons
+# (a sandbox, a profile directory, a bad flag) and none of them is fixed by
+# apt, so treating every failure as a missing dependency would hide the real
+# one behind a ten-minute install. The launch afterwards is still required:
+# the suites would fail on a browser that cannot start too, but minutes later
+# and inside a test's output, where this fails at the step that caused it.
 outputs:
   key:
     description: The exact key, for the step that saves the browser.
@@ -22,6 +39,22 @@ runs:
       uses: actions/cache/restore@v6
       with:
         path: ~/.cache/ms-playwright
-        key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-    - shell: sh
-      run: npx playwright install --with-deps chromium
+        key: playwright-shell-${{ runner.os }}-${{ hashFiles('node_modules/playwright-core/browsers.json') }}
+    - shell: bash
+      run: |
+        npx playwright install --only-shell chromium
+        # The shell and the libraries it opens at run time, ANGLE and
+        # SwiftShader among them, which a launch alone never loads. No shell
+        # found is a failure, not a pass: a renamed executable would otherwise
+        # leave nothing for ldd to complain about.
+        cache=~/.cache/ms-playwright
+        shell=(-name chrome-headless-shell -o -name headless_shell)
+        [ -n "$(find "$cache" -type f \( "${shell[@]}" \))" ] \
+          || { echo "no headless shell under $cache" >&2; exit 1; }
+        missing=$(find "$cache" -type f \( "${shell[@]}" -o -name '*.so' \) \
+          -exec ldd {} + 2>/dev/null | grep -F 'not found' | sort -u || true)
+        if [ -n "$missing" ]; then
+          printf 'Chromium is missing system libraries:\n%s\n' "$missing"
+          timeout 15m npx playwright install-deps chromium-headless-shell
+        fi
+        node -e "require('playwright').chromium.launch().then((b) => b.close())"
