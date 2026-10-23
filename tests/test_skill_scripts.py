@@ -1719,6 +1719,65 @@ class PostInlineTests(unittest.TestCase):
         self.assertIn("moved from h1 to h2", result.stderr)
 
 
+ODDS = SKILLS / "codetrial-odds"
+
+
+class OddsTests(unittest.TestCase):
+    def test_it_is_typed_only_and_named_for_its_directory(self):
+        # Routing never offers it, so the plain-language ranking request
+        # stays with codetrial-triage.
+        front = (ODDS / "SKILL.md").read_text().split("---", 2)[1]
+        self.assertIn("name: codetrial-odds\n", front)
+        self.assertIn("disable-model-invocation: true\n", front)
+
+    def test_only_a_whole_sweep_replaces_the_snapshot(self):
+        # Records its arguments in the snapshot, or fails as FAKE_SWEEP says.
+        sweep = (
+            'case "${FAKE_SWEEP:-}" in\n'
+            "  fail) echo '{\"status\": [' ; exit 1 ;;\n"
+            "  junk) echo '{}' ;;\n"
+            "  *) jq -n '{status: [], args: $ARGS.positional}' --args \"$@\" ;;\n"
+            "esac\n"
+        )
+        snapshot = ".git/codetrial-triage/pr-sweep.json"
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            saved = repo / snapshot
+
+            def run(mode=""):
+                return run_fake(
+                    ODDS / "snapshot.sh",
+                    [],
+                    FAKE_GH_FAILS,
+                    {"ODDS_SWEEP": sweep},
+                    cwd=repo,
+                    env={"FAKE_SWEEP": mode},
+                )
+
+            first = run()
+            self.assertEqual((first.returncode, first.stdout), (0, f"{snapshot}\n"))
+            # An empty stale-days leaves the sweep its own default.
+            self.assertEqual(
+                json.loads(saved.read_text())["args"], ["sysprog21/codetrial", ""]
+            )
+            self.assertEqual(run().returncode, 0)
+            self.assertEqual(
+                json.loads(saved.read_text())["args"],
+                ["sysprog21/codetrial", "", snapshot],
+            )
+            kept = saved.read_text()
+            for mode in ("fail", "junk"):
+                with self.subTest(mode=mode):
+                    result = run(mode)
+                    self.assertEqual((result.returncode, result.stdout), (1, ""))
+                    self.assertIn("the last snapshot is kept", result.stderr)
+                    self.assertEqual(saved.read_text(), kept)
+                    self.assertEqual(
+                        [p.name for p in saved.parent.iterdir()], ["pr-sweep.json"]
+                    )
+
+
 HYGIENE = SKILLS / "codetrial-triage" / "hygiene.sh"
 
 # The PR and its commits; every other call fails, so ci-failure.sh yields no
