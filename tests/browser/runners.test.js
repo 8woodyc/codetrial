@@ -682,6 +682,30 @@ test("both runners refuse a returned list that loops back into itself", () => {
   assert.doesNotMatch(python, /id\(node\) not in seen/);
 });
 
+test("both runners refuse a copied random list that loops back into itself", () => {
+  // A copy whose last node links back to the first holds every value and
+  // random pointer, so stopping at the revisit would print a correct answer.
+  const javascript = runners.slice(
+    runners.indexOf("const randomListToArray"),
+    runners.indexOf("};", runners.indexOf("const randomListToArray")),
+  );
+  assert.match(
+    javascript,
+    /if \(seen\.has\(node\)\)\s*throw new TypeError\("Returned list must not reach a node twice\."\)/,
+  );
+  assert.doesNotMatch(javascript, /while \(node && !seen\.has\(node\)\)/);
+
+  const python = runners.slice(
+    runners.indexOf("def _random_list_to_array"),
+    runners.indexOf("def _graph_to_adjacency"),
+  );
+  assert.match(
+    python,
+    /if id\(node\) in seen:\s*raise TypeError\("Returned list must not reach a node twice\."\)/,
+  );
+  assert.doesNotMatch(python, /id\(node\) not in seen/);
+});
+
 test("the runner evaluates no string, so the page needs no unsafe-eval", () => {
   // The candidate's code is the first statements of the worker, not an
   // argument to eval inside it. This is what lets the page's

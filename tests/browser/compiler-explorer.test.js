@@ -1585,24 +1585,18 @@ public:
     );
   }
 
-  // Compiles a flatten candidate into the harness and returns its results.
-  // The timeout keeps a serializer that walks forever from hanging the lane.
-  async function runFlatten(language, candidate) {
-    const dir = mkdtempSync(join(tmpdir(), `codetrial-${language}-flatten-`));
+  // Compiles a candidate into the named judge's harness and returns its
+  // results. The timeout keeps a serializer that walks forever from hanging
+  // the lane.
+  async function runJudge(language, id, candidate) {
+    const dir = mkdtempSync(join(tmpdir(), `codetrial-${language}-${id}-`));
     try {
       const source = join(
         dir,
-        language === "java" ? "Main.java" : `flatten.${language}`,
+        language === "java" ? "Main.java" : `candidate.${language}`,
       );
-      const binary = join(dir, "flatten");
-      writeFileSync(
-        source,
-        generateHarness(
-          language,
-          judges["flatten-binary-tree-to-linked-list"],
-          candidate,
-        ),
-      );
+      const binary = join(dir, "candidate");
+      writeFileSync(source, generateHarness(language, judges[id], candidate));
       if (language === "java") await run("javac", [source]);
       else
         await run(language === "c" ? "cc" : "g++", [
@@ -1687,7 +1681,11 @@ public:
       { skip },
       async () => {
         const judge = judges["flatten-binary-tree-to-linked-list"];
-        const results = await runFlatten(language, cyclicFlatten[language]);
+        const results = await runJudge(
+          language,
+          "flatten-binary-tree-to-linked-list",
+          cyclicFlatten[language],
+        );
         assert.equal(results.length, judge.cases.length);
         judge.cases.forEach((testCase, index) => {
           const result = results[index];
@@ -1742,8 +1740,9 @@ public:
         { skip },
         async () => {
           const judge = judges["flatten-binary-tree-to-linked-list"];
-          const results = await runFlatten(
+          const results = await runJudge(
             language,
+            "flatten-binary-tree-to-linked-list",
             twinChildren[language](shared),
           );
           assert.equal(results.length, judge.cases.length);
@@ -1768,6 +1767,154 @@ public:
         },
       );
     }
+  }
+
+  // A deep copy whose last node links back to the first copies every value
+  // and every random pointer, so only a serializer that refuses a revisited
+  // node can tell it from a correct answer. "empty random list" has no node.
+  const cyclicCopies = {
+    c: `struct Node* snapshotOutline(struct Node* head) {
+    int n = 0;
+    for (struct Node* p = head; p; p = p->next) n++;
+    if (!n) return NULL;
+    struct Node** copies = calloc(n, sizeof(*copies));
+    struct Node* p = head;
+    for (int i = 0; i < n; i++, p = p->next) {
+        copies[i] = calloc(1, sizeof(*copies[i]));
+        copies[i]->val = p->val;
+    }
+    p = head;
+    for (int i = 0; i < n; i++, p = p->next) {
+        copies[i]->next = copies[(i + 1) % n];
+        struct Node* q = head;
+        for (int j = 0; j < n; j++, q = q->next)
+            if (q == p->random) copies[i]->random = copies[j];
+    }
+    struct Node* copy = copies[0];
+    free(copies);
+    return copy;
+}`,
+    cpp: `class Solution {
+public:
+    Node* snapshotOutline(Node* head) {
+        if (!head) return nullptr;
+        unordered_map<Node*, Node*> copies;
+        for (Node* p = head; p; p = p->next) copies[p] = new Node(p->val);
+        for (Node* p = head; p; p = p->next) {
+            copies[p]->next = p->next ? copies[p->next] : copies[head];
+            copies[p]->random = p->random ? copies[p->random] : nullptr;
+        }
+        return copies[head];
+    }
+};`,
+    java: `class Solution {
+    public Node snapshotOutline(Node head) {
+        if (head == null) return null;
+        java.util.HashMap<Node, Node> copies = new java.util.HashMap<>();
+        for (Node p = head; p != null; p = p.next) copies.put(p, new Node(p.val));
+        for (Node p = head; p != null; p = p.next) {
+            copies.get(p).next = p.next != null ? copies.get(p.next) : copies.get(head);
+            copies.get(p).random = p.random != null ? copies.get(p.random) : null;
+        }
+        return copies.get(head);
+    }
+}`,
+  };
+  const cyclicCopyRuns = [
+    ["c", noCc],
+    ["cpp", noGpp],
+    ["java", noJava],
+  ];
+  for (const [language, skip] of cyclicCopyRuns) {
+    it(
+      `${language} harness refuses a copied random list that loops back into itself`,
+      { skip },
+      async () => {
+        const spec = judges["copy-list-with-random-pointer"];
+        const results = await runJudge(
+          language,
+          "copy-list-with-random-pointer",
+          cyclicCopies[language],
+        );
+        spec.cases.forEach((testCase, index) => {
+          const result = results[index];
+          if (testCase.expected.length === 0) {
+            assert.deepEqual(result.actual, [], testCase.label);
+            return;
+          }
+          assert.match(
+            result.error ?? "",
+            /Returned list must not reach a node twice\./,
+            testCase.label,
+          );
+        });
+      },
+    );
+  }
+
+  // C used to print these two refusals where the answer goes, so the case
+  // failed as a wrong answer with no reason. C++ and Java throw them, and C
+  // reports them through the same error field. A shallow copy that also
+  // loops is refused as a shallow copy, as the other four harnesses refuse
+  // it, because the original head comes before any revisit.
+  const deepCopy = "Returned list must be a deep copy.";
+  const strayRandom =
+    "Returned random pointer must stay inside the copied list.";
+  const strayCopies = [
+    {
+      name: "a shallow copy",
+      message: deepCopy,
+      candidate: `struct Node* snapshotOutline(struct Node* head) { return head; }`,
+    },
+    {
+      name: "a shallow copy that loops",
+      message: deepCopy,
+      candidate: `struct Node* snapshotOutline(struct Node* head) {
+    struct Node* tail = head;
+    while (tail && tail->next) tail = tail->next;
+    if (tail) tail->next = head;
+    return head;
+}`,
+    },
+    {
+      name: "a random pointer into the original",
+      message: strayRandom,
+      candidate: `struct Node* snapshotOutline(struct Node* head) {
+    struct Node dummy = { 0 };
+    struct Node* tail = &dummy;
+    for (struct Node* p = head; p; p = p->next) {
+        tail->next = calloc(1, sizeof(*tail->next));
+        tail = tail->next;
+        tail->val = p->val;
+        tail->random = p->random;
+    }
+    return dummy.next;
+}`,
+    },
+  ];
+  for (const { name, message, candidate } of strayCopies) {
+    it(`c harness reports ${name} as an error`, { skip: noCc }, async () => {
+      const spec = judges["copy-list-with-random-pointer"];
+      const results = await runJudge(
+        "c",
+        "copy-list-with-random-pointer",
+        candidate,
+      );
+      spec.cases.forEach((testCase, index) => {
+        const result = results[index];
+        const nodes = testCase.input[0];
+        const strays =
+          message === deepCopy
+            ? nodes.length > 0
+            : nodes.some(([, random]) => random !== null);
+        if (!strays) {
+          assert.deepEqual(result.actual, testCase.expected, testCase.label);
+          return;
+        }
+        assert.equal(result.actual, null, testCase.label);
+        assert.equal(result.error, message, testCase.label);
+      });
+    });
   }
 });
 

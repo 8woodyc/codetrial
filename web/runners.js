@@ -697,7 +697,9 @@ const JS_RUNNER_SOURCE = `
       };
       const randomListToArray = (node) => {
         const nodes = [], seen = new Set();
-        while (node && !seen.has(node)) {
+        while (node) {
+          if (seen.has(node))
+            throw new TypeError("Returned list must not reach a node twice.");
           if (originalRandomNodes.has(node)) throw new TypeError("Returned list must be a deep copy.");
           seen.add(node);
           nodes.push(node);
@@ -1026,7 +1028,9 @@ def _quad_tree_to_preorder(root):
 def _random_list_to_array(node):
     nodes = []
     seen = set()
-    while node is not None and id(node) not in seen:
+    while node is not None:
+        if id(node) in seen:
+            raise TypeError("Returned list must not reach a node twice.")
         if id(node) in _original_random_nodes:
             raise TypeError("Returned list must be a deep copy.")
         seen.add(id(node))
