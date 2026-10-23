@@ -1,5 +1,5 @@
-.PHONY: all build clean indent check mutants fetch-vendor fetch-clang \
-	verify-vendor web hooks uninstall-hooks
+.PHONY: all build clean indent indent-check check mutants fetch-vendor \
+	fetch-clang verify-vendor web hooks uninstall-hooks
 
 all: build
 
@@ -27,6 +27,11 @@ clean:
 indent: $(CLANG)
 	@./scripts/indent.sh --write
 	cargo clippy --all-targets -- -D warnings
+
+# The same chain against a copy of the tree, so nothing is rewritten. Unlike the
+# gate, a formatter the tree needs and lacks fails here rather than skipping.
+indent-check:
+	@./scripts/indent.sh --check
 
 # No verify-vendor prerequisite: scripts/test.sh runs it, and having both hash
 # 12MB of wasm twice per check bought nothing.

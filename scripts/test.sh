@@ -368,14 +368,13 @@ gate mutants-exclusions mutants_exclusions
 gate fmt cargo fmt --check --manifest-path "$ROOT/Cargo.toml"
 
 # Comment reflow and shell formatting, checked against a copy of the tree so a
-# gate never rewrites what it is judging. Both tools are optional locally and
-# installed in CI, so the check skips a lane rather than failing on a missing
-# tool, and the skip joins this run's summary; overlapping with the fmt gate
-# above costs nothing and reads better when it is `cargo fmt` alone that
-# drifted.
+# gate never rewrites what it is judging. This is the one caller that lets a
+# missing formatter skip its lane rather than fail, and the skip joins this
+# run's summary, which CI fails on; overlapping with the fmt gate above costs
+# nothing and reads better when it is `cargo fmt` alone that drifted.
 gate indent with_reported_skips formatting \
     's/^indent\.sh: \(.* not installed\), skipping that lane.*/\1/p' \
-    "$ROOT/scripts/indent.sh" --check
+    "$ROOT/scripts/indent.sh" --check --skip-missing
 
 # webrtc-sys needs Clang 21+ on Linux, and without one clippy and cargo-test
 # fail on a build script rather than on anything this tree did. The Makefile's

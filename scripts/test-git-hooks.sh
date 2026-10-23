@@ -310,22 +310,90 @@ expect 0 "a message that already has prose" \
 absent "prose is left alone" "$work/written.msg" "Commit rules"
 
 echo "  HOOKS   pre-commit"
-printf '#!/bin/sh\n\nset -eu\n\necho staged\n' > tidy.sh
-git add tidy.sh
+
+# Plain text, because the cases below have to hold on a machine without the
+# optional linters or the formatters: a case that needs a tool turns a laptop
+# without it red. `git diff --check` is always there.
+printf 'tidy\n' > notes.txt
+git add notes.txt
 expect 0 "a staged file the checkers accept" sh ./scripts/git-pre-commit.sh
 
 # The whole reason the hook checks out the index: an edit nobody staged must
 # neither fail this commit nor ride along in it.
-#
-# The defect is a syntax error rather than a formatting one, because `sh -n` is
-# always there while shfmt and shellcheck are lanes the hook skips when the tool
-# is missing. A case that needs an optional tool turns a laptop without it red.
-printf '#!/bin/sh\nif true; then\n  echo "no fi below me"\n' > untidy.sh
+printf 'untidy \n' > notes.txt
 expect 0 "an unstaged file is not judged" sh ./scripts/git-pre-commit.sh
-git add untidy.sh
+git add notes.txt
 expect 1 "the same file once staged" sh ./scripts/git-pre-commit.sh
-git rm -q --cached untidy.sh
-rm -f untidy.sh
+printf 'tidy\n' > notes.txt
+git add notes.txt
+
+# The scratch repository has no node_modules, so this is JavaScript with no
+# Prettier, which must not pass as checked.
+printf 'export const x = 1;\n' > staged.js
+git add staged.js
+expect 1 "a staged file whose formatter is missing" sh ./scripts/git-pre-commit.sh
+contains "the missing formatter is named" "$work/last.out" "prettier: run npm ci"
+
+# A commit of nothing but web files gives the chain no file at all, which is not
+# the same as a file it could not read. A stand-in Prettier that finds nothing
+# to change lets the case run without node.
+mkdir -p node_modules/.bin
+printf '#!/bin/sh\nexit 0\n' > node_modules/.bin/prettier
+chmod +x node_modules/.bin/prettier
+expect 0 "a commit of web files alone" sh ./scripts/git-pre-commit.sh
+rm -rf node_modules
+
+# A setting changes how files nobody staged are formatted, so a commit carrying
+# only the setting is checked against every file it governs.
+git commit -q --no-verify -m "Add a script the hook did not read" \
+    -m "The setting staged below has to reach this file."
+printf '{}\n' > .prettierrc.json
+git add .prettierrc.json
+expect 1 "a formatter setting alone widens the check" sh ./scripts/git-pre-commit.sh
+contains "the widened check reaches the unstaged file" "$work/last.out" "prettier"
+git rm -q --cached .prettierrc.json
+rm -f .prettierrc.json
+
+# The edges of what is staged, after the cases pre-commit's own stash dance
+# guards against: a file staged in part, `commit -a` and its temporary index, a
+# rename, a name past ASCII, one git still quotes, and an intent-to-add.
+part=$(printf '#!/bin/sh\nif true; then\n' | git hash-object -w --stdin)
+printf '#!/bin/sh\necho fixed\n' > part.sh
+git update-index --add --cacheinfo "100644,$part,part.sh"
+expect 1 "the staged half of a file is what is judged" sh ./scripts/git-pre-commit.sh
+git rm -q -f --cached part.sh
+rm -f part.sh
+
+printf 'untidy \n' > notes.txt
+expect 1 "commit -a judges what -a stages" git commit -q -a \
+    -m "Change the notes" -m "Trailing space the hook has to see through -a."
+git checkout -q -- notes.txt
+
+git mv staged.js renamed.js
+expect 1 "a renamed file is judged under its new name" sh ./scripts/git-pre-commit.sh
+contains "the renamed file reaches its formatter" "$work/last.out" "prettier"
+git mv renamed.js staged.js
+
+accented=$(printf 'caf\303\251.js')
+printf 'export const x = 1;\n' > "$accented"
+git add "$accented"
+expect 1 "a name past ASCII is judged" sh ./scripts/git-pre-commit.sh
+contains "that name reaches its formatter" "$work/last.out" "prettier"
+git rm -q --cached "$accented"
+rm -f "$accented"
+
+printf 'x\n' > 'say"hi.txt'
+git add 'say"hi.txt'
+expect 1 "a name git quotes is refused by name" sh ./scripts/git-pre-commit.sh
+contains "the refusal says why" "$work/last.out" "cannot be checked"
+git rm -q --cached 'say"hi.txt'
+rm -f 'say"hi.txt'
+
+printf 'export const later = 1;\n' > later.js
+git add -N later.js
+expect 0 "an intent-to-add file carries nothing to judge" sh ./scripts/git-pre-commit.sh
+git rm -q --cached later.js
+rm -f later.js
 
 echo "  HOOKS   pre-push"
 git commit -q --allow-empty -m "Add the scratch repository" \

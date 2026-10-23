@@ -266,6 +266,7 @@ then relied on weighs more than one Jim offered unprompted.
 make build           # release build
 make web             # run the server
 make indent          # format Rust, shell, Python, HTML and JavaScript; run Clippy
+make indent-check    # the same formatters as a check; fails on a missing one
 make clean           # remove build output
 make fetch-vendor    # fetch pinned browser assets
 make verify-vendor   # verify vendor checksums

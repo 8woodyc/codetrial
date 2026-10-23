@@ -1,0 +1,3 @@
+# No settings: rustfmt's defaults are this repository's style, and the edition
+# comes from Cargo.toml. The file being here is what keeps a ~/.rustfmt.toml on
+# a contributor's machine from deciding how a commit is formatted.
