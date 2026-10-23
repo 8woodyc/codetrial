@@ -24,9 +24,9 @@ use codetrial::token::{
     livekit_token,
 };
 use codetrial::web::{
-    DispatchRefusal, MAX_BODY_BYTES, MAX_REPORT_BYTES, READ_RATE_LIMIT, REPLAY_RATE_LIMIT,
-    RoomDispatcher, TOKEN_RATE_LIMIT, TokenConfig, WebServerConfig, initialize_account_database,
-    login_config, static_file_meta, token_response,
+    DispatchRefusal, MAX_BODY_BYTES, MAX_REPORT_BYTES, NoShowConsent, READ_RATE_LIMIT,
+    REPLAY_RATE_LIMIT, RoomDispatcher, TOKEN_RATE_LIMIT, TokenConfig, WebServerConfig,
+    initialize_account_database, login_config, static_file_meta, token_response,
 };
 
 #[path = "common/http.rs"]
@@ -348,6 +348,7 @@ async fn spawn_web_server(config: WebServerConfig) -> (String, TestServer) {
 #[derive(Default)]
 struct RecordingDispatcher {
     staffed: std::sync::Mutex<Vec<(String, String)>>,
+    no_show_releases: std::sync::Mutex<Vec<(String, NoShowConsent)>>,
     /// Set to refuse, standing in for a process already at capacity.
     at_capacity: std::sync::atomic::AtomicBool,
     /// Set to refuse, standing in for a fixed room still finishing a report.
@@ -376,6 +377,22 @@ impl RoomDispatcher for RecordingDispatcher {
             .push((room_name.to_string(), provider.url.clone()));
         Ok(())
     }
+
+    fn ensure_agent_with_no_show_release(
+        &self,
+        room_name: &str,
+        provider: &codetrial::config::Provider,
+        no_show: Option<NoShowConsent>,
+    ) -> Result<(), DispatchRefusal> {
+        self.ensure_agent(room_name, provider)?;
+        if let Some(no_show) = no_show {
+            self.no_show_releases
+                .lock()
+                .unwrap()
+                .push((room_name.to_string(), no_show));
+        }
+        Ok(())
+    }
     fn ensure_guest_agent(
         &self,
         room_name: &str,
@@ -389,6 +406,28 @@ impl RoomDispatcher for RecordingDispatcher {
 }
 
 impl RecordingDispatcher {
+    fn no_show_release(&self, room_name: &str) -> NoShowConsent {
+        self.no_show_releases
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(room, _)| room == room_name)
+            .map(|(_, no_show)| no_show.clone())
+            .expect("the dispatched recorded room should carry its no-show release")
+    }
+
+    async fn release_no_show(&self, room_name: &str) {
+        let no_show = {
+            let mut releases = self.no_show_releases.lock().unwrap();
+            let index = releases
+                .iter()
+                .position(|(room, _)| room == room_name)
+                .expect("the dispatched recorded room should carry its no-show release");
+            releases.swap_remove(index).1
+        };
+        no_show.release().await.unwrap();
+    }
+
     fn rooms(&self) -> Vec<String> {
         self.staffed
             .lock()
@@ -403,12 +442,35 @@ impl RecordingDispatcher {
     }
 }
 
-async fn spawn_web_server_with_dispatcher(
+#[derive(Default)]
+struct DefaultMethodDispatcher {
+    staffed: std::sync::Mutex<Vec<String>>,
+}
+
+impl RoomDispatcher for DefaultMethodDispatcher {
+    fn ensure_agent(
+        &self,
+        room_name: &str,
+        _provider: &codetrial::config::Provider,
+    ) -> Result<(), DispatchRefusal> {
+        self.staffed.lock().unwrap().push(room_name.to_string());
+        Ok(())
+    }
+}
+
+impl DefaultMethodDispatcher {
+    fn rooms(&self) -> Vec<String> {
+        self.staffed.lock().unwrap().clone()
+    }
+}
+
+async fn spawn_web_server_with_dispatcher<D: RoomDispatcher>(
     config: WebServerConfig,
-    dispatcher: std::sync::Arc<RecordingDispatcher>,
+    dispatcher: std::sync::Arc<D>,
 ) -> (String, TestServer) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+    let dispatcher: std::sync::Arc<dyn RoomDispatcher> = dispatcher;
     let server = spawn_test_server(
         listener,
         codetrial::web::web_service_with_dispatcher(config, Some(dispatcher)),

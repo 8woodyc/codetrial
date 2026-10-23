@@ -12,7 +12,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use serde_json::{Value, json};
 
-use crate::accounts::{Accounts, GitHubLoginConfig};
+use crate::accounts::{Accounts, GitHubLoginConfig, blocking, release_interview_room};
 
 pub use crate::accounts::{ACCOUNT_SCHEMA_VERSION, initialize_account_database};
 pub use crate::current_epoch_seconds;
@@ -529,6 +529,45 @@ impl AppState {
     }
 }
 
+/// The recorded consent to release if a candidate never reaches its room.
+#[derive(Clone)]
+pub struct NoShowConsent {
+    accounts: Arc<Accounts>,
+    interview_id: String,
+    account_id: i64,
+    room_name: String,
+}
+
+impl NoShowConsent {
+    pub(crate) fn new(
+        accounts: Arc<Accounts>,
+        interview_id: String,
+        account_id: i64,
+        room_name: String,
+    ) -> Self {
+        Self {
+            accounts,
+            interview_id,
+            account_id,
+            room_name,
+        }
+    }
+
+    /// Gives a recorded interview's consent back only if it is still bound to
+    /// the room whose candidate never arrived, and reports whether it did.
+    pub async fn release(self) -> rusqlite::Result<bool> {
+        blocking(move || {
+            release_interview_room(
+                &self.accounts,
+                &self.interview_id,
+                self.account_id,
+                &self.room_name,
+            )
+        })
+        .await
+    }
+}
+
 /// Rate limiting needs the peer address, which only exists when the router is
 /// served with connect info attached.
 /// Puts an interviewer in a room this server just named.
@@ -558,6 +597,19 @@ pub trait RoomDispatcher: Send + Sync + 'static {
         room_name: &str,
         provider: &crate::config::Provider,
     ) -> Result<(), DispatchRefusal>;
+
+    /// Starts an interviewer and releases recorded consent if no candidate
+    /// reaches the dispatched room. Dispatchers that cannot observe a no-show
+    /// keep their existing behavior.
+    fn ensure_agent_with_no_show_release(
+        &self,
+        room_name: &str,
+        provider: &crate::config::Provider,
+        no_show: Option<NoShowConsent>,
+    ) -> Result<(), DispatchRefusal> {
+        let _ = no_show;
+        self.ensure_agent(room_name, provider)
+    }
 
     /// Whether this dispatcher enforces guest-specific admission limits.
     ///

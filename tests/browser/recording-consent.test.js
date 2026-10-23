@@ -196,6 +196,29 @@ test("recording-consent is recorded before a token is asked for", () => {
   );
 });
 
+test("recording-consent bounds a stalled token request before offline practice", () => {
+  const body = withoutComments(functionBody(script, "connect"));
+  assert.ok(
+    code.includes("const TOKEN_REQUEST_TIMEOUT_MS = 20_000;"),
+    "the browser deadline must leave the server's body deadline time to answer",
+  );
+  assertIncludesCompact(
+    body,
+    "signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS)",
+    "the deadline signal must cover the token request and its response body",
+  );
+  assert.ok(
+    body.includes('error?.name === "TimeoutError"'),
+    "a timeout must not expose browser-specific exception text",
+  );
+  assert.ok(
+    body.includes(
+      "The interview connection timed out. Offline practice is ready.",
+    ),
+    "the candidate needs a stable explanation before the existing offline fallback",
+  );
+});
+
 test("recording-consent sends the version it displayed", () => {
   const body = withoutComments(functionBody(script, "recordConsent"));
   assert.ok(

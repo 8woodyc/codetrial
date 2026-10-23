@@ -223,6 +223,9 @@ let editorPaintFrame = null;
 // The agent reads the editor once per 2s watch tick, so publishing every
 // keystroke sends ~10x more full-buffer packets than anyone consumes.
 const CODE_PUBLISH_DEBOUNCE_MS = 300;
+// Bounds startup through the response headers. The server may finish claim and
+// dispatch after the browser has fallen back to offline practice.
+const TOKEN_REQUEST_TIMEOUT_MS = 20_000;
 /// Long enough to read twice, short enough that it is gone before the answer
 /// it is about. Measured against the hint text, not chosen round.
 const FRAMEWORK_HINT_MS = 12000;
@@ -1748,6 +1751,7 @@ async function connect(preflight, presenting = false) {
     const response = await fetch("/api/token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
       body: JSON.stringify({
         problemId: problem.page,
         durationMin,
@@ -1815,11 +1819,17 @@ async function connect(preflight, presenting = false) {
         });
     }
   } catch (error) {
+    const failure =
+      error?.name === "TimeoutError"
+        ? new Error(
+            "The interview connection timed out. Offline practice is ready.",
+          )
+        : error;
     // Swallowed for the candidate, logged for everyone else. Offline practice
     // mode is a reasonable fallback but a terrible diagnosis: it looks the same
     // whether the server has no LiveKit credentials, the token was refused, or
     // the microphone failed to publish after a successful connect.
-    console.warn("codetrial connect_failed", error);
+    console.warn("codetrial connect_failed", failure);
     // Whatever threw may have thrown after `connectLiveKit` already joined and
     // published, and dropping the reference does not leave the room. That is
     // how a page ran "offline practice" with a live LiveKit room underneath it,
@@ -1830,7 +1840,7 @@ async function connect(preflight, presenting = false) {
     state.room = null;
     if (joined) void joined.disconnect?.()?.catch?.(() => {});
     stopPreflight(preflight);
-    const degraded = providerUiState("degraded", error?.message);
+    const degraded = providerUiState("degraded", failure?.message);
     setAgentStateLabel(degraded.label);
     // A degraded start without a reason reads as the product working. The server
     // says why it refused, in words written for a candidate, and a busy server

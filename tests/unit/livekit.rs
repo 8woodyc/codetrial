@@ -3859,6 +3859,15 @@ fn both_usage_summaries_share_one_spelling() {
         ),
         "{startup}"
     );
+
+    let error = std::io::Error::other("startup failed");
+    let failed = startup_failure_line("live", "room-a", 7, &error);
+    assert!(
+        failed.starts_with(
+            "codetrial live_usage room=room-a session=7 model=live elapsed_s=0 outcome=error phase=startup prompt_tokens=0"
+        ),
+        "{failed}"
+    );
 }
 
 /// The window reaches the interview's state, which is the one place the
