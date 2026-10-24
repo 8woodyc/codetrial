@@ -1635,7 +1635,19 @@ fn a_lone_unsafe_check_after_both_repairs_still_reaches_the_card() {
     let output = report_with_self_review(2, json!(["Notice whether you sounded confident."]));
     let raw = last_attempt_for(&output, problem)
         .expect("one unsafe coaching check must not lose the evaluation");
-    let card = crate::agent::final_report(Some(&raw), 1, None, problem);
+    let card = crate::agent::final_report(
+        Some(&raw),
+        1,
+        None,
+        problem,
+        crate::agent::ReportRounds {
+            behavioral_opened: true,
+            follow_ups_released: true,
+            candidate_turns: 1,
+        },
+        InterviewMode::Coding,
+        false,
+    );
     assert!(card.get("incomplete").is_none(), "{card}");
     assert_eq!(card["codingScore"], 82);
     assert_eq!(card["hintsUsed"], 1);
@@ -4222,7 +4234,19 @@ fn a_success_criterion_still_unsafe_after_both_repairs_is_replaced_and_scored() 
         raw["improvementPlan"][0]["successCriterion"], "State it independently",
         "a criterion with nothing unsafe is left as the model wrote it"
     );
-    let card = crate::agent::final_report(Some(&raw), 0, None, report_problem());
+    let card = crate::agent::final_report(
+        Some(&raw),
+        0,
+        None,
+        report_problem(),
+        crate::agent::ReportRounds {
+            behavioral_opened: true,
+            follow_ups_released: true,
+            candidate_turns: 1,
+        },
+        InterviewMode::Coding,
+        false,
+    );
     assert!(card.get("incomplete").is_none(), "{card}");
     assert_eq!(card["codingScore"], 82);
 

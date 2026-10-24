@@ -182,7 +182,7 @@ fn a_silent_candidate_has_no_communication_assessment() {
     assert_eq!(accepted["communicationFeedback"]["strengths"], json!([]));
     assert_eq!(accepted["communicationFeedback"]["improvements"], json!([]));
 
-    let published = final_report_for_round(
+    let published = final_report(
         Some(&report),
         0,
         None,
@@ -275,8 +275,16 @@ fn a_candidate_turn_still_requires_a_numeric_communication_assessment() {
 #[test]
 fn strict_report_validation_is_atomic_and_server_owns_hints() {
     let valid = valid_strict_report();
-    let report =
-        validate_report(&valid, 3, get_problem(Some("two-sum"))).expect("fixture is valid");
+    let report = final_report(
+        Some(&valid),
+        3,
+        None,
+        get_problem(Some("two-sum")),
+        rounds(true),
+        InterviewMode::Coding,
+        false,
+    );
+    assert!(!report["incomplete"].as_bool().unwrap_or(false));
     assert_eq!(report["hintsUsed"], 3);
 
     let mut hostile = valid.clone();
@@ -293,7 +301,15 @@ fn strict_report_validation_is_atomic_and_server_owns_hints() {
     assert!(errors.contains("$.decision"));
     assert!(errors.contains("$.extra"));
 
-    let incomplete = final_report(Some(&hostile), 3, None, get_problem(Some("two-sum")));
+    let incomplete = final_report(
+        Some(&hostile),
+        3,
+        None,
+        get_problem(Some("two-sum")),
+        rounds(true),
+        InterviewMode::Coding,
+        false,
+    );
     assert_eq!(incomplete["incomplete"], true);
     assert!(incomplete.get("codingScore").is_none());
     assert!(incomplete.get("decision").is_none());
@@ -780,12 +796,23 @@ fn final_report_matches_frontend_publish_contract() {
         },
         "communicationFeedback": "bad",
     });
-    let sanitized = final_report(Some(&raw), 2, None, get_problem(Some("two-sum")));
+    let sanitized = final_report(
+        Some(&raw),
+        2,
+        None,
+        get_problem(Some("two-sum")),
+        rounds(true),
+        InterviewMode::Coding,
+        false,
+    );
     let fallback = final_report(
         None,
         1,
         Some("model unavailable"),
         get_problem(Some("two-sum")),
+        rounds(true),
+        InterviewMode::Coding,
+        false,
     );
 
     assert_eq!(sanitized["incomplete"], true);

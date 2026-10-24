@@ -2294,9 +2294,11 @@ const TRANSCRIPTION_REPORT_POLICY: &str = r#"- Uncertain speech and requests to 
   framework assessments, either score, feedback, or the hiring decision, and a
   report never names the language a transcript came out in. Leave framework
   phase scores null when their only support is uncertain speech.
-- Judge communicationScore and the decision rule's clear-communication half
-  from reliable evidence only: clarified speech, typed code comments, and
-  supported notes. A recognition gap is neither clear nor unclear
+- When the brief records candidate turns, judge communicationScore and the
+  decision rule's clear-communication half from reliable evidence only:
+  clarified speech, typed code comments, and supported notes. When it records
+  zero candidate turns, typed comments remain coding evidence only and do not
+  establish a communication assessment. A recognition gap is neither clear nor unclear
   communication, so it cannot by itself turn a verdict the reliable evidence
   supports into NO_HIRE, and it is never the reason given for a verdict. When
   it leaves evidence thin, say in the summary that reliable communication
@@ -2983,7 +2985,7 @@ fn report_brief(input: &ReportPromptInput<'_>) -> String {
         ),
     };
     let communication_evidence = if input.candidate_turns == 0 {
-        "CANDIDATE TURNS: 0. The server recorded no candidate transcript turns. Return `communicationScore` as `null`, return both `communicationFeedback.strengths` and `communicationFeedback.improvements` as empty arrays, and state that communication was not assessed. Code edits and test runs are not spoken responses: use them only for coding assessment and never describe them as something the candidate said, explained, answered, or narrated."
+        "CANDIDATE TURNS: 0. The server recorded no candidate transcript turns. Return `communicationScore` as `null`, return both `communicationFeedback.strengths` and `communicationFeedback.improvements` as empty arrays, and state that communication was not assessed. Code edits, typed code comments, and test runs are not spoken responses: use them only for coding assessment and never describe them as something the candidate said, explained, answered, or narrated. Missing communication evidence is neither positive nor negative: base `decision` on the evidence that was assessed and do not change it only because communication was unassessed."
             .to_string()
     } else {
         format!(
@@ -3185,9 +3187,13 @@ Score two independent dimensions from 0 to 100:
    any evidence they did provide, but do not deduct for unsupported STAR parts of
    that abandoned probe.
 
-Decision rule: "HIRE" only if the performance would clear a real mid-level SWE
-onsite bar — a working, reasonably optimal solution AND clear communication.
-Otherwise "NO_HIRE".
+Decision rule: when communication was assessed, "HIRE" only if the performance
+would clear a real mid-level SWE onsite bar — a working, reasonably optimal
+solution AND clear communication. Otherwise "NO_HIRE". When the brief records
+zero candidate turns, missing communication evidence is neither positive nor
+negative: base the decision on the evidence that was assessed, and do not turn
+an otherwise supported verdict into "NO_HIRE" only because communication was
+unassessed.
 The practice level, when supplied in the brief, gives candidate-facing context
 only; it must never raise or lower the fixed mid-level hiring bar.
 The ten `frameworkAssessment` phase scores are formative coaching signals and

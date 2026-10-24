@@ -1236,15 +1236,7 @@ fn evaluation_reaction(case: &Value, state: &mut RuntimeState) -> String {
         }
         "report" => {
             let transcript = case["transcript"].as_str().expect("transcript is text");
-            for (index, _) in transcript
-                .lines()
-                .filter(|line| line.starts_with("Candidate:"))
-                .enumerate()
-            {
-                state
-                    .evidence_ledger
-                    .record_conversation_turn(index as u64, "candidate");
-            }
+            let candidate_turns = u32::from(!transcript.trim().is_empty());
             model_report_input(report_prompt(ReportPromptInput {
                 problem: get_problem(Some("two-sum")),
                 interview_mode: InterviewMode::Coding,
@@ -1263,7 +1255,7 @@ fn evaluation_reaction(case: &Value, state: &mut RuntimeState) -> String {
                 evidence: "",
                 behavioral_round: BehavioralRound::of(state),
                 follow_ups_released: false,
-                candidate_turns: state.evidence_ledger.conversation.candidate_turns,
+                candidate_turns,
             }))
         }
         other => panic!("unknown reaction kind {other}"),

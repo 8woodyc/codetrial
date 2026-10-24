@@ -223,27 +223,14 @@ pub fn report_response_schema(communication_assessed: bool) -> serde_json::Value
     })
 }
 
-pub fn validate_report(
-    raw: &serde_json::Value,
-    hints_used: u32,
-    problem: &Problem,
-) -> Result<serde_json::Value, Vec<String>> {
-    let mut report = validate_report_candidate(raw, problem)?;
-    report
-        .as_object_mut()
-        .expect("validated object")
-        .insert("hintsUsed".to_string(), serde_json::json!(hints_used));
-    Ok(report)
-}
-
 /// Whether a model response is a report, and the report if it is.
 ///
 /// What comes back is not `raw`: the fields the server owns are applied to the
 /// accepted copy, so the plan is in its final order and the phase rows carry
 /// the tags that follow from it. A caller that keeps `raw` instead keeps a
 /// report the model happened to order, which is not the one the candidate is
-/// shown. `validate_report` adds the last of those fields, `hintsUsed`, which
-/// is counted here rather than claimed by the model.
+/// shown. The publish boundary adds the last server-owned field, `hintsUsed`,
+/// which is counted here rather than claimed by the model.
 pub fn validate_report_candidate(
     raw: &serde_json::Value,
     problem: &Problem,
@@ -1697,48 +1684,13 @@ pub fn final_report(
     hints_used: u32,
     error_note: Option<&str>,
     problem: &Problem,
-) -> serde_json::Value {
-    final_report_with_rounds(raw_report, hints_used, error_note, problem, None)
-}
-
-/// `final_report` with the round evidence that governed report generation.
-/// This keeps the final publish boundary on the same silent-session policy as
-/// the prompt and repair loop instead of reinterpreting an accepted `null`
-/// communication score as malformed.
-pub fn final_report_for_round(
-    raw_report: Option<&serde_json::Value>,
-    hints_used: u32,
-    error_note: Option<&str>,
-    problem: &Problem,
     rounds: ReportRounds,
     mode: InterviewMode,
     drawing_received: bool,
 ) -> serde_json::Value {
-    final_report_with_rounds(
-        raw_report,
-        hints_used,
-        error_note,
-        problem,
-        Some((rounds, mode, drawing_received)),
-    )
-}
-
-fn final_report_with_rounds(
-    raw_report: Option<&serde_json::Value>,
-    hints_used: u32,
-    error_note: Option<&str>,
-    problem: &Problem,
-    rounds: Option<(ReportRounds, InterviewMode, bool)>,
-) -> serde_json::Value {
     let (reason, errors) = match (raw_report, error_note) {
         (Some(raw_report), None) => {
-            let validated = match rounds {
-                Some((rounds, mode, drawing_received)) => {
-                    validate_report_for_round(raw_report, problem, rounds, mode, drawing_received)
-                }
-                None => validate_report_candidate(raw_report, problem),
-            };
-            match validated {
+            match validate_report_for_round(raw_report, problem, rounds, mode, drawing_received) {
                 Ok(mut report) => {
                     report
                         .as_object_mut()

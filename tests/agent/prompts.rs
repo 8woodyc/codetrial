@@ -534,7 +534,15 @@ fn silent_report_brief_makes_communication_unassessed() {
         "{prompt}"
     );
     assert!(
-        prompt.contains("Code edits and test runs are not spoken responses"),
+        prompt.contains("Code edits, typed code comments, and test runs are not spoken responses"),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains("Missing communication evidence is neither positive nor negative"),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains("do not change it only because communication was unassessed"),
         "{prompt}"
     );
 }

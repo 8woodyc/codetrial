@@ -83,9 +83,8 @@ pub(crate) use report::{
     MAX_ERROR_CHARS, Sanitized, sanitize_example_drawing_candidate, sanitize_report_candidate,
 };
 pub use report::{
-    MAX_SUMMARY_TEXT, ReportRounds, fallback_report, final_report, final_report_for_round,
-    names_published_problem, report_response_schema, spelled_words, validate_report,
-    validate_report_candidate, validate_report_for_round,
+    MAX_SUMMARY_TEXT, ReportRounds, fallback_report, final_report, names_published_problem,
+    report_response_schema, spelled_words, validate_report_candidate, validate_report_for_round,
 };
 
 // Only the tests read these, and a report the filter changed is the one place
