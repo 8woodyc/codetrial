@@ -159,6 +159,23 @@ test("setup shows distinct credential groups without narrow-screen overflow", as
       await page.locator("fieldset").last().innerText(),
       /Optional/i,
     );
+    // Beside the key, so whoever enters it learns whose project pays.
+    assert.match(
+      await page.locator("fieldset").last().innerText(),
+      /Each Gemini Live turn is billed on the whole context it runs in, to the Google AI project of whichever configured key it uses: this key or an exported key list, unless the interview's LiveKit provider sets Google keys of its own\./,
+    );
+    // The report requests spend keys from the same list, so a note naming Live
+    // alone would understate what the operator is charged for. They fail over
+    // apart from Live, so with keys from two projects a report can bill the
+    // other one, and the note must not promise a single project.
+    assert.match(
+      await page.locator("fieldset").last().innerText(),
+      /The reports, interim reviews and phase judge draw from the same configured keys and bill the project of whichever key each request uses\./,
+    );
+    assert.doesNotMatch(
+      await page.locator("fieldset").last().innerText(),
+      /same project/,
+    );
     assert.equal(await page.locator("input:required").count(), 3);
     assert.equal(await page.locator("#googleApiKey:required").count(), 0);
     assert.equal(

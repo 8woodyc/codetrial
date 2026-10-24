@@ -3798,6 +3798,13 @@ body:not([data-recording]) .replay-detail > :not(header) {
   line-height: 1.4;
 }
 
+.cost-note {
+  margin: -0.5rem 0 1.25rem;
+  color: var(--sub);
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
 /* The dot is painted, not a marker or generated content: the stylesheet draws
    no text, and tests/browser/replay-render.test.js holds it to that. */
 .next-steps li {
@@ -3984,6 +3991,17 @@ body:not([data-recording]) .replay-detail > :not(header) {
      margins above. */
   .session-panel .format-choices {
     gap: 0.25rem;
+  }
+
+  /* On a short screen the narrow Start column makes the billing notice wrap
+     more than anything beside it, so its type, line height and bottom margin
+     tighten here. Together with the length of the longest notice, that is
+     what keeps the lobby on one 1280x800 screen, which
+     tests/browser/lobby.test.js checks. */
+  .cost-note {
+    margin-bottom: 0.75rem;
+    font-size: 0.8125rem;
+    line-height: 1.35;
   }
 }
 
