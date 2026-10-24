@@ -68,6 +68,10 @@ env:
   # and absent is what it was here, so the file that describes every other
   # check was the one file nothing checked.
   ACTIONLINT_VERSION: 1.7.12
+  # scripts/hook-check would install git hooks into each runner's checkout and
+  # fail the build over them. Nobody commits here, and the commit-log step
+  # replays every message the hooks would have judged.
+  CODETRIAL_SKIP_HOOKS: 1
 
   # The license and source policy in deny.toml, pinned like the tools above:
   # a release that reads that file differently should arrive as a bump.
@@ -749,7 +753,7 @@ jobs:
         shell: bash
       - name: Build the self-contained executable
         if: runner.os != 'Linux'
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        run: cargo build --release --locked -p codetrial --target ${{ matrix.target }}
       # GitHub retired the Ubuntu 20.04 runner, but its glibc 2.31 remains the
       # useful Linux release baseline. Build inside Bullseye, which carries the
       # same glibc, rather than on the runner. This is deliberately not musl:
@@ -801,7 +805,7 @@ jobs:
             --env CXX=/clang/bin/clang++ \
             --env GITHUB_SHA \
             ${{ matrix.image }} \
-            sh -c 'RUSTUP_TOOLCHAIN=${RUST_VERSION:?} exec cargo build --release --locked --target "$1"' \
+            sh -c 'RUSTUP_TOOLCHAIN=${RUST_VERSION:?} exec cargo build --release --locked -p codetrial --target "$1"' \
             sh ${{ matrix.target }}
       # A successful link does not prove the Objective-C categories survived.
       # The selector reference remains even when its implementation is absent,

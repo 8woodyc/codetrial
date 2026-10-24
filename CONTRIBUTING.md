@@ -97,8 +97,9 @@ own already in the way, or a `core.hooksPath` shared with other repositories, is
 left alone and reported with how to integrate it. Your own hook keeps running
 once moved to `.git/hooks/<name>.local`, after ours.
 `./scripts/install-git-hooks.sh --check` asks the same question without writing.
-`cargo build` runs the same installer whenever that check fails, and skips it
-once the hooks are in effect; what needs you shows up as a Cargo warning.
+`cargo build` and `cargo check` run the same installer on every build, and
+fail when the hooks cannot be put in effect, printing what needs you. Set
+`CODETRIAL_SKIP_HOOKS=1` for a checkout that cannot take hooks.
 
 Formatting is required of every contributor; only a pull request Dependabot
 opened and wrote has formatting drift reported rather than failed. The pre-commit

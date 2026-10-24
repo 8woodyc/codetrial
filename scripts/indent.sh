@@ -109,7 +109,7 @@ list()
     done
 }
 
-rust=$(list 'build.rs' 'src/*.rs' 'tests/*.rs')
+rust=$(list 'build.rs' 'src/*.rs' 'tests/*.rs' 'scripts/*.rs')
 shell=$(list '*.sh')
 
 # tests/ as well as scripts/: the Python under tests/ drives the recording and
@@ -250,15 +250,17 @@ if [ "$mode" = check ]; then
     work=$(mktemp -d "$notes/tree.XXXXXX") || exit 2
 
     # One tar pipe rather than a mkdir and a cp per file: 81 files was 162
-    # process spawns and most of this gate's wall clock. Cargo.toml because
-    # `cargo fmt` reads the manifest to find the crate. A setting the tree does
-    # not have is left out, or tar would refuse the whole copy over it.
+    # process spawns and most of this gate's wall clock. Every manifest, because
+    # `cargo fmt` reads them to find the workspace and each member's files. A
+    # setting the tree does not have is left out, or tar would refuse the whole
+    # copy over it.
     copy=$files
     for setting in $configs; do
         [ -f "$setting" ] && copy="$copy
 $setting"
     done
-    printf '%s\n' "$copy" Cargo.toml \
+    manifests=$(list 'Cargo.toml' '*/Cargo.toml')
+    printf '%s\n' "$copy" "$manifests" \
         | tar -cf - -T - \
         | (cd "$work" && tar -xf -) || exit 2
 fi

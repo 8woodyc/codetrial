@@ -252,18 +252,27 @@ repository is reported as `SHARED` and nothing is written there. A checkout
 from before the scripts existed has nothing to run and commits as before.
 `./scripts/install-git-hooks.sh --check` runs the verification alone.
 
-`build.rs` runs that check whenever the build script reruns and the install
-only when it fails. The script runs on the first `cargo build`, `cargo check`
-or rust-analyzer pass in a clone or worktree, and again when the installer or
-the hooks directory changes, so a deleted hook comes back on the next build.
-A refusal reaches the terminal as a Cargo warning and never fails the build.
+Every `cargo build`, `cargo check`, `cargo run` and rust-analyzer pass in a
+clone or worktree runs the install through `scripts/hook-check`, a
+workspace member whose build script reruns on every build, so a deleted or
+non-executable hook and a `core.hooksPath` set in a global config are all
+caught on the next one. Anything the install cannot settle, a `FOREIGN` hook, a
+`SHARED` hooks directory or no `sh` to run it with, fails the build with the
+installer's own instructions. `CODETRIAL_SKIP_HOOKS=1` skips the check: CI sets
+it, since it replays every commit message anyway, and so can a checkout that
+cannot take hooks. It is also what keeps `make uninstall-hooks` in effect, since
+the next build otherwise puts the hooks back. `cargo test` leaves the check
+out, since it would link an empty test binary for it each time, and so does a
+command that names its targets: `-p codetrial`, `--bin`, `--test` or
+`cargo install --path .`.
 
-The hooks run the `scripts/` of the checkout they fire in, as `build.rs` does
-on a build, so review a branch before committing on it as you would before
-building it. No script of ours runs while a merge is concluded: by the time
-its commit-msg or prepare-commit-msg fires the incoming tree is written, and
-running it would make `git pull` execute what it pulled, so the wrapper skips
-it, and there is no pre-merge-commit hook. CI checks a pull request's content.
+The hooks run the `scripts/` of the checkout they fire in, as
+`scripts/hook-check` does on a build, so review a branch before committing on it
+as you would before building it. No script of ours runs while a merge is
+concluded: by the time its commit-msg or prepare-commit-msg fires the incoming
+tree is written, and running it would make `git pull` execute what it pulled, so
+the wrapper skips it, and there is no pre-merge-commit hook. CI checks a pull
+request's content.
 
 The pre-commit hook runs ESLint, `ruff check` and `shellcheck`, then
 `scripts/indent.sh --staged`, over a checkout of the index, so an unstaged edit

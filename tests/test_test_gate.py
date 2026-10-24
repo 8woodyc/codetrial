@@ -747,5 +747,120 @@ printf 'python:%s\\n' "$*" >> "$CALLS"
         self.assertIn("usage:", result.stderr)
 
 
+class BuildHooksTests(unittest.TestCase):
+    # The check is skipped where CI sets the switch, which is also where this
+    # suite runs, so each case clears it and builds with git configs of its own.
+    # RUSTFLAGS too: the workflow's mold flag names a linker this lane does not
+    # install, and an empty crate has no use for it.
+    def env(self, base):
+        env = dict(os.environ)
+        env.pop("CODETRIAL_SKIP_HOOKS", None)
+        return env | {
+            "RUSTFLAGS": "",
+            "GIT_CONFIG_GLOBAL": str(base / "gitconfig"),
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "CARGO_TARGET_DIR": str(base / "target"),
+        }
+
+    def test_every_cargo_build_repairs_or_refuses_the_hooks(self):
+        if not shutil.which("cargo"):
+            self.skipTest("build hook check needs cargo")
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            repo = base / "repo"
+            env = self.env(base)
+            shutil.copytree(ROOT / "scripts/hook-check", repo / "scripts/hook-check")
+            for source in (ROOT / "scripts").glob("git-*.sh"):
+                shutil.copy(source, repo / "scripts")
+            shutil.copy(ROOT / "scripts/install-git-hooks.sh", repo / "scripts")
+            (repo / "Cargo.toml").write_text(
+                '[workspace]\nmembers = ["scripts/hook-check"]\nresolver = "3"\n'
+            )
+            subprocess.run(["git", "init", "-q"], cwd=repo, env=env, check=True)
+
+            def build(check=True, skip=None):
+                extra = {} if skip is None else {"CODETRIAL_SKIP_HOOKS": skip}
+                result = subprocess.run(
+                    ["cargo", "build", "--offline"],
+                    cwd=repo,
+                    env=env | extra,
+                    capture_output=True,
+                    text=True,
+                )
+                if check:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                return result
+
+            build()
+            hook = repo / ".git/hooks/commit-msg"
+
+            # Neither change moves an mtime Cargo watches; the next build
+            # still puts each right.
+            hook.chmod(0o644)
+            gone = repo / ".git/hooks/pre-commit"
+            gone.unlink()
+            build()
+            self.assertTrue(os.access(hook, os.X_OK))
+            self.assertTrue(os.access(gone, os.X_OK))
+
+            (base / "gitconfig").write_text(f"[core]\n\thooksPath = {base}/shared\n")
+            refused = build(check=False)
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn("SHARED", refused.stderr)
+            self.assertIn("CODETRIAL_SKIP_HOOKS=1", refused.stderr)
+            build(skip="1")
+            # Set but empty is how an unset export in a script reads; it skips
+            # nothing.
+            self.assertNotEqual(build(check=False, skip="").returncode, 0)
+
+    def test_build_installs_only_in_its_own_checkout(self):
+        if not shutil.which("rustc"):
+            self.skipTest("build hook check needs rustc")
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            binary = base / "build-script"
+            subprocess.run(
+                [
+                    "rustc",
+                    "--edition=2024",
+                    str(ROOT / "scripts/hook-check/build.rs"),
+                    "-o",
+                    str(binary),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            env = self.env(base)
+            repo = base / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q", str(repo)], env=env, check=True)
+
+            def installs(root):
+                crate = root / "scripts/hook-check"
+                crate.mkdir(parents=True)
+                (root / "scripts/install-git-hooks.sh").write_text(
+                    '#!/bin/sh\nprintf installed > "$PWD/installed"\n'
+                )
+                subprocess.run(
+                    [str(binary)],
+                    cwd=crate,
+                    env=env | {"CARGO_MANIFEST_DIR": str(crate)},
+                    check=True,
+                    capture_output=True,
+                )
+                return (root / "installed").exists()
+
+            self.assertTrue(installs(repo))
+            # git skips a `.git` it cannot read and finds the outer repository,
+            # whose hooks are not this crate's to install.
+            stray = repo / "stray"
+            (stray / ".git").mkdir(parents=True)
+            self.assertFalse(installs(stray))
+            broken = repo / "broken"
+            broken.mkdir()
+            (broken / ".git").write_text("gitdir: missing\n")
+            self.assertFalse(installs(broken))
+
+
 if __name__ == "__main__":
     unittest.main()
