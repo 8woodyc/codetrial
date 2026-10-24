@@ -2839,10 +2839,10 @@ pub(crate) async fn run_room_with_slot(
                 }
                 frame = next_audio_frame(&mut media.audio), if media.audio.is_some() => {
                     // The fastest writer in the loop, and so the one that
-                    // reaches a closed socket first: a flush leaves every
-                    // twenty milliseconds of speech. Dropping the frame costs a
-                    // frame of audio the resumed session did not need;
-                    // propagating cost the interview.
+                    // reaches a closed socket first: a flush leaves every ten
+                    // milliseconds of speech. Dropping the frame costs a frame
+                    // of audio the resumed session did not need; propagating
+                    // cost the interview.
                     let ended = frame.is_none();
 
                     // Read by checkpoints and the idle timers before the first

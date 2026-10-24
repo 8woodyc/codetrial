@@ -2191,14 +2191,15 @@ fn live_setup_uses_native_audio_voice_tools_and_transcription() {
         json!({"thinkingBudget": 0})
     );
 
-    // The end sensitivity is sent only when configured, and then as set.
-    assert!(
-        setup["realtimeInputConfig"]["automaticActivityDetection"]
-            .get("endOfSpeechSensitivity")
-            .is_none()
+    // Absent, the API's own default decides how soon replies start, and the
+    // silence window was measured against HIGH sent explicitly.
+    assert_eq!(
+        setup["realtimeInputConfig"]["automaticActivityDetection"]["endOfSpeechSensitivity"],
+        json!(boot.end_sensitivity),
+        "the configured end sensitivity must be sent, not defaulted"
     );
     let tuned = RuntimeBootstrap {
-        end_sensitivity: Some("END_SENSITIVITY_LOW"),
+        end_sensitivity: "END_SENSITIVITY_LOW",
         ..boot.clone()
     };
     assert_eq!(

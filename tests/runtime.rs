@@ -2,8 +2,9 @@ use codetrial::agent::{
     InterviewGrounding, InterviewLoop, InterviewMode, InterviewProfile, Seniority,
 };
 use codetrial::config::{
-    DEFAULT_GEMINI_LIVE_MODEL, DEFAULT_GEMINI_REPORT_MODEL, DEFAULT_GEMINI_SILENCE_MS,
-    DEFAULT_GEMINI_START_SENSITIVITY, DEFAULT_GEMINI_VOICE, load_from_pairs,
+    DEFAULT_GEMINI_END_SENSITIVITY, DEFAULT_GEMINI_LIVE_MODEL, DEFAULT_GEMINI_REPORT_MODEL,
+    DEFAULT_GEMINI_SILENCE_MS, DEFAULT_GEMINI_START_SENSITIVITY, DEFAULT_GEMINI_VOICE,
+    load_from_pairs,
 };
 use codetrial::runtime::{RuntimeOptions, agent_identity, bootstrap, bootstrap_with_rounds};
 
@@ -314,7 +315,7 @@ fn bootstrap_carries_the_configured_endpointing_window() {
 
     assert_eq!(boot.silence_ms, 2_400);
     assert_eq!(boot.start_sensitivity, "START_SENSITIVITY_HIGH");
-    assert_eq!(boot.end_sensitivity, Some("END_SENSITIVITY_LOW"));
+    assert_eq!(boot.end_sensitivity, "END_SENSITIVITY_LOW");
 
     // And the defaults travel the same path, so the wiring is not merely
     // reading one configured value back.
@@ -322,7 +323,7 @@ fn bootstrap_carries_the_configured_endpointing_window() {
     let default = bootstrap(&stock, "interview-fixed", Some("two-sum"), 45);
     assert_eq!(default.silence_ms, DEFAULT_GEMINI_SILENCE_MS);
     assert_eq!(default.start_sensitivity, DEFAULT_GEMINI_START_SENSITIVITY);
-    assert_eq!(default.end_sensitivity, None, "left at the API's own value");
+    assert_eq!(default.end_sensitivity, DEFAULT_GEMINI_END_SENSITIVITY);
 }
 
 /// The board reaches Gemini on the stream a camera frame does, so a whiteboard

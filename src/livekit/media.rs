@@ -44,11 +44,13 @@ fn candidate_audio_stream(track: RtcAudioTrack) -> NativeAudioStream {
     )
 }
 
-/// Audio sent to Gemini in twenty-millisecond batches of 16 kHz mono PCM16, two
-/// of the ten-millisecond frames LiveKit delivers. The last words before the
-/// candidate stopped wait for a full batch, and the endpointing clock does not
-/// start until Gemini has them; a smaller batch costs messages, not bytes.
-pub(super) const GEMINI_AUDIO_BUFFER_BYTES: usize = 640;
+/// Forward each complete ten-millisecond LiveKit frame as 16 kHz mono PCM16.
+/// Combining two frames held the first for another ten milliseconds, including
+/// an utterance ending on an odd frame. This doubles websocket message count
+/// from 50 to 100 per second; the audio is unchanged, and only the framing
+/// each message carries is added. A shorter frame still waits in the buffer
+/// for the rest of one.
+pub(super) const GEMINI_AUDIO_BUFFER_BYTES: usize = 320;
 
 /// One frame in five seconds. Each frame stays in the Live context and is
 /// billed again on every later turn, and a presence check needs no more.

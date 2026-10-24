@@ -16,15 +16,16 @@ pub const DEFAULT_GEMINI_LIVE_MODEL: &str = "gemini-3.1-flash-live-preview";
 /// think needs a longer window than someone who does not, and cutting it too
 /// short interrupts people while they are still talking.
 ///
-/// Three seconds leaves room for a mid-sentence pause. The candidate can yield
-/// early through the browser control, which ends the audio stream instead of
-/// making every reply wait through that window: in a measured session the
-/// reply's first audio came about 0.8s after the last word rather than 3.4s,
-/// and in one turn of twelve the end was ignored and the window ran as usual.
-/// The page draws the window filling, so the wait is visible rather than a
-/// surprise. Rooms can still tune `GEMINI_SILENCE_MS` for their speakers and
-/// hardware.
-pub const DEFAULT_GEMINI_SILENCE_MS: u32 = 3_000;
+/// Every reply to speech the candidate did not yield waits out this window
+/// before Gemini starts, so it is the largest share of reply latency. Three
+/// seconds made each such reply arrive about 3.4s after the last word, against
+/// 0.8s when the candidate yielded through the browser control, which ends the
+/// audio stream instead. A second and a half halves that wait and still covers
+/// a breath between clauses; a longer pause to think is what the thinking hold
+/// is for, and the page draws the window filling, so the wait is visible
+/// rather than a surprise. Rooms whose speakers pause longer can still raise
+/// `GEMINI_SILENCE_MS`.
+pub const DEFAULT_GEMINI_SILENCE_MS: u32 = 1_500;
 
 /// How readily Gemini decides the candidate has started speaking, and so how
 /// readily it abandons a reply it is part way through delivering.
@@ -42,6 +43,14 @@ pub const DEFAULT_GEMINI_SILENCE_MS: u32 = 3_000;
 /// on headphones can afford to be interrupted more eagerly than one on a laptop
 /// speaker.
 pub const DEFAULT_GEMINI_START_SENSITIVITY: &str = "START_SENSITIVITY_LOW";
+
+/// How readily Gemini decides the candidate has finished, before the silence
+/// window starts counting. `HIGH` is the API's documented default, so sending
+/// it changes nothing today; it is named so that the window was measured
+/// against a known value and a different provider default cannot move it
+/// unseen. An operator who sees slow speakers cut off can set
+/// `GEMINI_END_SENSITIVITY=LOW` or raise the window.
+pub const DEFAULT_GEMINI_END_SENSITIVITY: &str = "END_SENSITIVITY_HIGH";
 
 /// The clamp exists for a typo, not for an API limit. A previous version of
 /// this said "Gemini accepts at most two seconds" and capped at 2000, which is
@@ -563,9 +572,7 @@ pub struct AgentConfig {
     pub gemini_silence_ms: u32,
     pub gemini_context_compression: Option<GeminiContextCompression>,
     pub gemini_start_sensitivity: String,
-    /// `None` leaves the end-of-speech sensitivity at the API's own value; see
-    /// `end_sensitivity`.
-    pub gemini_end_sensitivity: Option<String>,
+    pub gemini_end_sensitivity: String,
     pub room_prefix: String,
     pub default_duration_min: u32,
     pub gemini_candidate_video_enabled: bool,
@@ -779,8 +786,16 @@ pub fn load_from_pairs(
         gemini_silence_ms: optional_u32(&values, "GEMINI_SILENCE_MS", DEFAULT_GEMINI_SILENCE_MS)
             .min(MAX_GEMINI_SILENCE_MS),
         gemini_context_compression,
-        gemini_start_sensitivity: start_sensitivity_or_default(&values),
-        gemini_end_sensitivity: end_sensitivity(&values),
+        gemini_start_sensitivity: sensitivity_or_default(
+            &values,
+            "START_SENSITIVITY",
+            DEFAULT_GEMINI_START_SENSITIVITY,
+        ),
+        gemini_end_sensitivity: sensitivity_or_default(
+            &values,
+            "END_SENSITIVITY",
+            DEFAULT_GEMINI_END_SENSITIVITY,
+        ),
         room_prefix: optional(&values, "CODETRIAL_ROOM_PREFIX", DEFAULT_ROOM_PREFIX),
         default_duration_min: optional_u32(&values, "CODETRIAL_DURATION_MIN", DEFAULT_DURATION_MIN),
         gemini_candidate_video_enabled: gemini_candidate_video_enabled(
@@ -864,43 +879,25 @@ fn optional(values: &BTreeMap<String, String>, key: &str, default: &str) -> Stri
 /// be an interviewer that gets cut off again for no stated reason. The short
 /// spellings are accepted because the long ones are shouted API constants and
 /// nobody types them twice.
-fn start_sensitivity_or_default(values: &BTreeMap<String, String>) -> String {
-    match optional(
-        values,
-        "GEMINI_START_SENSITIVITY",
-        DEFAULT_GEMINI_START_SENSITIVITY,
-    )
-    .to_ascii_uppercase()
-    .as_str()
-    {
-        "LOW" | "START_SENSITIVITY_LOW" => "START_SENSITIVITY_LOW".to_string(),
-        "HIGH" | "START_SENSITIVITY_HIGH" => "START_SENSITIVITY_HIGH".to_string(),
-        other => {
-            eprintln!(
-                "GEMINI_START_SENSITIVITY: {other} is not LOW or HIGH; using {DEFAULT_GEMINI_START_SENSITIVITY}"
-            );
-            DEFAULT_GEMINI_START_SENSITIVITY.to_string()
-        }
-    }
-}
-
-/// How readily Gemini decides the candidate has finished, beside the silence
-/// window that decides how long it then waits. Unset by default, which leaves
-/// the API's own value in force: unlike the start sensitivity there is no
-/// measurement here to choose a side with, and HIGH ends turns sooner at the
-/// cost the silence window already documents, a candidate cut off
-/// mid-sentence. An unreadable value is refused to the default for the reason
-/// `start_sensitivity_or_default` gives.
-fn end_sensitivity(values: &BTreeMap<String, String>) -> Option<String> {
-    let value = present(values, "GEMINI_END_SENSITIVITY")?.to_ascii_uppercase();
-    match value.as_str() {
-        "LOW" | "END_SENSITIVITY_LOW" => Some("END_SENSITIVITY_LOW".to_string()),
-        "HIGH" | "END_SENSITIVITY_HIGH" => Some("END_SENSITIVITY_HIGH".to_string()),
-        other => {
-            eprintln!(
-                "GEMINI_END_SENSITIVITY: {other} is not LOW or HIGH; leaving the API default"
-            );
-            None
+///
+/// `prefix` is `START_SENSITIVITY` or `END_SENSITIVITY`, so `GEMINI_<prefix>`
+/// is the key and `<prefix>_LOW` or `<prefix>_HIGH` the value sent.
+fn sensitivity_or_default(
+    values: &BTreeMap<String, String>,
+    prefix: &str,
+    default: &str,
+) -> String {
+    let key = format!("GEMINI_{prefix}");
+    let value = optional(values, &key, default).to_ascii_uppercase();
+    let level = value
+        .strip_prefix(prefix)
+        .and_then(|rest| rest.strip_prefix('_'))
+        .unwrap_or(&value);
+    match level {
+        "LOW" | "HIGH" => format!("{prefix}_{level}"),
+        _ => {
+            eprintln!("{key}: {value} is not LOW or HIGH; using {default}");
+            default.to_string()
         }
     }
 }

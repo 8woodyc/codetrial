@@ -117,12 +117,20 @@ pub(super) const THINKING_TRANSCRIPT_GRACE: Duration = Duration::from_millis(1_5
 /// a closed audio stream began about 0.8s after it in a measured session.
 pub(super) const THINKING_REPLY_FALLBACK: Duration = Duration::from_secs(4);
 
-/// The window for a room whose silence window is `silence_ms`: never as long
-/// as half of it, so the transcript of speech begun after the click, which
-/// Gemini sends only once that silence window has passed behind it, always
-/// lands outside.
+/// How much shorter than the silence window the pre-click window stays, for
+/// the agent's clock and Gemini's disagreeing about when that window began.
+const THINKING_WINDOW_MARGIN: Duration = Duration::from_millis(250);
+
+/// The window for a room whose silence window is `silence_ms`: short of it by
+/// `THINKING_WINDOW_MARGIN`, so the transcript of speech begun after the click,
+/// which Gemini sends only once that silence window has passed behind it,
+/// always lands outside. Half the window was the bound before, which a 1.5s
+/// window cut to 0.75s and left a delayed pre-click transcript able to end the
+/// hold it was spoken before. Half stays the floor: below half a second the
+/// margin would leave a short window little or no grace at all.
 pub(super) fn thinking_transcript_grace(silence_ms: u32) -> Duration {
-    THINKING_TRANSCRIPT_GRACE.min(Duration::from_millis(u64::from(silence_ms) / 2))
+    let silence = Duration::from_millis(u64::from(silence_ms));
+    THINKING_TRANSCRIPT_GRACE.min((silence / 2).max(silence.saturating_sub(THINKING_WINDOW_MARGIN)))
 }
 
 /// A live socket can acknowledge pings while never answering a turn. Allow

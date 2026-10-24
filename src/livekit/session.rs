@@ -892,6 +892,16 @@ pub(super) async fn handle_gemini_event(
             context.gemini.input_cause = None;
         }
 
+        // Before the completion closes the reply's trace, so the tail is that
+        // reply's audio. Padded afterwards, it found no trace, opened one as
+        // unprompted output with its audio already accepted, and the next
+        // reply's real first chunk was not recorded until that reply's own
+        // tail. A trace a pause or a replaced socket already closed is no reply
+        // the padding can belong to either.
+        if matches!(event, GeminiEvent::TurnComplete) {
+            let traced = context.activity.latency.is_open();
+            pad_reply_tail(room, context, traced).await?;
+        }
         if let Some(record) =
             observe_latency_event(context.activity, &event, held, received_at(context.gemini))
         {
@@ -912,7 +922,7 @@ pub(super) async fn handle_gemini_event(
                 on_input_transcript(room, context, &text, interruptible).await
             }
             GeminiEvent::Audio { bytes, mime_type } => {
-                on_generated_audio(room, context, &bytes, &mime_type, interruptible).await
+                on_generated_audio(room, context, &bytes, &mime_type, interruptible, true).await
             }
             GeminiEvent::UsageRecorded => {
                 if let Some(usage) = context.gemini.take_usage() {
@@ -1479,16 +1489,19 @@ pub(super) fn log_turn_timing(
     .expect("failed to write turn timing");
 }
 
-/// A chunk of the interviewer's voice, queued for the room.
+/// A chunk of the interviewer's voice, queued for the room. `traced` is false
+/// for audio no open trace can claim as its reply's.
 async fn on_generated_audio(
     room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
     bytes: &[u8],
     mime_type: &str,
     interruptible: Interruptible,
+    traced: bool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let handler_started = Instant::now();
     let mut first_audio = None;
+    let measured = traced && !context.activity.socket.discarding_output;
 
     // A new turn's first chunk while the previous one is still draining.
     // `InputTranscript` normally clears the queue before this point, so
@@ -1501,14 +1514,14 @@ async fn on_generated_audio(
     // reply behind it.
     if context.output_audio.prepare_reply(bytes, mime_type) {
         drop_stale_playout(room, context, interruptible).await?;
-        if !context.activity.socket.discarding_output {
+        if measured {
             context
                 .activity
                 .latency
                 .output(received_at(context.gemini), false);
         }
         let accepted_at = Instant::now();
-        if !context.activity.socket.discarding_output
+        if measured
             && context.output_audio.fills_frame(bytes)
             && let Some(mut record) = context.activity.latency.audio(accepted_at)
         {
@@ -1632,17 +1645,33 @@ pub(super) async fn publish_control(room: &RoomLink, notice: &serde_json::Value,
     }
 }
 
+/// The reply's last chunk rarely ends on a frame. Its tail goes out padded, as
+/// the reply's own audio, so a reply that was nothing but a tail still gets its
+/// first-audio record while that reply's trace is `traced`, still open.
+async fn pad_reply_tail(
+    room: &RoomLink,
+    context: &mut GeminiEventContext<'_>,
+    traced: bool,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if let Some(padding) = context.output_audio.tail_padding() {
+        on_generated_audio(
+            room,
+            context,
+            &padding,
+            "audio/pcm",
+            Interruptible::No,
+            traced,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 /// Gemini finished the turn. The room has not: the queue is still draining.
 async fn on_turn_complete(
     room: &RoomLink,
     context: &mut GeminiEventContext<'_>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // The reply's last chunk rarely ends on a frame. Its tail goes out padded,
-    // as the reply's own audio, so a reply that was nothing but a tail still
-    // gets its first-audio record.
-    if let Some(padding) = context.output_audio.tail_padding() {
-        on_generated_audio(room, context, &padding, "audio/pcm", Interruptible::No).await?;
-    }
     finish_turn_timing(
         room.name(),
         context.activity,
@@ -1756,6 +1785,11 @@ async fn on_interruption(
                 "the candidate has said nothing yet"
             }
         );
+
+        // Whatever trace is open now is not the kept reply's: the interruption
+        // may have closed that one and opened the next at once for the input
+        // that cut in.
+        pad_reply_tail(room, context, false).await?;
         return on_turn_complete(room, context).await;
     };
 
