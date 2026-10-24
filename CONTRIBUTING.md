@@ -130,11 +130,13 @@ Refuse a permission listing that may be truncated
 Prove an empty test run is not a pass
 ```
 
-A commit needs a body: the hook and CI refuse a subject alone. Fixup, squash and
-merge commits are exempt, and so are Dependabot's. The body carries the premise
-and the trade, usually in a single paragraph. This tree keeps its detailed
-reasoning in the comment next to the code, so a body retelling the mechanics
-duplicates that comment and then goes stale on its own.
+A commit needs a body: the hook and CI refuse a subject alone. Merge commits are
+exempt, and so are Dependabot's. A `fixup!`, `squash!` or `amend!` subject is
+refused at commit, at push and in CI alike: fold the change into the commit it
+fixes, with `git rebase -i --autosquash` for an older one. The body carries the
+premise and the trade, usually in a single paragraph. This tree keeps its
+detailed reasoning in the comment next to the code, so a body retelling the
+mechanics duplicates that comment and then goes stale on its own.
 The hook rejects the shape that does it outright: a body line opening with
 `How:`, `Step:`, `Steps:`, `Changes:` or an `Implementation:` heading. Whether
 what is left says anything is the part only a reviewer can judge.
