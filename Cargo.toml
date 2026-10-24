@@ -15,8 +15,18 @@ rust-version = "1.98"
 [lints.rust]
 unsafe_code = "forbid"
 
+# The four restriction lints below had no match outside test code when they
+# were added, so denying them costs nothing and keeps it that way: a request
+# or a data packet that reaches an `unwrap` or a `panic!` takes the interview
+# down with it, and `dbg!` and `todo!` are leftovers. A startup invariant
+# says why with `expect`, which stays allowed. Test code is exempt through
+# clippy.toml for unit tests and a crate attribute in each tests/*.rs.
 [lints.clippy]
 all = "deny"
+dbg_macro = "deny"
+panic = "deny"
+todo = "deny"
+unwrap_used = "deny"
 
 [dependencies]
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "original-uri", "query", "tokio"] }

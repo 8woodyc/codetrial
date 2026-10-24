@@ -1,3 +1,5 @@
+#![allow(clippy::panic, clippy::unwrap_used)] // see [lints.clippy] in Cargo.toml
+
 //! The credential boundary. Everything here is a property the module already
 //! holds and states in a comment, pinned so that a later edit has to argue with
 //! a failing test rather than with prose.

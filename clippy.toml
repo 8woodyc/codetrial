@@ -1,0 +1,4 @@
+# Cargo.toml denies `unwrap_used` and `panic` for the service; a test that
+# fails by panicking is a test working as intended.
+allow-unwrap-in-tests = true
+allow-panic-in-tests = true
