@@ -1,8 +1,8 @@
 #!/bin/sh
 # Post a review the user confirmed, only while the pull request is still where
-# it was when they read it. The payload is the one review.md describes, already
-# passed through review-anchors.sh; updatedAt is the value recorded when the
-# text was shown to the user.
+# it was when they read it. The payload is the one the codetrial-review skill
+# describes, already passed through review-anchors.sh; updatedAt is the value
+# recorded when the text was shown to the user.
 #
 # Usage: post-review.sh <pr> <checked.json> <updatedAt> [repo]
 #        Prints the posted review's URL. Exits 3, posting nothing, when the
@@ -45,12 +45,6 @@ printf '%s\n' "$checked" | jq -e '.body | strings | length > 0' > /dev/null || {
     echo "post-review.sh: $payload has no body, which GitHub requires" >&2
     exit 2
 }
-before=$(jq '.comments // [] | length' "$payload")
-after=$(printf '%s\n' "$checked" | jq '.comments | length')
-if [ "$before" != "$after" ]; then
-    echo "post-review.sh: $((before - after)) comment(s) on #$pr fall outside the diff; run review-anchors.sh and confirm the moved text" >&2
-    exit 3
-fi
 
 # Last, right before the post, so a push or a comment made while the diff was
 # read is still caught. The read and the post are two calls, so a change in the
@@ -68,7 +62,14 @@ if [ "$updated" != "$since" ]; then
     exit 3
 fi
 
+# After the head check: a push moves lines out of the diff too, and the head
+# having moved is the reason to give.
+if ! printf '%s\n' "$checked" | jq -e '.moved == []' > /dev/null; then
+    echo "post-review.sh: $(printf '%s\n' "$checked" | jq '.moved | length') comment(s) on #$pr fall outside the diff; confirm the moved text in the body first" >&2
+    exit 3
+fi
+
 # The checked text, not the file again, so a rewrite of the file after the
 # checks above cannot change what is posted.
-printf '%s\n' "$checked" | gh api -X POST "repos/$repo/pulls/$pr/reviews" \
-    --input - --jq .html_url
+printf '%s\n' "$checked" | jq 'del(.moved)' \
+    | gh api -X POST "repos/$repo/pulls/$pr/reviews" --input - --jq .html_url

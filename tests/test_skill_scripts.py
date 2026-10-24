@@ -7,9 +7,11 @@ in a scratch repository whose Makefile, workflow and skills are written here, so
 a case names exactly what resolves and what does not.
 """
 
+import fnmatch
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -799,7 +801,7 @@ class PrSweepTests(SweepCase):
         )
 
     def test_workflow_facts_the_review_checklist_states_still_hold(self):
-        # review.md's workflow checklist says check.yml runs on pull_request
+        # codetrial-review's workflow rules say check.yml runs on pull_request
         # with contents: read, and that the only job granted contents: write
         # is release, which runs on a push to main.
         workflow = (ROOT / ".github" / "workflows" / "check.yml").read_text()
@@ -1155,6 +1157,7 @@ class RelatedTests(unittest.TestCase):
 
 
 VERIFY = SKILLS / "codetrial-verify"
+REVIEW = SKILLS / "codetrial-review"
 
 # One PR at head "h1": a gates lane whose log names two gates, the aggregate job
 # main also fails, and a check from an app outside GitHub Actions.
@@ -1449,14 +1452,17 @@ class VerifyScriptTests(unittest.TestCase):
 
     def test_a_pr_that_is_not_a_number_is_refused_before_any_call(self):
         for script, args in (
-            ("ci-failure.sh", ["abc"]),
-            ("review-anchors.sh", ["abc", "payload.json"]),
-            ("post-review.sh", ["abc", "payload.json", "2026-10-22T00:00:00Z"]),
+            (VERIFY / "ci-failure.sh", ["abc"]),
+            (REVIEW / "review-anchors.sh", ["abc", "payload.json"]),
+            (
+                REVIEW / "post-review.sh",
+                ["abc", "payload.json", "2026-10-22T00:00:00Z"],
+            ),
         ):
-            with self.subTest(script=script):
+            with self.subTest(script=script.name):
                 # The fake gh fails every call, so only the script's own
                 # check can produce exit 2 and its message.
-                result = run_fake(VERIFY / script, args, FAKE_GH_FAILS, {})
+                result = run_fake(script, args, FAKE_GH_FAILS, {})
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertIn("is not a pull request number", result.stderr)
 
@@ -1482,7 +1488,7 @@ class VerifyScriptTests(unittest.TestCase):
             ],
         }
         result = run_fake(
-            VERIFY / "review-anchors.sh",
+            REVIEW / "review-anchors.sh",
             [5, "$FAKE_PAYLOAD"],
             FAKE_GH_CI,
             {"FAKE_DIFF": DIFF, "FAKE_PAYLOAD": json.dumps(payload)},
@@ -1503,6 +1509,91 @@ class VerifyScriptTests(unittest.TestCase):
         self.assertEqual(
             checked["body"],
             "Notes.\n\nweb/a.js:40: outside every hunk\n\nweb/a.js:11: starts outside",
+        )
+
+    def test_review_anchors_place_by_quote_and_never_by_a_guessed_line(self):
+        # Two hunks of one file that each add the line "dup".
+        diff = DIFF + (
+            "diff --git a/web/b.js b/web/b.js\n--- a/web/b.js\n+++ b/web/b.js\n"
+            "@@ -1,2 +1,3 @@\n one\n+dup\n two\n"
+            "@@ -20,2 +21,3 @@\n three\n+dup\n four\n"
+            "diff --git a/web/c.js b/web/c.js\n--- a/web/c.js\n+++ b/web/c.js\n"
+            "@@ -1,3 +1,3 @@\n foo\n \n-old\n+baz\n"
+        )
+
+        def note(text, **fields):
+            return {"path": fields.pop("path", "web/a.js"), "body": text} | fields
+
+        payload = {
+            "event": "COMMENT",
+            "commit_id": "h1",
+            "body": "Notes.",
+            "comments": [
+                # Blank lines and indentation do not count; two lines span.
+                note("span", quote="  keep\n\n  new  "),
+                note("blank span", path="web/c.js", quote="foo\n\n baz"),
+                # A miscounted line inside the diff is corrected by the quote;
+                # a line outside every hunk is about unchanged code, so the
+                # quote cannot carry it into the diff.
+                note("quote wins", quote="tail", line=10),
+                # A start_line given with a quote that lands on one line is
+                # not kept: the span the quote found is the span.
+                note("stale start", quote="tail", line=10, start_line=3),
+                note("unchanged code", quote="tail", line=40),
+                # A deleted or context line on the left is matched on the left.
+                note("left side", quote="tail", line=11, side="LEFT"),
+                # The same text in two hunks: the line picks the second match,
+                # and a line in neither cannot pick.
+                note("picked", path="web/b.js", quote="dup", line=22),
+                note("unpicked", path="web/b.js", quote="dup", line=5),
+                # A quote found nowhere does not fall back to its line, which
+                # sits in a hunk and would post on the wrong code.
+                note("misquoted", quote="tail;", line=11),
+                # A run across two hunks is not one place.
+                note("across hunks", path="web/b.js", quote="two\nthree"),
+                note("nowhere", quote="absent"),
+            ],
+        }
+        result = run_fake(
+            REVIEW / "review-anchors.sh",
+            [5, "$FAKE_PAYLOAD"],
+            FAKE_GH_CI,
+            {"FAKE_DIFF": diff, "FAKE_PAYLOAD": json.dumps(payload)},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        checked = json.loads(result.stdout)
+        placed = {
+            c["body"]: (c.get("start_line"), c["line"], c.get("side", "RIGHT"))
+            for c in checked["comments"]
+        }
+        self.assertEqual(
+            placed,
+            {
+                "span": (10, 11, "RIGHT"),
+                "blank span": (1, 3, "RIGHT"),
+                "quote wins": (None, 12, "RIGHT"),
+                "stale start": (None, 12, "RIGHT"),
+                "left side": (None, 12, "LEFT"),
+                "picked": (None, 22, "RIGHT"),
+            },
+        )
+        self.assertFalse(any("quote" in c for c in checked["comments"]))
+        # The posting scripts act on moved; the body is how the user reads it.
+        self.assertEqual(
+            [c["body"] for c in checked["moved"]],
+            ["unchanged code", "unpicked", "misquoted", "across hunks", "nowhere"],
+        )
+        self.assertTrue(all(c["line"] is None for c in checked["moved"]))
+        self.assertEqual(
+            checked["body"].split("\n\n"),
+            [
+                "Notes.",
+                "web/a.js: unchanged code",
+                "web/b.js: unpicked",
+                "web/a.js: misquoted",
+                "web/b.js: across hunks",
+                "web/a.js: nowhere",
+            ],
         )
 
 
@@ -1532,7 +1623,7 @@ class PostReviewTests(unittest.TestCase):
             ],
         } | fields
         return run_fake(
-            VERIFY / "post-review.sh",
+            REVIEW / "post-review.sh",
             [5, "$FAKE_PAYLOAD", "T1"],
             FAKE_GH_POST,
             {"FAKE_DIFF": DIFF, "FAKE_PAYLOAD": json.dumps(payload)},
@@ -1564,7 +1655,7 @@ class PostReviewTests(unittest.TestCase):
         for payload in ("", " \n\t", "null", "[]", "broken", "{}\n{}"):
             with self.subTest(payload=payload):
                 result = run_fake(
-                    VERIFY / "post-review.sh",
+                    REVIEW / "post-review.sh",
                     [5, "$FAKE_PAYLOAD", "T1"],
                     FAKE_GH_FAILS,
                     {"FAKE_PAYLOAD": payload},
@@ -1589,7 +1680,7 @@ class PostReviewTests(unittest.TestCase):
                 self.assertIn(said, result.stderr)
 
 
-POST_INLINE = SKILLS / "codetrial-triage" / "post-inline.sh"
+POST_INLINE = REVIEW / "post-inline.sh"
 
 # The PR's head, diff and review threads, and each posted comment echoed back
 # as "posted path:line" in place of its URL.
@@ -1601,11 +1692,17 @@ case "$*" in
   "pr view 5 "*)
     if [ -e "${FAKE_PUSHED_AFTER:-/nonexistent}" ]; then echo h2
     else echo "${FAKE_HEAD:-h1}"; fi ;;
-  "pr diff 5 "*) cat "$FAKE_DIFF" ;;
+  # A second read of the diff fails: the anchors and the spans share one.
+  "pr diff 5 "*)
+    [ ! -e "$FAKE_DIFF.read" ] || { echo "diff read twice" >&2; exit 1; }
+    : > "$FAKE_DIFF.read"; cat "$FAKE_DIFF" ;;
   "api repos/sysprog21/codetrial/pulls/5/comments --paginate") cat "$FAKE_THREADS" ;;
   # A review is created whole or refused whole, as GitHub does.
   "api repos/sysprog21/codetrial/pulls/5/reviews --input "*)
     [ -z "${FAKE_REFUSE_REVIEW:-}" ] || exit 1
+    # GitHub has no quote field; a draft's own fields stay home.
+    ! jq -e 'any(.comments[]; has("quote") or has("moved"))' "$4" > /dev/null || {
+      echo "draft field posted" >&2; exit 1; }
     # FAKE_LOSE_REVIEW: the review lands, and its answer is lost.
     if [ -n "${FAKE_LOSE_REVIEW:-}" ]; then
       jq --slurpfile r "$4" '. + [$r[0].comments[]
@@ -1753,12 +1850,330 @@ class PostInlineTests(unittest.TestCase):
         self.assertEqual((result.returncode, result.stdout), (0, ""))
         self.assertIn("posting each finding", result.stderr)
 
+    def test_a_quote_places_the_finding_and_never_reaches_github(self):
+        result = self.post(
+            [
+                # The reviewer miscounted; the quote names line 12.
+                {"path": "web/a.js", "quote": "  tail", "line": 10, "body": "x"},
+                {"path": "web/a.js", "quote": "not in the diff", "body": "y"},
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "posted web/a.js:12 at h1\n")
+        self.assertIn("dropped web/a.js:unplaced, outside the diff", result.stderr)
+        self.assertNotIn("draft field posted", result.stderr)
+
     def test_a_moved_head_posts_nothing(self):
         result = self.post(
             [{"path": "web/a.js", "line": 11, "body": "x"}], env={"FAKE_HEAD": "h2"}
         )
         self.assertEqual((result.returncode, result.stdout), (3, ""))
         self.assertIn("moved from h1 to h2", result.stderr)
+
+
+BUNDLE = REVIEW / "review-bundle.sh"
+
+# The PR read on both sides of its diff, its files at the head, its threads,
+# and the comparison with an earlier review's head. FAKE_AFTER is what the
+# second read sees.
+FAKE_GH_BUNDLE = """#!/bin/sh
+case "$*" in
+  "pr view 5 --repo sysprog21/codetrial --json title,"*) cat "$FAKE_PR" ;;
+  "pr diff 5 "*) cat "$FAKE_DIFF" ;;
+  # gh applies --jq and pages itself; the fake prints one object per file.
+  "api repos/sysprog21/codetrial/pulls/5/files?per_page=100 --paginate "*)
+    cat "$FAKE_FILES" ;;
+  "api repos/sysprog21/codetrial/pulls/5/comments?per_page=100 --paginate "*)
+    [ -z "${FAKE_NO_COMMENTS:-}" ] || exit 1
+    echo '{"path":"web/a.js","line":11,"author":"maint","reply":true,"commit":"h1","body":"Also here."}' ;;
+  "pr view 5 --repo sysprog21/codetrial --json headRefOid,baseRefOid --jq "*)
+    echo "${FAKE_AFTER:-h1 b1}" ;;
+  # A space reaches GitHub encoded; a failed read is named, not guessed at.
+  "api repos/sysprog21/codetrial/contents/web/old.js?ref=h1 "*)
+    echo "a removed file is not read" >&2; exit 1 ;;
+  "api repos/sysprog21/codetrial/contents/web/gone.js?ref=h1 "*) exit 1 ;;
+  "api repos/sysprog21/codetrial/contents/web/a%20b.txt?ref=h1 "*) echo spaced ;;
+  "api repos/sysprog21/codetrial/contents/"*"?ref=h1 "*) echo "at head" ;;
+  # gh applies --jq itself, so the fake prints the rows.
+  "api user --jq .login") echo "${FAKE_VIEWER:-someone}" ;;
+  "api graphql --paginate "*)
+    printf 'false\\tfalse\\tweb/a.js\\t11\\tmaint\\tHandle the empty list.\\n'
+    printf 'true\\ttrue\\tweb/a.js\\t3\\tmaint\\tFixed.\\n' ;;
+  # gh applies --jq itself: the status, then how many merges the run holds.
+  "api repos/sysprog21/codetrial/compare/c0ffee1...h1 --jq "*)
+    echo "${FAKE_COMPARE:-ahead 0}" ;;
+  "api repos/sysprog21/codetrial/compare/c0ffee1...h1 -H Accept: application/vnd.github.diff")
+    cat "$FAKE_DIFF" ;;
+  *) echo "unexpected gh call: $*" >&2; exit 1 ;;
+esac
+"""
+
+BUNDLE_PR = {
+    "title": "Fix the thing",
+    "author": {"login": "contributor"},
+    "body": "Closes #9",
+    "headRefOid": "h1",
+    "baseRefOid": "b1",
+    "updatedAt": "T1",
+    "closingIssuesReferences": [{"number": 9}],
+    "reviews": [],
+    "comments": [],
+}
+
+
+# As the REST listing pages them; web/gone.js is changed but unreadable.
+BUNDLE_FILES = [
+    {"path": "web/a.js", "additions": 1, "deletions": 1, "status": "modified"},
+    {"path": "web/a b.txt", "additions": 1, "deletions": 1, "status": "modified"},
+    {"path": "web/old.js", "additions": 0, "deletions": 1, "status": "removed"},
+    {"path": "web/gone.js", "additions": 1, "deletions": 0, "status": "added"},
+]
+
+
+@unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+class ReviewBundleTests(unittest.TestCase):
+    def bundle(self, *args, env=(), files=BUNDLE_FILES, out=None, pr=BUNDLE_PR):
+        with tempfile.TemporaryDirectory() as scratch:
+            out = out or scratch
+            result = run_fake(
+                BUNDLE,
+                [5, out, *args],
+                FAKE_GH_BUNDLE,
+                {
+                    "FAKE_PR": json.dumps(pr),
+                    "FAKE_DIFF": DIFF,
+                    "FAKE_FILES": "".join(json.dumps(f) + "\n" for f in files),
+                },
+                env=env,
+            )
+            written = {
+                str(p.relative_to(out)): p.read_text()
+                for p in Path(out).rglob("*")
+                if p.is_file()
+            }
+        return result, written
+
+    def test_maps_files_to_rules_and_numbers_the_right_side(self):
+        result, written = self.bundle()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = json.loads(result.stdout)
+        self.assertEqual(json.loads(written["manifest.json"]), manifest)
+        self.assertEqual((manifest["head"], manifest["closes"]), ("h1", [9]))
+        rules = {f["path"]: f["rules"] for f in manifest["files"]}
+        self.assertEqual(rules["web/a.js"], ["browser.md"])
+        # No pattern covers a .txt under web/, so it is named, not skipped.
+        self.assertEqual(manifest["unruled"], ["web/a b.txt"])
+        self.assertEqual(manifest["updatedAt"], "T1")
+        # A contributor's diff never goes to an outside reviewer; the
+        # account's own PR may.
+        self.assertEqual(
+            (manifest["author"], manifest["outside_reviewers"]),
+            ("contributor", "refused"),
+        )
+        own, _ = self.bundle(env={"FAKE_VIEWER": "contributor"})
+        self.assertEqual(json.loads(own.stdout)["outside_reviewers"], "allowed")
+        self.assertTrue(manifest["files_complete"])
+        self.assertEqual(
+            json.loads(written["talk.json"]), {"reviews": [], "comments": []}
+        )
+        # Every changed file but the deleted one is read once, here.
+        self.assertEqual(written["head/web/a.js"], "at head\n")
+        self.assertEqual(written["head/web/a b.txt"], "spaced\n")
+        self.assertEqual(manifest["not_at_head"], ["web/gone.js", "web/old.js"])
+        self.assertNotIn("not read", result.stderr)
+        self.assertEqual(len(written["threads.tsv"].splitlines()), 2)
+        # A point made in a reply counts as raised, so replies are kept.
+        self.assertEqual(json.loads(written["comments.json"])[0]["reply"], True)
+        self.assertIsNone(manifest["since"])
+        numbered = written["numbered.txt"]
+        self.assertIn("    10  keep\n       --- x\n    11 +new\n", numbered)
+        self.assertIn("## web/old.js\n(deleted)\n", numbered)
+        self.assertNotIn("since.diff", written)
+
+    def test_since_needs_enough_of_a_sha_to_name_a_commit(self):
+        # A 1-digit prefix of the head would read as the head and review all.
+        result, _ = self.bundle("--since", "a")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("at least 7 hex digits", result.stderr)
+
+    def test_a_pr_past_the_file_listing_limit_says_it_is_partial(self):
+        result, _ = self.bundle(pr=dict(BUNDLE_PR, changedFiles=3001))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(json.loads(result.stdout)["files_complete"])
+        self.assertIn("changes 3001 files and GitHub listed 4", result.stderr)
+
+    def test_each_path_a_rule_applies_to_loads_that_rule(self):
+        # A rule's "Applies to" line scopes it; rules/paths is what the bundle
+        # routes by. A path named in the first and not routed by the second is
+        # a rule no reviewer of that file ever reads.
+        tracked = subprocess.run(
+            ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True
+        ).stdout.split()
+        routes = [
+            line.split()
+            for line in (REVIEW / "rules" / "paths").read_text().splitlines()
+            if line.strip() and not line.startswith("#")
+        ]
+        for rule in sorted((REVIEW / "rules").glob("*.md")):
+            if rule.name == "general.md":
+                continue
+            text = rule.read_text()
+            for scope in re.findall(r"^Applies to: (.*?)\n\n", text, re.M | re.S):
+                # Paths only: a constant named beside its file is not one.
+                for named in re.findall(r"`([^`]*[/.][^`]*)`", scope):
+                    files = [t for t in tracked if fnmatch.fnmatchcase(t, named)]
+                    with self.subTest(rule=rule.name, path=named):
+                        self.assertTrue(files, "names no tracked file")
+                        for path in files:
+                            self.assertIn(
+                                rule.name,
+                                {r for p, r in routes if fnmatch.fnmatchcase(path, p)},
+                                path,
+                            )
+
+    def test_an_earlier_head_gives_the_new_work_only_when_it_is_an_ancestor(self):
+        result, written = self.bundle("--since", "c0ffee1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(result.stdout)["since"], {"from": "c0ffee1", "status": "ahead"}
+        )
+        self.assertIn("since.txt", written)
+        result, written = self.bundle(
+            "--since", "c0ffee1", env={"FAKE_COMPARE": "diverged"}
+        )
+        since = json.loads(result.stdout)["since"]
+        self.assertEqual(since["status"], "diverged")
+        self.assertIn("whole diff", since["why"])
+        self.assertNotIn("since.diff", written)
+        # The base merged in keeps the earlier head an ancestor, but the
+        # comparison then carries the base's own work too.
+        result, written = self.bundle(
+            "--since", "c0ffee1", env={"FAKE_COMPARE": "ahead 1"}
+        )
+        since = json.loads(result.stdout)["since"]
+        self.assertEqual(since["status"], "merged")
+        self.assertIn("whole diff", since["why"])
+        self.assertNotIn("since.diff", written)
+
+    def test_a_refused_comment_read_fails_the_bundle(self):
+        # An empty list would read as a PR nobody has commented on.
+        result, written = self.bundle(env={"FAKE_NO_COMMENTS": "1"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("manifest.json", written)
+
+    def test_an_empty_repo_argument_keeps_since(self):
+        result, written = self.bundle("", "--since", "c0ffee1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["since"]["status"], "ahead")
+        self.assertIn("since.txt", written)
+
+    def test_a_rerun_into_one_directory_keeps_nothing_stale(self):
+        with tempfile.TemporaryDirectory() as out:
+            self.bundle("--since", "c0ffee1", out=out)
+            # The next head deletes the only file the first one changed.
+            only = [BUNDLE_FILES[2]]
+            result, written = self.bundle(files=only, out=out)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["not_at_head"], ["web/old.js"])
+        self.assertFalse([name for name in written if name.startswith("head/")])
+        self.assertNotIn("since.txt", written)
+        # A PR that only deletes runs no read at all, and says nothing.
+        self.assertEqual(result.stderr, "")
+
+    def test_a_pr_that_keeps_moving_is_refused(self):
+        result, _ = self.bundle(env={"FAKE_AFTER": "h2 b1"})
+        self.assertEqual((result.returncode, result.stdout), (3, ""))
+        self.assertIn("moved twice", result.stderr)
+
+    def test_bad_arguments_are_refused_before_any_call(self):
+        for args in (["abc", "out"], [5, "out", "--since", "not-a-sha"]):
+            with self.subTest(args=args):
+                result = run_fake(BUNDLE, args, FAKE_GH_FAILS, {})
+                self.assertEqual(result.returncode, 2, result.stderr)
+
+    def test_local_reviews_the_dirty_tree_or_the_branch(self):
+        with (
+            tempfile.TemporaryDirectory() as repo,
+            tempfile.TemporaryDirectory() as out,
+        ):
+
+            def git(*args):
+                subprocess.run(
+                    ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                    cwd=repo,
+                    check=True,
+                    capture_output=True,
+                )
+
+            git("init", "-q")
+            git("config", "user.email", "t@t")
+            Path(repo, "web").mkdir()
+            Path(repo, "web", "a.js").write_text("one\n")
+            git("add", ".")
+            git("commit", "-qm", "base")
+            base = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True
+            ).stdout.strip()
+            Path(repo, "web", "a.js").write_text("one\ntwo\n")
+            git("commit", "-qam", "branch")
+
+            def local(*args):
+                # A gh that fails every call: local mode reads only git.
+                result = run_fake(
+                    BUNDLE, ["--local", out, *args], FAKE_GH_FAILS, {}, cwd=repo
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return json.loads(result.stdout)
+
+            clean = local(base)
+            # Every commit carries the configured email: the account's own.
+            self.assertEqual(clean["outside_reviewers"], "allowed")
+            self.assertEqual(clean["against"], f"{base}...HEAD")
+            self.assertTrue(clean["committed"])
+            self.assertEqual(clean["files"][0]["rules"], ["browser.md"])
+            self.assertIn("     2 +two", Path(out, "numbered.txt").read_text())
+
+            Path(repo, "web", "b.js").write_text("other\n")
+            git("add", ".")
+            git("commit", "-qm", "theirs", "--author", "o <o@o>")
+            # A branch holding someone else's commit goes to no outside reviewer.
+            self.assertEqual(local(base)["outside_reviewers"], "refused")
+            git("reset", "-q", "--hard", "HEAD~1")
+
+            Path(repo, "notes.txt").write_text("x\n")
+            untracked = local()
+            self.assertEqual(untracked["against"], "HEAD")
+            self.assertFalse(untracked["committed"])
+            self.assertEqual(untracked["files"], [])
+            self.assertEqual(untracked["untracked"], ["notes.txt"])
+            self.assertEqual(Path(out, "pr.diff").read_text(), "")
+            # A base named is the base, untracked files or not.
+            named = local(base)
+            self.assertEqual(named["against"], f"{base}...HEAD")
+            self.assertTrue(named["committed"])
+            self.assertIn("     2 +two", Path(out, "numbered.txt").read_text())
+
+            Path(repo, "web", "a.js").write_text("one\ntwo\nthree\n")
+            Path(repo, "notes.txt").write_text("x\n")
+            dirty = local()
+            self.assertEqual(dirty["against"], "HEAD")
+            self.assertEqual(dirty["size"]["additions"], 1)
+            # With a base and uncommitted work, the base to the working tree:
+            # both commits' lines, and nothing a push of HEAD would carry alone.
+            whole = local(base)
+            self.assertEqual(whole["against"], base)
+            self.assertFalse(whole["committed"])
+            self.assertEqual(whole["size"]["additions"], 2)
+            self.assertEqual(dirty["untracked"], ["notes.txt"])
+            self.assertEqual(dirty["unruled"], [])
+
+            # A name git would quote reaches the rule patterns as it is.
+            git("add", ".")
+            Path(repo, "web", "\u00e9.js").write_text("x\n")
+            git("add", ".")
+            quoted = local()
+            self.assertIn("web/\u00e9.js", [f["path"] for f in quoted["files"]])
+            self.assertEqual(quoted["unruled"], ["notes.txt"])
 
 
 ODDS = SKILLS / "codetrial-odds"
@@ -2199,10 +2614,10 @@ DANGLING_REPORT = {
 
 
 class SkillRefsTests(unittest.TestCase):
-    def check(self, refs):
+    def check(self, refs, extra=()):
         with tempfile.TemporaryDirectory() as repo:
             repo = Path(repo)
-            files = {
+            files = dict(extra) | {
                 "Makefile": "hooks:\n\ttrue\nindent:\n\ttrue\nfmt_all:\n\ttrue\n"
                 "test lint: hooks\n\ttrue\nindent-check:= yes\n",
                 ".github/workflows/check.yml": "jobs:\n  gates:\n"
@@ -2221,6 +2636,9 @@ class SkillRefsTests(unittest.TestCase):
                 (repo / name).write_text(text)
             script = repo / "scripts/check-skill-refs.py"
             shutil.copy(SKILL_REFS, script)
+            # A rules map is checked against what git tracks.
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
             return subprocess.run(
                 [sys.executable, str(script)], cwd=repo, capture_output=True, text=True
             )
@@ -2236,6 +2654,28 @@ class SkillRefsTests(unittest.TestCase):
         self.assertEqual(set(lines), DANGLING_REPORT)
         self.assertEqual(len(lines), len(DANGLING_REPORT))
 
+    def test_a_rules_map_names_rules_that_exist_and_paths_that_do(self):
+        rules = ".claude/skills/fixture/rules/"
+        result = self.check(
+            RESOLVING,
+            {
+                rules + "paths": "# comment\n  # indented\nsrc/* code.md\n"
+                "src/* gone.md\nweb/*.mjs code.md\nsrc/* code.md extra.md\n",
+                # Rule files sit a level down and are checked like any other.
+                rules + "code.md": "# Code\n\n[gone](../missing.md)\n",
+            },
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(),
+            [
+                f"{rules}code.md: link ../missing.md",
+                f"{rules}paths: rule gone.md",
+                f"{rules}paths: pattern web/*.mjs",
+                f"{rules}paths: line src/* code.md extra.md",
+            ],
+        )
+
 
 ROUTING_SPEC = importlib.util.spec_from_file_location(
     "check_skill_routing", ROOT / "scripts" / "check-skill-routing.py"
@@ -2246,7 +2686,7 @@ ROUTING_SPEC.loader.exec_module(routing)
 
 class SkillRoutingTests(unittest.TestCase):
     def test_a_skill_fires_by_invocation_or_by_reading_its_file(self):
-        skills = ["codetrial-web", "codetrial-verify"]
+        skills = ["codetrial-web", "codetrial-review"]
 
         def used(name, **args):
             content = [{"type": "tool_use", "name": name, "input": args}]
@@ -2256,8 +2696,8 @@ class SkillRoutingTests(unittest.TestCase):
 
         self.assertEqual(used("Skill", skill="codetrial-web"), "codetrial-web")
         self.assertEqual(used("Skill", skill="proj:codetrial-web"), "codetrial-web")
-        path = "/tmp/x/.claude/skills/codetrial-verify/review.md"
-        self.assertEqual(used("Read", file_path=path), "codetrial-verify")
+        path = "/tmp/x/.claude/skills/codetrial-review/lenses.md"
+        self.assertEqual(used("Read", file_path=path), "codetrial-review")
         # Another skill, another file, or a user message decides nothing.
         self.assertIsNone(used("Skill", skill="gh-review"))
         self.assertIsNone(used("Read", file_path="/tmp/x/docs/install.md"))

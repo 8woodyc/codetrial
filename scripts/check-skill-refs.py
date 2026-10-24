@@ -12,10 +12,12 @@ Anchors follow GitHub's rule rather than a guess at it, because a link whose
 anchor is wrong still opens the file and an agent reading it never notices.
 """
 
+import fnmatch
 import functools
 import glob
 import os
 import re
+import subprocess
 import sys
 import unicodedata
 
@@ -242,8 +244,37 @@ def check(md):
         report(md, "CI lane", lane)
 
 
-for md in sorted(glob.glob(".claude/skills/*/*.md")):
+for md in sorted(glob.glob(".claude/skills/*/**/*.md", recursive=True)):
     check(md)
+
+# A skill's rules/paths routes changed files to rule files beside it: each rule
+# it names has to exist, and each pattern has to match a tracked file, or it
+# routes nothing and reads as coverage.
+# review-bundle.sh reads each line with the shell's read, so leading blanks are
+# dropped before a # is seen, and a third field would be glued onto the rule
+# name it routes to: such a line is reported rather than guessed at.
+rules_maps = sorted(glob.glob(".claude/skills/*/rules/paths"))
+tracked = (
+    subprocess.run(
+        ["git", "ls-files", "-z"], capture_output=True, text=True, check=True
+    ).stdout.split("\0")
+    if rules_maps
+    else []
+)
+for paths in rules_maps:
+    with open(paths, encoding="utf-8") as f:
+        for line in f:
+            fields = line.split()
+            if not fields or fields[0].startswith("#"):
+                continue
+            if len(fields) != 2:
+                report(paths, "line", line.strip())
+                continue
+            pattern, rule = fields
+            if not os.path.exists(os.path.join(os.path.dirname(paths), rule)):
+                report(paths, "rule", rule)
+            if not any(fnmatch.fnmatchcase(t, pattern) for t in tracked):
+                report(paths, "pattern", pattern)
 
 # The other direction: a check script outside the gate that no skill names.
 with open("scripts/test.sh", encoding="utf-8") as f:
