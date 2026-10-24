@@ -1,3 +1,5 @@
+#![allow(clippy::panic, clippy::unwrap_used)] // see [lints.clippy] in Cargo.toml
+
 //! Whether the interviewer behaves the way the live prompt asks, and the rules
 //! that decide it.
 //!

@@ -1,3 +1,5 @@
+#![allow(clippy::panic, clippy::unwrap_used)] // see [lints.clippy] in Cargo.toml
+
 //! The credentialed acceptance for recording, and the rules it applies.
 //!
 //! Two halves. The rules are Rust and run in every `cargo test`: what a good

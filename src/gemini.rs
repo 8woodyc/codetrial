@@ -1978,12 +1978,17 @@ fn gemini_text(value: &Value) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
+/// An empty pattern matches between every character, so it is skipped rather
+/// than replaced: an unconfigured key redacts nothing, and an encoding that
+/// came back empty cannot multiply the text once per key it is folded over.
 pub fn redact_api_key(text: &str, api_key: &str) -> String {
-    if api_key.is_empty() {
-        return text.to_string();
-    }
-    text.replace(api_key, "[REDACTED]")
-        .replace(&percent_encode_component(api_key), "[REDACTED]")
+    let encoded = percent_encode_component(api_key);
+    [api_key, encoded.as_str()]
+        .into_iter()
+        .filter(|pattern| !pattern.is_empty())
+        .fold(text.to_string(), |text, pattern| {
+            text.replace(pattern, "[REDACTED]")
+        })
 }
 
 fn redact_api_keys(text: &str, api_keys: &[String]) -> String {

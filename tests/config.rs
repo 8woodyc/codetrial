@@ -1,3 +1,5 @@
+#![allow(clippy::panic, clippy::unwrap_used)] // see [lints.clippy] in Cargo.toml
+
 use codetrial::config::{
     DEFAULT_COMPILER_EXPLORER_ENABLED, DEFAULT_DURATION_MIN,
     DEFAULT_GEMINI_CANDIDATE_VIDEO_ENABLED, DEFAULT_GEMINI_END_SENSITIVITY,

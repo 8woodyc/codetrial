@@ -69,6 +69,10 @@ env:
   # check was the one file nothing checked.
   ACTIONLINT_VERSION: 1.7.12
 
+  # The license and source policy in deny.toml, pinned like the tools above:
+  # a release that reads that file differently should arrive as a bump.
+  CARGO_DENY_VERSION: 0.20.2
+
 jobs:
   audit:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
@@ -119,11 +123,9 @@ jobs:
           - lane: rust
             timeout: 45
             packages: libglib2.0-dev mold sqlite3
-            components: clippy
           - lane: portable
             timeout: 20
             packages: shellcheck shfmt
-            components: rustfmt
           - lane: browser
             timeout: 20
     # Pinned rather than `ubuntu-latest`: that label moves to a new image on
@@ -199,18 +201,12 @@ jobs:
         if: matrix.lane == 'rust'
         uses: ./.github/actions/webrtc-clang
 
-      # The runner image ships a stable toolchain, but not necessarily one new
-      # enough for edition 2024, and clippy and rustfmt are gates rather than
-      # extras here. The browser lane runs no cargo at all.
+      # rust-toolchain.toml names the release, and clippy and rustfmt with it;
+      # this installs that one rather than whatever the runner image carries.
+      # The browser lane runs no cargo at all.
       - name: Install Rust
-        if: matrix.components
-        env:
-          COMPONENTS: ${{ matrix.components }}
-        run: |
-          rustup update stable
-          rustup default stable
-          # shellcheck disable=SC2086 # one word per component
-          rustup component add $COMPONENTS
+        if: matrix.lane != 'browser'
+        run: rustup toolchain install
 
       # Restore and save are separate steps on purpose. `actions/cache` saves
       # from a post-job step that is skipped unless the job succeeded, so a run
@@ -278,6 +274,16 @@ jobs:
         run: >-
           ./scripts/install-release-binary.sh sysprog21/commentflow latest
           commentflow-x86_64-unknown-linux-gnu.tar.gz commentflow
+
+      - name: Install cargo-deny
+        if: matrix.lane == 'rust'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          ./scripts/install-release-binary.sh EmbarkStudios/cargo-deny
+          "$CARGO_DENY_VERSION"
+          "cargo-deny-$CARGO_DENY_VERSION-x86_64-unknown-linux-musl.tar.gz"
+          "cargo-deny-$CARGO_DENY_VERSION-x86_64-unknown-linux-musl/cargo-deny"
 
       # Pinned to a tag rather than tracking a rolling one, unlike commentflow
       # above: this one judges the workflow, so a linter that moves on its own
@@ -459,9 +465,7 @@ jobs:
 
       - name: Install Rust
         if: steps.diff.outputs.changed == 'true'
-        run: |
-          rustup update stable
-          rustup default stable
+        run: rustup toolchain install
 
       - name: Cache cargo-mutants
         if: steps.diff.outputs.changed == 'true'
@@ -571,9 +575,7 @@ jobs:
         uses: ./.github/actions/webrtc-clang
 
       - name: Install Rust
-        run: |
-          rustup update stable
-          rustup default stable
+        run: rustup toolchain install
 
       # Restore, never save. The gates job owns this cache; four shards writing
       # a 1 GB entry under one key would be four uploads for the copy that
@@ -714,9 +716,10 @@ jobs:
             || '' }}
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
+      # Every target is its runner's host, so the pinned toolchain already has
+      # its standard library.
+      - name: Install Rust
+        run: rustup toolchain install
       # The image is part of the key, because on this leg it is the compiler.
       # `rust-cache` keys on the runner's rustc, which is no longer the one that
       # builds here, and it declines to save when an exact key hit came back: a
@@ -753,11 +756,12 @@ jobs:
       # the archive stays an ordinary dynamically linked Linux executable.
       #
       # The image pin in the matrix is the one thing here that has to be
-      # maintained by hand. Every other leg compiles with whatever stable
-      # resolved to that day, so this is the only compiler in the workflow that
-      # can fall behind the one the gates ran, and it runs on push to main
-      # alone: a stable-only API compiles in the pull request and breaks the leg
-      # that publishes, after the merge. Bump it when stable moves.
+      # maintained by hand. Every other leg compiles with the release
+      # rust-toolchain.toml pins, so this is the only compiler in the workflow
+      # that can fall behind the one the gates ran, and it runs on push to main
+      # alone: an API newer than `rust-version` compiles in the pull request and
+      # breaks the leg that publishes, after the merge. It is the floor, so bump
+      # it together with `rust-version`, which scripts/test.sh checks.
       #
       # `--user` rather than the container's root. Root here writes root-owned
       # objects into the mounted workspace, `Swatinem/rust-cache` then hits
@@ -771,6 +775,11 @@ jobs:
       # its LTS window and moves to archive.debian.org on someone else's
       # timetable, which `Acquire::Check-Valid-Until=false` does not answer. A
       # base image that ever drops glib fails loudly at pkg-config.
+      #
+      # `RUSTUP_TOOLCHAIN` because the image's rustup would otherwise obey
+      # rust-toolchain.toml in the mounted checkout, download the gates' newer
+      # release and build with it, and this leg would stop testing the floor.
+      # The image names its own release in `RUST_VERSION`.
       #
       # `CARGO_HOME` is the runner's, mounted in. It is what the cache restored
       # a step ago, and the container cannot see it otherwise: without this
@@ -792,7 +801,8 @@ jobs:
             --env CXX=/clang/bin/clang++ \
             --env GITHUB_SHA \
             ${{ matrix.image }} \
-            cargo build --release --locked --target ${{ matrix.target }}
+            sh -c 'RUSTUP_TOOLCHAIN=${RUST_VERSION:?} exec cargo build --release --locked --target "$1"' \
+            sh ${{ matrix.target }}
       # A successful link does not prove the Objective-C categories survived.
       # The selector reference remains even when its implementation is absent,
       # so match a method name entry rather than any occurrence of the selector.
@@ -1110,9 +1120,7 @@ jobs:
       - name: Install WebRTC C++ compiler
         uses: ./.github/actions/webrtc-clang
       - name: Install Rust
-        run: |
-          rustup update stable
-          rustup default stable
+        run: rustup toolchain install
       - name: Restore cargo cache
         uses: ./.github/actions/restore-cargo-cache
       - name: Report disk after restoring the build cache

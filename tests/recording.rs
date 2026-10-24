@@ -1,3 +1,5 @@
+#![allow(clippy::panic, clippy::unwrap_used)] // see [lints.clippy] in Cargo.toml
+
 //! The recordings table, checked against a real SQLite file rather than
 //! against the `CREATE TABLE` string that produced it.
 //!

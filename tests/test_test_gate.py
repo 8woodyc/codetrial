@@ -199,7 +199,8 @@ gate()
         shared = {"fetch-vendor", "verify-vendor"}
         self.assertEqual(rust & portable, shared)
         self.assertEqual(
-            rust - shared, {"clippy", "cargo-test", "browser-server-tests"}
+            rust - shared,
+            {"clippy", "cargo-test", "browser-server-tests", "cargo-deny"},
         )
         self.assertEqual(rust & browser, shared)
         self.assertEqual(portable & browser, shared)
@@ -616,9 +617,7 @@ printf 'python:%s\\n' "$*" >> "$CALLS"
     def test_each_lane_installs_what_its_gates_need(self):
         gates, matrix = gates_job(), lanes()
         self.assertEqual(condition(gates, "Install system packages"), "matrix.packages")
-        self.assertEqual(condition(gates, "Install Rust"), "matrix.components")
-        self.assertEqual(matrix["rust"]["components"], "clippy")
-        self.assertEqual(matrix["portable"]["components"], "rustfmt")
+        self.assertEqual(condition(gates, "Install Rust"), "matrix.lane != 'browser'")
         self.assertTrue({"mold", "sqlite3"} <= set(matrix["rust"]["packages"].split()))
         self.assertEqual(
             set(matrix["portable"]["packages"].split()), {"shellcheck", "shfmt"}
@@ -629,6 +628,9 @@ printf 'python:%s\\n' "$*" >> "$CALLS"
                 self.assertEqual(
                     condition(gates, f"Install {name}"), "matrix.lane == 'portable'"
                 )
+        self.assertEqual(
+            condition(gates, "Install cargo-deny"), "matrix.lane == 'rust'"
+        )
         self.assertEqual(
             condition(gates, "Install Chromium"), "matrix.lane != 'portable'"
         )

@@ -1,0 +1,26 @@
+# `cargo deny check licenses sources`, the `cargo-deny` gate in
+# scripts/test.sh. Advisories are cargo-audit's job there and in CI's audit
+# job, and duplicate versions are a decision Cargo.toml already explains, so
+# neither is checked here.
+
+# Every license the tree resolved to when this was written, and nothing else:
+# a dependency that brings a new one, copyleft or unknown, stops the gate until
+# someone adds it here on purpose. An `OR` expression passes on any allowed
+# term, so this is shorter than the set of distinct expressions.
+[licenses]
+allow = [
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "IJG",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+# crates.io only. The two crates under vendor/ are path patches, which this
+# does not count as a source.
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

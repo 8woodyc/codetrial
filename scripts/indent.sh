@@ -60,13 +60,14 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT" || exit 1
 
 # What decides the output besides the files themselves: the formatters'
-# settings, Prettier's pinned version, and this script. A commit that changes
-# one of them changes how every file formats, so the index check widens from the
-# staged files to all of them, and a tree check copies them along. Cargo.toml is
-# left out, though rustfmt reads its edition: every dependency bump would
-# otherwise recheck the whole tree, and CI catches the rare edition change.
-configs='.editorconfig rustfmt.toml ruff.toml .prettierrc.json .prettierignore
-package.json scripts/indent.sh'
+# settings, Prettier's pinned version, the Rust release rustfmt comes from, and
+# this script. A commit that changes one of them changes how every file formats,
+# so the index check widens from the staged files to all of them, and a tree
+# check copies them along. Cargo.toml is left out, though rustfmt reads its
+# edition: every dependency bump would otherwise recheck the whole tree, and CI
+# catches the rare edition change.
+configs='.editorconfig rustfmt.toml rust-toolchain.toml ruff.toml .prettierrc.json
+.prettierignore package.json scripts/indent.sh'
 
 # Against HEAD the index is this commit's changes; against the empty tree it is
 # every file the commit will hold. Either way `diff --cached` and not

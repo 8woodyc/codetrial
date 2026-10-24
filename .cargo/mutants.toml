@@ -1,7 +1,7 @@
 # Functions the mutation gate cannot judge, because `cargo test` cannot reach
 # them. Matched against the mutant names that `cargo mutants --list` prints.
 #
-# EXCLUSIONS: 74
+# EXCLUSIONS: 73
 #
 # That number is checked by `scripts/test.sh`, so adding an entry means editing
 # this line too. The point is not the count, it is that the list only ever grows
@@ -246,16 +246,6 @@
 # room cannot tell that from publishing one. What it decides before it writes
 # is `ready_to_close`, tested in tests/unit/livekit.rs.
 #
-# `percent_encode_component` returning an empty string is caught, by a dozen
-# encoding and redaction tests that fail in milliseconds, and it still scores
-# TIMEOUT. Redaction replaces the encoded key as well as the raw one, and an
-# empty pattern matches between every character, so each key's pass makes the
-# text about eleven times longer. `check_stops_where_the_first_interview_open_
-# would` redacts through more keys than a restart allows, which is a CPU loop
-# with no await in it: no test timeout can preempt it, and the run waits on
-# that one test until cargo-mutants gives up. The name is the one mutant, not
-# the function, so its other mutants are still judged.
-#
 # `spend_deferred_restart` is the held-`GoAway` check that `on_gemini_event`,
 # `on_playout_settled` and `on_watch_tick` each carried inline, lifted out so
 # the three read the settled rule the same way. Its lines were unjudged when
@@ -380,7 +370,6 @@ exclude_re = [
     "next_video_frame",
     "pump_video",
     "encode_video_frame_jpeg_off_thread",
-    "replace percent_encode_component -> String with String::new\\(\\)",
     "publish_thinking_state",
     "flush_thinking_notice",
     "publish_opening_attributes",

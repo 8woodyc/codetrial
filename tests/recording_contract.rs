@@ -1,3 +1,5 @@
+#![allow(clippy::panic, clippy::unwrap_used)] // see [lints.clippy] in Cargo.toml
+
 //! The provider contract, checked against bytes rather than against prose.
 //!
 //! Nothing in this file exercises CodeTrial's own recording code, because

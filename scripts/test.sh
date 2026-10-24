@@ -261,7 +261,18 @@ cargo_audit_gate()
         return 0
     fi
 
-    cargo audit --file "$ROOT/Cargo.lock"
+    # The binary rather than `cargo audit`; scripts/audit.py says why.
+    cargo-audit audit --file "$ROOT/Cargo.lock"
+}
+
+cargo_deny_gate()
+{
+    if ! command -v cargo-deny > /dev/null 2>&1; then
+        skip "cargo-deny: \`cargo install cargo-deny\` checks dependency licenses and sources"
+        return 0
+    fi
+
+    cargo deny --manifest-path "$ROOT/Cargo.toml" check licenses sources
 }
 
 # The crates under vendor/ carry fixes upstream has not released. A bump that
@@ -479,6 +490,10 @@ gate skill-scripts-tests unittest_gate "$ROOT/tests/test_skill_scripts.py"
 gate --lane browser browser-tests browser_tests static
 gate eslint eslint_gate
 gate --lane all cargo-audit cargo_audit_gate
+
+# The rust lane, because resolving the graph fetches every crate in Cargo.lock
+# and that lane is the one that restores them from the cargo cache.
+gate --lane rust cargo-deny cargo_deny_gate
 gate vendor-patches vendor_patches_gate
 gate actionlint actionlint_gate
 
