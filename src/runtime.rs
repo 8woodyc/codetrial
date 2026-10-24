@@ -59,7 +59,7 @@ pub struct RuntimeBootstrap<'a> {
     /// handwriting.
     pub candidate_video: bool,
     pub start_sensitivity: &'a str,
-    pub end_sensitivity: Option<&'a str>,
+    pub end_sensitivity: &'a str,
     pub instructions: String,
     pub greeting: String,
 }
@@ -155,7 +155,7 @@ pub fn bootstrap_with_rounds<'a>(
         context_compression: config.gemini_context_compression,
         candidate_video: config.gemini_candidate_video_enabled && !interview_mode.is_whiteboard(),
         start_sensitivity: &config.gemini_start_sensitivity,
-        end_sensitivity: config.gemini_end_sensitivity.as_deref(),
+        end_sensitivity: &config.gemini_end_sensitivity,
         greeting: greeting(interview_mode),
     }
 }

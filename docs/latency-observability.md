@@ -219,10 +219,17 @@ last frame of an utterance that ended on an odd frame, and the endpointing
 clock does not start until Gemini has it. This removes local batching wait, not
 provider inference or network time. It doubles websocket messages from 50 to
 100 per second while sending the same PCM bytes. Partial frames still buffer
-and flush when the track ends. Keep the default silence window unless a matched
-comparison shows it no longer cuts candidates off: `silence_window` is usually
-the largest segment, and the one most likely to be traded against interrupting
-a candidate who paused to think.
+and flush when the track ends.
+
+`silence_window` is usually the largest segment, and the one most directly
+traded against interrupting a candidate who paused to think. The default is 1.5
+seconds, down from 3 seconds, so a reply to unyielded speech starts about 1.5
+seconds sooner. `END_SENSITIVITY_HIGH` is sent beside it; it is the API's
+documented default, named so the window is measured against a known value, and
+it earns no latency of its own. A candidate who pauses longer mid-sentence is
+answered sooner too, which the thinking hold, `GEMINI_SILENCE_MS` and
+`GEMINI_END_SENSITIVITY=LOW` exist to absorb; compare
+interruptions as well as latency before moving either default again.
 
 ## Design lineage
 
@@ -319,12 +326,13 @@ Thresholds are experiment-specific and compare unrounded statistics; only the
 printed values are rounded. The default refuses any unsuccessful sample. A
 report with no delivered samples, or with a missing warmup, always fails,
 including when a nonzero missing-rate budget is allowed. Invalid data, an empty
-or interrupted run, failed or incomplete teardown, invalid timing windows, or
-the same run given twice fails rather than producing a healthy verdict; the
-runner then writes the refusal reason in place of statistics, as a JSON error
-object and a one-column CSV in the machine-readable summaries. The ordinary
-gate checks the report's validation, statistics, export formats and budget exit
-statuses; real-room experiments are separate from the credential-free gate.
+or interrupted run, a trial that left no result, failed or incomplete teardown,
+invalid timing windows, or the same run given twice fails rather than producing
+a healthy verdict; the runner then writes the refusal reason in place of
+statistics, as a JSON error object and a one-column CSV in the machine-readable
+summaries. The ordinary gate checks the report's validation, statistics, export
+formats and budget exit statuses; real-room experiments are separate from the
+credential-free gate.
 
 ### Lessons from lk-latency
 

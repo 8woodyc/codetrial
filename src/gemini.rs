@@ -2258,15 +2258,15 @@ fn live_setup_message(boot: &RuntimeBootstrap<'_>, resume: Option<&str>) -> Valu
             "realtimeInputConfig": {
                 "activityHandling": "START_OF_ACTIVITY_INTERRUPTS",
 
-                // The silence window decides how long to wait before answering,
-                // and the start sensitivity how readily a reply already in
-                // flight is abandoned; both are named, because left absent the
-                // API's own value is in force where it cannot be measured or
-                // tuned. The end sensitivity is added below only when
-                // configured: nothing measured picks a value for it.
+                // The end sensitivity and silence window decide how soon a
+                // reply starts, and the start sensitivity how readily one
+                // already in flight is abandoned; all three are named, because
+                // left absent the API's own value is in force where it cannot
+                // be measured or tuned.
                 "automaticActivityDetection": {
                     "silenceDurationMs": boot.silence_ms,
-                    "startOfSpeechSensitivity": boot.start_sensitivity
+                    "startOfSpeechSensitivity": boot.start_sensitivity,
+                    "endOfSpeechSensitivity": boot.end_sensitivity
                 }
             },
             "contextWindowCompression": {
@@ -2323,10 +2323,6 @@ fn live_setup_message(boot: &RuntimeBootstrap<'_>, resume: Option<&str>) -> Valu
             json!(compression.trigger_tokens.to_string());
         setup["setup"]["contextWindowCompression"]["slidingWindow"]["targetTokens"] =
             json!(compression.target_tokens.to_string());
-    }
-    if let Some(end) = boot.end_sensitivity {
-        setup["setup"]["realtimeInputConfig"]["automaticActivityDetection"]["endOfSpeechSensitivity"] =
-            json!(end);
     }
     setup
 }

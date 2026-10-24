@@ -1079,15 +1079,53 @@ fn an_answer_given_straight_after_the_click_is_not_swallowed() {
 #[test]
 fn the_pre_click_window_stays_inside_the_silence_window() {
     assert_eq!(thinking_transcript_grace(3_000), THINKING_TRANSCRIPT_GRACE);
-    assert_eq!(thinking_transcript_grace(1_000), Duration::from_millis(500));
-    for silence_ms in [0, 200, 1_000, 3_000, 30_000] {
+    assert_eq!(
+        thinking_transcript_grace(1_500),
+        Duration::from_millis(1_250)
+    );
+    assert_eq!(thinking_transcript_grace(1_000), Duration::from_millis(750));
+    assert_eq!(thinking_transcript_grace(500), Duration::from_millis(250));
+    assert_eq!(thinking_transcript_grace(250), Duration::from_millis(125));
+    assert_eq!(thinking_transcript_grace(0), Duration::ZERO);
+    for silence_ms in [200, 250, 400, 500, 1_000, 1_500, 3_000, 30_000] {
+        let grace = thinking_transcript_grace(silence_ms);
+        let silence = Duration::from_millis(u64::from(silence_ms));
         assert!(
-            thinking_transcript_grace(silence_ms) * 2
-                <= Duration::from_millis(u64::from(silence_ms))
-                || thinking_transcript_grace(silence_ms) == THINKING_TRANSCRIPT_GRACE,
+            grace >= silence / 2 || grace == THINKING_TRANSCRIPT_GRACE,
             "{silence_ms}"
         );
+        assert!(grace < silence, "{silence_ms}");
     }
+}
+
+/// The shipped window, where half of it left only 0.75s for the pre-click
+/// transcript: one delayed past that by a busy loop is still the tail of what
+/// came before the click, and an answer begun after it still releases.
+#[test]
+fn a_delayed_pre_click_transcript_keeps_the_hold_at_the_default_window() {
+    let click = Instant::now();
+    let mut state = RuntimeState {
+        thinking_hold: ThinkingHold::Held {
+            since: std::time::Instant::now(),
+        },
+        ..RuntimeState::default()
+    };
+    let mut activity = RuntimeActivity::new(click);
+    let silence_ms = crate::config::DEFAULT_GEMINI_SILENCE_MS;
+    activity.ignore_input_before_hold(click, thinking_transcript_grace(silence_ms));
+
+    let delayed = click + Duration::from_millis(900);
+    activity.observe_thinking_fragment(&mut state, "and that is my approach", delayed, 1);
+    assert_eq!(
+        state.take_thinking_notice(),
+        None,
+        "the tail does not release"
+    );
+
+    // The quickest answer after the click: a short word, then the window.
+    let answer = click + Duration::from_millis(200 + u64::from(silence_ms));
+    activity.observe_thinking_fragment(&mut state, "Actually it is linear", answer, 2);
+    assert_eq!(state.take_thinking_notice(), Some(false));
 }
 
 #[test]

@@ -1,10 +1,10 @@
 use codetrial::config::{
     DEFAULT_COMPILER_EXPLORER_ENABLED, DEFAULT_DURATION_MIN,
-    DEFAULT_GEMINI_CANDIDATE_VIDEO_ENABLED, DEFAULT_GEMINI_FIRST_OUTPUT_S,
-    DEFAULT_GEMINI_LIVE_MODEL, DEFAULT_GEMINI_REPLY_TIMEOUT_S, DEFAULT_GEMINI_REPORT_MODEL,
-    DEFAULT_GEMINI_SILENCE_MS, DEFAULT_GEMINI_START_SENSITIVITY, DEFAULT_GEMINI_VOICE,
-    DEFAULT_MAX_CONCURRENT_INTERVIEWS, DEFAULT_MAX_INTERIM_REVIEWS, DEFAULT_ROOM_PREFIX,
-    MAX_GEMINI_REPLY_TIMEOUT_S, MAX_GEMINI_SILENCE_MS, MAX_INTERIM_REVIEWS,
+    DEFAULT_GEMINI_CANDIDATE_VIDEO_ENABLED, DEFAULT_GEMINI_END_SENSITIVITY,
+    DEFAULT_GEMINI_FIRST_OUTPUT_S, DEFAULT_GEMINI_LIVE_MODEL, DEFAULT_GEMINI_REPLY_TIMEOUT_S,
+    DEFAULT_GEMINI_REPORT_MODEL, DEFAULT_GEMINI_SILENCE_MS, DEFAULT_GEMINI_START_SENSITIVITY,
+    DEFAULT_GEMINI_VOICE, DEFAULT_MAX_CONCURRENT_INTERVIEWS, DEFAULT_MAX_INTERIM_REVIEWS,
+    DEFAULT_ROOM_PREFIX, MAX_GEMINI_REPLY_TIMEOUT_S, MAX_GEMINI_SILENCE_MS, MAX_INTERIM_REVIEWS,
     MIN_GEMINI_FIRST_OUTPUT_S, MIN_GEMINI_REPLY_TIMEOUT_S, guest_mode_enabled, load_from_pairs,
     max_concurrent_interviews,
 };
@@ -194,6 +194,11 @@ fn config_defaults_optional_names_and_web_runtime_fields() {
     // `LOW` is the cautious one: `HIGH` is what cuts the interviewer off
     // mid-sentence, and flipping the default there has to fail here.
     assert_eq!(config.gemini_start_sensitivity, "START_SENSITIVITY_LOW");
+
+    // Literals for the same reason. Together these decide how long every reply
+    // to unyielded speech waits, and moving either is a product decision.
+    assert_eq!(config.gemini_silence_ms, 1_500);
+    assert_eq!(config.gemini_end_sensitivity, "END_SENSITIVITY_HIGH");
     assert_eq!(config.room_prefix, DEFAULT_ROOM_PREFIX);
     assert_eq!(config.default_duration_min, DEFAULT_DURATION_MIN);
     assert_eq!(
@@ -873,6 +878,34 @@ fn an_unreadable_start_sensitivity_falls_back_rather_than_reaching_the_wire() {
         assert_eq!(
             load(bad),
             DEFAULT_GEMINI_START_SENSITIVITY,
+            "{bad} must not reach the wire"
+        );
+    }
+}
+
+#[test]
+fn an_unreadable_end_sensitivity_falls_back_rather_than_reaching_the_wire() {
+    let load = |value: &str| {
+        load_from_pairs([
+            ("LIVEKIT_URL", "wss://example.livekit.cloud"),
+            ("LIVEKIT_API_KEY", "key"),
+            ("LIVEKIT_API_SECRET", "secret"),
+            ("GOOGLE_API_KEY", "google"),
+            ("GEMINI_END_SENSITIVITY", value),
+        ])
+        .expect("complete config should load")
+        .gemini_end_sensitivity
+    };
+    for low in ["LOW", "low", "END_SENSITIVITY_LOW"] {
+        assert_eq!(load(low), "END_SENSITIVITY_LOW", "{low}");
+    }
+    for high in ["HIGH", "high", "END_SENSITIVITY_HIGH"] {
+        assert_eq!(load(high), "END_SENSITIVITY_HIGH", "{high}");
+    }
+    for bad in ["END_SENSITIVITY_HIGHH", "medium", "  "] {
+        assert_eq!(
+            load(bad),
+            DEFAULT_GEMINI_END_SENSITIVITY,
             "{bad} must not reach the wire"
         );
     }
