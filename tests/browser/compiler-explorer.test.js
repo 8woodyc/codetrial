@@ -677,14 +677,18 @@ struct Node* replicateTopology(struct Node* s) {
           ),
         );
         await run("cc", ["-std=c17", source, "-o", binary]);
+        // A refusal is the case's error, not a string the candidate returned:
+        // as an actual, a case without an expected value showed it as OUTPUT.
         assert.deepEqual(
           parseCompilerResults(
             (await run(binary, [], { encoding: "utf8" })).stdout,
-          ).results.map((result) => result.actual),
+          ).results.map(({ actual, error }) =>
+            error === undefined ? { actual } : { error },
+          ),
           cloneGraphSpec.cases.map((testCase) =>
             testCase.input[0].length
-              ? "Returned graph must be a deep copy."
-              : [],
+              ? { error: "Returned graph must be a deep copy." }
+              : { actual: [] },
           ),
         );
       } finally {
@@ -736,11 +740,13 @@ struct Node* replicateTopology(struct Node* s) {
           assert.deepEqual(
             parseCompilerResults(
               (await run(binary, [], { encoding: "utf8" })).stdout,
-            ).results.map((result) => result.actual),
+            ).results.map(({ actual, error }) =>
+              error === undefined ? { actual } : { error },
+            ),
             cloneGraphSpec.cases.map((testCase) =>
               testCase.input[0][nodeValue - 1]?.length
-                ? "Returned graph has a NULL neighbor."
-                : testCase.expected,
+                ? { error: "Returned graph has a NULL neighbor." }
+                : { actual: testCase.expected },
             ),
           );
         } finally {

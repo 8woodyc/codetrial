@@ -223,23 +223,20 @@ describe("graph clone toolchain harnesses", { concurrency: true }, () => {
             assert.equal(results.length, 1);
             if (originalNeighbors)
               assert.equal(
-                results[0].error ?? results[0].actual,
+                results[0].error,
                 "Returned graph must be a deep copy.",
               );
             else if (nullNeighbor)
               assert.equal(
-                results[0].error ?? results[0].actual,
+                results[0].error,
                 "Returned graph has a NULL neighbor.",
               );
             else if (invalidId !== undefined)
               assert.equal(
-                results[0].error ?? results[0].actual,
+                results[0].error,
                 "Returned graph node IDs must be between 1 and 1023.",
               );
-            else if (duplicate)
-              assert.ok(
-                (results[0].error ?? results[0].actual).endsWith(message),
-              );
+            else if (duplicate) assert.ok(results[0].error.endsWith(message));
             else assert.deepEqual(results[0].actual, spec.cases[0].expected);
           } finally {
             rmSync(dir, { recursive: true, force: true });
