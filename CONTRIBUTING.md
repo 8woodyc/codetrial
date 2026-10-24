@@ -97,8 +97,9 @@ own already in the way, or a `core.hooksPath` shared with other repositories, is
 left alone and reported with how to integrate it. Your own hook keeps running
 once moved to `.git/hooks/<name>.local`, after ours.
 `./scripts/install-git-hooks.sh --check` asks the same question without writing.
-`cargo build` runs the same installer whenever that check fails, and skips it
-once the hooks are in effect; what needs you shows up as a Cargo warning.
+`cargo build` and `cargo check` run the same installer on every build, and
+fail when the hooks cannot be put in effect, printing what needs you. Set
+`CODETRIAL_SKIP_HOOKS=1` for a checkout that cannot take hooks.
 
 Formatting is required of every contributor; only a pull request Dependabot
 opened and wrote has formatting drift reported rather than failed. The pre-commit
@@ -130,11 +131,13 @@ Refuse a permission listing that may be truncated
 Prove an empty test run is not a pass
 ```
 
-A commit needs a body: the hook and CI refuse a subject alone. Fixup, squash and
-merge commits are exempt, and so are Dependabot's. The body carries the premise
-and the trade, usually in a single paragraph. This tree keeps its detailed
-reasoning in the comment next to the code, so a body retelling the mechanics
-duplicates that comment and then goes stale on its own.
+A commit needs a body: the hook and CI refuse a subject alone. Merge commits are
+exempt, and so are Dependabot's. A `fixup!`, `squash!` or `amend!` subject is
+refused at commit, at push and in CI alike: fold the change into the commit it
+fixes, with `git rebase -i --autosquash` for an older one. The body carries the
+premise and the trade, usually in a single paragraph. This tree keeps its
+detailed reasoning in the comment next to the code, so a body retelling the
+mechanics duplicates that comment and then goes stale on its own.
 The hook rejects the shape that does it outright: a body line opening with
 `How:`, `Step:`, `Steps:`, `Changes:` or an `Implementation:` heading. Whether
 what is left says anything is the part only a reviewer can judge.

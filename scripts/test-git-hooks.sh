@@ -250,7 +250,20 @@ expect 0 "a message that follows the rules" \
 One paragraph saying why this exists, wrapped inside the
 limit the hook enforces."
 expect 0 "the rules can be printed" sh "$ROOT/scripts/git-commit-msg.sh" --rules
-expect 0 "a fixup is left alone" message "fixup! Add the scratch repository"
+# Each with a body, so the marker is the only thing the rules can refuse.
+body="
+
+One paragraph saying why this exists."
+for marker in fixup squash amend; do
+    expect 1 "a $marker! subject" message "$marker! Add the scratch repository$body"
+    contains "the $marker! refusal names the fold" "$work/last.out" "git commit --amend"
+done
+for verb in Wiring Wires Lets Wrote Builds; do
+    expect 1 "the non-imperative $verb" message "$verb the scratch repository$body"
+done
+for verb in Seed Alias Bring; do
+    expect 0 "the imperative $verb" message "$verb the scratch repository$body"
+done
 expect 0 "a merge subject is left alone" message "Merge branch 'topic' into main"
 expect 1 "a lowercase subject" message "add the scratch repository"
 expect 1 "a past-tense subject" message "Added the scratch repository"

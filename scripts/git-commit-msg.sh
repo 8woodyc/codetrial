@@ -20,7 +20,8 @@ if [ "${1:-}" = "--rules" ]; then
 2. Keep the subject within 50 characters, and say more than one word
 3. Capitalize the subject; no trailing period, no backticks
 4. Use the imperative mood: "Fix", not "Fixed" or "Fixes"
-5. No conventional-commit prefix: not "fix:", not "feat(web):"
+5. No conventional-commit prefix: not "fix:", not "feat(web):",
+   and no "fixup!", "squash!" or "amend!": fold those before committing
 6. Wrap the body at 72 characters
 7. Write a body saying what and why; the diff says how
 
@@ -62,10 +63,15 @@ error()
     failed=1
 }
 
-# A fixup lands in the commit it names, and a merge subject is git's wording,
-# not the author's. Judging either is judging a message nobody wrote.
+# An autosquash marker is a note to a rebase that has not happened yet, and the
+# subject behind it is a copy of another commit's: the change belongs in that
+# commit before this one exists. A merge subject is git's wording, not the
+# author's, and judging it is judging a message nobody wrote.
 case "$subject" in
-    "fixup! "* | "squash! "* | "amend! "*) exit 0 ;;
+    "fixup! "* | "squash! "* | "amend! "*)
+        error "fold this into the commit it fixes: git commit --amend for HEAD, git rebase -i --autosquash for an older one"
+        exit 1
+        ;;
     "Merge branch "* | "Merge branches "* | "Merge tag "* | "Merge commit "* | \
         "Merge pull request "* | "Merge remote-tracking branch "*) exit 0 ;;
 esac
@@ -96,9 +102,9 @@ case "$subject" in
     *.) error "subject must not end with a period" ;;
 esac
 
-# The subject completes "this commit will ...", so a past tense or a gerund in
-# the first word is the whole tell. Checking one word catches nearly all of it
-# and never argues with a legitimate "Fix the parser" style subject.
+# The subject completes "this commit will ...", so a past tense, a gerund or a
+# third person in the first word is the whole tell. Named rather than matched by
+# suffix, which would also refuse "Alias", "Seed" and "Bring".
 first_word=$(printf '%s' "$subject" | sed 's/[[:space:]].*//' | tr '[:upper:]' '[:lower:]')
 case "$first_word" in
     added | adds | adding | adjusted | adjusts | adjusting | allowed | allows | \
@@ -114,7 +120,13 @@ case "$first_word" in
         removes | removing | renamed | renames | renaming | replaced | replaces | \
         replacing | reverted | reverts | reverting | tested | tests | testing | \
         tidied | tidies | tidying | updated | updates | updating | used | uses | \
-        using)
+        using | wired | wires | wiring | lets | letting | built | builds | \
+        building | wrote | writes | writing | ran | runs | running | kept | \
+        keeps | keeping | sent | sends | sending | brought | brings | bringing | \
+        took | takes | taking | gave | gives | giving | got | gets | getting | \
+        began | begins | beginning | chose | chooses | choosing | met | meets | \
+        meeting | held | holds | holding | told | tells | telling | thought | \
+        thinks | thinking)
         error "use the imperative mood: \"$first_word\" describes what you did"
         ;;
 esac

@@ -6,8 +6,8 @@
 # invoked it instead of naming one by path.
 #
 # Exit 0 means every hook is in effect, not merely that this script ran. --check
-# asks the same question without writing anything, and build.rs asks it on every
-# build-script rerun.
+# asks the same question without writing anything, and scripts/hook-check asks
+# it on every build.
 
 set -u
 
@@ -35,8 +35,18 @@ abs()
         *) printf '%s/%s\n' "$ROOT" "$1" ;;
     esac
 }
-hooks=$(abs "$(git rev-parse --git-path hooks)") || exit 1
-common=$(abs "$(git rev-parse --git-common-dir)") || exit 1
+
+# One git for both answers, split without another process: hook-check runs this
+# on every build.
+paths=$(git rev-parse --git-path hooks --git-common-dir) || exit 1
+{
+    IFS= read -r hooks
+    IFS= read -r common
+} << EOF
+$paths
+EOF
+hooks=$(abs "$hooks")
+common=$(abs "$common")
 
 # The wrapper says it is ours on its second line, so a later install can tell it
 # from a hook somebody wrote and rewrite it when its text changes, rather than
@@ -129,7 +139,7 @@ foreign()
 # wrapper that lost it reads as installed while nothing runs.
 #
 # Progress goes to stdout and anything a person has to act on to stderr, so
-# build.rs can pass the second on as it stands and drop the first.
+# scripts/hook-check can pass the second on as it stands and drop the first.
 verify()
 {
     status=0
@@ -177,6 +187,13 @@ if [ "$mode" = uninstall ]; then
             printf '  RESTORE %s\n' "$name"
         fi
     done
+    exit 0
+fi
+
+# Every hook in effect already, which is every build after the first: nothing to
+# write, and one pass of verify says so.
+if report=$(verify 2> /dev/null); then
+    printf '%s\n' "$report"
     exit 0
 fi
 

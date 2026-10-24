@@ -96,6 +96,14 @@ tokio = { version = "1.54.1", features = ["test-util"] }
 name = "audio-latency"
 test = true
 
+# scripts/hook-check holds every `cargo build` to the git hooks being in
+# effect; its build.rs says why it is a member of its own. `vendor/` holds path
+# dependencies, not members.
+[workspace]
+members = ["scripts/hook-check"]
+default-members = [".", "scripts/hook-check"]
+exclude = ["vendor"]
+
 # Release archives distribute the executable, not a debugging target. Cargo
 # already omits debug information in this profile; omit linker symbols too.
 #

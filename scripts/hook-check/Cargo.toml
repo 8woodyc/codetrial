@@ -1,0 +1,11 @@
+[package]
+name = "hook-check"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Nothing to compile but the build script, which is the whole of this crate.
+[lib]
+path = "lib.rs"
+test = false
+doctest = false
