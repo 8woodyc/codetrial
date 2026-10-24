@@ -134,6 +134,11 @@ an error, and `[lints.rust] unsafe_code = "forbid"` is what keeps this crate's
 `unsafe` count at zero — `forbid` rather than `deny`, so a local `#[allow]`
 cannot reintroduce it.
 
+The compiler those lints run on is pinned in `rust-toolchain.toml`, so a new
+Rust release cannot fail an unchanged tree: Dependabot proposes each bump as
+its own pull request. The pin is the gate's compiler; `rust-version` remains the
+oldest release the crate builds on, and the Linux release leg builds on it.
+
 `shellcheck` and `ruff` come from the system package manager. `actionlint` is
 not packaged as widely, so the gate falls back to its container image, pinned to
 the version the workflow installs, whenever the binary is absent and a docker

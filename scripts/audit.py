@@ -16,8 +16,11 @@ def git(root, *args):
 
 
 def audit(lockfile, database, fetch):
+    # The binary rather than `cargo audit`: rustup's `cargo` proxy would obey
+    # rust-toolchain.toml and install the pinned compiler, which an audit never
+    # runs, before handing over to the subcommand.
     command = [
-        "cargo",
+        "cargo-audit",
         "audit",
         "--json",
         "--db",

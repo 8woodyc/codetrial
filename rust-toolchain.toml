@@ -1,0 +1,5 @@
+# The gate's compiler, not the floor; docs/development.md says why it is pinned.
+[toolchain]
+channel = "1.99.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

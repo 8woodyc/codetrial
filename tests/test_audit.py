@@ -269,7 +269,7 @@ class AuditTests(unittest.TestCase):
             (root / "scripts").mkdir()
             script = root / "scripts/audit.py"
             script.write_bytes((support.ROOT / "scripts/audit.py").read_bytes())
-            support.write_executable(root / "cargo", CARGO)
+            support.write_executable(root / "cargo-audit", CARGO)
 
             def git(*args):
                 return subprocess.check_output(["git", "-C", str(root), *args])

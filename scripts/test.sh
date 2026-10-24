@@ -261,7 +261,8 @@ cargo_audit_gate()
         return 0
     fi
 
-    cargo audit --file "$ROOT/Cargo.lock"
+    # The binary rather than `cargo audit`; scripts/audit.py says why.
+    cargo-audit audit --file "$ROOT/Cargo.lock"
 }
 
 # The crates under vendor/ carry fixes upstream has not released. A bump that

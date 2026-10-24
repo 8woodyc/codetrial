@@ -616,9 +616,7 @@ printf 'python:%s\\n' "$*" >> "$CALLS"
     def test_each_lane_installs_what_its_gates_need(self):
         gates, matrix = gates_job(), lanes()
         self.assertEqual(condition(gates, "Install system packages"), "matrix.packages")
-        self.assertEqual(condition(gates, "Install Rust"), "matrix.components")
-        self.assertEqual(matrix["rust"]["components"], "clippy")
-        self.assertEqual(matrix["portable"]["components"], "rustfmt")
+        self.assertEqual(condition(gates, "Install Rust"), "matrix.lane != 'browser'")
         self.assertTrue({"mold", "sqlite3"} <= set(matrix["rust"]["packages"].split()))
         self.assertEqual(
             set(matrix["portable"]["packages"].split()), {"shellcheck", "shfmt"}

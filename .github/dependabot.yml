@@ -33,6 +33,11 @@ updates:
         applies-to: security-updates
         patterns:
           - "tree-sitter*"
+  # Keeps the rust-toolchain.toml pin moving, one pull request per release.
+  - package-ecosystem: rust-toolchain
+    directory: /
+    schedule:
+      interval: weekly
   - package-ecosystem: npm
     directory: /
     schedule:

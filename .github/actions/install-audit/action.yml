@@ -11,4 +11,4 @@ runs:
         name="cargo-audit-x86_64-unknown-linux-musl-v$CARGO_AUDIT_VERSION"
         ./scripts/install-release-binary.sh rustsec/rustsec \
           "cargo-audit/v$CARGO_AUDIT_VERSION" "$name.tgz" "$name/cargo-audit"
-        cargo audit --version | grep -qxF "cargo-audit-audit $CARGO_AUDIT_VERSION"
+        cargo-audit audit --version | grep -qxF "cargo-audit-audit $CARGO_AUDIT_VERSION"
