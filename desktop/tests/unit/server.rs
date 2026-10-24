@@ -21,6 +21,7 @@ fn the_server_is_started_on_the_data_dir_and_told_the_rest() {
         program: PathBuf::from("codetrial"),
         data_dir: PathBuf::from("/data"),
         addr: "127.0.0.1:3101".to_string(),
+        import_config: None,
     };
     let command = command(&launch);
     let args = command
@@ -52,6 +53,57 @@ fn the_server_is_started_on_the_data_dir_and_told_the_rest() {
     };
     assert_eq!(command.get_envs().count(), 1);
     assert_eq!(env("CODETRIAL_EXIT_WITH_STDIN").as_deref(), Some("1"));
+}
+
+#[test]
+fn a_cli_config_found_is_offered_to_the_server_to_import() {
+    let launch = Launch {
+        program: PathBuf::from("codetrial"),
+        data_dir: PathBuf::from("/data"),
+        addr: "127.0.0.1:3101".to_string(),
+        import_config: Some(PathBuf::from("/checkout/config/codetrial.env.local")),
+    };
+    let args = command(&launch)
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        args[args.len() - 2..],
+        ["--import-config", "/checkout/config/codetrial.env.local"]
+    );
+}
+
+/// Only the start folder is read, and in it `config/` comes before a bare file,
+/// as the CLI searches them.
+#[test]
+fn the_cli_config_is_looked_for_in_the_start_folder_and_nowhere_else() {
+    let root = temp_dir("cli-config");
+    let start = root.join("checkout").join("desktop");
+    std::fs::create_dir_all(&start).unwrap();
+    let above = root.join("checkout").join("codetrial.env.local");
+    let above_config = root
+        .join("checkout")
+        .join("config")
+        .join("codetrial.env.local");
+    std::fs::create_dir_all(above_config.parent().unwrap()).unwrap();
+    std::fs::write(&above, "").unwrap();
+    std::fs::write(&above_config, "").unwrap();
+    // A file in a folder above is another project's as far as the app knows.
+    assert_eq!(cli_config_in(&start), None);
+
+    let bare = start.join("codetrial.env.local");
+    let in_config = start.join("config").join("codetrial.env.local");
+    std::fs::create_dir_all(in_config.parent().unwrap()).unwrap();
+    std::fs::write(&bare, "").unwrap();
+    assert_eq!(cli_config_in(&start).as_deref(), Some(bare.as_path()));
+    std::fs::write(&in_config, "").unwrap();
+    assert_eq!(cli_config_in(&start).as_deref(), Some(in_config.as_path()));
+    // A folder of that name is not a config.
+    std::fs::remove_file(&in_config).unwrap();
+    std::fs::create_dir_all(&in_config).unwrap();
+    assert_eq!(cli_config_in(&start).as_deref(), Some(bare.as_path()));
+
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -90,6 +142,7 @@ fn launch_of(dir: &Path, program: PathBuf, addr: String) -> Launch {
         program,
         data_dir: dir.to_path_buf(),
         addr,
+        import_config: None,
     }
 }
 

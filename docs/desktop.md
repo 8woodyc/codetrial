@@ -21,7 +21,7 @@ A child process rather than a library call, because the server's startup lives
 in `src/main.rs` (config search, the Setup handover, every refusal it makes
 before serving) and moving that into the library would have been a rewrite of
 the file the CLI's behavior is pinned to. As a child it is the binary the CLI
-tests already cover, started with three things a launcher needs that the CLI
+tests already cover, started with four things a launcher needs that the CLI
 did not have. Each is decided in the server, so the app keeps no copy of the
 server's rules:
 
@@ -40,6 +40,22 @@ server's rules:
   write them, checked the way Setup checks them but not probed, and Setup is
   skipped. Nothing else from the environment goes in, and later launches read
   only the file.
+- `--import-config PATH`: a config Setup offers to use. The page names `PATH`
+  and the scheme and host of its LiveKit URL, and says whether it holds a
+  Google key, but never shows a key, the rest of the URL or a line it could not
+  read: any account on the machine can reach the port while Setup serves.
+  "Use these keys" has the server read `PATH` and save its Setup keys, checked
+  as typed ones are, and nothing else in it, so a CLI deployment's database
+  path or room prefix stays the CLI's. A `PATH` that cannot be used is named
+  with the reason instead. Offered, never applied by itself: a file found where
+  the app started could be any project's, and its LiveKit project is where
+  interviews would go, so it is used only when the page asks for it. Any
+  account on the machine that can reach the port while Setup serves can make
+  that request, as it can already post keys of its own. The app passes the CLI config in the folder it was started in,
+  `config/codetrial.env.local` or `codetrial.env.local`, and looks nowhere
+  else, so a file in a folder above is never offered. A development run from a
+  checkout's `desktop/` uses the file picker, or starts from the checkout's
+  root.
 - `--allowed-hosts LIST` (or `CODETRIAL_ALLOWED_HOSTS`): the `Host` values the
   server answers. A page on another origin can repoint its own name at
   127.0.0.1 and read a loopback server as same origin; the name it sends is
@@ -53,8 +69,8 @@ server's rules:
   This one stays in the environment even for `--data-dir`, because it is not
   configuration but a description of the pipe the launcher handed over.
 
-All three are ordinary server options, and a CLI install can use them the same
-way. `codetrial --help` lists the two flags, and the README's configuration
+All four are ordinary server options, and a CLI install can use them the same
+way. `codetrial --help` lists the three flags, and the README's configuration
 table lists `CODETRIAL_ALLOWED_HOSTS`.
 
 ## Where it keeps things
@@ -72,10 +88,14 @@ session signing key and a roaming profile is copied to a server:
 In it:
 
 - `codetrial.env.local`: the keys the Setup page takes, in plain text, the
-  same file the CLI writes. Edit it to change a key or add an option. To skip
-  Setup, start the app once from a terminal that exports the LiveKit keys (see
-  `--data-dir` above); an app opened from the Dock, Finder or the Start menu
-  sees no shell exports.
+  same file the CLI writes. Edit it to change a key or add an option. The first
+  launch writes it from exported LiveKit keys without asking (see `--data-dir`
+  above); otherwise Setup asks, and offers to use a CLI config found in the
+  folder the app was started in (see `--import-config`). An app opened from the Dock,
+  Finder or the Start menu sees no shell exports and starts where no CLI config
+  is, so Setup's "Import from a config file" button is the way to bring one in:
+  it fills the form from a file you choose. Either way it asks once: later
+  launches read this file.
 - `codetrial.db`: accounts and saved reports.
 - `session-secret`: the key session cookies are signed with, which the server
   makes on its first `--data-dir` launch when the config file sets no

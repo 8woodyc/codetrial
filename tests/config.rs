@@ -2047,3 +2047,24 @@ fn compression_requires_a_valid_pair_and_preserves_provider_defaults() {
         assert!(!error.invalid_entries.is_empty());
     }
 }
+
+/// The message quotes the line that was refused, which is how an operator
+/// finds it, not the one after it: the parser counts lines from 1 and the
+/// quote is read back by that count.
+#[test]
+fn an_invalid_config_line_is_named_by_number_and_never_quoted() {
+    let path =
+        std::env::temp_dir().join(format!("codetrial-invalid-line-{}.env", std::process::id()));
+    std::fs::write(
+        &path,
+        "# comment\nLIVEKIT_URL=wss://a\n  not a setting  \nNEXT=1\n",
+    )
+    .unwrap();
+    let error = codetrial::config::read_config_file(&path).unwrap_err();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(
+        error,
+        format!("{}: line 3 is not KEY=value", path.display())
+    );
+    assert!(!error.contains("not a setting"), "{error}");
+}
