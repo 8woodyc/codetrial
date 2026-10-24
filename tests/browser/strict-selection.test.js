@@ -11,6 +11,7 @@ import {
   DEFAULT_RUNTIME_CONFIG,
   launchChromium,
   memoryStorage,
+  pauseClock,
   read,
   startStaticServer,
 } from "./source.js";
@@ -252,6 +253,7 @@ for (const action of ["restore", "edit", "choose", "run", "end"]) {
     t.after(() => releaseJudge());
     const context = await browser.newContext();
     t.after(() => context.close());
+    if (action === "end") await context.clock.install();
     await context.route("**/runtime-config.js", (route) =>
       route.fulfill({
         contentType: "text/javascript",
@@ -297,6 +299,10 @@ for (const action of ["restore", "edit", "choose", "run", "end"]) {
         "Running...",
       );
     } else if (action === "end") {
+      // With no interviewer here, the offline summary replaces the ending
+      // overlay on a timer, and the report phase refuses language changes on
+      // its own. The paused clock keeps the judge landing during the ending.
+      await pauseClock(page);
       await page.locator("#end").click();
       await page.locator("#ending-overlay:not([hidden])").waitFor();
     } else {
@@ -308,6 +314,8 @@ for (const action of ["restore", "edit", "choose", "run", "end"]) {
         !document.querySelector('#language-select option[value="c"]').disabled,
     );
     assert.equal(await page.locator("#language-select").inputValue(), expected);
+    if (action === "end")
+      assert.equal(await page.locator("#ending-overlay").isVisible(), true);
     if (action === "restore")
       assert.match(
         await page.locator("#editor").inputValue(),
