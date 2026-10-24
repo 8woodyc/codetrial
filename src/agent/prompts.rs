@@ -83,6 +83,29 @@ call `log_hint` with `requested` false."#
     )
 }
 
+/// Said only when the candidate opted into leading the Algorithm and Coding
+/// steps themselves; empty otherwise, like every policy here with nothing to
+/// say. Scoped to those two steps because `silence_nudge` and
+/// `board_silence_nudge` are the ones that volunteer the next step on a
+/// stall there; the other four steps already wait on the candidate. The
+/// stall itself is answered under `candidate_led_nudge`, said fresh in that
+/// system event rather than relying on this policy alone to still hold by
+/// then.
+fn candidate_led_policy(enabled: bool) -> String {
+    if !enabled {
+        return String::new();
+    }
+    "CANDIDATE-LED CODING — the candidate opted to lead the Algorithm and Coding \
+steps. During those two steps only, do not propose the next step yourself, even \
+when they stall: ask an open question such as \"What are you thinking of doing \
+next?\" instead, and wait for them to state one. You may still answer a direct \
+clarifying question about the problem statement as flow 4 says; flow 4's \
+turn-back rule for approach checks and flow 5's hint and no-code rules still \
+apply unchanged. This does not change Repeat, Example, Test, or Optimizations, \
+where you lead as usual."
+        .to_string()
+}
+
 /// Every prompt that has to honour a declined behavioral probe names it in
 /// these words, so the live interviewer, its recovery and timer briefings,
 /// and the report reviewer cannot drift into different ideas of what counts
@@ -368,6 +391,7 @@ pub fn build_instructions_for_plan(
         interview_mode,
         code_execution_disabled,
         example_drawing_enabled,
+        candidate_led_enabled,
     } = options;
     let metadata = problem.question_metadata();
     let [_, optimal_point, pitfalls_point] = metadata.expected_discussion_points;
@@ -565,6 +589,7 @@ policies, which come out of the conversation as they would with a person."
     };
     let policies = [
         reacto_policy(interview_mode, code_execution_disabled),
+        candidate_led_policy(candidate_led_enabled),
         star_round_policy,
         disclosure_policy.to_string(),
         profile_policy(profile),
@@ -1863,6 +1888,28 @@ pub fn silence_nudge(state: &RuntimeState, evidence: &str, excerpt: Option<&str>
         "ask for whichever of their understanding, example, or planned algorithm they have not explained."
     };
 
+    // Repeat, Example and Algorithm recorded with no code yet means the stall
+    // is in Coding, not in an earlier step, as far as accumulated evidence can
+    // say — `phases_evidenced` only sees that each phase has evidence somewhere
+    // in the session, not that the live conversation has left Example for good.
+    // A candidate can cover all three and then return to Example, with a
+    // concrete concern, before touching the editor, so this stays a scoped
+    // conditional (`candidate_led_scoped_question`) rather than an outright
+    // substitution for `unwritten`: the model, which can see whether the stall
+    // is actually in Algorithm or Coding, decides, and a stall still in Example
+    // gets exactly what it would without candidate-led enabled. The trailing
+    // append below is skipped whenever a branch already carries that scoped
+    // clause itself, which is every `!written` branch, to avoid doubling it up.
+    let candidate_led_certain = state.candidate_led_enabled
+        && super::phases_evidenced(
+            state,
+            &[
+                super::FrameworkPhase::Repeat,
+                super::FrameworkPhase::Example,
+                super::FrameworkPhase::Algorithm,
+            ],
+        );
+
     // The server knows whether the editor holds edits, so the nudge says which
     // rather than offering both branches: asked to choose, the model read the
     // editor first, a tool round in front of the question. Only an editor
@@ -1871,16 +1918,67 @@ pub fn silence_nudge(state: &RuntimeState, evidence: &str, excerpt: Option<&str>
     let branch = if written {
         format!(" {with_code}")
     } else if super::code_untouched(state) {
-        format!(" They have not written code yet: {unwritten}")
+        if candidate_led_certain {
+            format!(
+                " They have not written code yet: {}{unwritten}",
+                candidate_led_scoped_question()
+            )
+        } else {
+            format!(" They have not written code yet: {unwritten}")
+        }
+    } else if candidate_led_certain {
+        format!(
+            " {}if the editor holds none of their code, {unwritten} Otherwise: {with_code}",
+            candidate_led_scoped_question()
+        )
     } else {
         format!(" If the editor holds none of their code, {unwritten} Otherwise: {with_code}")
     };
     format!(
-        "[SYSTEM EVENT] Silent and not typing for over {SILENCE_THRESHOLD_S:.0} seconds.{}{}Flow 2: ONE short question about their current decision.{branch} Do not restart them, restate the problem, supply an example, suggest an approach or reveal a bug.{}",
+        "[SYSTEM EVENT] Silent and not typing for over {SILENCE_THRESHOLD_S:.0} seconds.{}{}Flow 2: ONE short question about their current decision.{branch} Do not restart them, restate the problem, supply an example, suggest an approach or reveal a bug.{}{}",
         evidence_section(evidence),
         code_access(excerpt),
         behavioral_ban(state),
+        if candidate_led_certain && !written {
+            ""
+        } else {
+            candidate_led_nudge(state.candidate_led_enabled)
+        },
     )
+}
+
+/// The scoped clause `candidate_led_certain` branches lead with instead of
+/// asking `CANDIDATE_LED_OPEN_QUESTION` outright: see the comment on
+/// `candidate_led_certain` above for why evidence alone cannot earn the
+/// unconditional form. Ends with a lowercase-ready "Otherwise, " so a caller
+/// appends its own fallback text directly.
+fn candidate_led_scoped_question() -> String {
+    format!(
+        "if this stall is in the Algorithm or Coding step, {CANDIDATE_LED_OPEN_QUESTION} Otherwise, "
+    )
+}
+
+/// The open question asked, scoped by `candidate_led_scoped_question` or by
+/// `candidate_led_nudge`, in place of naming the next step.
+const CANDIDATE_LED_OPEN_QUESTION: &str = "ask what they are thinking of doing next \
+without naming or steering toward one yourself, and wait for them to state it.";
+
+/// Said by every silence nudge, editor and board alike, when the candidate
+/// opted to lead the Algorithm and Coding steps: the fresh instruction this
+/// stall is answered under, where it has to hold, not only the system prompt
+/// set once at the start of the session. Appended, rather than scoped inline
+/// like `candidate_led_scoped_question`, for the branches in `silence_nudge`
+/// that never name a next step to replace (the `written` branch, where code
+/// can exist in Test or Optimizations too) — there the model needs the scope
+/// stated once, not woven into text that already stands on its own.
+fn candidate_led_nudge(enabled: bool) -> &'static str {
+    if enabled {
+        " If this stall is in the Algorithm or Coding step, ask what they are \
+thinking of doing next without naming or steering toward one yourself, and \
+wait for them to state it; outside those two steps, ask as above."
+    } else {
+        ""
+    }
 }
 
 /// The silence nudge for a board, which carries no snapshot of its own.
@@ -1889,15 +1987,16 @@ pub fn silence_nudge(state: &RuntimeState, evidence: &str, excerpt: Option<&str>
 /// quoted, and the image the interviewer already has is the one it would have
 /// sent. What is left to say is how much is on it, which is what decides
 /// whether the question should be about the drawing or about the problem.
-pub fn board_silence_nudge(evidence: &str, strokes: u32) -> String {
+pub fn board_silence_nudge(evidence: &str, strokes: u32, candidate_led_enabled: bool) -> String {
     let board = if strokes == 0 {
         "The board is still empty.".to_string()
     } else {
         format!("The board holds {strokes} strokes, and you have the latest image of it.")
     };
     format!(
-        "[SYSTEM EVENT] Silent and not drawing for over {SILENCE_THRESHOLD_S:.0} seconds.{}{board}\nFlow 2: ONE short question about their current decision. If the board is empty, ask for whichever of their understanding, example, or planned algorithm they have not explained; if there is a drawing, ask them to narrate or trace it, and refer to a part of it only after looking at the image. Do not restart them, restate the problem, supply an example, suggest an approach or reveal a bug.{BEHAVIORAL_BAN}",
-        evidence_section(evidence)
+        "[SYSTEM EVENT] Silent and not drawing for over {SILENCE_THRESHOLD_S:.0} seconds.{}{board}\nFlow 2: ONE short question about their current decision. If the board is empty, ask for whichever of their understanding, example, or planned algorithm they have not explained; if there is a drawing, ask them to narrate or trace it, and refer to a part of it only after looking at the image. Do not restart them, restate the problem, supply an example, suggest an approach or reveal a bug.{BEHAVIORAL_BAN}{}",
+        evidence_section(evidence),
+        candidate_led_nudge(candidate_led_enabled),
     )
 }
 
