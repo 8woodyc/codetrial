@@ -469,6 +469,51 @@ push_main()
     printf 'refs/heads/main %s refs/heads/main %040d\n' "$(git rev-parse HEAD)" 0 \
         | "$hooks/pre-push" "$1" "$2"
 }
+
+# A topic head the review skill has not recorded is pushed with a note, never
+# refused; one it recorded is pushed without. A checkout without the skill, as
+# every push above, gets no note at all.
+absent "no note without the review skill" "$work/last.out" "no review on record"
+mkdir -p .claude/skills/codetrial-review "$(git rev-parse --git-common-dir)/codetrial-review"
+: > .claude/skills/codetrial-review/SKILL.md
+git commit -q --allow-empty -m "Change the topic further" \
+    -m "A head nobody has reviewed yet, pushed to the same topic branch."
+expect 0 "an unreviewed topic head is pushed" git push -q fork HEAD:refs/heads/topic
+contains "the push says the head has no review" "$work/last.out" "no review on record"
+git commit -q --allow-empty -m "Change the topic once more" \
+    -m "A head the review skill recorded before it was pushed."
+git rev-parse HEAD >> "$(git rev-parse --git-common-dir)/codetrial-review/reviewed"
+expect 0 "a reviewed topic head is pushed" git push -q fork HEAD:refs/heads/topic
+absent "a reviewed head gets no note" "$work/last.out" "no review on record"
+git commit -q --allow-empty -m "Change the topic for the note cases" \
+    -m "An unreviewed head for the pushes that must not get a note."
+
+expect 0 "an unreviewed head pushed to upstream's main" \
+    push_main upstream https://github.com/sysprog21/codetrial
+absent "main gets no note" "$work/last.out" "no review on record"
+git tag -a -m "A tag of an unreviewed head" unreviewed-tag
+expect 0 "an unreviewed head pushed as a tag" \
+    git push -q fork refs/tags/unreviewed-tag
+absent "a tag gets no note" "$work/last.out" "no review on record"
+expect 0 "two unreviewed topic heads in one push" \
+    git push -q fork HEAD:refs/heads/topic HEAD:refs/heads/second
+contains "the push names the missing review" "$work/last.out" "no review on record"
+if [ "$(grep -c "no review on record" "$work/last.out")" -ne 1 ]; then
+    fail "one push says it once"
+fi
+cases=$((cases + 1))
+git commit -q --allow-empty --no-verify -m "wip: skipped the hook again"
+expect 1 "a refused topic push" git push -q fork HEAD:refs/heads/topic
+absent "a refused push gets no note" "$work/last.out" "no review on record"
+
+# One refused ref among several: the unreviewed head beside it is not advised on
+# either, since the push as a whole is not going anywhere.
+expect 1 "a refused topic push beside an unreviewed one" \
+    git push -q fork HEAD:refs/heads/topic HEAD~1:refs/heads/third
+absent "a push with a refused ref gets no note" "$work/last.out" "no review on record"
+git reset -q --hard HEAD~1
+rm -rf .claude
+
 expect 0 "new work pushed to upstream's main" \
     push_main upstream https://github.com/sysprog21/codetrial
 

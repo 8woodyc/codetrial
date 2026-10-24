@@ -1,0 +1,55 @@
+# Which rule files a changed path loads, read by review-bundle.sh: a shell case
+# pattern (so * crosses a slash), then one rule file in this directory. Every
+# matching line counts. general.md and false-positives.md load for every change
+# and are not listed. A path no line matches is listed by the bundle as
+# unruled: read against the general rules only, which the report says. Each
+# path a rule's "Applies to" line names is routed to that rule's file here, and
+# tests/test_skill_scripts.py holds the two to each other.
+src/livekit* room.md
+src/gemini* room.md
+src/gemini* agent.md
+src/dispatch.rs room.md
+src/main.rs room.md
+src/config.rs room.md
+src/web/setup.rs room.md
+src/web/token.rs room.md
+src/agent* agent.md
+src/agent/report.rs judge.md
+src/runtime.rs agent.md
+src/* server.md
+src/web/setup.rs browser.md
+src/web/token.rs browser.md
+src/livekit/report.rs browser.md
+src/web/setup.rs styles.md
+docs/interview-contract-versions.md agent.md
+docs/provider-cost-and-degradation.md room.md
+docs/livekit-connection-troubleshooting.md room.md
+tests/golden/* agent.md
+tests/browser/replay-render.test.js agent.md
+tests/browser/lib.test.js agent.md
+tests/browser/render.test.js agent.md
+web/lib.js agent.md
+web/lib.js server.md
+web/render.js server.md
+web/render.js judge.md
+web/app.js judge.md
+web/compiler-explorer.js judge.md
+web/runners.js judge.md
+web/problems/* judge.md
+web/judges/* judge.md
+problem-bank/* judge.md
+scripts/gen-problem* judge.md
+scripts/problem_bank/* judge.md
+web/*.js browser.md
+web/*.html browser.md
+web/*.html styles.md
+web/*.css styles.md
+tests/* tests.md
+scripts/test.sh tests.md
+scripts/browser-check.cjs tests.md
+.github/* ci.md
+.cargo/* ci.md
+build.rs ci.md
+Makefile ci.md
+scripts/* ci.md
+.claude/skills/* ci.md

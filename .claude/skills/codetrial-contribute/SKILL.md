@@ -159,7 +159,13 @@ diff and actual test results. Do not paste a conversation transcript.
 Use [codetrial-verify](../codetrial-verify/SKILL.md) for the appropriate validation
 and [codetrial-web](../codetrial-web/SKILL.md) when browser or wire behavior is
 involved, [codetrial-livekit](../codetrial-livekit/SKILL.md) when the room or
-the LiveKit crates are. Report commands and outcomes, including failures and skipped or unrun
+the LiveKit crates are. Then review the committed branch with
+[codetrial-review](../codetrial-review/SKILL.md) before the description is
+drafted: it reads what the gate cannot (the accepted scope, the contracts in
+`docs/`, what maintainers already ruled on the same files), and a finding fixed
+now costs nobody a review round. Fix what it confirms, or say in the
+description why a finding does not apply; its report is never pasted into the
+PR. Report commands and outcomes, including failures and skipped or unrun
 checks with reasons. Local success is not evidence that remote CI passed, and
 a PR is not ready for review until CI is green.
 
@@ -284,6 +290,12 @@ the issue, with the user's approval, if a maintainer has not. An open issue nobo
 everyone's list.
 
 ## Answer a review
+
+Before pushing the answer, review the fix with
+[codetrial-review](../codetrial-review/SKILL.md) on the local branch, with the
+head the maintainer reviewed as its base (`review-bundle.sh --local <dir>
+<that sha>`), so it reads exactly the new commits and catches a fix that breaks
+something else before the maintainer has to.
 
 Fetching every thread, including long ones, and rechecking the head after a
 push, and where failed checks are diagnosed, are in

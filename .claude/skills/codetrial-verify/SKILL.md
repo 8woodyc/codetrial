@@ -1,6 +1,6 @@
 ---
 name: codetrial-verify
-description: How a CodeTrial change is validated - scripts/test.sh as the credential-free gate, which generated artifacts have to be regenerated before it passes, the checks that need credentials or a browser and therefore sit outside it, the browser and mutation lanes, and how to bring the server up for a live look without taking the maintainer's port. Use before calling work done, when diagnosing failed GitHub Actions checks, when a gate fails on drift rather than on a bug, when adding a test, when a fix needs to be seen working in the app, when reviewing a diff or an open pull request against the contracts in docs/ (review.md), or after editing a skill or anything a skill names (scripts/check-skill-refs.py).
+description: How a CodeTrial change is validated - scripts/test.sh as the credential-free gate, which generated artifacts have to be regenerated before it passes, the checks that need credentials or a browser and therefore sit outside it, the browser and mutation lanes, and how to bring the server up for a live look without taking the maintainer's port. Use before calling work done, when diagnosing failed GitHub Actions checks, when a gate fails on drift rather than on a bug, when adding a test, when a fix needs to be seen working in the app, or after editing a skill or anything a skill names (scripts/check-skill-refs.py). Reviewing a diff or a pull request is codetrial-review.
 ---
 
 # Validating a CodeTrial change
@@ -205,7 +205,9 @@ of reported as passed. It does not build, test or check generated-artifact
 drift; that is what the gate is for. `scripts/git-commit-msg.sh` holds the message to the
 rules it prints with `--rules`, `scripts/git-prepare-commit-msg.sh` splices the
 template above a `commit -v` scissors line, and `scripts/git-pre-push.sh`
-replays the rules over commits a rebase or an amend rewrote after the fact.
+replays the rules over commits a rebase or an amend rewrote after the fact, and
+notes a topic head [codetrial-review](../codetrial-review/SKILL.md) has not
+recorded, without refusing it.
 `make hooks` installs every `scripts/git-*.sh`, so adding one there installs
 itself. CI runs the same list over
 a pull request's own commits, so the rules bind someone who never installed the
@@ -286,6 +288,7 @@ rebase or amend:
 | tests pass | `./scripts/test.sh` at this head, its skips read | an earlier run |
 | CI is green | `gh pr checks` passing, and each run's `headSha` from `gh run view` at this head | a local pass, or a run on an older head |
 | review addressed | each open thread reread at this head | a pushed commit |
+| reviewed | [codetrial-review](../codetrial-review/SKILL.md) at this head, its confirmed findings fixed or answered | a review of an older head, or the gate passing |
 | the agent did it | `git diff` shows the change | the agent's summary |
 
 "Should", "probably" and "seems" go out only with the check that would settle
@@ -294,7 +297,7 @@ them.
 ## Reviewing a change
 
 A passing gate is not a review; reviewing a diff, one's own or an open pull
-request, follows [review.md](review.md).
+request, is [codetrial-review](../codetrial-review/SKILL.md).
 
 A skill names gates, lanes, scripts, flags, make targets and documents, and
 each one can move. The `skill-refs` gate runs `scripts/check-skill-refs.py`,

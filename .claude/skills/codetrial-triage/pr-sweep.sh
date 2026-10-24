@@ -618,7 +618,7 @@ wait "$fetching" || true
 unread=$(while read -r n; do [ -f "$work/$n.diff" ] || echo "$n"; done \
     < "$work/prs" | jq -s .)
 collide=$(find "$work" -name '*.diff' -exec awk \
-    "$(cat "$(dirname "$0")/../codetrial-verify/diff-path.awk")"'
+    "$(cat "$(dirname "$0")/../codetrial-review/diff-path.awk")"'
     function flush() {
         if (first != "" && path in shared)
             print pr "\t" path "\t" first "\t" last "\t" ctx

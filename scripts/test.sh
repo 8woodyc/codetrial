@@ -306,11 +306,11 @@ vendor_patches_gate()
 ruff_gate()
 {
     if ! command -v ruff > /dev/null 2>&1; then
-        skip "ruff: installing it lints the Python under scripts/ and tests/"
+        skip "ruff: installing it lints the Python under scripts/, tests/ and the skills"
         return 0
     fi
 
-    (cd "$ROOT" && ruff check scripts tests)
+    (cd "$ROOT" && ruff check scripts tests .claude/skills)
 }
 
 # `sh -n` says whether a script parses. shellcheck says whether it means what it
@@ -487,6 +487,7 @@ gate interview-behavior-script-tests unittest_gate "$ROOT/tests/test_interview_b
 # like any other, against a fake gh and a scratch repository.
 gate skill-refs "$PYTHON" "$ROOT/scripts/check-skill-refs.py"
 gate skill-scripts-tests unittest_gate "$ROOT/tests/test_skill_scripts.py"
+gate review-memory-tests unittest_gate "$ROOT/tests/test_review_memory.py"
 gate --lane browser browser-tests browser_tests static
 gate eslint eslint_gate
 gate --lane all cargo-audit cargo_audit_gate

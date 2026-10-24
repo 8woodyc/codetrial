@@ -104,8 +104,13 @@
   {
     "q": "review PR #430 against the docs contracts and tell me what blocks it",
     "expect": [
-      "codetrial-verify",
-      "codetrial-triage"
+      "codetrial-review"
+    ]
+  },
+  {
+    "q": "review PR 123",
+    "expect": [
+      "codetrial-review"
     ]
   },
   {
@@ -209,6 +214,54 @@
     "q": "i want to cache the finished session and regenerate the report later to save tokens, any objection?",
     "expect": [
       "codetrial-conventions"
+    ]
+  },
+  {
+    "q": "review my branch before i push, does anything break a contract in docs/?",
+    "expect": [
+      "codetrial-review"
+    ]
+  },
+  {
+    "q": "the author pushed again to PR #452, re-review just what changed since my last review",
+    "expect": [
+      "codetrial-review"
+    ]
+  },
+  {
+    "q": "cross-check PR #449 with agy and codex too, then post the inline comments once i ok them",
+    "expect": [
+      "codetrial-review"
+    ]
+  },
+  {
+    "q": "refresh the review rules from the PR review threads of the last two months",
+    "expect": [
+      "codetrial-review"
+    ]
+  },
+  {
+    "q": "did the maintainers already decide how many reconnect retries we allow? find the old discussion before i review this PR",
+    "expect": [
+      "codetrial-review"
+    ]
+  },
+  {
+    "q": "refresh the project memory of PR and issue discussions, it hasn't been polled since last week",
+    "expect": [
+      "codetrial-review"
+    ]
+  },
+  {
+    "q": "my branch is committed, check it for bugs before i open the pull request",
+    "expect": [
+      "codetrial-review"
+    ]
+  },
+  {
+    "q": "the push said my head has no review on record, what should i run",
+    "expect": [
+      "codetrial-review"
     ]
   },
   {

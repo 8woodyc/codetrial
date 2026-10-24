@@ -42,6 +42,15 @@ upstream=$(git remote -v \
 to_upstream=0
 printf '%s\n' "$url" | grep -Eiq "$upstream_url" && to_upstream=1
 
+# A topic branch about to become a pull request is the moment a review is
+# cheapest, so a head the codetrial-review skill has not recorded gets one line
+# saying so. It never refuses the push: the review is advice, the rules above
+# are not. Only where the skill exists, since a checkout without it has nothing
+# to run.
+reviewed=$(git rev-parse --git-common-dir)/codetrial-review/reviewed
+review_skill=$(git rev-parse --show-toplevel)/.claude/skills/codetrial-review/SKILL.md
+note=
+
 while read -r local_ref local_sha remote_ref remote_sha; do
     [ -n "${local_ref:-}" ] || continue
     [ "$local_sha" != "$zero" ] || continue
@@ -78,11 +87,31 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         continue
     }
 
-    [ -n "$commits" ] || continue
-    printf '%s\n' "$commits" | "$script_dir/check-commit-log.sh" || {
+    # No new commit to judge (a head already published, or one only a merge
+    # moved) still gets the review note below.
+    if [ -n "$commits" ] \
+        && ! printf '%s\n' "$commits" | "$script_dir/check-commit-log.sh"; then
         echo "Push rejected for $local_ref -> $remote_ref." >&2
         failed=1
-    }
+        continue
+    fi
+
+    # A topic branch only: main has its own rule above, and a tag never heads a
+    # pull request.
+    case $remote_ref in
+        refs/heads/main) ;;
+        refs/heads/*)
+            if [ -z "$note" ] && [ -e "$review_skill" ] \
+                && ! grep -qx "$local_sha" "$reviewed" 2> /dev/null; then
+                note="Note: $(git rev-parse --short "$local_sha") has no review on record;"
+                note="$note in Claude Code, /codetrial-review checks it before a pull request does."
+            fi
+            ;;
+    esac
 done
+
+# Said once the whole push is judged, so a push refused over another ref does
+# not also advise a review of a head that is not going anywhere.
+[ "$failed" -ne 0 ] || [ -z "$note" ] || echo "$note" >&2
 
 exit "$failed"

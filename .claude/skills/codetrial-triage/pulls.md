@@ -62,8 +62,8 @@ and these actions go on the confirmed list instead.
   'pull_request_target\|workflow_run' .github/workflows/*` prints nothing. When
   it prints something, every approval goes on the confirmed list. A run whose
   `touches_workflows` is true is never approved under this rule: it goes on
-  the confirmed list, with its diff read first against the workflow checklist
-  in [review.md](../codetrial-verify/review.md#3-what-the-gate-cannot-see)
+  the confirmed list, with its diff read first against the workflow rules
+  in [ci.md](../codetrial-review/rules/ci.md#keep-what-makes-a-fork-pr-safe-to-run)
   and the result stated there, whoever wrote it. Runner time
   still matters: skim the diff, and move the approval to the confirmed list when
   code the build or tests execute does something the title does not explain,
@@ -355,7 +355,7 @@ prerequisite commits, or mark it ready. Compare overlapping PRs by behavior as
 well as files; name the shared mechanism and the integration check needed by
 whichever lands second. Read current inline threads and failing job logs before
 calling a PR addressed. Reviewing the diff itself follows
-[review.md](../codetrial-verify/review.md). The shared
+[codetrial-review](../codetrial-review/SKILL.md). The shared
 [collaboration reference](../codetrial-contribute/collaboration.md) gives the
 maintainer examples and CI investigation criteria. This review grants no extra
 write permissions beyond the sweep actions above.
@@ -454,24 +454,26 @@ the PR, so it goes on the confirmed list.
 ## Review the queue
 
 `review` is the queue for "review what is waiting on me". Each PR in it gets the
-whole of [review.md](../codetrial-verify/review.md), and they are independent,
-so run one read-only agent per PR in parallel rather than reading them in
-turn. Each agent gets the PR number, its head, the issue it closes, the
-scratch directory, the files it may write there (`pr-$pr-*`), and four rules:
-read-only, no posting, cite rather than repeat a finding already in a thread,
-and return the checklist, the findings by level with `file:line` at the head,
-the commit series, and what was not checked. Name what is particular to each PR in its prompt: the docs/
+whole of [codetrial-review](../codetrial-review/SKILL.md) through its step
+5, and they are independent, so run one read-only agent per PR in parallel
+rather than reading them in turn. Each agent gets the PR number, its head, the
+issue it closes, the scratch directory, the files it may write there
+(`review-$pr/` and `pr-$pr-*`), and four rules: read-only, no posting, cite
+rather than repeat a finding already in a thread, and return the checklist,
+the verified findings by level with `file:line` at the head, the questions,
+the commit series, and the coverage. A PR whose earlier review by this account
+is on an older head gets that head as the bundle's `--since`. Name what is particular to each PR in its prompt: the docs/
 owner it likely touches, a sibling PR on the same code, an issue that will
 conflict with it. Verify each finding the report leans on in the code before
 drafting it; an agent's summary is a lead, not evidence.
 
 Merge the reports into one local summary, then draft one review per PR under
-review.md's step 4. Leave out of the drafts what is the maintainer's decision
+codetrial-review's step 6. Leave out of the drafts what is the maintainer's decision
 rather than the author's work, such as a behavior dropped outside the accepted
 scope or which of two sibling PRs wins, and list those separately for the
 user. Record each PR's `updatedAt` from `prs` when showing the drafts, and post
 each confirmed review with `post-review.sh` in
-[codetrial-verify](../codetrial-verify/review.md#4-report), which refuses when
+[codetrial-review](../codetrial-review/SKILL.md#6-post), which refuses when
 the head or `updatedAt` moved.
 
 ## Apply the comments

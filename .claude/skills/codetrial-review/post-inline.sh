@@ -1,7 +1,8 @@
 #!/bin/sh
 # Post a sweep review's inline comments at the head they were read at, as one
 # review so the author gets one notification, not one per finding. review-prs.md
-# describes the draft and why a sweep posts it without a confirmation.
+# describes the draft and why a sweep posts it without a confirmation; the
+# codetrial-review skill describes the finding it carries.
 #
 # Usage: post-inline.sh <pr> <draft.json> [repo]
 #        Prints the review's URL, or each comment's when it fell back to one
@@ -10,11 +11,12 @@
 #        again before every post, so a push during the reads posts nothing; 1
 #        when GitHub refused a comment; 2 on bad arguments.
 #
-# The draft is {sha, comments: [{path, line, start_line?, body}], summary}. Two
-# kinds of finding are dropped rather than posted. One outside the diff, which
-# GitHub refuses with 422; review-anchors.sh decides that. And one inside a hunk
-# cubic already commented on at this head: that region has a review thread, and
-# a second voice on it is noise, while the rest of the same file still gets
+# The draft is {sha, comments: [{path, line?, start_line?, quote?, body}],
+# summary}. review-anchors.sh places each comment, by its quote when the quote
+# is found once, else by its line. Two kinds of finding are dropped rather than
+# posted. One outside the diff, which GitHub refuses with 422. And one inside a
+# hunk cubic already commented on at this head: that region has a review thread,
+# and a second voice on it is noise, while the rest of the same file still gets
 # read. Only a cubic comment made at this head claims its hunk: an outdated one
 # keeps its old line number, which may now sit in another hunk. A finding the
 # account already posted at this head is dropped too, so a rerun after a refused
@@ -56,22 +58,30 @@ me=$(gh api user --jq .login)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-# Only the right side: a finding is about code the PR leaves behind.
-jq --arg sha "$sha" '{commit_id: $sha, body: "", comments: [.comments[]
-    | {path, line, side: "RIGHT", body}
-      + (if .start_line then {start_line, start_side: "RIGHT"} else {} end)]}' \
-    "$draft" > "$work/payload.json"
-sh "$(dirname "$0")/../codetrial-verify/review-anchors.sh" "$pr" \
-    "$work/payload.json" "$repo" 2> /dev/null > "$work/anchored.json" || {
+# The diff is read once, for the anchors and for the hunk spans below; a push
+# after this read is caught by same_head before anything is posted.
+gh pr diff "$pr" --repo "$repo" > "$work/pr.diff" < /dev/null || {
     echo "post-inline.sh: #$pr diff could not be read; nothing posted" >&2
     exit 1
 }
 
+# Only the right side: a finding is about code the PR leaves behind.
+jq --arg sha "$sha" '{commit_id: $sha, body: "", comments: [.comments[]
+    | {path, line, side: "RIGHT", body}
+      + (if .start_line then {start_line, start_side: "RIGHT"} else {} end)
+      + (if .quote then {quote} else {} end)]}' \
+    "$draft" > "$work/payload.json"
+# Its counts are not wanted here, but its refusal is: shown, with its exit.
+REVIEW_DIFF=$work/pr.diff sh "$(dirname "$0")/review-anchors.sh" "$pr" \
+    "$work/payload.json" "$repo" 2> "$work/anchors.err" > "$work/anchored.json" || {
+    status=$?
+    cat "$work/anchors.err" >&2
+    exit $status
+}
+
 # Each hunk's new-side span, one tab-separated "path first last" per row; a hunk
 # adding nothing on the right has no span.
-diff=$(gh pr diff "$pr" --repo "$repo")
-printf '%s\n' "$diff" \
-    | awk "$(cat "$(dirname "$0")/../codetrial-verify/diff-path.awk")"'
+awk "$(cat "$(dirname "$0")/diff-path.awk")"'
     /^diff --git / { header = 1; path = ""; next }
     header && /^\+\+\+ / { path = header_path($0); next }
     /^@@ / && path != "/dev/null" {
@@ -80,7 +90,7 @@ printf '%s\n' "$diff" \
         count = n > 1 ? r[2] + 0 : 1
         if (count > 0) print path "\t" r[1] "\t" (r[1] + count - 1)
     }
-' > "$work/hunks"
+' "$work/pr.diff" > "$work/hunks"
 
 # Sorts the findings against the review threads as they stand, leaving those to
 # post in $work/post. Run again after a refused review, since a review that
@@ -92,7 +102,7 @@ sort_findings()
         > "$work/threads.json" < /dev/null
     jq -n --slurpfile anchored "$work/anchored.json" \
         --slurpfile threads "$work/threads.json" --arg sha "$sha" --arg me "$me" \
-        --rawfile hunks "$work/hunks" --slurpfile payload "$work/payload.json" '
+        --rawfile hunks "$work/hunks" '
       [$hunks | split("\n")[] | select(length > 0) | split("\t")
         | {path: .[0], first: (.[1] | tonumber), last: (.[2] | tonumber)}] as $spans
       | def span: {path, first: (.start_line // .line), last: .line};
@@ -105,14 +115,11 @@ sort_findings()
           and .path == $c.path and .line == $c.line and .body == $c.body);
       def claimed: span as $s
           | any($spans[]; . as $h | overlaps($h; $s) and any($cubic[]; overlaps($h; .)));
-      ($anchored[0].comments) as $inline
-      | def anchored: . as $c | any($inline[]; .path == $c.path and .line == $c.line
-          and .start_line == $c.start_line);
-      $payload[0].comments[]
-      | if anchored | not then {drop: "outside the diff"} + .
-        elif posted then {drop: "already posted at this head"} + .
-        elif claimed then {drop: "in a hunk cubic already commented on"} + .
-        else . end
+      ($anchored[0].moved[] | {drop: "outside the diff"} + .),
+      ($anchored[0].comments[]
+        | if posted then {drop: "already posted at this head"} + .
+          elif claimed then {drop: "in a hunk cubic already commented on"} + .
+          else . end)
     ' > "$work/sorted.json"
     jq -c 'select(.drop | not)' "$work/sorted.json" > "$work/post"
 }
@@ -135,7 +142,7 @@ if [ -s "$work/post" ]; then
         sort_findings
     fi
 fi
-jq -r 'select(.drop) | "post-inline.sh: #'"$pr"' dropped \(.path):\(.line), \(.drop)"' \
+jq -r 'select(.drop) | "post-inline.sh: #'"$pr"' dropped \(.path):\(.line // "unplaced"), \(.drop)"' \
     "$work/sorted.json" >&2
 while IFS= read -r comment; do
 

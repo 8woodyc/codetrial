@@ -175,6 +175,13 @@ the reviewer little. Use it only beside a `Closes #N`, or in a body that already
 states the motivation and the implementation in full, so the reference adds
 context rather than standing in for it.
 
+Working with Claude Code, run `/codetrial-review` on the committed branch
+before opening the pull request. It reads what the gate cannot: the scope the
+issue accepted, the contracts in `docs/`, and what maintainers already decided
+about the same files. Fix what it confirms; its report stays out of the pull
+request. The pre-push hook prints one line when the head being pushed has no
+such review on record, and never refuses the push for it.
+
 A review thread carries a correction, a measurement, or nothing: no pasted
 agent walkthroughs, no severity tables, no re-summarizing a diff that GitHub
 already shows. Close an addressed thread with "Resolve conversation".

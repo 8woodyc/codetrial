@@ -290,7 +290,10 @@ missing linter is skipped and named in the closing line. The commit-msg hook
 holds the subject to 50 characters and the body to 72, imperative and ASCII.
 The pre-push hook
 replays the same message rules over commits a rebase or an amend rewrote after
-the fact, and CI runs them over a pull request's own commits.
+the fact, and CI runs them over a pull request's own commits. On a topic branch
+it also prints one line when the head has no `/codetrial-review` on record (the
+skill records a reviewed head under the git directory); that line is advice and
+never refuses the push.
 
 ## Releases and the embedded web tree
 

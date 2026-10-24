@@ -112,10 +112,11 @@ list()
 rust=$(list 'build.rs' 'src/*.rs' 'tests/*.rs' 'scripts/*.rs')
 shell=$(list '*.sh')
 
-# tests/ as well as scripts/: the Python under tests/ drives the recording and
-# calibration harnesses, and leaving it out of the formatter while `ruff check`
-# reads it in the gate is a split nobody can keep track of.
-python=$(list 'scripts/*.py' 'tests/*.py')
+# tests/ and the skills as well as scripts/: the Python under tests/ drives the
+# recording and calibration harnesses, a skill runs its own, and leaving any of
+# it out of the formatter while `ruff check` reads it in the gate is a split
+# nobody can keep track of.
+python=$(list 'scripts/*.py' 'tests/*.py' '.claude/skills/*.py')
 
 # The issue forms are in this list because Prettier is the only lane here that
 # reads YAML: actionlint takes .github/workflows and stops. An unquoted colon in
