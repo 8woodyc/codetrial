@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "next_sequence": 18,
+  "next_sequence": 16,
   "candidate_edits_at_last_test": 7,
   "entries": [
     {
@@ -272,26 +272,6 @@
       "family": "LIFECYCLE",
       "provenance": "server_observation",
       "source_timestamp_ms": null,
-      "receipt_timestamp_ms": 1400,
-      "observation": {
-        "transition": "paused"
-      }
-    },
-    {
-      "sequence": 16,
-      "family": "LIFECYCLE",
-      "provenance": "server_observation",
-      "source_timestamp_ms": null,
-      "receipt_timestamp_ms": 1500,
-      "observation": {
-        "transition": "resumed"
-      }
-    },
-    {
-      "sequence": 17,
-      "family": "LIFECYCLE",
-      "provenance": "server_observation",
-      "source_timestamp_ms": null,
       "receipt_timestamp_ms": 1600,
       "observation": {
         "transition": "ended"
@@ -365,10 +345,9 @@
     "last_hint_sequence": null
   },
   "lifecycle": {
-    "paused": false,
     "ended": true,
     "behavioral_round_started": false,
-    "transitions": 3
+    "transitions": 1
   },
   "coverage": {
     "covered": [],
@@ -398,7 +377,7 @@
     ]
   },
   "metrics": {
-    "raw_events_received": 15,
+    "raw_events_received": 13,
     "code_events_emitted": 10,
     "live_setup_count": 0,
     "live_setup_bytes": 0,

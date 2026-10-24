@@ -135,48 +135,6 @@ fn a_cold_restart_with_nothing_said_yet_says_so() {
     );
 }
 
-/// The ordinary pause, which is most of them: an interviewer that was here the
-/// whole time is told to carry on, not re-grounded from scratch.
-#[test]
-fn unpausing_without_a_cold_restart_keeps_the_short_resume_line() {
-    let mut state = RuntimeState {
-        paused: true,
-        ..RuntimeState::default()
-    };
-
-    let resumed = apply_data_event(
-        &mut state,
-        TOPIC_CONTROL,
-        &json!({ "type": "pause_interview", "paused": false }),
-        0.0,
-    );
-
-    assert_eq!(
-        resumed.generate_reply.as_deref(),
-        Some(
-            "The interview has resumed. Continue with your REACTO step. TIMER: about 45 minutes remain on the candidate's countdown."
-        )
-    );
-
-    // Paused mid-answer, the same interviewer carries on in the behavioral
-    // round rather than being sent back to a REACTO step it already left.
-    let mut state = RuntimeState {
-        behavioral_round_started: true,
-        paused: true,
-        ..RuntimeState::default()
-    };
-    let resumed = apply_data_event(
-        &mut state,
-        TOPIC_CONTROL,
-        &json!({ "type": "pause_interview", "paused": false }),
-        0.0,
-    )
-    .generate_reply
-    .unwrap();
-    assert!(resumed.starts_with(&resume(true)), "{resumed}");
-    assert!(!resumed.contains("REACTO"), "{resumed}");
-}
-
 /// Coding, Test and Optimizations are checked against the editor, not taken on
 /// the interviewer's word: a session once ticked Coding with nothing typed.
 #[test]
@@ -2184,19 +2142,6 @@ fn a_run_is_credited_to_the_code_submitted_not_the_editor_it_lands_in() {
 }
 
 #[test]
-fn a_paused_run_earns_nothing() {
-    let mut state = with_written_code(RuntimeState {
-        paused: true,
-        ..RuntimeState::default()
-    });
-    receive_test_run(&mut state);
-    assert!(state.tested_code.is_none());
-    assert_eq!(state.test_runs, 0);
-    state.paused = false;
-    assert!(tested(&mut state).is_err());
-}
-
-#[test]
 fn a_run_of_the_code_on_screen_outranks_a_later_outage() {
     // The run happened; an outage reported after it does not undo that. Every
     // reader has to agree, or the reaction invites a trace the gate refuses.
@@ -3710,10 +3655,6 @@ fn automatic_test_credit_obeys_submission_and_session_gates() {
     }
     for state in [
         RuntimeState {
-            paused: true,
-            ..with_written_code(RuntimeState::default())
-        },
-        RuntimeState {
             ended: true,
             ..with_written_code(RuntimeState::default())
         },
@@ -3731,7 +3672,7 @@ fn automatic_test_credit_obeys_submission_and_session_gates() {
             json!({"code": code, "language": "python", "total": 3}),
         ));
     }
-    assert_eq!(cases.len(), 10);
+    assert_eq!(cases.len(), 9);
     for (mut state, packet) in cases {
         apply_data_event(&mut state, TOPIC_TEST_RESULTS, &packet, 0.0);
         assert!(

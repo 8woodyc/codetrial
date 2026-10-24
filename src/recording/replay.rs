@@ -172,12 +172,12 @@ enum Collapse {
     /// a state does, but no consumer of the snapshot reads one, and the
     /// template drops it in a `default:` arm that says so.
     ///
-    /// `Lifecycle` is out of this collapse because of the pause. `applyPause`
-    /// in `web/interview.js` records a `paused` row precisely so a break is
-    /// visible rather than passing as thinking time, and the response window
-    /// computed from the `avatar` history is exactly what it would otherwise
-    /// pass as. Collapsing to the newest `lifecycle` row leaves a reviewer
-    /// reading a break as a long silence.
+    /// `Lifecycle` is out of this collapse because the response windows read
+    /// its history: `thinking_started` and `thinking_ended` rows mark the
+    /// windows a hold spans, and a recording made while the page still had a
+    /// Pause button carries `paused` rows that mark its breaks. Collapsing to
+    /// the newest `lifecycle` row leaves a reviewer reading either as a long
+    /// silence.
     Restatements,
 }
 

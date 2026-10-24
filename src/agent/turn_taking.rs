@@ -27,7 +27,7 @@ pub enum ThinkingHold {
     /// `settle_stale_request`.
     Requested { since: Instant },
     /// Declared, by the Thinking button or a spoken request whose utterance
-    /// ended. `since` times the check-in, and restarts after a pause.
+    /// ended. `since` times the check-in.
     Held { since: Instant },
 }
 
@@ -95,14 +95,14 @@ impl RuntimeState {
     }
 
     /// Ends a declared hold that has run `THINKING_CHECK_IN_S` in silence, so
-    /// the interviewer can check in. Timed from the hold's own start, restarted
-    /// by a resume, so neither a pause nor an earlier hold counts toward it.
+    /// the interviewer can check in. Timed from the hold's own start, so an
+    /// earlier hold does not count toward it.
     pub(crate) fn claim_thinking_check_in(&mut self, now: Instant, receipt: u64) -> bool {
         let ThinkingHold::Held { since } = self.thinking_hold else {
             return false;
         };
         let limit = Duration::from_secs(super::THINKING_CHECK_IN_S);
-        if self.paused || self.ended || now.duration_since(since) < limit {
+        if self.ended || now.duration_since(since) < limit {
             return false;
         }
         self.end_thinking(receipt)
@@ -117,7 +117,7 @@ impl RuntimeState {
         let ThinkingHold::Requested { since } = self.thinking_hold else {
             return false;
         };
-        if self.paused || self.ended || now.duration_since(since) < THINKING_REQUEST_SETTLE {
+        if self.ended || now.duration_since(since) < THINKING_REQUEST_SETTLE {
             return false;
         }
         self.declare_thinking(now, receipt)
@@ -128,14 +128,6 @@ impl RuntimeState {
     pub(crate) fn released_recently(&self, now: Instant) -> bool {
         self.thinking_released_at
             .is_some_and(|at| now.duration_since(at) < super::THINKING_RELEASE_COOLDOWN)
-    }
-
-    /// A pause is not thinking time, so a hold that survives one is timed
-    /// afresh from the resume.
-    pub(crate) fn restart_thinking_clock(&mut self, now: Instant) {
-        if let ThinkingHold::Held { since } = &mut self.thinking_hold {
-            *since = now;
-        }
     }
 
     /// A provisional request turned out to be reasoning, or its utterance can
@@ -152,12 +144,11 @@ impl RuntimeState {
         true
     }
 
-    /// Whether the interviewer must stay quiet: a pause or a hold. The one
-    /// question every reply, nudge and close asks; only the places where the
-    /// two differ read them apart. Not who has the floor, which is
-    /// `RuntimeActivity::floor` and is often read right beside this.
+    /// Whether the interviewer must stay quiet for a thinking hold. The one
+    /// question every reply, nudge and close asks. Not who has the floor,
+    /// which is `RuntimeActivity::floor` and is often read right beside this.
     pub fn interviewer_silenced(&self) -> bool {
-        self.paused || self.thinking_hold.is_active()
+        self.thinking_hold.is_active()
     }
 
     /// Asks for the page to be told the declared state again, whether or not
@@ -180,9 +171,8 @@ impl RuntimeState {
             self.code_shown = self.code.clone();
         }
 
-        // A held briefing, or a reply owed across a pause or a replacement, is
-        // answered by the next turn. A pause can owe one with no replacement
-        // behind it; taking that answer as a briefing's only delays a reset.
+        // A held briefing, or a reply a replacement owed, is answered by the
+        // next turn.
         self.recovery_reply_pending |= cold_brief || self.owed_reply_on_resume.is_some();
         self.owed_reply_on_resume = None;
         self.thinking_unheard_reply = false;

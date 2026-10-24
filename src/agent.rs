@@ -67,7 +67,7 @@ pub use prompts::{
     log_hint_text, numbered, numbered_from, owed_reply, phase_judge_prompt,
     phase_judge_system_instruction, phase_judgment_note, proactive_review, read_board_text,
     read_editor_text, received_test_note, released_follow_ups, report_prompt,
-    report_system_instruction, report_system_instruction_for_examples, resume, resumed_context,
+    report_system_instruction, report_system_instruction_for_examples, resumed_context,
     rolling_assessment, round_skipped, round_started, silence_nudge, spoken_language,
     test_results_reaction, test_runner_outage_reaction, test_runner_unavailable_reaction,
     test_setup_error_reaction, time_warning, uncredited_test_results_reaction,
@@ -180,8 +180,8 @@ pub const THINKING_CHECK_IN_S: u64 = 120;
 pub(crate) const THINKING_RELEASE_COOLDOWN: std::time::Duration =
     std::time::Duration::from_secs(10);
 
-pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 39;
-pub const LIVE_PROMPT_VERSION: u32 = 30;
+pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 40;
+pub const LIVE_PROMPT_VERSION: u32 = 31;
 pub const REPORT_PROMPT_VERSION: u32 = 23;
 pub const RUBRIC_VERSION: u32 = 1;
 pub const REPORT_SCHEMA_VERSION: u32 = 3;
@@ -970,10 +970,8 @@ pub struct RuntimeState {
     pub coding_minutes: u32,
     pub behavioral_minutes: u32,
     pub round_transition_seen: bool,
-    /// The one five-minute warning the interviewer has accepted. The browser
-    /// re-sends its level after a pause in case the first packet arrived while
-    /// the server was paused, so this is the acknowledgement that prevents a
-    /// delivered warning from becoming a second interruption.
+    /// The one five-minute warning the interviewer has accepted, so a warning
+    /// that arrives twice does not become a second interruption.
     pub time_warning_seen: bool,
     pub behavioral_round_started: bool,
     /// Where the behavioral round begins in `transcript`. A cold restart whose
@@ -984,7 +982,6 @@ pub struct RuntimeState {
     /// grow in place, even with a candidate entry after it, without adding a
     /// transcript line. Recovery must include that turn if its text changed.
     pub behavioral_round_prior_turn: Option<(usize, String)>,
-    pub paused: bool,
     /// Thinking keeps media and editor evidence live, but suppresses replies.
     /// Changed only through the methods in `turn_taking`.
     pub thinking_hold: ThinkingHold,
@@ -1000,8 +997,8 @@ pub struct RuntimeState {
     /// A reply the hold dropped is still in the model's history, and the
     /// release has to say so; see `thinking_resume`.
     pub thinking_unheard_reply: bool,
-    /// A recovery briefing, sent at once or held for an unpause or the end of
-    /// a hold, asked for a reply that has not ended yet. Its answer proves
+    /// A recovery briefing, sent at once or held for the end of a hold, asked
+    /// for a reply that has not ended yet. Its answer proves
     /// nothing about the socket, so it does not reset the restart budget.
     pub recovery_reply_pending: bool,
     pub framework_evidence: Vec<FrameworkEvidence>,
@@ -1126,20 +1123,16 @@ pub struct RuntimeState {
     pub integrity_last_heartbeat: Option<serde_json::Value>,
     /// Whether the interviewer owes this candidate a cold-restart briefing.
     ///
-    /// Set when a Gemini socket is replaced by a session that remembers nothing
-    /// while the interview is paused, which is the one moment the briefing
-    /// cannot simply be spoken: the reply would be discarded on the way out,
-    /// and when a cold briefing failed to send. Resuming is what clears it,
-    /// because that is when Jim speaks again, and the line resuming sends
-    /// otherwise assumes an interviewer who was here for the whole interview.
-    /// A socket resumed from the cold one inherits the debt, since its memory
-    /// starts from that cold session.
+    /// Set when a cold briefing failed to send, so the socket that replaces
+    /// this one gives it. A socket resumed from the cold one inherits the debt,
+    /// since its memory starts from that cold session.
     pub needs_cold_brief: bool,
-    /// A resumed socket replaced a session that owed a reply while the
-    /// interview was paused. The reply cannot be asked for then, since it
-    /// would be discarded. Hold the raw event, not its formatted request, so
-    /// recovery cannot nest briefings. Some(None) owes a reply without a known
-    /// event; None owes no reply.
+    /// A replacement socket took over from a session that owed a reply while
+    /// a thinking hold kept the interviewer quiet. The reply cannot be asked
+    /// for then, since it would be discarded; ending the hold asks for it.
+    /// Hold the raw event, not its formatted request, so recovery cannot nest
+    /// briefings. Some(None) owes a reply without a known event; None owes no
+    /// reply.
     pub owed_reply_on_resume: Option<Option<String>>,
     /// Observations a reviewer recorded in the pauses, while the interview was
     /// still running. Held apart from `framework_evidence`, which is the
@@ -1264,7 +1257,6 @@ impl Default for RuntimeState {
             behavioral_round_started: false,
             behavioral_round_transcript_start: 0,
             behavioral_round_prior_turn: None,
-            paused: false,
             thinking_hold: ThinkingHold::Off,
             thinking_released_at: None,
             thinking_notice: None,
@@ -3071,9 +3063,6 @@ pub struct DataEventResult {
     pub update_last_interjection: bool,
     pub generate_reply: Option<String>,
     pub finish_interview: Option<String>,
-    /// Some only when the pause state genuinely changed, so a browser asking
-    /// twice for what it already has publishes nothing.
-    pub pause_changed: Option<bool>,
     pub thinking_changed: Option<bool>,
     pub yield_turn: bool,
     /// `generate_reply` carries what a hold left owed (see `thinking_resume`),
@@ -3288,9 +3277,8 @@ pub fn spoken_minutes_from_remaining_seconds(remaining_seconds: i64) -> i64 {
 
 /// What the candidate's countdown reads, in whole minutes.
 ///
-/// Wall time, because the page's deadline is wall time too: a pause stops the
-/// conversation and not the clock, as `tickTimer` in `web/interview.js` says
-/// at the other end of the same decision.
+/// Wall time, because the page's deadline is wall time too, and nothing stops
+/// either clock before it.
 pub fn minutes_left(state: &RuntimeState) -> i64 {
     let planned = i64::from(state.coding_minutes + state.behavioral_minutes) * 60;
     let elapsed = i64::try_from(state.started_at.elapsed().as_secs()).unwrap_or(i64::MAX);

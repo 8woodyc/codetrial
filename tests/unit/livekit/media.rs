@@ -204,30 +204,22 @@ fn an_ended_audio_track_is_released_even_when_the_flush_fails() {
         );
     }
 
-    // And it has to sit at the arm's own level rather than inside either
-    // branch, because the paused path has no release of its own any more: every
-    // brace opened since the pause test is closed again before the release is
-    // reached.
-    let branch = arm
-        .find("if turn.state.paused")
-        .expect("the arm still decides on the pause first");
-    let depth = arm[branch..release].chars().fold(0i32, |depth, c| match c {
-        '{' => depth + 1,
-        '}' => depth - 1,
-        _ => depth,
-    });
+    // And it has to sit at the arm's own level rather than inside the branch
+    // that handles a failed write: every brace opened since the statement that
+    // pumps is closed again before the release is reached.
+    let statement = arm[..pump]
+        .rfind('\n')
+        .expect("the pump has a line of its own");
+    let depth = arm[statement..release]
+        .chars()
+        .fold(0i32, |depth, c| match c {
+            '{' => depth + 1,
+            '}' => depth - 1,
+            _ => depth,
+        });
     assert_eq!(
         depth, 0,
         "the release is nested in a branch, so some path through the arm keeps an ended stream"
-    );
-    assert!(
-        !include_str!("../../../src/livekit/media.rs")
-            .split("pub(super) fn discard_paused_audio")
-            .nth(1)
-            .and_then(|rest| rest.split("\n}").next())
-            .expect("discard_paused_audio is still defined here")
-            .contains("release_if_ended"),
-        "two answers to one question: the arm releases for every path, including this one"
     );
     let pump_audio_source = include_str!("../../../src/livekit/media.rs")
         .split("pub(super) async fn pump_audio")
@@ -240,36 +232,23 @@ fn an_ended_audio_track_is_released_even_when_the_flush_fails() {
     );
 }
 
-/// A pause drops frames but must not drop the fact that a track ended.
-///
 /// Both `select!` arms in the room loop are guarded on the stream still
 /// being present. An ended stream yields `None` the instant it is polled,
-/// so leaving it in place while paused re-arms the arm forever: the loop
-/// spins for the whole pause instead of waiting. A camera taken by another
-/// application is exactly how a track ends mid-interview.
+/// so leaving it in place re-arms the arm forever: the loop spins instead of
+/// waiting. A camera taken by another application is exactly how a track
+/// ends mid-interview.
 #[test]
-fn a_track_that_ends_while_paused_is_let_go_of() {
+fn a_track_that_ends_is_let_go_of() {
     // A stand-in for the stream, because a real one needs a real track. What is
     // under test is the rule, and the rule is what was missing.
     let mut stream = Some("camera");
     release_if_ended(&mut stream, false);
-    assert_eq!(
-        stream,
-        Some("camera"),
-        "a paused track is still wanted on resume"
-    );
+    assert_eq!(stream, Some("camera"), "a live track is still wanted");
     release_if_ended(&mut stream, true);
     assert!(
         stream.is_none(),
         "an ended track re-arms the select arm forever"
     );
-
-    // The buffer half: a paused interview resumes into silence rather than into
-    // the tail of whatever was said as it was pausing.
-    let mut media = CandidateMedia::new();
-    media.audio_bytes.extend_from_slice(&[1, 2, 3, 4]);
-    discard_paused_audio(&mut media);
-    assert!(media.audio_bytes.is_empty());
 }
 
 #[test]

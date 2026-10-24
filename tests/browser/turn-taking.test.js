@@ -35,7 +35,7 @@ function shippedTurnStatus() {
 }
 
 test("a server thinking acknowledgement updates the controls and records the declared gap", () => {
-  const state = { candidateThinking: false, endsAt: 12345, paused: false };
+  const state = { candidateThinking: false, endsAt: 12345 };
   const attributes = {};
   const nodes = {
     thinking: {
@@ -61,7 +61,6 @@ test("a server thinking acknowledgement updates the controls and records the dec
   // chord: it would be read out again on every toggle.
   assert.doesNotMatch(nodes.turnStatus.textContent, /Enter/);
   assert.equal(state.endsAt, 12345);
-  assert.equal(state.paused, false);
   apply(true);
   assert.equal(events.length, 1);
   apply(false);
@@ -83,7 +82,6 @@ test("the agent's thinking acknowledgement reaches applyThinking byte for byte",
   const applied = [];
   const { receiveControl } = loadInterview(["receiveControl"], {
     applyThinking: (thinking) => applied.push(thinking),
-    applyPause: () => assert.fail("not a pause"),
   });
   // `thinking_state_message` in src/livekit/session.rs asserts these bytes.
   const encode = (text) => new TextEncoder().encode(text);
@@ -93,12 +91,11 @@ test("the agent's thinking acknowledgement reaches applyThinking byte for byte",
   assert.deepEqual(applied, [true, false]);
 });
 
-test("the turn controls publish only in a live, connected, unpaused interview", () => {
+test("the turn controls publish only in a live, connected interview", () => {
   const sent = [];
   const state = {
     connected: true,
     interviewerPresent: true,
-    paused: false,
     phase: "live",
     candidateThinking: false,
   };
@@ -143,7 +140,6 @@ test("the turn controls publish only in a live, connected, unpaused interview", 
   assert.equal(sent.length, 4);
 
   for (const blocked of [
-    () => (state.paused = true),
     () => (state.connected = false),
     () => (state.interviewerPresent = false),
     () => (state.phase = "ending"),
@@ -151,7 +147,6 @@ test("the turn controls publish only in a live, connected, unpaused interview", 
     Object.assign(state, {
       connected: true,
       interviewerPresent: true,
-      paused: false,
       phase: "live",
     });
     blocked();

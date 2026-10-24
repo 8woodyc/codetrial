@@ -41,8 +41,8 @@ use super::turn::{
 };
 use super::{
     AGENT_STATE_LISTENING, AGENT_STATE_SPEAKING, AGENT_STATE_THINKING, LIVEKIT_AGENT_STATE,
-    NOTABLE_PLAYOUT_BACKLOG, WRAP_UP_WAIT, browser_packet, output_settled,
-    pause_leaves_output_in_flight,
+    NOTABLE_PLAYOUT_BACKLOG, WRAP_UP_WAIT, browser_packet, hold_leaves_output_in_flight,
+    output_settled,
 };
 
 /// The door every realtime-input text goes through, so that what the session
@@ -441,10 +441,10 @@ impl GeminiEventContext<'_> {
 
 /// What to do with an inbound Gemini event before its own arm sees it.
 ///
-/// The two ways a reply is unwanted, and they are not the same. A pause is a
+/// The two ways a reply is unwanted, and they are not the same. A hold is a
 /// standing condition: it silences output for as long as it lasts and nothing
 /// about the event changes it. A discard is one turn's sentence, armed when a
-/// pause cut a reply already in flight, and the turn's own end is what serves
+/// hold cut a reply already in flight, and the turn's own end is what serves
 /// it -- which is why `Deliver` is not the whole answer here and
 /// `EndsTheDiscard` exists.
 #[derive(Debug, PartialEq, Eq)]
@@ -477,9 +477,9 @@ pub(super) fn clock(elapsed: Duration) -> String {
 /// What a `tests:` log line reports about one result: the counts, whether it
 /// earned credit and how it compares, whether the credited run still covers
 /// the editor, and whether a reaction was asked for. `None` is a packet
-/// dropped before it was judged, during a pause, in the behavioral round, or
-/// one that ran nothing; the counts on record are then the previous run's, so
-/// none are printed.
+/// dropped before it was judged, in the behavioral round, or one that ran
+/// nothing; the counts on record are then the previous run's, so none are
+/// printed.
 pub(super) struct TestRunLine<'a> {
     pub(super) run: Option<&'a serde_json::Value>,
     pub(super) note: Option<TestRunNote>,
@@ -569,8 +569,8 @@ pub(super) fn answers_prompt(event: &GeminiEvent) -> bool {
 /// or an await. It is also the rule a restart has to get right: the discard
 /// belongs to the socket that armed it, and a replacement that inherits one
 /// drops its own first turn, which is the cold-restart briefing.
-/// Speech or text that reaches the candidate, which a pause, a hold or a
-/// discard silences.
+/// Speech or text that reaches the candidate, which a hold or a discard
+/// silences.
 fn is_output(event: &GeminiEvent) -> bool {
     matches!(
         event,
@@ -593,7 +593,7 @@ fn output_disposition(event: &GeminiEvent, discarding: bool, held: bool) -> Outp
 
     // Checked after the discard, not before it: a turn ending while held still
     // has to serve the discard's sentence, and `TurnComplete` is not output so
-    // it was never the thing a pause or a hold silences.
+    // it was never the thing a hold silences.
     if held && is_output {
         return OutputDisposition::Drop;
     }
@@ -632,7 +632,7 @@ pub(super) fn ends_turn(event: &GeminiEvent) -> bool {
     matches!(event, GeminiEvent::TurnComplete | GeminiEvent::Interrupted)
 }
 
-/// The old turn was already cut off at pause. Its delayed ending must not
+/// The old turn was already cut off by a hold. Its delayed ending must not
 /// settle or cancel a prompt, candidate turn, or tool continuation sent since.
 ///
 /// A `TurnComplete` the interruption guard swallows ends the discard too. With
@@ -857,7 +857,7 @@ pub(super) async fn handle_gemini_event(
         matches!(event, GeminiEvent::TurnComplete) && context.activity.answered_without_speaking();
 
     // Every completion ends a generation the provider billed and whose context
-    // it may have cut, including the late one an interruption or a pause leaves
+    // it may have cut, including the late one an interruption or a hold leaves
     // behind and the guard below swallows.
     if matches!(event, GeminiEvent::TurnComplete) {
         context
@@ -990,7 +990,6 @@ pub(super) async fn handle_gemini_event(
         && !thinking_reply_due
         && !context.state.end_requested
         && !context.state.ended
-        && !context.state.paused
         && !context.state.interviewer_silenced()
         && !context.activity.incoming_speech_active(now)
     {
@@ -1033,7 +1032,7 @@ fn observe_voice_activity(
     now: Instant,
     has_audio: bool,
 ) -> bool {
-    let observed = !state.paused && has_audio;
+    let observed = has_audio;
     if observed {
         activity.note_candidate_voice_activity(active, now);
     }
@@ -1240,9 +1239,9 @@ async fn play_tool_ack(
 }
 
 /// Whether the output can take the acknowledgement now: never while the floor
-/// is held (a pause holds it too), never before a goodbye, and only into idle
-/// output, so it neither plays over anything nor has any of the reply spliced
-/// onto it. Whether the candidate is owed one is `take_tool_ack`'s to say.
+/// is held, never before a goodbye, and only into idle output, so it neither
+/// plays over anything nor has any of the reply spliced onto it. Whether the
+/// candidate is owed one is `take_tool_ack`'s to say.
 pub(super) fn tool_ack_fits(
     state: &RuntimeState,
     output_audio: &OutputAudio,
@@ -1456,10 +1455,7 @@ pub(super) fn finish_turn_timing(
 ) {
     if matches!(
         outcome,
-        TimingOutcome::Replaced
-            | TimingOutcome::Paused
-            | TimingOutcome::Held
-            | TimingOutcome::Ended
+        TimingOutcome::Replaced | TimingOutcome::Held | TimingOutcome::Ended
     ) {
         write_floor(
             room,
@@ -1604,8 +1600,7 @@ fn speech_release_briefing(state: &RuntimeState, withdrawn: bool) -> String {
 
 /// Once a held reply has been dropped, releasing the hold must not play its
 /// tail; its own boundary disarms the discard. The model still holds what it
-/// said, so the release has to disown it. A pause drops output too, but a
-/// resumed interview gets its own line and owes nothing for it here.
+/// said, so the release has to disown it.
 fn drop_output(state: &mut RuntimeState, activity: &mut RuntimeActivity) {
     if state.thinking_hold.is_active() {
         activity.socket.discarding_output = true;
@@ -2715,37 +2710,19 @@ async fn drop_stale_playout(
 /// A hold took the floor while Jim was still talking: stop him, and drop the
 /// rest of the turn he was in if Gemini is still producing it. A discard
 /// already under way is kept, since its turn has not ended either. A
-/// generation that had stalled arms no discard, as at a pause, but its late
-/// ending is still kept from settling what the hold's release asks for.
+/// generation that had stalled arms no discard, but its late ending is still
+/// kept from settling what the hold's release asks for. The latency
+/// measurement closes as `held`.
 pub(super) fn cut_off_for_hold(
     state: &mut RuntimeState,
     activity: &mut RuntimeActivity,
     output_audio: &mut OutputAudio,
 ) {
-    cut_off_generation(
-        state,
-        activity,
-        output_audio,
-        Boundary::Held,
-        Instant::now(),
-    );
-}
-
-/// What a pause and a hold both do to the interviewer's turn: arm a discard
-/// for a generation still producing it, or a stale wait for one that stalled,
-/// then cut what is queued and close the latency measurement at `boundary`.
-/// One place, so the two cannot drift apart on which ending they swallow.
-pub(super) fn cut_off_generation(
-    state: &mut RuntimeState,
-    activity: &mut RuntimeActivity,
-    output_audio: &mut OutputAudio,
-    boundary: Boundary,
-    now: Instant,
-) {
-    activity.socket.discarding_output |= pause_leaves_output_in_flight(activity, now);
+    let now = Instant::now();
+    activity.socket.discarding_output |= hold_leaves_output_in_flight(activity, now);
     activity.socket.stale_turn_pending |= activity.generating && !activity.socket.discarding_output;
     cut_off_turn(state, activity, output_audio);
-    activity.latency.close(boundary, now);
+    activity.latency.close(Boundary::Held, now);
 }
 
 /// The decision and its effect, with no room in sight so a test can reach it.

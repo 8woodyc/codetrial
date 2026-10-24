@@ -765,7 +765,7 @@ async fn compression_trial(
             if total.prompt + total.response > BENCHMARK_TOKEN_LIMIT {
                 return Err(io::Error::other("benchmark token budget exhausted").into());
             }
-            if activity.can_refresh_context(state.paused, false, false, std::time::Instant::now()) {
+            if activity.can_refresh_context(false, false, std::time::Instant::now()) {
                 let checkpoint = crate::agent::with_timer(&state, crate::agent::compressed_context(&state));
                 send_model_context(&mut session, &mut state, ModelInputKind::Turn, &checkpoint, None).await?;
                 activity.tokens.context_refresh_pending = false;
@@ -1739,7 +1739,7 @@ async fn live_compression_continuity_quality() {
             if total.prompt + total.response > 150_000 {
                 return Err(io::Error::other("continuity probe token budget exhausted").into());
             }
-            if activity.can_refresh_context(state.paused, false, false, std::time::Instant::now()) {
+            if activity.can_refresh_context(false, false, std::time::Instant::now()) {
                 let checkpoint = crate::agent::with_timer(&state, crate::agent::compressed_context(&state));
                 if control {
                     session.send_context(&checkpoint, false).await?;

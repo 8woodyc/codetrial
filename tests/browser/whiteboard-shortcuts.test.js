@@ -57,7 +57,6 @@ globalThis.boardTest = {
   lock(kind) {
     board.ready = kind !== "not-ready";
     state.phase = kind === "before-start" ? "preflight" : kind === "ended" ? "report" : "live";
-    state.paused = kind === "paused";
     frameworkRound = kind === "behavioral" ? "behavioral" : "coding";
     paintBoard();
   },
@@ -602,13 +601,7 @@ for (const mac of [false, true]) {
     const before = (await inspect(page)).strokes;
     assert.equal(before.length, 1);
     assert.equal((await inspect(page)).canRedo, true);
-    for (const kind of [
-      "not-ready",
-      "before-start",
-      "paused",
-      "behavioral",
-      "ended",
-    ]) {
+    for (const kind of ["not-ready", "before-start", "behavioral", "ended"]) {
       await page.evaluate((kind) => globalThis.boardTest.lock(kind), kind);
       await page.locator("#board").focus();
       for (const chord of chords) {

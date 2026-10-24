@@ -341,7 +341,7 @@ impl ResumeRecovery {
         if session::ends_turn(event) && std::mem::take(&mut state.recovery_reply_pending) {
             return;
         }
-        if completed_live_reply(state, activity, event) {
+        if completed_live_reply(activity, event) {
             *restarts = 0;
             self.suppressed = false;
         }
@@ -878,8 +878,8 @@ async fn replace_gemini_session(
     };
 
     // A cold session remembers none of the drawing, and the briefing's text
-    // cannot carry it. Sent whether or not the briefing itself was held for a
-    // pause, so the session that eventually speaks has seen the board.
+    // cannot carry it, so the board follows the briefing and the session that
+    // speaks next has seen it.
     if !resumed
         && context.state.interview_mode.is_whiteboard()
         && let Err(error) = board::resend(context.board, context.gemini).await
@@ -1080,19 +1080,18 @@ fn keep_recovery_debt(
 ///
 /// A resumed socket gets its update as context. It speaks only when the old
 /// socket owed a reply, since otherwise the candidate has the floor. A cold
-/// socket always speaks, except during a pause, where the reply would be
-/// discarded: the briefing is owed until unpause instead. A resumed socket
-/// whose cold predecessor still owed its briefing gets that briefing, since
-/// its memory starts from the cold session.
+/// socket always speaks, except during a thinking hold, where its reply would
+/// be discarded: it is briefed as context that asks for no answer instead. A
+/// resumed socket whose cold predecessor still owed its briefing gets that
+/// briefing, since its memory starts from the cold session.
 async fn send_recovery_brief(
     gemini: &mut GeminiLiveSession,
     state: &mut RuntimeState,
     replacement: Replacement,
     owed_prompt: Option<&str>,
 ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-    // A reply owed during a pause or a hold cannot be asked for yet, since it
-    // would be dropped; ending it asks for it instead, on either kind of
-    // socket.
+    // A reply owed during a hold cannot be asked for yet, since it would be
+    // dropped; ending the hold asks for it instead, on either kind of socket.
     let owed = replacement.owed();
     let held = state.interviewer_silenced();
     if owed && held {
@@ -1128,17 +1127,11 @@ async fn send_recovery_brief(
     if held {
         // The reply the old socket owed was held above, since `hand_over` has
         // already taken the prompt off the activity; it is asked for when the
-        // pause or hold ends.
-        if state.paused {
-            // Nothing reaches the new socket until the pause ends, so its
-            // briefing can wait for the resume.
-            state.needs_cold_brief = true;
-            return Ok(false);
-        }
-
-        // A hold is not a pause: the candidate's audio still reaches the new
-        // socket, which could answer them knowing nothing of the interview.
-        // Briefed now, as context that asks for no answer.
+        // hold ends.
+        //
+        // The candidate's audio still reaches the new socket during a hold, and
+        // it could answer them knowing nothing of the interview. Briefed now,
+        // as context that asks for no answer.
         let briefing = crate::agent::with_timer(state, crate::agent::cold_restart(state));
         state.code_shown = state.code.clone();
         send_model_context_scoped(
@@ -1173,11 +1166,10 @@ async fn send_recovery_brief(
     Ok(true)
 }
 
-/// Keeps a reply owed during a pause for the unpause to ask for, whether the
-/// pause found it owed or a replacement during the pause did. A known event is
-/// never replaced by an unknown one: a candidate transcript landing in the
-/// pause leaves `hand_over` no prompt text, but the event it was paused on is
-/// still the one the reply belongs to.
+/// Keeps a reply a replaced socket owed during a hold for the hold's release to
+/// ask for. A known event is never replaced by an unknown one: a candidate
+/// transcript landing in the hold leaves `hand_over` no prompt text, but the
+/// event the hold began on is still the one the reply belongs to.
 fn hold_owed_reply(state: &mut RuntimeState, owed_prompt: Option<&str>) {
     if owed_prompt.is_some() || state.owed_reply_on_resume.is_none() {
         state.owed_reply_on_resume = Some(owed_prompt.map(str::to_string));
@@ -1853,13 +1845,11 @@ async fn on_watch_tick(
         return Ok(ControlFlow::Break(()));
     }
 
-    // A board the send interval held back, or one that arrived during a pause,
-    // goes out here once nothing stops it. Without this it waited for the next
-    // board to carry it, and the candidate who has stopped drawing to explain
-    // is exactly the one who sends no next board.
-    if !context.state.paused
-        && let Err(error) = board::send_if_due(context.board, context.gemini, tick_at).await
-    {
+    // A board the send interval held back goes out here once nothing stops it.
+    // Without this it waited for the next board to carry it, and the candidate
+    // who has stopped drawing to explain is exactly the one who sends no next
+    // board.
+    if let Err(error) = board::send_if_due(context.board, context.gemini, tick_at).await {
         eprintln!("Gemini board write failed ({error}); waiting for the close to be reported");
     }
 
@@ -1941,7 +1931,7 @@ async fn on_watch_tick(
     );
 
     // Every path that settles the wait already publishes the next state: audio
-    // publishes `speaking`, a completed or cut turn, a replacement and a pause
+    // publishes `speaking`, a completed or cut turn, a replacement and a hold
     // publish `listening`, and so does the candidate speaking again.
     if reply == (ReplyWatch::Owed { shown: true }) {
         set_agent_state(room, context.agent_state, AGENT_STATE_THINKING);
@@ -2149,15 +2139,10 @@ async fn on_watch_tick(
     Ok(ControlFlow::Continue(()))
 }
 
-fn completed_live_reply(
-    state: &RuntimeState,
-    activity: &RuntimeActivity,
-    event: &GeminiEvent,
-) -> bool {
+fn completed_live_reply(activity: &RuntimeActivity, event: &GeminiEvent) -> bool {
     matches!(event, GeminiEvent::TurnComplete)
         && activity.generating
         && !activity.socket.discarding_output
-        && !state.paused
 }
 
 /// What a watch tick does about the reply the interviewer owes, decided in one
@@ -2175,8 +2160,8 @@ enum ReplyWatch {
     Recover,
 }
 
-// VAD edges are not acoustic evidence, and paused frames are discarded rather
-// than collected. Keep this on the same path the room uses to pump each frame.
+// VAD edges are not acoustic evidence. Keep this on the same path the room uses
+// to pump each frame.
 /// Returns whether the frame carried voice, which the camera gate reads on
 /// every frame whatever the idle timers make of it.
 fn note_candidate_audio_frame(
@@ -2185,7 +2170,7 @@ fn note_candidate_audio_frame(
     frame: Option<&::livekit::webrtc::audio_frame::AudioFrame<'_>>,
     now: Instant,
 ) -> bool {
-    let voiced = !state.paused && frame.is_some_and(media::frame_has_voice);
+    let voiced = frame.is_some_and(media::frame_has_voice);
     if voiced && !state.interviewer_silenced() {
         activity.turn_timing.note_voice(now);
         activity.latency.voice(now);
@@ -2200,8 +2185,8 @@ fn note_candidate_audio_frame(
     voiced
 }
 
-/// While the floor is held, by a pause or by the candidate keeping it to
-/// think, nothing is waited on and nothing is shown: the interviewer's silence
+/// While the floor is held by the candidate keeping it to think, nothing is
+/// waited on and nothing is shown: the interviewer's silence
 /// is the one the candidate asked for, and replies generated meanwhile are
 /// dropped on purpose. Once a close is requested the silence is the one the
 /// tool response asked for, so neither recovery nor the wait applies, but the
@@ -2225,79 +2210,17 @@ fn reply_watch(
     }
 }
 
-/// Pausing cancels the old turn even if no output has taken the floor yet.
-/// Resuming rebases debt that provider events created during the pause.
-fn update_pause_activity(
-    state: &mut RuntimeState,
-    activity: &mut RuntimeActivity,
-    output_audio: &mut OutputAudio,
-    now: Instant,
-) {
-    activity.clear_candidate_voice_activity();
-    if !state.paused {
-        activity.resume_reply_wait(now);
-        return;
-    }
-    if activity.reply_unfinished() {
-        let owed_prompt = activity
-            .prompt_text
-            .as_deref()
-            .filter(|_| activity.owes_prompt());
-        hold_owed_reply(state, owed_prompt);
-    }
-    session::cut_off_generation(
-        state,
-        activity,
-        output_audio,
-        latency::Boundary::Paused,
-        now,
-    );
-}
-
-/// The event a resume owes a reply for, read before the resume prompt is
-/// composed around it. The cold briefing the resume may also carry stays in
-/// the state until a send pays it, so it needs no copy here.
-struct ResumeDebt {
-    owed_prompt: Option<String>,
-}
-
-impl ResumeDebt {
-    fn capture(state: &RuntimeState) -> Option<Self> {
-        state.paused.then(|| Self {
-            owed_prompt: state.owed_reply_on_resume.clone().flatten(),
-        })
-    }
-}
-
-/// A failed resume must restore the raw debt, never the composed briefing.
+/// Marks the prompt owed once its send succeeded. A failed send is the
+/// caller's to account for.
 fn record_event_prompt<E>(
-    state: &mut RuntimeState,
     activity: &mut RuntimeActivity,
     prompt: &str,
-    resume_debt: Option<&ResumeDebt>,
     sent: Result<(), E>,
     now: Instant,
 ) -> Result<(), E> {
-    match sent {
-        Ok(()) => {
-            let owed_prompt = match resume_debt {
-                Some(debt) => debt.owed_prompt.as_deref(),
-                None => Some(prompt),
-            };
-            activity.mark_prompted(now, owed_prompt, false);
-            Ok(())
-        }
-        Err(error) => {
-            // The unpause leaves its debt in the state until a send pays it.
-            // The owed event moves onto the activity, where the next socket's
-            // briefing names it once; left in both, it was named twice.
-            if let Some(debt) = resume_debt {
-                state.owed_reply_on_resume = None;
-                activity.owe_prompt(now, debt.owed_prompt.clone());
-            }
-            Err(error)
-        }
-    }
+    sent?;
+    activity.mark_prompted(now, Some(prompt), false);
+    Ok(())
 }
 
 // This appends history without requesting output. Wire order does not promise
@@ -2442,13 +2365,12 @@ async fn on_gemini_event(
     // the thanks the candidate hears and the `skipped` evidence calls the
     // wrap-up asks for -- is cut off by the shutdown behind it. `TurnComplete`,
     // `Interrupted` and a socket replacement all clear the flag, so this is a
-    // beat, not a condition that can hold the interview open. Not while paused.
-    // The closing would be generated into a room whose output this loop drops
-    // (`output_disposition`), so the candidate hears none of it and is handed a
-    // report out of a silence they did not know had ended. Pausing also clears
-    // the outstanding-response flag, so without this the next event of any kind
-    // ends the interview. Held instead until they come back; if they never do,
-    // the deadline still ends it.
+    // beat, not a condition that can hold the interview open. Not during a
+    // thinking hold either: the closing would be generated into output this
+    // loop drops (`output_disposition`), so the candidate hears none of it and
+    // is handed a report out of a silence they did not know had ended. Held
+    // instead until the hold ends; if it never does, the deadline still ends
+    // the interview.
     if ready_to_close(context.state, context.activity) {
         eprintln!(
             "interviewer ended the interview: trigger=acknowledged room={}",
@@ -2852,9 +2774,7 @@ pub(crate) async fn run_room_with_slot(
                     if note_candidate_audio_frame(&turn.state, &mut turn.activity, frame.as_ref(), now) {
                         media.voiced_at = Some(now);
                     }
-                    if turn.state.paused {
-                        discard_paused_audio(&mut media);
-                    } else if let Err(error) = pump_audio(&mut media, &mut gemini, frame).await {
+                    if let Err(error) = pump_audio(&mut media, &mut gemini, frame).await {
                         eprintln!("Gemini audio write failed ({error}); waiting for the close to be reported");
                     }
 
@@ -2866,36 +2786,26 @@ pub(crate) async fn run_room_with_slot(
                     ControlFlow::Continue(())
                 }
                 Some(snapshot) = board.rx.recv(), if !turn.state.ended => {
-                    // Kept even while paused. The board is the drawing as it
-                    // stands, and one exported just before the pause is work
-                    // the candidate did; dropping it left the interviewer on
-                    // the board before it until another edit, which a paused
-                    // candidate cannot make. It waits to be shown until the
-                    // interview resumes, through the watch tick.
                     if board::record(&mut board, &mut turn.state, snapshot) {
                         turn.activity.reset_completed_coding_idle();
                     }
 
-                    if !turn.state.paused {
-                        // The candidate is working, even while silent. Without
-                        // this the silence nudge counts a candidate who is
-                        // drawing a diagram as idle and interrupts them
-                        // mid-stroke, which is what `last_code_change` stops a
-                        // typing candidate being asked.
-                        let now = Instant::now();
-                        turn.activity.last_code_change = now;
-                        if let Err(error) = board::send_if_due(&mut board, &mut gemini, now).await {
-                            eprintln!("Gemini board write failed ({error}); waiting for the close to be reported");
-                        }
+                    // The candidate is working, even while silent. Without this
+                    // the silence nudge counts a candidate who is drawing a
+                    // diagram as idle and interrupts them mid-stroke, which is
+                    // what `last_code_change` stops a typing candidate being
+                    // asked.
+                    let now = Instant::now();
+                    turn.activity.last_code_change = now;
+                    if let Err(error) = board::send_if_due(&mut board, &mut gemini, now).await {
+                        eprintln!("Gemini board write failed ({error}); waiting for the close to be reported");
                     }
                     ControlFlow::Continue(())
                 }
                 frame = next_video_frame(&mut media.video), if media.video.is_some() => {
                     let speaking =
                         turn.activity.candidate_voice_active || media.voiced_recently(Instant::now());
-                    if turn.state.paused {
-                        release_if_ended(&mut media.video, frame.is_none());
-                    } else if let Err(error) = pump_video(&mut media, &mut gemini, frame, speaking)
+                    if let Err(error) = pump_video(&mut media, &mut gemini, frame, speaking)
                     .await
                     {
                         eprintln!("Gemini video write failed ({error}); waiting for the close to be reported");
@@ -3371,11 +3281,10 @@ pub(super) fn browser_packet(
 /// Whether the interviewer's request to close may be acted on yet.
 ///
 /// A predicate rather than four conditions in the select arm, because three of
-/// them are load-bearing in ways nothing else states. `paused`: the closing
-/// would be generated into a room whose output this loop drops, so the
-/// candidate hears none of it and is handed a report out of a silence they did
-/// not know had ended -- and pausing also clears the flag below, so without
-/// this the next event of any kind would end the interview.
+/// them are load-bearing in ways nothing else states. `interviewer_silenced`:
+/// a thinking hold drops the interviewer's output, so a closing generated
+/// during it is never heard and the candidate is handed a report out of a
+/// silence they did not know had ended.
 /// `tool_response_outstanding`: Gemini owes a generation for the tool response,
 /// and acting before it lands means `send_wrap_up_and_wait` returns on the
 /// acknowledgement's `TurnComplete` with the real closing cut off behind it.

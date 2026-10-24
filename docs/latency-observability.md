@@ -37,10 +37,11 @@ this one, and survives either a normal completion or an interruption. Trailing
 transcripts alone do not queue another reply, and the runtime
 late-transcript grace also applies to tracing.
 
-Generations a pause or a thinking hold has cut off locally are closed then, as
-`paused` or `held`, discarding queued input from before that local cut. Their late provider events are not attributed to the reply
-that follows. An `interrupted` before any output keeps the clock, because the
-barge-in that caused it is the input still waiting for an answer.
+Generations a thinking hold has cut off locally are closed then, as `held`,
+discarding queued input from before that local cut. Their late provider events
+are not attributed to the reply that follows. An `interrupted` before any output
+keeps the clock, because the barge-in that caused it is the input still waiting
+for an answer.
 
 ## Stages
 
@@ -52,7 +53,8 @@ barge-in that caused it is the input still waiting for an answer.
 | `native_audio_cancelled` | That frame was cancelled before capture, including a chunk still waiting for enough PCM to form a frame. |
 | `audio_enqueue_failed` | The first frame could not enter a full or closed worker queue. It is not a native-capture attempt or a successful latency sample. |
 | `turn_complete`, `interrupted` | The provider ended the generation. |
-| `paused`, `held` | A local cut ended it. |
+| `held` | A local cut ended it. |
+| `paused` | A local cut by the Pause button ended it. Only logs from before that button was removed carry it; `scripts/analyze-latency.py` still reads it. |
 | `socket_replaced` | The socket was replaced. A reply without accepted audio keeps waiting (`continuing=true`), including tool-only generations. |
 
 ## Waterfall

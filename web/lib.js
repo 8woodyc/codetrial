@@ -821,8 +821,8 @@ const textEncoder = new TextEncoder();
 /// function-local, moving it left the whole suite green with the supported-card
 /// branch no longer rendering, which is the defect a local constant invites.
 export const ACTIVE_CONTRACT = {
-  bundleVersion: 39,
-  livePromptVersion: 30,
+  bundleVersion: 40,
+  livePromptVersion: 31,
   reportPromptVersion: 23,
   reportSchemaVersion: 3,
   rubricVersion: 1,
@@ -1521,7 +1521,7 @@ export const TIME_WARNING_S = 300;
 ///
 /// This used to also report the crossing, which needed the caller's previous
 /// value. A crossing is one tick wide, and this tick is missable -- a throttled
-/// tab, or an interview paused across it -- so the caller latches the threshold
+/// tab skips it -- so the caller latches the threshold
 /// instead and everything here derives from `endsAt`. `now` is a parameter so
 /// this is assertable without waiting out an interview.
 export function countdown(endsAt, now) {
@@ -1846,14 +1846,14 @@ function windowSpan(start, end) {
 /// test run, the time warning, the round transition and the wrap-up all end in
 /// a `speaking` row followed by a `listening` row, and none of them is a
 /// question. The candidate interrupting, the agent dropping out and coming
-/// back, a Gemini socket restart, and the candidate pressing Pause while the
-/// interviewer is mid-turn write the same pair. There is no row that tells
+/// back, and a Gemini socket restart write the same pair. There is no row that tells
 /// those from a question ending, so the page says so beside the number rather
 /// than guessing.
 ///
-/// The pause is the exception, because there is a row: `applyPause` in
-/// `web/interview.js` records a `lifecycle` `paused`, and its comment says why,
-/// which is that a break must be visible rather than passing as thinking time.
+/// The pause is the exception, because there is a row: a `lifecycle` `paused`,
+/// which the interview page wrote while it still had a Pause button, so that a
+/// break was visible rather than passing as thinking time. Nothing writes it
+/// now, but a saved recording keeps its rows, so it is still read here.
 /// A window overlapping one carries `paused`, and the page says so on that
 /// window rather than only in the paragraph above the list. Marked rather than
 /// hidden or subtracted: how long the break was is in the rows, and a duration
@@ -1961,7 +1961,7 @@ export function responseWindows(events) {
     }
     if (state === "listening" && !open && before === "speaking") {
       // `paused` is read here as well, for the other order: pausing mid-turn
-      // makes the server publish `listening`, so the window this opens is the
+      // made the server publish `listening`, so the window this opens is the
       // break itself.
       // `matched` is whether a turn could have been attributed to this window
       // at all, which is not the same question as whether one was. A window

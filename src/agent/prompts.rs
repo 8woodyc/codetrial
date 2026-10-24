@@ -958,8 +958,7 @@ fn missing_evidence(mode: InterviewMode) -> &'static str {
 const NO_REPEAT: &str = "Do not repeat example walkthroughs, testing, complexity, or edge-case questions already answered; revisit them only for a relevant implementation change or a concrete unresolved concern.";
 
 /// Asks a model that took over mid-conversation for the reply its predecessor
-/// owed, by the resumed briefing and by the resume line after a pause that
-/// held it back.
+/// owed, by the resumed briefing and by the end of a hold that held it back.
 const OWED_REPLY: &str = "Your reply to the candidate's latest turn or the latest system event was lost with the connection. Give it now in one short turn, answering the newest unanswered item. Do not mention the interruption, apologize, or repeat anything you already said.";
 
 /// Said wherever a missing evidence row could read as unfinished work. The
@@ -2072,17 +2071,6 @@ pub fn round_skipped(mode: InterviewMode) -> String {
     )
 }
 
-/// The line an interviewer who was here the whole pause is told to carry on
-/// with, in the round it paused in. A cold restart deferred by the pause gets
-/// `cold_restart` instead.
-pub fn resume(behavioral_round: bool) -> String {
-    if behavioral_round {
-        "The interview has resumed. Continue the behavioral round without returning to coding, repeating a question, or reopening an abandoned probe. If there is no further discussion, use `end_interview` under its normal completion rules.".to_string()
-    } else {
-        "The interview has resumed. Continue with your REACTO step.".to_string()
-    }
-}
-
 /// The request for a reply a replaced socket owed, with the event it owed when
 /// that was one of ours: without it the model guesses which item was
 /// unanswered, and the test report is the likeliest guess, which is how a
@@ -2099,10 +2087,10 @@ pub fn owed_reply(owed_prompt: Option<&str>) -> String {
     }
 }
 
-/// A briefing or resume line, followed by the request for the reply a lost
-/// connection owed when one is owed. `Some(None)` owes a reply with no event
-/// to name. One join for every path that asks, so the unpause and a cold
-/// replacement cannot phrase the request differently.
+/// A briefing, followed by the request for the reply a lost connection owed
+/// when one is owed. `Some(None)` owes a reply with no event to name. One
+/// join for every path that asks, so no two replacements phrase the request
+/// differently.
 pub fn with_owed_reply(line: String, owed: Option<Option<&str>>) -> String {
     match owed {
         Some(owed_prompt) => format!("{line} {}", owed_reply(owed_prompt)),

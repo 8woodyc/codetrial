@@ -7,18 +7,16 @@
 
 use std::time::Instant;
 
-use super::turn_taking::{
-    owed_context, thinking_owes_context, thinking_resume, with_thinking_debt,
-};
+use super::turn_taking::{thinking_owes_context, thinking_resume, with_thinking_debt};
 use super::{
     DataEventResult, INTERVIEWER_SPEAKER, InterviewLoop, LanguageChoiceContext,
     LifecycleTransition, MAX_INTEGRITY_EVENTS, ROUND_TRANSITION_SKEW, RuntimeState, SincePrevious,
     TIME_WARNING_S, TestSource, analyze_code, analyze_code_cached, behavioral_time_warning,
     changed_excerpt, format_test_run_for_reaction, integrity_hash, language_choice, observe_code,
-    observe_code_cached, python_truthy, resume, round_skipped, round_started,
-    sanitize_integrity_event, sanitize_test_run, spoken_language, test_reaction_decision,
-    test_results_reaction, test_runner_outage_reaction, test_runner_unavailable_reaction,
-    test_setup_error_reaction, time_warning, uncredited_test_results_reaction,
+    observe_code_cached, python_truthy, round_skipped, round_started, sanitize_integrity_event,
+    sanitize_test_run, spoken_language, test_reaction_decision, test_results_reaction,
+    test_runner_outage_reaction, test_runner_unavailable_reaction, test_setup_error_reaction,
+    time_warning, uncredited_test_results_reaction,
 };
 use crate::runtime::{TOPIC_CODE_UPDATE, TOPIC_CONTROL, TOPIC_INTEGRITY, TOPIC_TEST_RESULTS};
 
@@ -97,9 +95,6 @@ fn apply_data_event_at_with_received(
         state.evidence_ledger.record_received_event();
     }
     if state.behavioral_round_started && matches!(topic, TOPIC_CODE_UPDATE | TOPIC_TEST_RESULTS) {
-        return DataEventResult::default();
-    }
-    if state.paused && matches!(topic, TOPIC_CODE_UPDATE | TOPIC_TEST_RESULTS) {
         return DataEventResult::default();
     }
     let was_complete = super::coding_round_complete(state);
@@ -751,10 +746,7 @@ fn apply_control(
 ) -> DataEventResult {
     match payload.get("type").and_then(serde_json::Value::as_str) {
         Some("drawing_activity")
-            if state.example_drawing_enabled
-                && !state.ended
-                && !state.paused
-                && !state.behavioral_round_started =>
+            if state.example_drawing_enabled && !state.ended && !state.behavioral_round_started =>
         {
             // Drawing resets the typing quiet window without supplying evidence
             // or requesting a model response.
@@ -763,7 +755,7 @@ fn apply_control(
                 ..DataEventResult::default()
             }
         }
-        Some("thinking") if !state.ended && !state.paused => {
+        Some("thinking") if !state.ended => {
             let Some(thinking) = payload.get("thinking").and_then(serde_json::Value::as_bool)
             else {
                 return DataEventResult::default();
@@ -795,7 +787,7 @@ fn apply_control(
                 ..DataEventResult::default()
             }
         }
-        Some("yield_turn") if !state.ended && !state.paused => {
+        Some("yield_turn") if !state.ended => {
             let drawing =
                 payload.get("surface").and_then(serde_json::Value::as_str) == Some("example");
             if drawing
@@ -825,18 +817,12 @@ fn apply_control(
                 ..DataEventResult::default()
             }
         }
-        Some("pause_interview") if !state.ended => {
-            control_pause(state, payload, receipt_timestamp_ms)
-        }
         Some("round_transition") if round_transition_due(state, payload) => DataEventResult {
             preempts_hold: true,
             ..control_round_transition(state, receipt_timestamp_ms)
         },
         Some("time_warning")
-            if !state.ended
-                && !state.paused
-                && !state.time_warning_seen
-                && time_warning_is_due(state) =>
+            if !state.ended && !state.time_warning_seen && time_warning_is_due(state) =>
         {
             DataEventResult {
                 preempts_hold: true,
@@ -850,84 +836,9 @@ fn apply_control(
     }
 }
 
-/// Pause used to be a practice-only affordance, and practice is gone. Left
-/// working for everyone rather than deleted with the mode: a candidate whose
-/// machine or network interrupts them mid-interview can at least stop the
-/// interviewer talking into an empty room. It stops the conversation, not the
-/// deadline, which runs on wall clock either way. It is recorded, so a paused
-/// stretch is visible in the report.
-fn control_pause(
-    state: &mut RuntimeState,
-    payload: &serde_json::Value,
-    receipt_timestamp_ms: u64,
-) -> DataEventResult {
-    let paused = payload
-        .get("paused")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
-    if paused == state.paused {
-        return DataEventResult::default();
-    }
-    state.paused = paused;
-    state.evidence_ledger.record_lifecycle(
-        receipt_timestamp_ms,
-        if paused {
-            LifecycleTransition::Paused
-        } else {
-            LifecycleTransition::Resumed
-        },
-    );
-
-    // A provisional request cannot be confirmed across a pause: its utterance's
-    // end is dropped with the rest of the paused output. Left in place, it
-    // silenced the resume line and, its settle clock having run through the
-    // pause, was declared on the first tick after it.
-    if paused {
-        state.withdraw_thinking_request();
-    } else {
-        state.restart_thinking_clock(Instant::now());
-    }
-
-    // A resumed interview whose interviewer was replaced mid-pause has to be
-    // re-grounded before it is told to carry on: the fixed line below assumes a
-    // Jim who remembers the conversation, and after a cold restart there is
-    // none to continue from.
-    let can_reply = !state.interviewer_silenced();
-    DataEventResult {
-        pause_changed: Some(paused),
-        generate_reply: can_reply.then(|| {
-            if state.needs_cold_brief {
-                // The briefing, then anything else the replaced socket left
-                // owed, which the briefing alone does not ask for.
-                owed_context(state)
-            } else {
-                let resumed = resume(state.behavioral_round_started);
-                let owed = owed_context(state);
-                if owed.is_empty() {
-                    resumed
-                } else {
-                    format!("{resumed} {owed}")
-                }
-            }
-        }),
-
-        // Paid by the room loop once the resume is sent, so one that fails
-        // leaves the debt for the socket that replaces this one.
-        carries_thinking_debt: can_reply && thinking_owes_context(state),
-
-        // Resuming makes Jim speak, so it starts the interjection cooldown like
-        // every other reply here. Without this the timing loop could follow the
-        // resume line straight into a proactive review, talking twice over a
-        // candidate who just came back.
-        update_last_interjection: !paused,
-        ..DataEventResult::default()
-    }
-}
-
 /// Whether a round transition can be applied or held for a pending judgment.
 pub(crate) fn round_transition_due(state: &RuntimeState, payload: &serde_json::Value) -> bool {
     !state.ended
-        && !state.paused
         && state.interview_loop == InterviewLoop::CodingBehavioral
         && !state.round_transition_seen
         && payload.get("round").and_then(serde_json::Value::as_str) == Some("behavioral")
@@ -986,12 +897,8 @@ fn time_warning_is_due(state: &RuntimeState) -> bool {
         >= std::time::Duration::from_secs(planned.saturating_sub(TIME_WARNING_S))
 }
 
-/// The clock crossing the warning threshold, once.
-///
-/// The browser releases its own latch after a pause because its first packet
-/// may have arrived while this side was paused. Remembering an accepted warning
-/// here lets that retry through when needed while refusing it after it already
-/// interrupted the candidate.
+/// The clock crossing the warning threshold, once. Remembering an accepted
+/// warning here refuses a repeat after it already interrupted the candidate.
 fn control_time_warning(state: &mut RuntimeState) -> DataEventResult {
     state.time_warning_seen = true;
     if !state.behavioral_round_started {

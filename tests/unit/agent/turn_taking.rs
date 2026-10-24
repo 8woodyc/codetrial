@@ -153,9 +153,6 @@ fn a_request_nothing_decides_is_declared_once_it_settles() {
     };
     let settled = asked + THINKING_REQUEST_SETTLE;
     assert!(!state.settle_stale_request(settled - std::time::Duration::from_millis(1), 1));
-    state.paused = true;
-    assert!(!state.settle_stale_request(settled, 1), "not while paused");
-    state.paused = false;
     assert!(state.settle_stale_request(settled, 2));
     assert!(state.thinking_hold.is_declared());
     assert_eq!(state.take_thinking_notice(), Some(true));

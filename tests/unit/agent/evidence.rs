@@ -553,10 +553,11 @@ fn evidence_ledger_records_hint_policy_outcomes_without_hint_text() {
 fn evidence_ledger_keeps_lifecycle_and_coverage_as_closed_facts() {
     let mut ledger = EvidenceLedger::default();
     ledger.set_uncovered_coverage(["repeat", "algorithm"]);
-    ledger.record_lifecycle(100, LifecycleTransition::Paused);
-    ledger.record_lifecycle(200, LifecycleTransition::Resumed);
+    ledger.record_lifecycle(100, LifecycleTransition::ThinkingStarted);
+    ledger.record_lifecycle(200, LifecycleTransition::ThinkingEnded);
     ledger.record_coverage(300, "repeat");
-    assert!(!ledger.lifecycle.paused);
+    assert!(!ledger.lifecycle.ended);
+    assert!(!ledger.lifecycle.behavioral_round_started);
     assert_eq!(ledger.lifecycle.transitions, 2);
     assert_eq!(ledger.coverage.covered, ["repeat"]);
     assert_eq!(ledger.coverage.uncovered, ["algorithm"]);
@@ -568,13 +569,13 @@ fn evidence_ledger_only_records_accepted_control_transitions() {
     apply_data_event(
         &mut state,
         crate::runtime::TOPIC_CONTROL,
-        &serde_json::json!({ "type": "pause_interview", "paused": true }),
+        &serde_json::json!({ "type": "thinking", "thinking": true }),
         99.0,
     );
     apply_data_event(
         &mut state,
         crate::runtime::TOPIC_CONTROL,
-        &serde_json::json!({ "type": "pause_interview", "paused": true }),
+        &serde_json::json!({ "type": "thinking", "thinking": true }),
         99.0,
     );
     apply_data_event(
@@ -583,9 +584,11 @@ fn evidence_ledger_only_records_accepted_control_transitions() {
         &serde_json::json!({ "type": "end_interview", "reason": "candidate_ended" }),
         99.0,
     );
-    assert!(state.evidence_ledger.lifecycle.paused);
     assert!(state.evidence_ledger.lifecycle.ended);
-    assert_eq!(state.evidence_ledger.lifecycle.transitions, 2);
+
+    // The repeated hold is not a transition; the goodbye ends the one declared,
+    // and that end is.
+    assert_eq!(state.evidence_ledger.lifecycle.transitions, 3);
 }
 
 #[test]
@@ -3211,14 +3214,14 @@ fn each_prompt_gets_only_the_lines_it_does_not_already_state() {
     ledger.record_hint(7_100, false, true);
     ledger.record_hint(7_200, true, false);
     ledger.record_conversation_turn(8_000, "candidate");
-    ledger.record_lifecycle(9_000, LifecycleTransition::Paused);
+    ledger.record_lifecycle(9_000, LifecycleTransition::BehavioralStarted);
 
     let code = "code: python, 3 candidate edits, 3 changed the program, parses, last edit code, returned to an earlier buffer 1 times";
     let history = "the same failure 2 runs in a row, 1 runs failed to start, 1 edit-and-run cycles";
     let tests = format!("tests: browser-reported claims (unverified): 1 of 3 passing, {history}");
     let diagnostics = "diagnostics: browser-reported claims (unverified): syntax 1";
     let hints = "hints: 2 requested, 1 volunteered, 1 withheld, ladder at rung 1";
-    let session = "session: paused";
+    let session = "session: behavioral round started";
     assert_eq!(
         ledger.prompt_view(ViewFor::Watch),
         [

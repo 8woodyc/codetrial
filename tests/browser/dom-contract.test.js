@@ -827,13 +827,11 @@ test("a dropped connection is visible and recovers its state", () => {
   );
 });
 
-// The board is locked when the editor is, and for the same two reasons: a
-// paused interview collects no evidence, and the behavioral round retires the
-// coding surface. Left live, a pause sent Jim work drawn while he waited.
-test("the board takes no edits while the interview is paused", () => {
+// The board is locked when the editor is: the behavioral round retires the
+// coding surface.
+test("the board takes no edits once the behavioral round retires it", () => {
   const script = interviewSource();
   const locked = functionBody(script, "boardLocked");
-  assert.match(locked, /state\.paused \|\|/);
   assert.match(locked, /frameworkRound === "behavioral"/);
   // Nor before the room is joined, where a stroke would miss the replay.
   assert.match(locked, /!board\.ready/);
@@ -849,11 +847,7 @@ test("the board takes no edits while the interview is paused", () => {
       `${button} stays usable on a locked board`,
     );
   }
-  // Both moments the lock changes repaint the toolbar, after the state moved.
-  assert.match(
-    functionBody(script, "applyPause"),
-    /state\.paused = paused;[\s\S]*?if \(whiteboard\) paintBoard\(\);/,
-  );
+  // The round moving repaints the toolbar, after the state moved.
   assert.match(
     script,
     /frameworkRound = "behavioral";\s*if \(whiteboard\) paintBoard\(\);/,
@@ -1072,43 +1066,19 @@ test("the ending overlay counts the wait it is asking the candidate to sit throu
   }
 });
 
-/// A paused interview still has a deadline.
-///
-/// `tickTimer` used to return early while paused, so the countdown froze and
-/// `time_up` never fired: the session sat until the agent's own deadline, the
-/// full duration plus a two-minute grace, behind a stopped clock. That is issue
-/// 31's symptom -- an interview waiting on a clock nobody is watching --
-/// arriving by a second route. A pause stops the conversation, not the
-/// deadline, so what it suppresses is only what would talk into the room.
-test("a paused interview still counts down and still ends", () => {
+/// The thresholds `tickTimer` publishes are levels, sent once each.
+test("the countdown's thresholds are levels, not crossings", () => {
   const tick = functionBody(interviewSource(), "tickTimer");
 
-  assert.doesNotMatch(
-    tick,
-    /state\.phase !== "live" \|\| state\.paused/,
-    "a pause must not stop the countdown reaching time_up",
-  );
-  assert.ok(
-    tick.indexOf('endInterview("time_up")') >
-      tick.indexOf("if (!state.paused)"),
-    "the ending is outside the pause guard, so a paused interview still reaches it",
-  );
-
-  // Sent once, and only from a tick that was allowed to publish. A crossing
-  // latched separately from the send would be one tick wide, so a pause across
-  // it loses the event; a level plus the flag cannot be missed.
+  // A crossing latched separately from the send would be one tick wide, so a
+  // missed tick loses the event; a level plus the flag cannot be missed.
   for (const spoken of ["round_transition", "timeWarningPayload"]) {
     const at = tick.indexOf(spoken);
     assert.ok(at !== -1, `${spoken} left tickTimer`);
-    assert.match(
-      tick.slice(0, at),
-      /if \(!state\.paused\)/,
-      `${spoken} would talk into a paused room`,
-    );
     assert.doesNotMatch(
       tick.slice(0, at),
       /previousRemaining/,
-      `${spoken} is edge-triggered again, so a pause across the crossing loses it`,
+      `${spoken} is edge-triggered again, so a missed tick loses it`,
     );
   }
 });
@@ -1128,43 +1098,6 @@ test("an interview the interviewer ended still records that it ended", () => {
     receive,
     /state\.phase === "live"/,
     "a browser-driven end already wrote the frame, and two would be worse than none",
-  );
-});
-
-/// A level is worth having because it can be asked again -- but only the one
-/// that went unheard.
-///
-/// A pause releases a latch so a threshold published into the pause round trip,
-/// which the agent drops, gets asked again on resume. Releasing every latch
-/// instead re-asks thresholds that were already announced, and the agent treats
-/// a second time warning as news: Jim breaks in with "exactly N minutes remain"
-/// once per pause cycle. `togglePause` snapshots what had already been heard as
-/// the request leaves, and only the rest is released.
-test("a pause releases only the threshold latches it prevented from being heard", () => {
-  const script = interviewSource();
-  const pause = functionBody(script, "applyPause");
-
-  assert.match(
-    pause,
-    /if \(paused\)/,
-    "the release belongs to pausing, not to resuming twice",
-  );
-  assert.match(
-    pause,
-    /state\.latchedBeforePause/,
-    "without the snapshot the release cannot tell an unheard threshold from an announced one",
-  );
-  for (const latch of ["roundTransitionSent", "timeWarningSent"]) {
-    assert.match(
-      pause,
-      new RegExp(`if \\(!announced\\?\\.${latch}\\) state\\.${latch} = false`),
-      `${latch} is released unconditionally, so a threshold already announced is announced again`,
-    );
-  }
-  assert.match(
-    functionBody(script, "togglePause"),
-    /state\.latchedBeforePause = \{/,
-    "the snapshot has to be taken as the request leaves, not when the echo lands",
   );
 });
 

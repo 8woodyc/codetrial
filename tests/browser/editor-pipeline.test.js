@@ -28,8 +28,9 @@ after(async () => {
 });
 
 /// A page on the interview screen with an empty editor, no room joined. The
-/// pause control is revealed by bindEvents after the starter buffer is seeded.
-/// The textarea starts enabled in HTML, so it cannot signal readiness. Nothing
+/// round plan summary, empty in the HTML, is written by bindEvents after the
+/// starter buffer is seeded. The textarea starts enabled in HTML, so it cannot
+/// signal readiness. Nothing
 /// under test needs a live session, so this never waits on one.
 async function editorPage(t, { params = {}, beforeLoad } = {}) {
   if (!browser) {
@@ -52,7 +53,9 @@ async function editorPage(t, { params = {}, beforeLoad } = {}) {
   await page.goto(`${base}/interview.html?${query}`, {
     waitUntil: "domcontentloaded",
   });
-  await page.waitForSelector("#pause:not([hidden])");
+  await page.waitForFunction(
+    () => document.querySelector("#round-plan-summary").textContent !== "",
+  );
   // The editor cannot take focus under the setup check; a keystroke only
   // needs focus, not a click.
   await closeSetupCheck(page);
@@ -1193,7 +1196,10 @@ test("editor setup waits for delayed problem initialization before clearing the 
   try {
     await requested;
     await loadingPage.waitForSelector("#editor:not([disabled])");
-    assert.equal(await loadingPage.locator("#pause").isVisible(), false);
+    assert.equal(
+      await loadingPage.locator("#round-plan-summary").textContent(),
+      "",
+    );
     // Recreate the old helper's sequence before the module can initialize.
     await loadingPage.evaluate(() => document.querySelector("#editor").focus());
     await loadingPage.keyboard.press("ControlOrMeta+A");
@@ -1206,7 +1212,9 @@ test("editor setup waits for delayed problem initialization before clearing the 
     );
     releaseProblem();
     const { page, errors } = await setup;
-    await page.waitForSelector("#pause:not([hidden])");
+    await page.waitForFunction(
+      () => document.querySelector("#round-plan-summary").textContent !== "",
+    );
     assert.equal((await caretState(page)).value, "");
     assert.deepEqual(errors, []);
   } finally {

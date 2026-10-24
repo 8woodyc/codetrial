@@ -77,8 +77,9 @@ pub(super) async fn pump_audio<S: AudioSink>(
         // Only the flush. Letting go of the stream is the caller's, because it
         // has to happen whether or not this fails: the caller logs a write
         // error and keeps looping, and a stream still in place is polled again
-        // at once, ends again and fails again, which is the busy loop
-        // `discard_paused_audio` already describes for the paused path.
+        // at once, ends again and fails again. Both `select!` arms are guarded
+        // on the stream still being present, so that is a busy loop for as long
+        // as the room lasts, not a lost frame.
         flush_audio(gemini, &mut media.audio_bytes).await?;
         return Ok(());
     };
@@ -95,26 +96,7 @@ pub(super) async fn pump_audio<S: AudioSink>(
     Ok(())
 }
 
-/// What a media frame is worth while the interview is paused.
-///
-/// The frame itself is dropped: a paused interview is not collecting evidence,
-/// and a tenth of a second of speech the resumed session never needed is not
-/// worth propagating a write error over.
-///
-/// Letting go of an ended track is the caller's, once, for every path through
-/// the arm. Doing it here as well would be a second answer to a question that
-/// already has one, and the bug worth guarding against is a path that answers
-/// it nowhere: both `select!` arms are guarded on the stream still being
-/// present, and an ended stream yields `None` the moment it is polled, so a
-/// stream left in place re-arms the arm and fires again immediately, for as
-/// long as the room lasts. That is a busy loop, not a lost frame.
-pub(super) fn discard_paused_audio(media: &mut CandidateMedia) {
-    media.audio_bytes.clear();
-}
-
-/// Generic so it can be tested, and called directly for video, which has no
-/// buffer to clear and so needs nothing wrapped around it. A real stream needs
-/// a real track, so a rule
+/// Generic so it can be tested: a real stream needs a real track, so a rule
 /// written directly against `NativeAudioStream` is one no test can reach, and
 /// this rule is the whole of the bug.
 pub(super) fn release_if_ended<T>(stream: &mut Option<T>, ended: bool) {

@@ -41,9 +41,9 @@ checkpoint, whatever it owed when it was replaced. Resumption stays disabled
 through that failure run until completed output or a socket that stays up past
 a minute proves recovery; these cold opens consume the same restart budget. The
 reply to a recovery briefing is not that proof, whether the briefing went out
-at once or was held for an unpause or the end of a thinking hold: every
-replacement asks for one, so a run of sockets that each answer their briefing
-and die still ends the interview.
+at once or was held for the end of a thinking hold: every replacement asks for
+one, so a run of sockets that each answer their briefing and die still ends the
+interview.
 
 A candidate turn, required prompt (including the opening greeting), or tool
 continuation that gets nothing back for 10 seconds, not even the end of a turn
@@ -75,20 +75,20 @@ already answered, so it owes nothing. The replacement, resumed or cold, carries
 the unanswered reply across and publishes the same reconnecting state. A reply
 cut off mid-generation is owed too, and the replacement is told not to repeat
 what was already said. Optional editor reviews accept silence; queued audio and
-a paused interview do not trigger this watchdog. Periodic nudges wait
-while a reply is owed rather than replacing its debt. Until a socket has
-transcribed the candidate, the first one and every replacement alike, the idle
-timers also count the candidate's microphone level as speech, so a socket that
-is not hearing them does not take their talking for silence and nudge them.
+a thinking hold do not trigger this watchdog. Periodic nudges wait while a reply
+is owed rather than replacing its debt. Until a socket has transcribed the
+candidate, the first one and every replacement alike, the idle timers also count
+the candidate's microphone level as speech, so a socket that is not hearing them
+does not take their talking for silence and nudge them.
 
 A close the interviewer asked for is not recovered either: it waits on the
 tool acknowledgement, and if that never comes, or starts and then stops, the
 interview closes once the acknowledgement has been silent for 20 seconds. A
-close is held across a pause and acted on after the resume. A generation or
-tool continuation silent for 20 seconds when the candidate pauses is not
-waited on after the resume, so the reply to the resume is heard rather than
-discarded, and if that generation does end later its ending is not taken as
-the answer to the resume.
+close is held across a thinking hold and acted on once the hold ends. A
+generation or tool continuation silent for 20 seconds when a hold cuts it off is
+not waited on after the release, so the reply to the release is heard rather
+than discarded, and if that generation does end later its ending is not taken as
+the answer to the release.
 
 A turn Gemini completes with no output settles what it owed. The socket has
 answered, and the model may choose silence; the idle nudges, not the watchdog,
@@ -162,12 +162,13 @@ Coding drawing activity restarts the browser's turn ring using the published
 speech silence window. New ink or concurrent speech resets the countdown;
 after silence, the page waits at most two seconds to share the visible drawing
 and sends one explicit drawing yield. A failed upload still yields, and new
-activity, a pause, thinking time or a disconnected interviewer cancels a yield
-that is waiting on the upload. A drawing-only yield requests a brief response
-even without an audio turn; it does not send an image. With a spoken turn still open, the note is delivered
-as context and the audio turn is ended, allowing the existing reply fallback
-to recover silence instead of asking for two replies. Drawings still grant no
-assessment evidence. Whiteboard turn taking is unchanged.
+activity, thinking time or a disconnected interviewer cancels a yield that is
+waiting on the upload. A drawing-only yield requests a brief response even
+without an audio turn; it does not send an image. With a spoken turn still open,
+the note is delivered as context and the audio turn is ended, allowing the
+existing reply fallback to recover silence instead of asking for two replies.
+Drawings still grant no assessment evidence. Whiteboard turn taking is
+unchanged.
 
 Final reporting has a shared hard budget of five Gemini HTTP calls across
 initial generation, up to two semantic repairs, and transient retries. The
@@ -255,11 +256,11 @@ changed; typing pauses every few seconds while Coding is open, so editor-only
 judgments also take at most 12 of the calls. The end and a held round
 transition may start one sooner: the end waits at most 5 seconds in all for its
 judgments, and a round transition is held at most 5 seconds while the room
-keeps running, or until the resume when the interview is paused. Both share the
-ceiling of 48 calls per interview, of which a coding round at a typed editor
-leaves 8 for a behavioral round still to come. Each reads at most 6 KiB of
-transcript tail and 6 KiB of editor. A rate limit on a judgment does not cool
-the key, so the judge cannot leave the final report without one.
+keeps running. Both share the ceiling of 48 calls per interview, of which a
+coding round at a typed editor leaves 8 for a behavioral round still to come.
+Each reads at most 6 KiB of transcript tail and 6 KiB of editor. A rate limit on
+a judgment does not cool the key, so the judge cannot leave the final report
+without one.
 
 ## What bounds concurrency
 
@@ -447,22 +448,22 @@ to 1 to 2048 tokens), or fell at all from a context that had reached the
 trigger. Both are heuristics, not an API compression event.
 
 The checkpoint waits until the candidate is not mid-turn by transcript or by
-microphone level, no reply, tool continuation or queued audio is outstanding,
-and the interview is not paused; the room retries after Gemini events, at the
-playout boundary and on the watch tick. It carries the platform timer, the
-chosen language, the current round, the evidenced phases, a 2,500-byte
-transcript budget (a long behavioral round keeps up to 750 bytes of its opening
-beside the recent dialogue), the test report up to 1,000 bytes, and in the
-coding round up to 1,800 bytes of the editor's opening and ending. Omitted
-lines are named as omitted and remain available through `read_editor`; omission
-is not evidence that a follow-up was unused or that no refusal occurred. A
-replacement socket drops a pending checkpoint, because its recovery already
-carries local state, and socket recovery keeps its own larger budgets.
-Whiteboard checkpoints omit editor and test data and direct visual claims to a
-fresh `read_board` snapshot. During the behavioral round, they omit the drawing
-and prohibit returning to it merely to recover earlier work. They also omit
-coding-run progress cues. Coding checkpoint output is unchanged by these mode
-guards; no token reduction is claimed for this correctness fix.
+microphone level, and no reply, tool continuation or queued audio is
+outstanding; the room retries after Gemini events, at the playout boundary and
+on the watch tick. It carries the platform timer, the chosen language, the
+current round, the evidenced phases, a 2,500-byte transcript budget (a long
+behavioral round keeps up to 750 bytes of its opening beside the recent
+dialogue), the test report up to 1,000 bytes, and in the coding round up to
+1,800 bytes of the editor's opening and ending. Omitted lines are named as
+omitted and remain available through `read_editor`; omission is not evidence
+that a follow-up was unused or that no refusal occurred. A replacement socket
+drops a pending checkpoint, because its recovery already carries local state,
+and socket recovery keeps its own larger budgets. Whiteboard checkpoints omit
+editor and test data and direct visual claims to a fresh `read_board` snapshot.
+During the behavioral round, they omit the drawing and prohibit returning to it
+merely to recover earlier work. They also omit coding-run progress cues. Coding
+checkpoint output is unchanged by these mode guards; no token reduction is
+claimed for this correctness fix.
 
 Only while a pair is configured do `read_editor`, `log_hint` and, at a
 whiteboard, `record_framework_evidence` answers also carry the latest unanswered candidate
@@ -483,14 +484,14 @@ latest unanswered local candidate utterance, quoted as data, and preserves the
 current round and evidenced steps without replaying the opening or full problem
 restatement. In coding, a prior candidate opening is also quoted within 750
 bytes once a later candidate turn exists; it is omitted during the behavioral
-round. A new timer reading remains last. The first response on a cut context precedes its
-usage-triggered checkpoint; the reminder covers that gap. Paused, thinking-held
-and ending interviews receive no reminder. The reminder is not added under
-provider defaults. Recovery briefings already carry the recent transcript and
-their own no-restart rules, so they receive only the owed-question rule and any
-opening or latest candidate line their transcript tail no longer holds whole.
-The added text is part of measured model input, so comparisons must include its
-cost rather than assume it is free.
+round. A new timer reading remains last. The first response on a cut context
+precedes its usage-triggered checkpoint; the reminder covers that gap.
+Thinking-held and ending interviews receive no reminder. The reminder is not
+added under provider defaults. Recovery briefings already carry the recent
+transcript and their own no-restart rules, so they receive only the
+owed-question rule and any opening or latest candidate line their transcript
+tail no longer holds whole. The added text is part of measured model input, so
+comparisons must include its cost rather than assume it is free.
 
 A lower threshold reduces the history retained for later turns, and may remove
 information a follow-up needs or add compression latency. Final reporting still
@@ -693,14 +694,14 @@ and compression comparisons must include that overhead.
 Provider voiceActivity START/END observations hold silence nudges, editor watch
 prompts, context refreshes, and idle assessment calls while Gemini detects
 candidate speech. END starts the silence interval afresh. These observations
-are not transcripts or assessment evidence. Socket replacement, pause, and
-microphone teardown and explicit Thinking/yield stream finalization clear the active flag.
+are not transcripts or assessment evidence. Socket replacement and microphone
+teardown and explicit Thinking/yield stream finalization clear the active flag.
 A START with no microphone or provider evidence for 10 seconds is treated as if
 its END had arrived then, so one lost END cannot hold these back for the rest of
-the socket. Raw microphone energy retains its
-existing noise safeguard after the socket first transcribes the candidate.
-This avoids treating a delayed transcript as silence; measured savings still
-require a completed comparison including any additional tool calls.
+the socket. Raw microphone energy retains its existing noise safeguard after the
+socket first transcribes the candidate. This avoids treating a delayed
+transcript as silence; measured savings still require a completed comparison
+including any additional tool calls.
 
 An advisory transport restart also waits during the quiet transcription tail:
 provider speech is still active but the microphone has been quiet for at least

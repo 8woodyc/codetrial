@@ -3,9 +3,10 @@
 The agent emits `codetrial turn_timing` when the first reply audio chunk is
 accepted into its output queue. Later chunks do not emit another summary.
 A pending measurement that ends without that chunk emits `outcome=no_audio`,
-`interrupted`, `replaced`, `paused`, `held`, or `ended` instead. Replacements
-finish the old measurement before the socket number changes; the new socket
-starts with no inherited timestamps or tool counters.
+`interrupted`, `replaced`, `held`, or `ended` instead. Logs from before the
+Pause button was removed can also carry `outcome=paused`, which nothing emits
+now. Replacements finish the old measurement before the socket number changes;
+the new socket starts with no inherited timestamps or tool counters.
 
 For example, this synthetic measurement has one tool call before audio:
 
@@ -59,7 +60,7 @@ cannot create another measurement for the completed reply.
 
 Durations are rounded down to whole milliseconds. A fast tool may report zero
 milliseconds while still incrementing `tool_calls`. Tools handled during a
-pause, thinking hold, or discarded generation are excluded, as are calls after
+thinking hold or a discarded generation are excluded, as are calls after
 the first reply audio. Board-image preparation, provider inference and event
 queue delays are not local tool execution.
 
@@ -103,7 +104,7 @@ for the optional activity signal and its separate audio clock.
 For a manual check, use a rebuilt binary, speak a complete answer, and compare
 the next summary with one where the interviewer reads the editor. Check that
 the latter has tool activity, that later audio chunks add no summaries, and
-that a cut, pause or replacement leaves the next measurement with fresh
+that a cut, thinking hold or replacement leaves the next measurement with fresh
 timestamps. A naturally slow reply is useful evidence, not a prerequisite for
 testing the arithmetic with controlled timestamps in `tests/unit/livekit/`.
 
@@ -150,7 +151,7 @@ one. When activity expires locally or its track is lost without END, the active
 overlap is flushed unresolved with unknown duration. It cannot stretch across
 the next utterance. A new START also displaces any ended but unsettled overlap
 as unresolved. Unobserved loss before expiry cannot be distinguished from
-continuous provider activity. Pause, thinking hold, socket replacement and
+continuous provider activity. A thinking hold, socket replacement and
 session teardown flush outstanding records; an unfinished overlap is
 `unresolved`, and a responded pause keeps its known outcome. Replacement
 flushes before the socket id changes. Events consumed by handoff or discarded
@@ -172,7 +173,7 @@ emission can reorder sequence numbers. `at` is interview elapsed time at
 emission. The fields are `room`, `session`, `socket`, `seq`, `kind`, `outcome`,
 `at`, `gap_ms`, `overlap_ms`, `playout_ahead_ms` and `suspect`. Inapplicable
 fields and an absent suspect print `unknown`. No text, word counts or audio are
-logged. Activity is eligible only with a candidate audio track, outside pause,
+logged. Activity is eligible only with a candidate audio track, outside a
 thinking hold and discarded output. PCM levels and transcripts cannot open
 records.
 

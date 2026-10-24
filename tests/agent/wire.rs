@@ -538,10 +538,6 @@ fn drawing_activity_resets_idle_without_adding_evidence_or_requesting_a_reply() 
     assert!(!state.thinking_hold.is_active());
     for mut state in [
         RuntimeState {
-            paused: true,
-            ..RuntimeState::default()
-        },
-        RuntimeState {
             ended: true,
             ..RuntimeState::default()
         },
@@ -581,10 +577,6 @@ fn drawing_yields_request_a_reply_without_speech_or_assessment_credit() {
     assert!(!state.thinking_hold.is_active());
     for mut blocked in [
         RuntimeState {
-            paused: true,
-            ..RuntimeState::default()
-        },
-        RuntimeState {
             ended: true,
             ..RuntimeState::default()
         },
@@ -607,46 +599,43 @@ fn drawing_yields_request_a_reply_without_speech_or_assessment_credit() {
 #[test]
 fn example_mutation_controls_respect_opt_in_and_interview_boundaries() {
     for enabled in [false, true] {
-        for paused in [false, true] {
-            for ended in [false, true] {
-                for behavioral in [false, true] {
-                    for mode in [InterviewMode::Coding, InterviewMode::Whiteboard] {
-                        for kind in ["drawing_activity", "yield_turn"] {
-                            let mut state = RuntimeState {
-                                example_drawing_enabled: enabled,
-                                paused,
-                                ended,
-                                behavioral_round_started: behavioral,
-                                interview_mode: mode,
-                                ..Default::default()
-                            };
-                            let result = apply_data_event(
-                                &mut state,
-                                codetrial::runtime::TOPIC_CONTROL,
-                                &serde_json::json!({"type": kind, "surface":"example"}),
-                                0.0,
+        for ended in [false, true] {
+            for behavioral in [false, true] {
+                for mode in [InterviewMode::Coding, InterviewMode::Whiteboard] {
+                    for kind in ["drawing_activity", "yield_turn"] {
+                        let mut state = RuntimeState {
+                            example_drawing_enabled: enabled,
+                            ended,
+                            behavioral_round_started: behavioral,
+                            interview_mode: mode,
+                            ..Default::default()
+                        };
+                        let result = apply_data_event(
+                            &mut state,
+                            codetrial::runtime::TOPIC_CONTROL,
+                            &serde_json::json!({"type": kind, "surface":"example"}),
+                            0.0,
+                        );
+                        let eligible = enabled && !ended && !behavioral;
+                        let label = format!(
+                            "{kind}: enabled={enabled}, ended={ended}, behavioral={behavioral}, mode={mode:?}"
+                        );
+                        if kind == "drawing_activity" {
+                            assert_eq!(result.update_last_code_change, eligible, "{label}");
+                            assert!(result.generate_reply.is_none(), "{label}");
+                        } else {
+                            assert_eq!(
+                                result.yield_turn,
+                                eligible && mode == InterviewMode::Coding,
+                                "{label}"
                             );
-                            let eligible = enabled && !paused && !ended && !behavioral;
-                            let label = format!(
-                                "{kind}: enabled={enabled}, paused={paused}, ended={ended}, behavioral={behavioral}, mode={mode:?}"
+                            assert_eq!(
+                                result.generate_reply.is_some(),
+                                eligible && mode == InterviewMode::Coding,
+                                "{label}"
                             );
-                            if kind == "drawing_activity" {
-                                assert_eq!(result.update_last_code_change, eligible, "{label}");
-                                assert!(result.generate_reply.is_none(), "{label}");
-                            } else {
-                                assert_eq!(
-                                    result.yield_turn,
-                                    eligible && mode == InterviewMode::Coding,
-                                    "{label}"
-                                );
-                                assert_eq!(
-                                    result.generate_reply.is_some(),
-                                    eligible && mode == InterviewMode::Coding,
-                                    "{label}"
-                                );
-                            }
-                            assert!(state.framework_evidence.is_empty(), "{label}");
                         }
+                        assert!(state.framework_evidence.is_empty(), "{label}");
                     }
                 }
             }
@@ -917,54 +906,13 @@ fn the_grounding_budget_is_the_number_the_browser_enforces() {
     );
 }
 
-/// Pause and the round gate answer to the interview being over, and say what
-/// they did.
+/// The round gate says what it did.
 ///
-/// Each of these could be quietly loosened: the pause arm could run after the
-/// interview ended, resuming could stop speaking, the coding gate could accept
-/// one phase where it wants two, and either branch could stop reporting which
-/// round it moved to. The browser and the report both read those answers.
+/// It could be quietly loosened: the coding gate could accept one phase where
+/// it wants two, and either branch could stop reporting which round it moved
+/// to. The browser and the report both read those answers.
 #[test]
-fn control_events_respect_the_end_and_report_what_they_did() {
-    let pause = |paused: bool| json!({"type": "pause_interview", "paused": paused});
-
-    // Nothing is driven after the interview ends, pause included.
-    let mut ended = RuntimeState {
-        ended: true,
-        ..RuntimeState::default()
-    };
-    let after = apply_data_event(&mut ended, TOPIC_CONTROL, &pause(true), 99.0);
-    assert!(
-        after.pause_changed.is_none(),
-        "an ended interview cannot be paused"
-    );
-    assert!(!ended.paused);
-
-    // Pausing is silent; resuming says so, because the candidate is waiting for
-    // the interviewer to pick the conversation back up.
-    let mut live = RuntimeState::default();
-    let paused = apply_data_event(&mut live, TOPIC_CONTROL, &pause(true), 1.0);
-    assert_eq!(paused.pause_changed, Some(true));
-    assert!(
-        paused.generate_reply.is_none(),
-        "nobody is listening while paused"
-    );
-
-    let resumed = apply_data_event(&mut live, TOPIC_CONTROL, &pause(false), 2.0);
-    assert_eq!(resumed.pause_changed, Some(false));
-    assert!(
-        resumed.generate_reply.is_some(),
-        "resuming into silence leaves the candidate waiting on a turn nobody takes"
-    );
-    assert!(
-        resumed.update_last_interjection,
-        "the resume line is a turn, so it starts the interjection cooldown like any other"
-    );
-    assert!(
-        !paused.update_last_interjection,
-        "pausing says nothing, so it starts no cooldown"
-    );
-
+fn the_round_gate_reports_what_it_did() {
     // The coding gate wants both phases, and says which round it moved to
     // either way: the browser closes the editor on that answer.
     let evidence = |phase: &str| {
@@ -1118,7 +1066,6 @@ fn browser_thinking_controls_keep_evidence_live_and_yield_the_floor() {
     let result = apply_data_event(&mut state, &topic, start, TEST_REACTION_COOLDOWN_S);
     assert_eq!(result.thinking_changed, Some(true));
     assert!(state.thinking_hold.is_active());
-    assert!(!state.paused);
     assert!(result.generate_reply.is_none());
     assert_eq!(state.started_at, started);
     assert_eq!(
@@ -1157,9 +1104,6 @@ fn browser_thinking_controls_keep_evidence_live_and_yield_the_floor() {
     let continued = apply_data_event(&mut state, &topic, wire_case(&cases, "thinking end"), 0.0);
     assert_eq!(continued.thinking_changed, Some(false));
     assert!(continued.generate_reply.is_some());
-    state.paused = true;
-    assert!(!apply_data_event(&mut state, &topic, wire_case(&cases, "yield turn"), 0.0).yield_turn);
-    state.paused = false;
     state.ended = true;
     assert_eq!(
         apply_data_event(&mut state, &topic, start, 0.0).thinking_changed,
@@ -1168,7 +1112,7 @@ fn browser_thinking_controls_keep_evidence_live_and_yield_the_floor() {
 }
 
 #[test]
-fn thinking_preserves_recovery_debt_across_pause_and_resume() {
+fn thinking_release_delivers_the_recovery_debt() {
     let mut state = RuntimeState {
         thinking_hold: ThinkingHold::Held {
             since: std::time::Instant::now(),
@@ -1178,11 +1122,6 @@ fn thinking_preserves_recovery_debt_across_pause_and_resume() {
         code: "return 42".into(),
         ..RuntimeState::default()
     };
-    control(&mut state, json!({"type":"pause_interview","paused":true}));
-    let resume = control(&mut state, json!({"type":"pause_interview","paused":false}));
-    assert!(resume.generate_reply.is_none());
-    assert!(state.needs_cold_brief);
-    assert!(state.owed_reply_on_resume.is_some());
     let ready = control(&mut state, json!({"type":"thinking","thinking":false}));
     let prompt = ready.generate_reply.unwrap();
     assert!(prompt.contains("return 42"));
@@ -1268,27 +1207,6 @@ fn a_continue_right_after_the_last_one_releases_without_a_reply() {
 }
 
 #[test]
-fn a_cold_briefing_on_resume_also_asks_for_the_reply_owed() {
-    let mut state = RuntimeState {
-        paused: true,
-        needs_cold_brief: true,
-        owed_reply_on_resume: Some(Some("Answer the outstanding candidate question.".into())),
-        code: "return 42".into(),
-        ..RuntimeState::default()
-    };
-    let resumed = control(&mut state, json!({"type":"pause_interview","paused":false}));
-    let prompt = resumed.generate_reply.unwrap();
-    assert!(prompt.contains("return 42"));
-    assert!(prompt.contains("Answer the outstanding candidate question."));
-
-    // Kept until the room loop has sent it: a resume that fails to send leaves
-    // it for the next socket.
-    assert!(resumed.carries_thinking_debt);
-    assert!(state.needs_cold_brief);
-    assert!(state.owed_reply_on_resume.is_some());
-}
-
-#[test]
 fn asking_for_the_state_it_already_has_re_announces_it() {
     let mut state = RuntimeState::default();
     toggle_thinking(&mut state, true);
@@ -1343,40 +1261,7 @@ fn a_test_run_during_a_hold_is_told_to_the_model_without_asking_for_a_reply() {
 }
 
 #[test]
-fn a_pause_withdraws_a_request_it_would_otherwise_leave_undecided() {
-    let mut state = RuntimeState {
-        thinking_hold: ThinkingHold::Requested {
-            since: std::time::Instant::now(),
-        },
-        ..RuntimeState::default()
-    };
-    for paused in [true, false] {
-        let result = control(
-            &mut state,
-            json!({"type":"pause_interview","paused":paused}),
-        );
-        if !paused {
-            assert!(result.generate_reply.is_some(), "the resume line is spoken");
-        }
-    }
-    assert_eq!(state.thinking_hold, ThinkingHold::Off);
-    assert_eq!(state.thinking_notice, None, "nothing public happened");
-
-    // A declared hold is the candidate's, and survives a pause.
-    state.thinking_hold = ThinkingHold::Held {
-        since: std::time::Instant::now(),
-    };
-    for paused in [true, false] {
-        control(
-            &mut state,
-            json!({"type":"pause_interview","paused":paused}),
-        );
-    }
-    assert!(state.thinking_hold.is_declared());
-}
-
-#[test]
-fn a_yield_carries_the_debt_it_delivers_and_a_pause_carries_none() {
+fn a_yield_carries_the_debt_it_delivers() {
     let mut state = RuntimeState {
         thinking_unheard_reply: true,
         ..RuntimeState::default()
@@ -1390,12 +1275,6 @@ fn a_yield_carries_the_debt_it_delivers_and_a_pause_carries_none() {
             .unwrap()
             .contains("Nothing you said while the candidate was thinking")
     );
-
-    // Pausing says nothing, so it pays nothing, however much is owed.
-    let paused = control(&mut state, json!({"type":"pause_interview","paused":true}));
-    assert!(paused.generate_reply.is_none());
-    assert!(!paused.carries_thinking_debt);
-    assert!(state.thinking_unheard_reply);
 }
 
 #[test]
