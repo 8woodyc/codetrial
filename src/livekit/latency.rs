@@ -722,6 +722,12 @@ impl ReplyLatency {
         Some(record)
     }
 
+    /// Whether a reply is being traced, so padding that only finishes an
+    /// earlier reply's audio can stay out of a trace it would otherwise open.
+    pub(super) fn is_open(&self) -> bool {
+        self.trace.is_some()
+    }
+
     /// Ends the trace at a boundary nothing else needs the record of, logging
     /// it.
     pub(super) fn close(&mut self, boundary: Boundary, now: Instant) {

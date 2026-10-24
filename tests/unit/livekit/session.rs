@@ -5493,6 +5493,96 @@ async fn delivery_uncertainty_at_the_playout_backstop_seals_the_ambiguous_line()
     assert!(segments.contains(&("Words before the old audio drains.".into(), true)));
 }
 
+/// A reply ending off a frame is padded at its completion. Padded after the
+/// completion closed the reply's trace, the tail opened a trace of its own with
+/// its audio already accepted, so the next reply's first chunk went unrecorded
+/// until that reply's own tail: replies heard two seconds after the candidate
+/// stopped were logged as stalls of eight.
+#[tokio::test]
+async fn a_padded_tail_leaves_the_next_reply_its_first_audio_record() {
+    let mut h = Harness::new().await;
+    h.event(GeminiEvent::InputTranscript("What is the target?".into()))
+        .await;
+    h.event(GeminiEvent::Audio {
+        bytes: vec![0; GEMINI_OUTPUT_AUDIO_SAMPLE_RATE as usize / 100 * 2 + 2],
+        mime_type: format!("audio/pcm;rate={GEMINI_OUTPUT_AUDIO_SAMPLE_RATE}"),
+    })
+    .await;
+    h.event(GeminiEvent::TurnComplete).await;
+    assert!(h.output.pending_bytes.is_empty(), "the tail was padded");
+    assert!(
+        !h.turn.activity.latency.is_open(),
+        "the padding opened no trace of its own"
+    );
+    while h.queued.try_recv().is_ok() {}
+
+    h.event(GeminiEvent::InputTranscript("It is twelve.".into()))
+        .await;
+    h.event(reply_audio()).await;
+    let first = h.queued.try_recv().expect("the reply's first frame");
+    assert!(
+        first.latency_marker.is_some(),
+        "the reply's own first frame carries its record"
+    );
+}
+
+/// A reply that was nothing but a partial frame is heard only once its tail is
+/// padded, so the padding carries that reply's first-audio record.
+#[tokio::test]
+async fn a_reply_that_is_only_a_tail_keeps_its_first_audio_record() {
+    let mut h = Harness::new().await;
+    h.event(GeminiEvent::InputTranscript("What is the target?".into()))
+        .await;
+    h.event(GeminiEvent::Audio {
+        bytes: vec![0; 2],
+        mime_type: format!("audio/pcm;rate={GEMINI_OUTPUT_AUDIO_SAMPLE_RATE}"),
+    })
+    .await;
+    assert!(
+        h.queued.try_recv().is_err(),
+        "a partial frame waits for more"
+    );
+    h.event(GeminiEvent::TurnComplete).await;
+    let tail = h.queued.try_recv().expect("the padded tail");
+    assert!(
+        tail.latency_marker.is_some(),
+        "the padded tail is the reply's first audio"
+    );
+}
+
+/// A turn kept through an interruption is padded after the interruption closed
+/// its trace, and that close opens the trace of the voice that cut in. The
+/// padding is the kept reply's, so the next reply keeps its own first audio.
+#[tokio::test]
+async fn a_kept_turn_tail_leaves_the_voice_that_cut_in_its_first_audio_record() {
+    let mut h = Harness::new().await;
+    h.event(GeminiEvent::Audio {
+        bytes: vec![0; GEMINI_OUTPUT_AUDIO_SAMPLE_RATE as usize / 100 * 2 + 2],
+        mime_type: format!("audio/pcm;rate={GEMINI_OUTPUT_AUDIO_SAMPLE_RATE}"),
+    })
+    .await;
+    while h.queued.try_recv().is_ok() {}
+    h.turn.activity.latency.voice(Instant::now());
+    h.event(GeminiEvent::Interrupted).await;
+    assert!(
+        h.output.pending_bytes.is_empty(),
+        "the kept tail was padded"
+    );
+    while let Ok(frame) = h.queued.try_recv() {
+        assert!(
+            frame.latency_marker.is_none(),
+            "the kept reply's audio is not the next reply's first"
+        );
+    }
+
+    h.event(reply_audio()).await;
+    let first = h.queued.try_recv().expect("the reply's first frame");
+    assert!(
+        first.latency_marker.is_some(),
+        "the reply's own first frame carries its record"
+    );
+}
+
 #[tokio::test]
 async fn delivery_uncertainty_keeps_tail_padding_with_the_completed_generation() {
     let mut h = Harness::new().await;
