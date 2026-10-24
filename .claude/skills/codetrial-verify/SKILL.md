@@ -32,7 +32,7 @@ one failure does not hide the next; the summary line names every gate that
 failed. It covers `cargo fmt --check`, `clippy -D warnings`, `cargo test`, the
 Python unittest suites, the Node browser tests, ESLint, `ruff check`,
 `shellcheck`, the generated-artifact drift checks, the hook suite, the skill
-references, `cargo-audit` and `actionlint`.
+references, `cargo-audit`, `cargo-deny` and `actionlint`.
 
 It is not offline. The `fetch-vendor` gate downloads missing assets named by a
 `web/vendor/**/FETCH` manifest; it cannot restore committed vendor files.

@@ -71,6 +71,7 @@ tree. The summary names each one; these are what they need.
 npm ci                            # ESLint and Prettier, pinned
 npx playwright install chromium   # the browser tests, the whole lobby flow
 cargo install cargo-audit         # the dependency advisory scan
+cargo install cargo-deny          # dependency licenses and sources, deny.toml
 ```
 
 CI runs `scripts/test.sh rust`, `scripts/test.sh portable` and

@@ -199,7 +199,8 @@ gate()
         shared = {"fetch-vendor", "verify-vendor"}
         self.assertEqual(rust & portable, shared)
         self.assertEqual(
-            rust - shared, {"clippy", "cargo-test", "browser-server-tests"}
+            rust - shared,
+            {"clippy", "cargo-test", "browser-server-tests", "cargo-deny"},
         )
         self.assertEqual(rust & browser, shared)
         self.assertEqual(portable & browser, shared)
@@ -627,6 +628,9 @@ printf 'python:%s\\n' "$*" >> "$CALLS"
                 self.assertEqual(
                     condition(gates, f"Install {name}"), "matrix.lane == 'portable'"
                 )
+        self.assertEqual(
+            condition(gates, "Install cargo-deny"), "matrix.lane == 'rust'"
+        )
         self.assertEqual(
             condition(gates, "Install Chromium"), "matrix.lane != 'portable'"
         )

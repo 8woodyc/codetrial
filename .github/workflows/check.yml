@@ -69,6 +69,10 @@ env:
   # check was the one file nothing checked.
   ACTIONLINT_VERSION: 1.7.12
 
+  # The license and source policy in deny.toml, pinned like the tools above:
+  # a release that reads that file differently should arrive as a bump.
+  CARGO_DENY_VERSION: 0.20.2
+
 jobs:
   audit:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
@@ -270,6 +274,16 @@ jobs:
         run: >-
           ./scripts/install-release-binary.sh sysprog21/commentflow latest
           commentflow-x86_64-unknown-linux-gnu.tar.gz commentflow
+
+      - name: Install cargo-deny
+        if: matrix.lane == 'rust'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          ./scripts/install-release-binary.sh EmbarkStudios/cargo-deny
+          "$CARGO_DENY_VERSION"
+          "cargo-deny-$CARGO_DENY_VERSION-x86_64-unknown-linux-musl.tar.gz"
+          "cargo-deny-$CARGO_DENY_VERSION-x86_64-unknown-linux-musl/cargo-deny"
 
       # Pinned to a tag rather than tracking a rolling one, unlike commentflow
       # above: this one judges the workflow, so a linter that moves on its own
