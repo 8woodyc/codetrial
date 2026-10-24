@@ -79,6 +79,12 @@ livekit-net = "0.1.4"
 # at their real values instead of waiting them out.
 tokio = { version = "1.54.1", features = ["test-util"] }
 
+# The audio probe matches onsets to pulses, and `cargo test` builds an
+# example's tests without running them unless asked to.
+[[example]]
+name = "audio-latency"
+test = true
+
 # Release archives distribute the executable, not a debugging target. Cargo
 # already omits debug information in this profile; omit linker symbols too.
 #
