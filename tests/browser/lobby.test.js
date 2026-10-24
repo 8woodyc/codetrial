@@ -7866,6 +7866,28 @@ for (const storage of ["account", "device"]) {
       assert.equal((await snapshot(page)).card, original.card);
       await page.click("details.problem-picker summary");
       const card = page.locator(`[data-problem="${EASY[0]}"]`);
+      assert.equal(
+        await card.getAttribute("aria-describedby"),
+        await summary.getAttribute("id"),
+      );
+      const cdp = await page.context().newCDPSession(page);
+      try {
+        const { root } = await cdp.send("DOM.getDocument");
+        const { nodeId } = await cdp.send("DOM.querySelector", {
+          nodeId: root.nodeId,
+          selector: `[data-problem="${EASY[0]}"]`,
+        });
+        const { nodes } = await cdp.send("Accessibility.getPartialAXTree", {
+          nodeId,
+        });
+        assert.equal(
+          nodes.find((node) => node.role?.value === "button")?.description
+            ?.value,
+          await summary.textContent(),
+        );
+      } finally {
+        await cdp.detach();
+      }
       assert.doesNotMatch(
         (await card.getAttribute("aria-label")) ?? (await card.innerText()),
         /Previously attempted/,
@@ -7965,7 +7987,22 @@ lobbyTest(
     assert.equal(await summary(EASY[0]).textContent(), "");
     assert.equal(await summary(EASY[1]).getAttribute("hidden"), null);
     page.on("dialog", (dialog) => dialog.accept());
-    await page.locator("[data-delete-report]").click();
+    const releaseDeleteReload = holdHistory();
+    try {
+      const reloading = page.waitForRequest(`${base}/api/reports`);
+      await page.locator("[data-delete-report]").click();
+      await reloading;
+      assert.deepEqual(deletedIds, ["replacement"]);
+      assert.equal(await summary(EASY[1]).textContent(), "");
+      assert.equal(
+        await page.locator(".problem-attempt-summary:not([hidden])").count(),
+        0,
+      );
+    } finally {
+      releaseDeleteReload();
+      holdReports = null;
+    }
+    await awaitReady(page);
     await page.waitForFunction(
       () =>
         document.querySelectorAll(".problem-attempt-summary:not([hidden])")

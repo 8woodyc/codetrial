@@ -192,6 +192,8 @@ practiceListSaved = refreshPracticeList();
 for (const card of cards) {
   mark(card.button, false);
   card.attemptSummary = document.createElement("p");
+  card.attemptSummary.id = `problem-attempts-${card.id}`;
+  card.button.setAttribute("aria-describedby", card.attemptSummary.id);
   card.attemptSummary.className = "problem-attempt-summary";
   card.attemptSummary.hidden = true;
   card.entry.append(card.attemptSummary);
@@ -1185,6 +1187,7 @@ async function deleteSavedReport(attempt, when, button) {
 /// `local` draws this device's copy whatever the account holds, because that
 /// is the one the status line says was left behind.
 async function reloadAfterDelete(local) {
+  renderProblemAttempts([]);
   if (!historyReady) {
     await refreshHistory();
     return;
