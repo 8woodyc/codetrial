@@ -70,6 +70,11 @@ export function normalizeProgressEntry(raw) {
   const wrapper = raw && typeof raw === "object" ? raw : {};
   const entry = unwrapEntry(raw);
   const report = sanitizeReport(entry.report);
+  const recordedMetric = (key) =>
+    typeof entry.report?.[key] === "number" &&
+    Number.isFinite(entry.report[key])
+      ? report[key]
+      : null;
   const durationMin =
     Number.isInteger(entry.durationMin) &&
     entry.durationMin >= 10 &&
@@ -101,6 +106,9 @@ export function normalizeProgressEntry(raw) {
     recordedDecision: ["HIRE", "NO_HIRE"].includes(entry.report?.decision)
       ? entry.report.decision
       : null,
+    recordedCodingScore: recordedMetric("codingScore"),
+    recordedCommunicationScore: recordedMetric("communicationScore"),
+    recordedHintsUsed: recordedMetric("hintsUsed"),
     // Only the short local history keeps it; anything else reopens without.
     code: typeof entry.code === "string" ? entry.code : null,
     report,
