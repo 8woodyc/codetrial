@@ -69,19 +69,29 @@ test("selecting an example pen color switches from erasing to drawing", async (t
     await page.mouse.up();
   }
 
+  await draw();
+  assert.equal(await page.evaluate(() => window.ops.length), 1);
   await eraser.click();
+  await draw();
+  assert.deepEqual(
+    await page.evaluate(() => {
+      const { color, width } = window.ops.at(-1);
+      return { color, width };
+    }),
+    { color: "#ffffff", width: 24 },
+  );
   await red.click();
-  assert.equal(await pen.getAttribute("aria-pressed"), "true");
-  assert.equal(await eraser.getAttribute("aria-pressed"), "false");
-  assert.equal(await red.getAttribute("aria-pressed"), "true");
-  assert.equal(await page.evaluate(() => window.ops.length), 0);
+  assert.equal(await page.evaluate(() => window.ops.length), 2);
   await draw();
   assert.deepEqual(
     await page.evaluate(() =>
-      window.ops.map(({ color, width }) => ({ color, width })),
+      window.ops.slice(2).map(({ color, width }) => ({ color, width })),
     ),
     [{ color: "#c2261b", width: 3 }],
   );
+  assert.equal(await pen.getAttribute("aria-pressed"), "true");
+  assert.equal(await eraser.getAttribute("aria-pressed"), "false");
+  assert.equal(await red.getAttribute("aria-pressed"), "true");
 
   await eraser.click();
   assert.equal(await pen.getAttribute("aria-pressed"), "false");
