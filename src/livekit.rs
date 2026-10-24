@@ -2932,6 +2932,14 @@ pub(crate) async fn run_room_with_slot(
         }
     }
     .await;
+
+    // Every exit from the loop lands here, including the ones that never close
+    // the turns: the candidate not returning, the billing exits, the event
+    // stream ending, an error. A cut still waiting loses only its quote there,
+    // and this is the one place it is still printed, whatever exit is added.
+    if let Some(line) = turn.turns.take_cut_line(Instant::now(), false) {
+        eprintln!("{line}");
+    }
     session::finish_turn_timing(
         room.name(),
         &mut turn.activity,

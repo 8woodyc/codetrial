@@ -2015,6 +2015,74 @@ pub(super) enum Interruptible {
 pub(super) struct SpeakerTurns {
     pub(super) interviewer: SpeakerTurn,
     pub(super) candidate: SpeakerTurn,
+    /// The cut waiting for the words behind it; see [`SpeakerTurns::note_cut`].
+    cut: Option<WaitingCut>,
+}
+
+/// How much of what the candidate said over a cut the line quotes.
+const CUT_QUOTE_CHARS: usize = 80;
+
+/// What the line for a cut needs from the moment of the cut, and the words
+/// that closes while the candidate was speaking cleared from the turn since.
+#[derive(Debug)]
+struct WaitingCut {
+    at: String,
+    since: Instant,
+    heard: String,
+}
+
+/// The start of two stretches of speech, one after the other.
+fn joined_head(earlier: &str, later: &str) -> String {
+    let mut words = String::from(earlier);
+    if !earlier.is_empty() && !later.is_empty() {
+        words.push(' ');
+    }
+    words.push_str(later);
+    words.chars().take(CUT_QUOTE_CHARS).collect()
+}
+
+impl SpeakerTurns {
+    /// Gemini cut the interviewer's turn, and the line naming the cut is
+    /// already out. `Interrupted` arrives with the start of the candidate's
+    /// activity, before the transcription of whatever caused it, so the line
+    /// quoting the cause waits for the words. Noted after the turn being
+    /// replied to has been closed, or that answer is what the line quotes. A
+    /// cut still waiting is replaced, so settle it first.
+    pub(super) fn note_cut(&mut self, at: String, since: Instant) {
+        self.cut = Some(WaitingCut {
+            at,
+            since,
+            heard: String::new(),
+        });
+    }
+
+    /// The line for the waiting cut, once, quoting the start of what the
+    /// candidate said over it and saying how long after the cut that is. Read
+    /// before the candidate turn closes, which clears it.
+    ///
+    /// Not while the candidate is still speaking: a close that lands
+    /// mid-utterance, such as the late end of the cut generation, would read
+    /// speech as wordless. The cut keeps waiting, and keeps the words the turn
+    /// holds, since that close is about to clear them.
+    pub(super) fn take_cut_line(&mut self, now: Instant, speaking: bool) -> Option<String> {
+        let cut = self.cut.as_mut()?;
+        let heard = joined_head(&cut.heard, &self.candidate.head(CUT_QUOTE_CHARS));
+        if speaking {
+            cut.heard = heard;
+            return None;
+        }
+        let cut = self.cut.take()?;
+        Some(format!(
+            "timing: candidate audio since the cut at={}, settled {:.1}s later: {}",
+            cut.at,
+            now.saturating_duration_since(cut.since).as_secs_f64(),
+            if heard.is_empty() {
+                "(nothing transcribed; check speaker echo or background noise)"
+            } else {
+                &heard
+            }
+        ))
+    }
 }
 
 /// The two speakers in the order their turns opened.
