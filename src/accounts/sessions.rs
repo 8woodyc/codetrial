@@ -113,32 +113,30 @@ pub fn session_user(
 ) -> rusqlite::Result<Option<SignedInUser>> {
     accounts.with(|connection| {
         let now = crate::current_epoch_seconds_i64();
-        let mut statement = connection.prepare(
+        connection.query_row(
             "
         SELECT users.id, users.login, users.avatar_url, users.email, users.email_verified, users.github_id
         FROM sessions
         JOIN users ON users.id = sessions.user_id
         WHERE sessions.id = ?1 AND sessions.expires_at > ?2
         ",
-        )?;
-        let mut rows = statement.query((session_key(session_id), now))?;
-        let Some(row) = rows.next()? else {
-            return Ok(None);
-        };
-
-        // The flag gates the column. A row with an address and a zero flag is
-        // one nobody checked, and reading the address anyway is how an
-        // unverified value becomes a delivery target one refactor later.
-        let verified: i64 = row.get(4)?;
-        Ok(Some(SignedInUser {
-            id: row.get(0)?,
-
-            // Trusted only under create_session's caller invariant.
-            identity_verified: row.get::<_, i64>(5)? > 0,
-            login: row.get(1)?,
-            avatar_url: row.get(2)?,
-            verified_email: row.get::<_, Option<String>>(3)?.filter(|_| verified != 0),
-        }))
+            (session_key(session_id), now),
+            |row| {
+                // The flag gates the column. A row with an address and a zero
+                // flag is one nobody checked, and reading the address anyway is
+                // how an unverified value becomes a delivery target one
+                // refactor later.
+                let verified: i64 = row.get(4)?;
+                Ok(SignedInUser {
+                    id: row.get(0)?,
+                    // Trusted only under create_session's caller invariant.
+                    identity_verified: row.get::<_, i64>(5)? > 0,
+                    login: row.get(1)?,
+                    avatar_url: row.get(2)?,
+                    verified_email: row.get::<_, Option<String>>(3)?.filter(|_| verified != 0),
+                })
+            },
+        ).optional()
     })
 }
 

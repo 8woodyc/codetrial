@@ -172,25 +172,26 @@ pub fn interview_for_account(
     account_id: i64,
 ) -> rusqlite::Result<Option<Interview>> {
     accounts.with(|connection| {
-        let mut statement = connection.prepare(
-            "
+        connection
+            .query_row(
+                "
         SELECT id, account_id, consent_version, consent_at, consent_withdrawn_at, room_name
         FROM interviews
         WHERE id = ?1 AND account_id = ?2
         ",
-        )?;
-        let mut rows = statement.query((id, account_id))?;
-        let Some(row) = rows.next()? else {
-            return Ok(None);
-        };
-        Ok(Some(Interview {
-            id: row.get(0)?,
-            account_id: row.get(1)?,
-            consent_version: row.get(2)?,
-            consent_at: row.get(3)?,
-            consent_withdrawn_at: row.get(4)?,
-            room_name: row.get(5)?,
-        }))
+                (id, account_id),
+                |row| {
+                    Ok(Interview {
+                        id: row.get(0)?,
+                        account_id: row.get(1)?,
+                        consent_version: row.get(2)?,
+                        consent_at: row.get(3)?,
+                        consent_withdrawn_at: row.get(4)?,
+                        room_name: row.get(5)?,
+                    })
+                },
+            )
+            .optional()
     })
 }
 
