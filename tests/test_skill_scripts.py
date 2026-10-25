@@ -581,6 +581,13 @@ class PrSweepTests(SweepCase):
                 ),
             ),
             pull(8, commits=GREEN, body="Refs #11, #12 and #13"),
+            # The form the log prefers counts as a request as much as Closes.
+            pull(
+                9,
+                commits=GREEN,
+                body="Refs #14",
+                comments=listed(request("C5", 1, "Make the last line `Close #14`.")),
+            ),
         )
         self.assertEqual(
             swept["refs_only"],
@@ -594,6 +601,7 @@ class PrSweepTests(SweepCase):
                 {"pr": 8, "issue": 11, "asked": False},
                 {"pr": 8, "issue": 12, "asked": False},
                 {"pr": 8, "issue": 13, "asked": False},
+                {"pr": 9, "issue": 14, "asked": True},
             ],
         )
 
@@ -2281,21 +2289,20 @@ def failing_job(gates, on_main=False, name="gates (portable)"):
 
 
 def agent_marked(messages):
-    """ai_marker from agent-marker.jq over each message, in one jq call."""
-    result = subprocess.run(
-        [
-            "jq",
-            "-c",
-            "-L",
-            str(SKILLS / "codetrial-triage"),
-            'include "agent-marker"; map(ai_marker)',
-        ],
-        input=json.dumps(messages),
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return json.loads(result.stdout)
+    """Whether the commit-msg hook credits an AI tool in each message: bit 2."""
+    hook = ROOT / "scripts" / "git-commit-msg.sh"
+    return [
+        bool(
+            subprocess.run(
+                ["sh", str(hook), "--stored", "-"],
+                input=message,
+                capture_output=True,
+                text=True,
+            ).returncode
+            & 2
+        )
+        for message in messages
+    ]
 
 
 @unittest.skipUnless(shutil.which("jq"), "jq is not installed")
@@ -2437,6 +2444,34 @@ class HygieneTests(unittest.TestCase):
             ),
             (None, ["commit_rules"]),
         )
+
+    def test_a_broken_rule_and_an_attribution_in_one_message_are_both_asked_for(self):
+        both = "added a thing.\n\nCo-authored-by: Claude <noreply@anthropic.com>\n"
+        self.assertEqual(
+            self.keys([commit(both)]), (None, ["commit_rules", "co_authored"])
+        )
+
+    def test_attribution_is_checked_in_merges_and_bot_commits(self):
+        message = (
+            "Merge branch 'main'\n\nCo-authored-by: Claude <noreply@anthropic.com>\n"
+        )
+        self.assertEqual(
+            self.keys([commit(message, parents=2)]),
+            (None, ["merge_commit", "co_authored"]),
+        )
+        bot = commit(
+            GOOD_MESSAGE + "\nCo-authored-by: Claude <noreply@anthropic.com>\n"
+        )
+        bot["commit"]["author"] = {
+            "email": "49699333+dependabot[bot]@users.noreply.github.com"
+        }
+        self.assertEqual(self.keys([bot]), (None, ["co_authored"]))
+
+    def test_a_reference_on_the_last_line_breaks_a_commit_rule(self):
+        refs = GOOD_MESSAGE + "\nRefs #12\n"
+        closes = GOOD_MESSAGE + "\nCloses #12\n"
+        self.assertEqual(self.keys([commit(refs)]), (None, ["commit_rules"]))
+        self.assertEqual(self.keys([commit(closes)]), (None, []))
 
     def test_each_commit_rule_fires_on_its_own_evidence_alone(self):
         # One rule's evidence at a time, so a predicate that leaned on another

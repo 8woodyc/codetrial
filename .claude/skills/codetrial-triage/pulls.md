@@ -440,16 +440,16 @@ compared), then say who each PR waits on from its
 ## Closing references
 
 `refs_only` lists each PR that closes no issue and names one with `Refs #N`, so
-its merge closes nothing. CONTRIBUTING.md asks PRs to avoid `Refs`: it stands
-only beside a `Closes #N`, which is why a PR that closes something is left out
-here, or in a body that states the motivation and the implementation in full,
-as #110 does for #257 and #362 for its parent #306. Otherwise, when the PR
-delivers the issue, ask its author to end the body with `Closes #N` (SKILL.md,
-"Superseded by an open pull request"); when it does not, ask for the motivation
-and the implementation in the body, or for the `Refs` line to go. `asked` true
-means a maintainer already asked for `Closes` on that PR, so the next move is
-the author's and nothing is posted again. Either comment needs a judgement of
-the PR, so it goes on the confirmed list.
+its merge closes nothing. CONTRIBUTING.md keeps `Refs` out of a PR body, and
+the sweep lists the pairs where that costs most: it leaves out a PR that closes
+something, as #110 does for #257 and #362 for its parent #306. Otherwise, when
+the PR delivers the issue, ask its author to end the body with `Close #N`
+(SKILL.md, "Superseded by an open pull request"); when it does not, ask for the
+motivation and the implementation in the body, or for the `Refs` line to go
+and, for an issue too large for the PR, a sub-issue holding the part it
+finishes. `asked` true means a maintainer already asked for a closing line on
+that PR, so the next move is the author's and nothing is posted again. Either
+comment needs a judgement of the PR, so it goes on the confirmed list.
 
 ## Review the queue
 

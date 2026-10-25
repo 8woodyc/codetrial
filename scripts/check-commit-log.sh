@@ -32,10 +32,20 @@ if [ "${1:-}" = --bot-only ]; then
     exit
 fi
 
+# The author's address and the message in one read, split here: a commit costs
+# one git process rather than two, and a replay of a branch is mostly commits.
+nl='
+'
+
 while read -r commit; do
     [ -n "$commit" ] || continue
-    [ "$(git show -s --format=%ae "$commit")" = "$dependabot" ] && continue
-    git show -s --format=%B "$commit" | "$message_hook" - && continue
+    shown=$(git show -s --format='%ae%n%B' "$commit")
+    [ "${shown%%"$nl"*}" = "$dependabot" ] && continue
+    case $shown in
+        *"$nl"*) message=${shown#*"$nl"} ;;
+        *) message= ;;
+    esac
+    printf '%s\n' "$message" | "$message_hook" --stored - && continue
 
     # Through cat -v: a subject is text on its way to a terminal or a CI log,
     # and an escape sequence in one can rewrite what the reader sees around it.

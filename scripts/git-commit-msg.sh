@@ -8,6 +8,22 @@
 # which is how scripts/check-commit-log.sh replays an existing commit through
 # the same rules. One list, so a contributor with the hooks installed and one
 # without are judged the same way.
+#
+# The checks themselves are in scripts/git-commit-msg.awk, one process for the
+# whole message. This file only prepares the text the way git will store it.
+#
+#   git-commit-msg.sh [--stored] FILE|-   judge a message. The exit status adds up what is
+#                              wrong: 1 a style rule is broken, 2 some line
+#                              credits an AI tool, so 3 is both. 4 means the
+#                              message or the rules could not be read, or awk
+#                              failed to run, which is none of those and never
+#                              read as one. --stored says the message is one
+#                              a commit already holds (check-commit-log.sh and
+#                              the PR sweep replay those): git cut no scissors
+#                              and stripped no comments from it, so neither is
+#                              done here, and a line that looks like either
+#                              cannot hide a trailer under it.
+#   git-commit-msg.sh --rules  print the rules
 
 set -u
 
@@ -22,21 +38,46 @@ if [ "${1:-}" = "--rules" ]; then
 4. Use the imperative mood: "Fix", not "Fixed" or "Fixes"
 5. No conventional-commit prefix: not "fix:", not "feat(web):",
    and no "fixup!", "squash!" or "amend!": fold those before committing
-6. Wrap the body at 72 characters
-7. Write a body saying what and why; the diff says how
+6. Wrap the body at 72 characters; a link or file name longer than a line, and
+   a trailer such as Co-authored-by, may run past
+7. Write a body saying what and why; the diff says how. A subject that only
+   names a file ("Update web/app.js") says where, not what
 
 Printable ASCII throughout. One paragraph carries most changes here; the
 per-decision detail belongs in the comment next to the code.
+No AI attribution: no Co-Authored-By for a tool, no "Generated with" footer.
+Finish an issue with Close #N on the last line; a Refs #N belongs in the
+description, never on the last line.
 EOF
     exit 0
 fi
 
+stored=0
+if [ "${1:-}" = "--stored" ]; then
+    stored=1
+    shift
+fi
+if [ $# -ne 1 ]; then
+    echo "usage: git-commit-msg.sh [--stored] FILE|-   or   --rules" >&2
+    exit 4
+fi
 message_file=$1
+case $0 in
+    */*) script_dir=${0%/*} ;;
+    *) script_dir=. ;;
+esac
+awk_script=$script_dir/git-commit-msg.awk
 
-if [ "$message_file" = "-" ]; then
-    message_file=$(mktemp) || exit 1
-    trap 'rm -f "$message_file"' EXIT
-    cat > "$message_file"
+# A shell exits 1 or 2 on a redirection it cannot make, which are the statuses
+# for a broken rule and a credit to a tool, so a message that cannot be read is
+# caught before it is opened.
+if [ "$message_file" != "-" ]; then
+    if [ ! -r "$message_file" ] || [ -d "$message_file" ]; then
+        echo "git-commit-msg.sh: cannot read $message_file" >&2
+        exit 4
+    fi
+    # Everything below reads standard input, so a file is only a redirection.
+    exec < "$message_file"
 fi
 
 # `git commit -v` puts the diff after a scissors line and drops it before the
@@ -44,136 +85,48 @@ fi
 # Under `commit.cleanup=verbatim` the comment lines are kept in the stored
 # message, so stripping them would judge a message nobody commits. Everything
 # below the scissors goes either way: git drops it before storing.
-cleanup=$(git config --get commit.cleanup 2> /dev/null) || cleanup=default
-message=$(sed '/-\{8,\}[[:space:]]*>8[[:space:]]*-\{8,\}/,$d' "$message_file")
-if [ "$cleanup" = verbatim ]; then
-    : # Kept as written, blank lines included: that is what verbatim means.
-else
-    message=$(printf '%s\n' "$message" | git stripspace --strip-comments)
+cleanup=default
+if [ "$stored" -eq 0 ]; then
+    cleanup=$(git config --get commit.cleanup 2> /dev/null) || cleanup=default
 fi
-
-subject=$(printf '%s\n' "$message" | sed -n '1p')
-second=$(printf '%s\n' "$message" | sed -n '2p')
-body=$(printf '%s\n' "$message" | sed -n '2,$p')
-failed=0
-
-error()
+strip_comments()
 {
-    printf 'Commit message: %s\n' "$1" >&2
-    failed=1
+    if [ "$stored" -eq 1 ]; then
+
+        # Trailing whitespace goes either way, a carriage return included: a
+        # commit made in GitHub's web editor holds CRLF, and judging the CR
+        # would answer "printable ASCII" for a message that reads fine.
+        sed 's/[[:space:]]*$//'
+    elif [ "$cleanup" = verbatim ]; then
+        cat
+    else
+        git stripspace --strip-comments
+    fi
+}
+scissors()
+{
+    if [ "$stored" -eq 1 ]; then
+        cat
+    else
+        sed '/-\{8,\}[[:space:]]*>8[[:space:]]*-\{8,\}/,$d'
+    fi
 }
 
-# An autosquash marker is a note to a rebase that has not happened yet, and the
-# subject behind it is a copy of another commit's: the change belongs in that
-# commit before this one exists. A merge subject is git's wording, not the
-# author's, and judging it is judging a message nobody wrote.
-case "$subject" in
-    "fixup! "* | "squash! "* | "amend! "*)
-        error "fold this into the commit it fixes: git commit --amend for HEAD, git rebase -i --autosquash for an older one"
-        exit 1
-        ;;
-    "Merge branch "* | "Merge branches "* | "Merge tag "* | "Merge commit "* | \
-        "Merge pull request "* | "Merge remote-tracking branch "*) exit 0 ;;
-esac
+# The rules run in the C locale: the ASCII rule counts bytes, and the character
+# ranges in them mean what they say only there. The awk speaks on standard
+# output; its complaints belong on standard error.
+LC_ALL=C
+export LC_ALL
+scissors | strip_comments | awk -f "$awk_script" >&2
 
-if [ -z "$subject" ]; then
-    error "a descriptive subject is required"
-elif [ "${#subject}" -gt 50 ]; then
-    error "subject is ${#subject} characters; keep it within 50"
-else
-    case "$subject" in
-        *[[:space:]]*) ;;
-        *) error "subject must say more than one word" ;;
-    esac
-fi
-
-# ASCII covers three rules at once: no tabs or control characters, no CJK, and
-# no em dash or typographic quote smuggled in by an editor that autocorrects.
-if printf '%s' "$message" | LC_ALL=C grep -q '[^ -~]'; then
-    error "message must be printable ASCII"
-fi
-
-case "$subject" in
-    [[:space:]]*) error "subject must not start with whitespace" ;;
-    [[:lower:]]*) error "capitalize the subject" ;;
-esac
-
-case "$subject" in
-    *.) error "subject must not end with a period" ;;
-esac
-
-# The subject completes "this commit will ...", so a past tense, a gerund or a
-# third person in the first word is the whole tell. Named rather than matched by
-# suffix, which would also refuse "Alias", "Seed" and "Bring".
-first_word=$(printf '%s' "$subject" | sed 's/[[:space:]].*//' | tr '[:upper:]' '[:lower:]')
-case "$first_word" in
-    added | adds | adding | adjusted | adjusts | adjusting | allowed | allows | \
-        allowing | avoided | avoids | avoiding | bumped | bumps | bumping | \
-        changed | changes | changing | checked | checks | checking | cleaned | \
-        cleans | cleaning | corrected | corrects | correcting | created | creates | \
-        creating | deleted | deletes | deleting | disabled | disables | disabling | \
-        dropped | drops | dropping | enabled | enables | enabling | fixed | fixes | \
-        fixing | handled | handles | handling | implemented | implements | \
-        implementing | improved | improves | improving | included | includes | \
-        including | introduced | introduces | introducing | made | makes | making | \
-        moved | moves | moving | refactored | refactors | refactoring | removed | \
-        removes | removing | renamed | renames | renaming | replaced | replaces | \
-        replacing | reverted | reverts | reverting | tested | tests | testing | \
-        tidied | tidies | tidying | updated | updates | updating | used | uses | \
-        using | wired | wires | wiring | lets | letting | built | builds | \
-        building | wrote | writes | writing | ran | runs | running | kept | \
-        keeps | keeping | sent | sends | sending | brought | brings | bringing | \
-        took | takes | taking | gave | gives | giving | got | gets | getting | \
-        began | begins | beginning | chose | chooses | choosing | met | meets | \
-        meeting | held | holds | holding | told | tells | telling | thought | \
-        thinks | thinking)
-        error "use the imperative mood: \"$first_word\" describes what you did"
+# The awk adds 16 to a verdict, so any other status is awk failing to run (it
+# exits 2 on a program it cannot open or parse, which must not read as a credit
+# to a tool).
+status=$?
+case $status in
+    16 | 17 | 18 | 19) exit $((status - 16)) ;;
+    *)
+        echo "git-commit-msg.sh: awk failed with status $status" >&2
+        exit 4
         ;;
 esac
-
-# This log has no conventional-commit prefixes and no backticks in a subject.
-# Both read as an import from another project's tooling.
-if printf '%s' "$subject" | grep -qE '^[A-Za-z]+(\([^)]*\))?!?: '; then
-    error "subject must not use conventional-commit syntax"
-fi
-
-case "$subject" in
-    *'`'*) error "subject must not contain backticks" ;;
-esac
-
-# `second` is line 2 and `body` is line 2 onward, so a non-empty line 2 is a
-# body that started without a blank line between it and the subject.
-if [ -n "$second" ]; then
-    error "separate the subject from the body with a blank line"
-fi
-
-# A subject names the change and cannot also carry the reason for it, which is
-# what a reviewer and a later bisect need. Through stripspace, so a body of
-# blank or whitespace-only lines kept under verbatim cleanup is still empty.
-if [ -z "$(printf '%s\n' "$body" | git stripspace)" ]; then
-    error "a body is required: say what changed and why"
-fi
-
-# The message is ASCII by the rule above, so a byte is a column and grep can
-# answer this in one pass.
-if printf '%s\n' "$body" | grep -q '.\{73,\}'; then
-    error "wrap body lines at 72 characters"
-fi
-
-# The reasoning per decision lives in the comment next to the code in this tree.
-# A body that walks through the implementation duplicates it and then goes stale
-# on its own.
-if printf '%s\n' "$body" \
-    | grep -qiE '^(how|implementation( (details|notes|steps))?|steps?|changes)[[:space:]]*:'; then
-    error "the body carries what and why; how is the diff's job"
-fi
-
-# Not an error: long bodies exist in this history. Still worth saying once,
-# because the house shape is a premise and its trade, not a retelling.
-blanks=$(printf '%s\n' "$body" | git stripspace | grep -c '^$')
-if [ "$blanks" -gt 1 ]; then
-    printf 'Commit message: note, %s paragraphs; one usually carries it.\n' \
-        "$((blanks + 1))" >&2
-fi
-
-exit "$failed"

@@ -215,11 +215,11 @@ titles or the same broad symptom are insufficient to establish duplication.
   Whether the merge closes it is a fact to check: read the PR's
   `closingIssuesReferences` and its commit messages as well as its body, since a
   Development-sidebar link or a closing keyword in a commit closes an issue even
-  when the body has none, and read what you find against the `Closes` and `Refs`
+  when the body has none, and read what you find against the `Close` and `Refs`
   rule in CONTRIBUTING.md. Say it needs a manual close when nothing carries the
   reference, and never promise the merge will close it otherwise. When the PR
   delivers the issue and only says `Refs #N`, the fix is a comment on the PR
-  asking its author to make the last line `Closes #N`, so the merge records it
+  asking its author to make the last line `Close #N`, so the merge records it
   (#143 for #141). The PR sweep's `refs_only` lists these pairs and whether a
   maintainer already asked ([pulls.md](pulls.md#closing-references)).
 - **Already shipped**: the tree already does what the request asks. `git grep -n`

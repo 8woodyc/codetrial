@@ -80,7 +80,8 @@ message()
 # what a real clone would link and the hooks resolve their own paths the way
 # they will in the field.
 mkdir -p "$work/repo/scripts" || exit 1
-cp "$ROOT"/scripts/git-*.sh "$ROOT/scripts/check-commit-log.sh" \
+cp "$ROOT"/scripts/git-*.sh "$ROOT/scripts/git-commit-msg.awk" \
+    "$ROOT/scripts/check-commit-log.sh" \
     "$ROOT/scripts/install-git-hooks.sh" "$ROOT/scripts/indent.sh" \
     "$work/repo/scripts/" || exit 1
 for config in .editorconfig .shellcheckrc; do
@@ -273,6 +274,36 @@ expect 1 "a subject ending in a period" message "Add the scratch repository."
 expect 1 "a subject with a backtick" message 'Add the `scratch` repository'
 expect 1 "a conventional-commit prefix" message "feat: add the scratch repository"
 expect 1 "a one-word subject" message "Scratch"
+
+# A subject that only names a file says where, not what, and the refusal says
+# so.
+for subject in \
+    "Update web/interview.js" \
+    "Update web/interview.js and web/app.js" \
+    "Fix app.js" \
+    "Modify README.md" \
+    "Update README" \
+    "Tweak the scripts/test.sh" \
+    "Update docs/" \
+    "Update .gitignore" \
+    "Update src/web/ and web/app.js"; do
+    expect 1 "the file-only subject $subject" message "$subject$body"
+    contains "the refusal says why" "$work/last.out" "where the change is, not what it does"
+done
+for subject in \
+    "Update web/interview.js to recheck setup" \
+    "Fix the app.js crash on empty input" \
+    "Update the lobby" \
+    "Update CI/CD" \
+    "Fix input/output" \
+    "Correct Math.floor" \
+    "Fix Promise.all" \
+    "Remove web/old.js" \
+    "Rename a.js to b.js" \
+    "Move scripts/a.sh scripts/b.sh" \
+    "Add scripts/wait-for-server.sh"; do
+    expect 0 "the subject $subject" message "$subject$body"
+done
 expect 1 "a subject past 50 characters" \
     message "Add the scratch repository the hook tests run inside of"
 expect 1 "a body with no blank line above it" message "Add the repository
@@ -295,6 +326,222 @@ expect 1 "a non-ASCII message" message "Add the repository
 
 The rejected character is a Greek alpha, α, standing in for whatever an
 editor autocorrected."
+
+# The wrap limit gives way for exactly the tokens a wrap would have to break.
+url="https://github.com/sysprog21/codetrial/blob/main/docs/provider-cost-and-degradation.md"
+expect 0 "a link alone on a line past 72 characters" message "Add the repository
+
+See $url
+for the reasoning."
+expect 0 "a file name longer than a line, in a sentence" message "Add the repository
+
+The change is in scripts/some-directory/another-directory/yet-another-directory/a-rather-long-file-name.sh today."
+expect 0 "a long path with a line number" message "Add the repository
+
+See scripts/some-directory/another-directory/yet-another-directory/a-rather-long-file-name.sh:123 for it."
+expect 1 "a link that fits on a line of its own, beside prose" message "Add the repository
+
+See https://github.com/sysprog21/codetrial/pull/123 for the discussion that led here."
+expect 0 "a long human co-author trailer" message "Add the repository
+
+One paragraph saying why this exists.
+
+Co-authored-by: Ada Lovelace <1234567+ada-the-countess@users.noreply.github.com>"
+expect 1 "a sentence with a colon is not a trailer" message "Add the repository
+
+Note: this sentence is long enough on its own to run past the limit that the hook enforces."
+expect 1 "short file names do not stretch the limit" message "Add the repository
+
+This sentence uses foo.rs and bar.rs and baz.rs and qux.rs and needs wrapping."
+expect 1 "prose past 72 characters beside a link" message "Add the repository
+
+This sentence is long enough on its own to run past the limit, and it also names $url
+so only the sentence is at fault."
+expect 1 "a body line past 72 characters with no link" message "Add the repository
+
+This line exists to run past the seventy-two column limit that the hook is
+supposed to enforce, and it does."
+
+# A message whose last line is the case: the one place a credit or a closing
+# reference does its work.
+with_last()
+{
+    with_status=$1
+    with_label=$2
+    expect "$with_status" "$with_label" message "Add the scratch repository
+
+One paragraph saying why this exists.
+
+$3"
+}
+
+# An attribution names a tool, not a collaborator. A person who shares a tool's
+# name, or works where it is made, is still credited.
+for credit in \
+    "Co-Authored-By: Claude <noreply@anthropic.com>" \
+    "Co-authored-by: Agent <codex@openai.com>" \
+    "Co-authored-by: Copilot <198982749+Copilot@users.noreply.github.com>" \
+    "Co-authored-by: Copilot <198982749+copilot[bot]@users.noreply.github.com>" \
+    "Generated with [Claude Code](https://claude.com/claude-code)" \
+    "Assisted-by: Claude:claude-opus-5" \
+    "Assisted-by: Claude Code" \
+    "Co-authored-by: Claude <claude@anthropic.com>" \
+    "Co-authored-by: Claude Opus 4.5 (1M context) <noreply@anthropic.com>" \
+    "Co-authored-by: ChatGPT <noreply@openai.com>" \
+    "Co-authored-by: aider (gpt-5) <noreply@aider.chat>" \
+    "Co-authored-by: Amp <amp@ampcode.com>" \
+    "Co-authored-by: Jules <161369871+google-labs-jules[bot]@users.noreply.github.com>" \
+    "Co-authored-by: Bot <161369871+google-labs-jules[bot]@users.noreply.github.com>" \
+    "Signed-off-by: Bot <noreply@anthropic.com>" \
+    "AI-Assisted-By: Claude" \
+    "Generated-by: Aider" \
+    "Assisted-by: Bot <codex@openai.com>" \
+    "Session: https://claude.ai/code/session_01abc" \
+    "Generated by Codex." \
+    "Assisted-by: Claude <claude@anthropic.com>" \
+    "Generated-by: ChatGPT <ai@example.com>" \
+    "Generated with Amp" \
+    "Generated with Jules" \
+    "Created with Cursor" \
+    "Made by an AI"; do
+    with_last 2 "the AI attribution $credit" "$credit"
+    contains "the refusal names the attribution" "$work/last.out" "AI attribution"
+done
+for credit in \
+    "Co-authored-by: Claude Shannon <claude@example.com>" \
+    "Co-authored-by: Ada Lovelace <ada@anthropic.com>" \
+    "Assisted-by: Ada Lovelace <ada@example.com>" \
+    "Assisted-by: Claude Shannon <claude@example.com>" \
+    "Co-authored-by: Aider Smith <aider@example.com>" \
+    "Co-authored-by: Amp Nguyen <amp@example.com>" \
+    "Co-authored-by: Devin <devin@example.com>" \
+    "Co-authored-by: Jules <jules@example.org>" \
+    "Created with cursor (0, 0) to cover empty input." \
+    "Created with an AI-generated fixture for the parser." \
+    "Made with cursor positions saved in the file." \
+    "Written by Claude Shannon in 1948." \
+    "Skip files generated by codex in the walk."; do
+    with_last 0 "the credit $credit" "$credit"
+done
+expect 2 "an attribution on a merge, which the style rules leave alone" \
+    message "Merge branch 'topic' into main
+
+Generated by Codex"
+expect 3 "an autosquash subject that also credits a tool" \
+    message "fixup! Add the scratch repository
+
+Generated by Codex"
+expect 4 "a directory where a message should be" \
+    sh "$ROOT/scripts/git-commit-msg.sh" "$work"
+
+# The status is documented in scripts/git-commit-msg.sh: 3 is a broken rule and
+# a credit together, and 4 is a message or a rules file that cannot be used.
+expect 4 "a message file that is not there" \
+    sh "$ROOT/scripts/git-commit-msg.sh" "$work/no-such.msg"
+mv scripts/git-commit-msg.awk "$work/git-commit-msg.awk"
+expect 4 "a rules file that is not there" message "Add the scratch repository
+
+One paragraph saying why this exists."
+printf 'this is { not awk\n' > scripts/git-commit-msg.awk
+expect 4 "a rules file awk cannot parse, whose status 2 is not a credit" message "Add the scratch repository
+
+One paragraph saying why this exists."
+mv "$work/git-commit-msg.awk" scripts/git-commit-msg.awk
+expect 3 "a broken rule and a credit in one message" \
+    message "add the scratch repository
+
+One paragraph saying why this exists.
+
+Co-Authored-By: Claude <noreply@anthropic.com>"
+
+# A message a commit already holds had no scissors cut and no comments stripped
+# by git, so a line that looks like either hides nothing. In the editor the same
+# text is cut, because git cuts it before the commit exists.
+# shellcheck disable=SC2317,SC2329
+stored()
+{
+    printf '%s\n' "$1" | sh "$ROOT/scripts/git-commit-msg.sh" --stored -
+}
+under_scissors="Add the scratch repository
+
+One paragraph saying why this exists.
+
+-------- >8 --------
+Co-authored-by: Claude <noreply@anthropic.com>"
+expect 2 "a credit under a scissors-looking line, in a stored message" \
+    stored "$under_scissors"
+expect 0 "the same text in the editor, where git cuts it" \
+    message "$under_scissors"
+under_comment="Add the scratch repository
+
+One paragraph saying why this exists.
+
+# Generated with Claude Code"
+expect 2 "a credit on a comment-looking line, in a stored message" \
+    stored "$under_comment"
+expect 0 "the same text in the editor, where git strips it" \
+    message "$under_comment"
+# A Greek letter, as in the ASCII case above: the byte width is the point.
+expect 1 "a non-ASCII comment-looking line, in a stored message" \
+    stored "Add the scratch repository
+
+One paragraph saying why this exists.
+
+# α"
+
+# A commit made in GitHub's web editor holds CRLF. It is judged on its text, so
+# the one thing wrong with this one is the subject, and the refusal says so.
+crlf=$(printf 'Update web/interview.js\r\n\r\nRecheck setup before joining.\r\n')
+expect 1 "a CRLF message from the web editor, refused for its subject alone" \
+    stored "$crlf"
+contains "the refusal is about the subject" "$work/last.out" "only names a file"
+absent "no complaint about the line endings" "$work/last.out" "printable ASCII"
+expect 0 "a CRLF message with a subject that says what changed" \
+    stored "$(printf 'Recheck setup after the picker closes\r\n\r\nDevices can change while it is open.\r\n')"
+expect 4 "no message given" sh "$ROOT/scripts/git-commit-msg.sh"
+git config commit.cleanup verbatim
+expect 0 "a comment kept as written under verbatim cleanup" \
+    message "Add the scratch repository
+
+# Please enter the commit message for your changes."
+git config --unset commit.cleanup
+expect 0 "three paragraphs are a note and not a failure" message "Add the scratch repository
+
+First paragraph saying why.
+
+Second paragraph saying more.
+
+Third paragraph saying still more."
+contains "the note says how many" "$work/last.out" "3 paragraphs"
+
+# Close finishes an issue and goes last; Closes is accepted. A Refs is context
+# in the description.
+with_last 1 "a Refs line last" "Refs #12"
+contains "the Refs refusal names the alternative" "$work/last.out" "Close #N"
+with_last 1 "a Refs with a repository last" "Refs: sysprog21/codetrial#12"
+with_last 1 "a References line last, trailing blanks and all" "References #12
+
+"
+with_last 1 "several references on the last line" "Refs #11, #12 and sysprog21/codetrial#13."
+with_last 1 "an Oxford-comma list of references last" "Refs #11, #12, and #13"
+with_last 1 "an issue URL last" "Refs https://github.com/sysprog21/codetrial/issues/12"
+with_last 1 "a pull request URL with a fragment last" \
+    "Refs https://github.com/sysprog21/codetrial/pull/12#issuecomment-5"
+with_last 1 "references separated by a semicolon last" "Refs: #12; #13"
+with_last 0 "a sentence that starts with a reference, last" \
+    "Refs #12 explains why the old behavior was retained."
+with_last 0 "a Close line last" "Close #12"
+with_last 0 "a Closes line last, which is accepted too" "Closes #12"
+expect 0 "a Refs in the description with a Close last" message "Add the scratch repository
+
+One paragraph saying why this exists. Refs #11 is the first half.
+Refs #10 explains the cap.
+
+Close #12"
+expect 0 "a Refs in the middle of a paragraph" message "Add the scratch repository
+
+One paragraph saying why this exists, as Refs #12 describes it,
+and nothing more."
 
 echo "  HOOKS   prepare-commit-msg"
 printf '' > "$work/empty.msg"
