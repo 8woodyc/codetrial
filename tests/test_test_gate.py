@@ -428,6 +428,18 @@ printf 'python:%s\\n' "$*" >> "$CALLS"
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("tests 3", result.stdout)
 
+    def test_release_builds_share_verified_assets_and_pinned_rust(self):
+        action = (ROOT / ".github/actions/prepare-vendor/action.yml").read_text()
+        self.assertLess(action.index("restore-vendor"), action.index("fetch-vendor.sh"))
+        self.assertLess(
+            action.index("fetch-vendor.sh"), action.index("verify-vendor.sh")
+        )
+        desktop = (ROOT / ".github/workflows/desktop.yml").read_text()
+        for job in (support.job("build"), desktop):
+            self.assertIn("uses: ./.github/actions/prepare-vendor", job)
+            self.assertIn("run: rustup toolchain install", job)
+            self.assertNotIn("dtolnay/rust-toolchain@stable", job)
+
     def test_browser_timeout_fails_a_stalled_suite(self):
         probe = subprocess.run(
             ["node", "--test-timeout=100", "--version"],
