@@ -127,8 +127,14 @@ fingerprints. A missing patch remains unknown rather than evidence of absence.
 
 ## Releases, retries and rollback
 
-Tags are `review-memory-<UTC timestamp>-<run ID>`. Attestation and validation
-precede draft creation. Uploads are checked against exact digests before the
+Tags are `review-memory-<UTC timestamp>-<run ID>`. After a versioned release is
+published, the same three assets are mirrored to the fixed `review-memory-latest`
+release (`releases/download/review-memory-latest/memory.db.gz`). It is a download
+convenience only: it never matches the managed-name pattern, so retention,
+discovery and rollback ignore it, and a failed refresh warns without undoing the
+publication. Takedown must delete it too.
+
+Attestation and validation precede draft creation. Uploads are checked against exact digests before the
 draft is published with `--latest=false`. The product latest pointer stays with
 product releases; both discovery paths paginate past more than 100 releases.
 An interrupted publication attempts to delete only its still-draft release.
@@ -197,7 +203,7 @@ records and releases. Do not leave a publisher running while purging inputs.
 
    ```sh
    gh api --paginate 'repos/sysprog21/codetrial/actions/artifacts?per_page=100' --jq '.artifacts[] | [.id, .name] | @tsv'
-   gh api --paginate 'repos/sysprog21/codetrial/releases?per_page=100' --jq '.[] | select(.tag_name | test("^review-memory-[0-9]{8}T[0-9]{6}Z-[0-9]+$")) | [.id, .tag_name, .draft] | @tsv'
+   gh api --paginate 'repos/sysprog21/codetrial/releases?per_page=100' --jq '.[] | select(.tag_name | test("^review-memory-([0-9]{8}T[0-9]{6}Z-[0-9]+|latest)$")) | [.id, .tag_name, .draft] | @tsv'
    gh api --method DELETE repos/sysprog21/codetrial/actions/artifacts/ARTIFACT_ID
    gh api --method DELETE repos/sysprog21/codetrial/releases/RELEASE_ID
    gh api repos/sysprog21/codetrial/git/matching-refs/tags/MEMORY_TAG --jq '.[].ref'

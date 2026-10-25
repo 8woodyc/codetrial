@@ -44,6 +44,8 @@ CHECKPOINT_PREFIX = "review-memory-checkpoint-"
 READY_PREFIX = "review-memory-ready-"
 SIGN_JOB = "review-memory-sign-checkpoint"
 WORKFLOW = ".github/workflows/review-memory.yml"
+LATEST_TAG = "review-memory-latest"
+RELEASE_ASSETS = ("memory.db.gz", "manifest.json", "SHA256SUMS")
 CHECKPOINT_FILES = {"checkpoint.json", "checkpoint.db.gz"}
 CHECKPOINT_MARKS = memory.SNAPSHOT_MARKS | {
     "walk",
@@ -871,11 +873,14 @@ def release_asset(repo, asset, destination, maximum):
     Path(destination).write_bytes(blob)
 
 
+def all_releases(repo):
+    return memory.gh("repos/{}/releases?per_page=100".format(repo), paginate=True)
+
+
 def managed_releases(repo):
-    releases = memory.gh("repos/{}/releases?per_page=100".format(repo), paginate=True)
     return [
         release
-        for release in releases
+        for release in all_releases(repo)
         if re.fullmatch(
             re.escape(memory.SNAPSHOT_PREFIX) + r"[0-9]{8}T[0-9]{6}Z-[0-9]+",
             release.get("tag_name", ""),
@@ -928,6 +933,10 @@ def remove_release(repo, tag):
     ):
         raise memory.Fail("refusing unmanaged release deletion", code="policy")
     command("release", "delete", tag, "--repo", repo, "--yes")
+    delete_tag_ref(repo, tag)
+
+
+def delete_tag_ref(repo, tag):
     refs = memory.gh("repos/{}/git/matching-refs/tags/{}".format(repo, tag))
     if any(ref["ref"] == "refs/tags/" + tag for ref in refs):
         command(
@@ -1012,6 +1021,35 @@ def find_release(repo, tag):
     )
 
 
+def refresh_pointer(repo, sha, directory, notes, title):
+    """Mirror the newest verified assets under the short LATEST_TAG.
+
+    The versioned release stays the verified identity; this one only gives
+    users a stable download URL. GitHub allows one release per tag, so the
+    old pointer is dropped first, then the tag, which would otherwise keep
+    the new release on an older commit.
+    """
+    if any(release["tag_name"] == LATEST_TAG for release in all_releases(repo)):
+        command("release", "delete", LATEST_TAG, "--repo", repo, "--yes")
+    delete_tag_ref(repo, LATEST_TAG)
+    command(
+        "release",
+        "create",
+        LATEST_TAG,
+        *(directory / name for name in RELEASE_ASSETS),
+        "--repo",
+        repo,
+        "--target",
+        sha,
+        "--title",
+        title,
+        "--notes-file",
+        notes,
+        "--latest=false",
+        timeout=600,
+    )
+
+
 def promote(args):
     directory = Path(args.output) / "ready"
     verify_package(args.output, args.repo, args.sha, args.run_id, args.run_attempt)
@@ -1048,10 +1086,7 @@ def promote(args):
             "release",
             "create",
             tag,
-            *(
-                directory / name
-                for name in ("memory.db.gz", "manifest.json", "SHA256SUMS")
-            ),
+            *(directory / name for name in RELEASE_ASSETS),
             "--repo",
             args.repo,
             "--target",
@@ -1069,7 +1104,7 @@ def promote(args):
         if release is None or not release["draft"]:
             raise memory.Fail("created draft is missing", code="invalid-snapshot")
         assets = {asset["name"]: asset for asset in release["assets"]}
-        for name in ("memory.db.gz", "manifest.json", "SHA256SUMS"):
+        for name in RELEASE_ASSETS:
             expected = digest(directory / name)
             if name not in assets:
                 raise memory.Fail(
@@ -1129,6 +1164,27 @@ def promote(args):
                     "review memory: draft cleanup incomplete; inspect " + tag,
                     file=sys.stderr,
                 )
+    try:
+        refresh_pointer(
+            args.repo,
+            args.sha,
+            directory,
+            notes,
+            "Review memory " + data["generated_at"],
+        )
+    except (
+        memory.Fail,
+        memory.BudgetExhausted,
+        ValueError,
+        OSError,
+        subprocess.TimeoutExpired,
+    ) as error:
+        print(
+            "::warning title=Review memory::latest pointer not refreshed ({})".format(
+                error
+            ),
+            file=sys.stderr,
+        )
     return {"outcome": "published", "tag": tag}
 
 
