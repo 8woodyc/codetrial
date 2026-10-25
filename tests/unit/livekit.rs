@@ -655,6 +655,59 @@ fn candidate_led_initial_state_carries_signed_choice() {
     }
 }
 
+/// A language chosen before joining replaces the opening question, and the
+/// browser's first packet in it is not announced as a switch. A real switch
+/// afterwards still is.
+#[test]
+fn a_language_chosen_before_joining_starts_the_interview() {
+    let config = load_from_pairs([
+        ("LIVEKIT_URL", "wss://example.livekit.cloud"),
+        ("LIVEKIT_API_KEY", "devkey"),
+        ("LIVEKIT_API_SECRET", "devsecret"),
+        ("GOOGLE_API_KEY", "google-key"),
+    ])
+    .unwrap();
+    let code_update = |state: &mut crate::agent::RuntimeState, language: &str| {
+        let starter = state
+            .code_templates
+            .get(language)
+            .cloned()
+            .unwrap_or_default();
+        crate::agent::apply_data_event(
+            state,
+            crate::runtime::TOPIC_CODE_UPDATE,
+            &serde_json::json!({"code": starter, "language": language}),
+            99.0,
+        )
+        .generate_reply
+        .unwrap_or_default()
+    };
+
+    let boot = candidate_bootstrap(&config, "chosen", Some(r#"{"language":"java"}"#));
+    assert_eq!(boot.greeting, crate::agent::greeting_with_language("Java"));
+    let mut state = initial_runtime_state(&boot, Instant::now());
+    assert_eq!(
+        (state.language.as_str(), state.language_chosen),
+        ("java", true)
+    );
+    assert!(!code_update(&mut state, "java").contains("just selected"));
+    assert!(
+        crate::agent::cold_restart(&state).contains("do not ask them to choose a language again")
+    );
+    assert!(code_update(&mut state, "cpp").contains("just selected C++"));
+
+    for metadata in [
+        r#"{}"#,
+        r#"{"language":"rust"}"#,
+        r#"{"language":"java","interviewMode":"whiteboard"}"#,
+    ] {
+        let boot = candidate_bootstrap(&config, "unchosen", Some(metadata));
+        let state = initial_runtime_state(&boot, Instant::now());
+        assert_eq!(boot.greeting, crate::agent::greeting(state.interview_mode));
+        assert!(!state.language_chosen, "{metadata}");
+    }
+}
+
 #[test]
 fn runtime_activity_emits_periodic_prompts_and_updates_gates() {
     let now = Instant::now();

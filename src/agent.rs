@@ -62,16 +62,17 @@ pub use prompts::{
     MAX_NUMBERED_BYTES, PhaseJudgeInput, ReportPromptInput, SincePrevious, TestRecord,
     behavioral_silence_nudge, behavioral_time_warning, board_silence_nudge,
     build_instructions_for_plan, changed_excerpt, cold_restart, compressed_context,
-    format_test_run, format_test_run_for_reaction, greeting, hint_ladder_used_text, hint_rung_text,
-    hint_rung_withheld_text, interim_review_prompt, interim_system_instruction, language_choice,
-    log_hint_text, numbered, numbered_from, owed_reply, phase_judge_prompt,
-    phase_judge_system_instruction, phase_judgment_note, proactive_review, read_board_text,
-    read_editor_text, received_test_note, released_follow_ups, report_prompt,
-    report_system_instruction, report_system_instruction_for_examples, resumed_context,
-    rolling_assessment, round_skipped, round_started, silence_nudge, spoken_language,
-    test_results_reaction, test_runner_outage_reaction, test_runner_unavailable_reaction,
-    test_setup_error_reaction, time_warning, uncredited_test_results_reaction,
-    unrecorded_earlier_phases, unvoiced_record_note, with_owed_reply, wrap_up,
+    format_test_run, format_test_run_for_reaction, greeting, greeting_with_language,
+    hint_ladder_used_text, hint_rung_text, hint_rung_withheld_text, interim_review_prompt,
+    interim_system_instruction, language_choice, log_hint_text, numbered, numbered_from,
+    owed_reply, phase_judge_prompt, phase_judge_system_instruction, phase_judgment_note,
+    proactive_review, read_board_text, read_editor_text, received_test_note, released_follow_ups,
+    report_prompt, report_system_instruction, report_system_instruction_for_examples,
+    resumed_context, rolling_assessment, round_skipped, round_started, silence_nudge,
+    spoken_language, test_results_reaction, test_runner_outage_reaction,
+    test_runner_unavailable_reaction, test_setup_error_reaction, time_warning,
+    uncredited_test_results_reaction, unrecorded_earlier_phases, unvoiced_record_note,
+    with_owed_reply, wrap_up,
 };
 pub(crate) use prompts::{
     behavioral_round_start, editor_tool_continuity, end_interview_refusal, evidenced_among,
@@ -179,8 +180,8 @@ pub const THINKING_CHECK_IN_S: u64 = 120;
 pub(crate) const THINKING_RELEASE_COOLDOWN: std::time::Duration =
     std::time::Duration::from_secs(10);
 
-pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 42;
-pub const LIVE_PROMPT_VERSION: u32 = 32;
+pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 43;
+pub const LIVE_PROMPT_VERSION: u32 = 33;
 pub const REPORT_PROMPT_VERSION: u32 = 24;
 pub const RUBRIC_VERSION: u32 = 1;
 pub const REPORT_SCHEMA_VERSION: u32 = 4;
@@ -3028,6 +3029,9 @@ pub struct MetadataConfig {
     pub code_execution_disabled: bool,
     pub example_drawing_enabled: bool,
     pub candidate_led_enabled: bool,
+    /// The language the candidate chose before joining, an id
+    /// `spoken_language` accepts, and never set at a whiteboard.
+    pub language: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -3399,6 +3403,15 @@ pub fn parse_participant_metadata(metadata: Option<&str>) -> MetadataConfig {
     let example_drawing_enabled = !interview_mode.is_whiteboard()
         && value.get("exampleDrawing") == Some(&serde_json::Value::Bool(true));
     let candidate_led_enabled = value.get("candidateLed") == Some(&serde_json::Value::Bool(true));
+
+    // Checked again here although the token handler checked it: this string
+    // reaches the greeting and the runtime state, and the metadata is the only
+    // record of it the agent has.
+    let language = value
+        .get("language")
+        .and_then(serde_json::Value::as_str)
+        .filter(|language| !interview_mode.is_whiteboard() && spoken_language(language).is_some())
+        .map(str::to_string);
     MetadataConfig {
         voice: sanitize_interviewer_choice(value.get("interviewerVoice"), INTERVIEWER_VOICES),
         accent: sanitize_interviewer_choice(value.get("interviewerAccent"), INTERVIEWER_ACCENTS),
@@ -3412,6 +3425,7 @@ pub fn parse_participant_metadata(metadata: Option<&str>) -> MetadataConfig {
         code_execution_disabled,
         example_drawing_enabled,
         candidate_led_enabled,
+        language,
     }
 }
 

@@ -327,6 +327,20 @@ pub fn token_response(
             .expect("metadata is an object")
             .insert("exampleDrawing".to_string(), Value::Bool(true));
     }
+
+    // Only an id the language tabs offer: the agent interpolates it into the
+    // interviewer's opening, so anything else would be text written into it.
+    if !interview_mode.is_whiteboard()
+        && let Some(language) = request
+            .get("language")
+            .and_then(Value::as_str)
+            .filter(|language| crate::agent::spoken_language(language).is_some())
+    {
+        metadata
+            .as_object_mut()
+            .expect("metadata is an object")
+            .insert("language".to_string(), json!(language));
+    }
     if request.get("codeExecution") == Some(&Value::Bool(false)) {
         metadata
             .as_object_mut()

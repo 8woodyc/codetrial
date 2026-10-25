@@ -836,6 +836,16 @@ pub fn greeting(mode: InterviewMode) -> String {
     )
 }
 
+/// The coding opening when the candidate chose a language before joining.
+///
+/// `spoken` comes from `spoken_language`, never from the packet itself, so the
+/// allowlist that guards `language_choice` guards this prompt too.
+pub fn greeting_with_language(spoken: &str) -> String {
+    format!(
+        "[SYSTEM EVENT] The interview starts now. The candidate chose {spoken} before joining, and it is already selected in the editor. Greet the candidate in at most four short sentences: introduce yourself as {AGENT_NAME}; introduce THE EXERCISE in one sentence in its scenario's own terms, without naming any published problem, practice site, or the technique it needs; and mention that they can switch languages with the tabs above the editor at any time and may ask for a hint if they get stuck. Do not ask which language they want, do not comment on whether {spoken} is a good choice, do not volunteer a constraint, edge case, or hint, and do not read the scenario out word for word. Then ask them to restate the inputs, outputs, constraints, and ambiguities in their own words, and to ask whatever they need to pin down."
+    )
+}
+
 /// How a language id is said out loud, and the allowlist of ids the tabs offer.
 ///
 /// `None` for anything else, and that is a boundary rather than a convenience.
