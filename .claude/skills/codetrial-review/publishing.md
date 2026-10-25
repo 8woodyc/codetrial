@@ -103,6 +103,11 @@ Failures during input verification stop before collection and do not become a
 cold rebuild. Investigate `unverified`, `invalid-checkpoint`, network and tooling
 errors before deliberately choosing a fresh rebuild.
 
+A disposable index-version change can resume a checkpoint with the same verified
+physical schema and source/checkpoint formats. The restored copy rebuilds locally;
+raw data, stale queues and sync cursors survive without refetch. Unknown physical
+schemas still fail closed before migration.
+
 Checkpoint Actions artifacts expire after seven days. They contain projected
 current public payloads, authority, stale queues and sync cursors; they exclude
 local history and decisions. Ready handoffs expire after one day. These are

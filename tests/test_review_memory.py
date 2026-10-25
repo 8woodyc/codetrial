@@ -1015,6 +1015,7 @@ sys.exit(memory.main(['--db',sys.argv[3],*sys.argv[4:]]))
             busy = self.run_memory("ensure", ok=False)
             self.assertEqual(busy.returncode, 1)
             self.assertEqual(json.loads(busy.stdout)["outcome"], "error")
+            self.assertEqual(json.loads(busy.stdout)["code"], "busy")
         finally:
             lock.close()
         (self.dir / "memory.db").write_bytes(b"corrupted-local-data")
@@ -1383,7 +1384,7 @@ class EvidenceSafetyTests(MemoryCase):
     def test_ensure_error_codes_and_unreadable_status_are_structured(self):
         memory = self.memory_module()
         errors = [
-            (sqlite3.DatabaseError("locked"), "storage"),
+            (sqlite3.DatabaseError("locked"), "busy"),
             (OSError("disk full"), "storage"),
             (EOFError("truncated gzip"), "corrupt"),
             (ValueError("invalid"), "invalid"),
@@ -1397,24 +1398,28 @@ class EvidenceSafetyTests(MemoryCase):
         ]
         for error, expected in errors:
             self.assertEqual(memory.failure_code(error), expected)
-        with (
-            memory.connect(":memory:") as db,
-            patch.object(
-                memory, "clear_staging", side_effect=sqlite3.DatabaseError("locked")
-            ),
-            patch.object(
-                memory, "memory_status", side_effect=sqlite3.DatabaseError("unreadable")
-            ),
-            patch.object(memory, "print", create=True) as output,
+        for message, expected in (
+            ("unreadable", "storage"),
+            ("database is locked", "busy"),
         ):
-            result = memory.cmd_ensure(
-                db, SimpleNamespace(store_path=str(self.dir / "memory.db"))
-            )
-        self.assertEqual(result, 1)
-        status = json.loads(output.call_args[0][0])
-        self.assertEqual(status["outcome"], "error")
-        self.assertEqual(status["code"], "storage")
-        self.assertIsNone(status["status"])
+            with (
+                memory.connect(":memory:") as db,
+                patch.object(
+                    memory, "clear_staging", side_effect=sqlite3.DatabaseError("locked")
+                ),
+                patch.object(
+                    memory, "memory_status", side_effect=sqlite3.DatabaseError(message)
+                ),
+                patch.object(memory, "print", create=True) as output,
+            ):
+                result = memory.cmd_ensure(
+                    db, SimpleNamespace(store_path=str(self.dir / "memory.db"))
+                )
+            self.assertEqual(result, 1)
+            status = json.loads(output.call_args[0][0])
+            self.assertEqual(status["outcome"], "error")
+            self.assertEqual(status["code"], expected)
+            self.assertIsNone(status["status"])
 
     def test_discovery_keeps_http_failures_as_network_codes(self):
         memory = self.memory_module()
@@ -1456,7 +1461,9 @@ class EvidenceSafetyTests(MemoryCase):
                 )
             self.assertEqual(result, 1)
             status = json.loads(output.call_args[0][0])
-            self.assertEqual(status["code"], "storage")
+            self.assertEqual(
+                status["code"], "busy" if "locked" in str(failure) else "storage"
+            )
             self.assertIn("recovery", status)
             if "locked" in str(failure):
                 self.assertIn("busy", status["reason"])
@@ -1885,6 +1892,28 @@ class EvidenceSafetyTests(MemoryCase):
             "fixes", "--text", "reconnect retries", "--file", "src/livekit.rs"
         ).stdout
         self.assertNotIn("#2 merged", result)
+
+    def test_fix_symbol_serialization_is_identical_across_process_hash_seeds(self):
+        script = """import importlib.util,json,sys
+spec=importlib.util.spec_from_file_location('memory',sys.argv[1])
+m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+db=m.connect(':memory:')
+m.index_fix(db,1,{'title':'Fixture','body':''},'merged',[
+ {'filename':'src/a.rs','patch':'@@ -0,0 +1,3 @@\\n+fn alpha_one() {}\\n+fn beta_two() {}\\n+fn gamma_three() {}'}])
+print(json.dumps(tuple(db.execute('SELECT * FROM fixes_fts').fetchone())))
+"""
+        outputs = []
+        for seed in ("1", "2", "3"):
+            result = subprocess.run(
+                [sys.executable, "-c", script, str(MEMORY)],
+                env=dict(os.environ, PYTHONHASHSEED=seed),
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            outputs.append(json.loads(result.stdout))
+        self.assertTrue(all(row == outputs[0] for row in outputs))
+        self.assertTrue(outputs[0][2].startswith("alpha_one beta_two gamma_three "))
 
     def test_index_rebuild_keeps_raw_hashes_and_unchanged_annotation_sources(self):
         history = json.loads(json.dumps(HISTORY))
@@ -3001,6 +3030,14 @@ class ReviewFixTests(MemoryCase):
         self.run_memory("context", str(bundle), "--ref", "HEAD")
         self.assertIn(
             "The project memory is empty", (bundle / "history.md").read_text()
+        )
+        self.assertIn(
+            "do not repeat refresh during this review",
+            (bundle / "history.md").read_text(),
+        )
+        self.assertIn(
+            "Optional manual recovery after the review",
+            (bundle / "history.md").read_text(),
         )
         self.answer_with(
             "/issues/comments",

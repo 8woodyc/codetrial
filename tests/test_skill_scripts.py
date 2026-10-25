@@ -2865,5 +2865,95 @@ class SkillRoutingTests(unittest.TestCase):
         self.assertEqual(env, ["config/codetrial.env.example"])
 
 
+class MemoryPreparationFlowTests(unittest.TestCase):
+    def test_documented_review_flow_handles_empty_interrupted_and_degraded_results(
+        self,
+    ):
+        text = (SKILLS / "codetrial-review/SKILL.md").read_text()
+        snippet = next(
+            block.split("```", 1)[0]
+            for block in text.split("```sh\n")[1:]
+            if block.startswith("bundle=")
+        )
+        triage_text = (SKILLS / "codetrial-triage/review-prs.md").read_text()
+        triage_snippet = next(
+            block.split("```", 1)[0]
+            for block in triage_text.split("```sh\n")[1:]
+            if block.lstrip().startswith("history_ok=")
+        )
+        flows = (("review", snippet), ("triage", triage_snippet))
+        cases = [
+            ("ready", 0, {"outcome": "ready", "code": "ready"}, True, False),
+            ("partial", 2, {"outcome": "degraded", "code": "budget"}, True, False),
+            ("busy", 1, {"outcome": "error", "code": "busy"}, True, False),
+            ("storage", 1, {"outcome": "error", "code": "storage"}, False, False),
+            ("invalid", 2, "invalid", False, False),
+            ("interrupted", 130, "", False, False),
+            ("multiple", 0, '{"outcome":"ready"} {"outcome":"ready"}', False, False),
+            ("wrong-exit", 2, {"outcome": "ready", "code": "ready"}, False, False),
+            ("context-failed", 0, {"outcome": "ready", "code": "ready"}, True, True),
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            (base / "bin").mkdir()
+            (base / "review-7").mkdir()
+            support.write_executable(
+                base / "bin/python3",
+                "#!"
+                + sys.executable
+                + "\n"
+                + """import os,sys
+from pathlib import Path
+if 'ensure' in sys.argv:
+    print(os.environ['CASE_JSON'])
+    sys.exit(int(os.environ['CASE_EXIT']))
+with open(os.environ['CALL_LOG'], 'a') as out:
+    out.write('context\\n')
+if os.environ['CONTEXT_FAIL'] == 'true':
+    sys.exit(1)
+Path(sys.argv[-1], 'history.md').write_text('fixture context')
+""",
+            )
+            for flow, snippet in flows:
+                for name, code, value, context_called, context_failed in cases:
+                    with self.subTest(flow=flow, case=name):
+                        log = base / "calls"
+                        if log.exists():
+                            log.unlink()
+                        env = dict(
+                            os.environ,
+                            PATH=str(base / "bin") + ":" + os.environ["PATH"],
+                            SCRATCH=str(base),
+                            dir=str(base / "review-7"),
+                            shared_memory_status=str(
+                                base / "review-7/memory-status.json"
+                            ),
+                            shared_memory_exit=str(code),
+                            pr="7",
+                            CASE_EXIT=str(code),
+                            CASE_JSON=json.dumps(value)
+                            if isinstance(value, dict)
+                            else value,
+                            CALL_LOG=str(log),
+                            CONTEXT_FAIL=str(context_failed).lower(),
+                        )
+                        (base / "review-7/memory-status.json").write_text(
+                            env["CASE_JSON"]
+                        )
+                        result = subprocess.run(
+                            ["bash", "-e", "-u", "-o", "pipefail", "-c", snippet],
+                            env=env,
+                            capture_output=True,
+                            text=True,
+                        )
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual(log.exists(), context_called)
+                        history = (base / "review-7/history.md").read_text()
+                        self.assertEqual(
+                            "fixture context" in history,
+                            context_called and not context_failed,
+                        )
+
+
 if __name__ == "__main__":
     unittest.main()

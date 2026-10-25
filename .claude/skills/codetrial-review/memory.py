@@ -2,12 +2,12 @@
 """CodeTrial's project memory: every PR and issue discussion, kept local and
 searchable, so a review can ask what was decided, changed or started before.
 
-    memory.py backfill          # once: the whole history, resumable
+    memory.py backfill          # explicit full collection/recovery, resumable
     memory.py poll              # often: what changed since the last poll
     memory.py detail [--max N]  # PR files, reviews, commits and patches
     memory.py sweep             # now and then: what was deleted upstream
     memory.py status
-    memory.py ensure [--budget 60] [--max 30] [--offline]
+    memory.py ensure [--budget 60] [--max 30] [--offline] [--bootstrap-only]
     memory.py snapshot --output DIR --release-id ID --generator-commit SHA
     memory.py search TEXT [--file P] [--symbol S] [--error E] [--trust T] ...
     memory.py fixes [--text T] [--file P] [--symbol S] [--exclude N]
@@ -20,9 +20,9 @@ The store is SQLite in the clone's common git directory, so every worktree
 shares it and nothing of it is tracked. Each store belongs to one repository;
 use --db with a separate path for another source. Search is lexical (FTS5, BM25): the
 questions a review asks name a function, a path or an error message, which a
-word index answers exactly and an embedding blurs. Every GitHub payload is kept
-verbatim in `raw`, and everything searchable is derived from it: a store built
-by another VERSION of this file rebuilds those tables when opened, so a change
+word index can retrieve. Original local payloads stay verbatim in `raw`;
+imported public records carry explicit credential-projection metadata (snapshots.md).
+Everything searchable is derived from stored raw data: a store built by another VERSION of this file rebuilds those tables when opened, so a change
 to what is extracted costs no API call. A document that is edited or deleted
 upstream keeps its old text in `history` with where, when and by whom it was
 said; a deleted one leaves search.
@@ -91,7 +91,7 @@ REPO = "sysprog21/codetrial"
 # Bumped whenever what is extracted from the raw payloads changes: a store at
 # another version rebuilds every derived table from `raw` when it is opened,
 # which costs no API call.
-VERSION = 8
+VERSION = 9
 # Source compatibility is independent of the disposable search indexes.
 SOURCE_FORMAT = 3
 SNAPSHOT_PREFIX = "review-memory-"
@@ -244,6 +244,8 @@ def failure_code(error):
         return "timeout"
     if isinstance(error, (zlib.error, EOFError)):
         return "corrupt"
+    if isinstance(error, sqlite3.DatabaseError) and "locked" in str(error):
+        return "busy"
     if isinstance(error, (sqlite3.DatabaseError, OSError)):
         return "storage"
     return "invalid"
@@ -1602,6 +1604,7 @@ def index_fix(db, number, issue, state, files):
         ][:200]
         solution.extend(lines)
         symbols.update(named_in("\n".join(hunk_headers(f.get("patch")) + lines)))
+    symbol_text = " ".join(sorted(symbols))
     db.execute(
         "INSERT INTO fixes_fts (rowid, problem, paths, symbols, solution) "
         "VALUES (?, ?, ?, ?, ?)",
@@ -1609,7 +1612,7 @@ def index_fix(db, number, issue, state, files):
             number,
             "\n".join(problem),
             " ".join(paths) + " " + split_terms(" ".join(paths)),
-            " ".join(symbols) + " " + split_terms(" ".join(symbols)),
+            symbol_text + " " + split_terms(symbol_text),
             "\n".join(solution),
         ),
     )
@@ -2387,8 +2390,11 @@ def store_age(db):
     ).fetchone()[0]
     if not threads:
         return (
-            "The project memory is empty, so nothing below is history: run "
-            "memory.py backfill (about 15 to 20 minutes) and draw this page again."
+            "The project memory is empty, so nothing below is collected history. "
+            "Use the recorded preparation outcome (memory-status.json when supplied); "
+            "do not repeat refresh during this review or in per-PR agents. "
+            "Optional manual recovery after the review: memory.py ensure --budget 600. "
+            "Offline history stays unavailable; a full backfill is explicit manual recovery."
         )
     status = memory_status(db)
     bootstrap = mark(db, "bootstrap")
@@ -3346,7 +3352,7 @@ def cmd_ensure(db, args):
             json.dumps(
                 {
                     "outcome": "error",
-                    "code": "storage",
+                    "code": failure_code(error),
                     "reason": safe_label(str(error))[:240],
                     "status": None,
                     "recovery": recovery,
@@ -3401,7 +3407,8 @@ def pass_lock(path, required=False):
         raise Fail(
             "another {} or {} is running; try again after it".format(
                 ", ".join(SYNC_PASSES[:-1]), SYNC_PASSES[-1]
-            )
+            ),
+            code="busy",
         )
     return handle
 

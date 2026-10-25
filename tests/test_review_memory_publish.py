@@ -3,6 +3,7 @@
 
 import importlib.util
 import io
+import gzip
 import json
 import tempfile
 import subprocess
@@ -64,6 +65,42 @@ class PublisherTests(unittest.TestCase):
             self.assertIsNone(db.execute("SELECT 1 FROM decisions").fetchone())
             self.assertEqual(data["counts"]["redacted_records"], 1)
             self.memory.check_public_credentials(db)
+
+    def test_same_schema_older_index_checkpoint_resumes_without_refetch(self):
+        directory, data = self.checkpoint()
+        path = directory / "checkpoint.db"
+        path.write_bytes(gzip.decompress((directory / "checkpoint.db.gz").read_bytes()))
+        with self.memory.connect(str(path)) as db:
+            raw = [tuple(row) for row in db.execute("SELECT * FROM raw ORDER BY key")]
+            db.execute("PRAGMA user_version=8")
+        blob = directory / "checkpoint.db.gz"
+        blob.write_bytes(gzip.compress(path.read_bytes(), mtime=0))
+        data.update(
+            index_version=8,
+            sha256=self.publisher.digest(blob),
+            compressed_bytes=blob.stat().st_size,
+        )
+        (directory / "checkpoint.json").write_text(json.dumps(data))
+        path.unlink()
+        restored, _ = self.publisher.open_checkpoint(directory, self.memory.REPO)
+        with patch.object(
+            self.memory, "gh", side_effect=AssertionError("migration refetched source")
+        ):
+            with self.memory.connect(str(restored)) as db:
+                self.assertEqual(
+                    db.execute("PRAGMA user_version").fetchone()[0], self.memory.VERSION
+                )
+                self.assertEqual(
+                    [
+                        tuple(row)
+                        for row in db.execute("SELECT * FROM raw ORDER BY key")
+                    ],
+                    raw,
+                )
+                self.assertEqual(self.memory.mark(db, "sweep_attempt"), "running")
+                self.assertEqual(
+                    db.execute("SELECT number FROM stale").fetchone()[0], 1
+                )
 
     def test_checkpoint_corruption_is_rejected_before_sqlite_open(self):
         directory, _ = self.checkpoint()

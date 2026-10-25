@@ -2,8 +2,11 @@
 
 This is the design for the next review-memory changes, not a list of shipped
 features. The snapshot builder, verified `ensure`, source-safe evidence output
-and credential publication guard are implemented. The publisher workflow,
-retrieval expansion, inflight/freshness changes and evaluation work remain planned.
+and public credential projection are implemented. The publisher workflow and
+release management are implemented; real workflow-token and signed-download
+validation still require deployment. An offline bootstrap harness checks pipeline
+consistency without claiming network performance. Retrieval expansion,
+inflight/freshness changes and evaluation work remain planned.
 
 ## Reference and boundary
 

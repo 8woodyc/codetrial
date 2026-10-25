@@ -118,9 +118,12 @@ sync commands keep their existing platform behavior.
 The command emits one JSON object on stdout: ready (exit 0), degraded (exit 2),
 or error (exit 1), for syntactically valid invocations. Argparse usage errors
 retain standard exit 2 and write usage to stderr rather than a result object.
+Ctrl-C exits 130 and may produce no result JSON; treat it as incomplete preparation.
 Callers must explicitly handle exit 2 to continue without
 fresh history. Network, verification and time-budget failures are degraded;
-a corrupt local store or an unavailable exclusive lock is an error. Progress
+a corrupt local store or an unavailable exclusive lock is an error. The latter
+has code `busy`; callers may read existing local context while the writer runs.
+Other storage errors leave history unavailable until inspected. Progress
 goes to stderr. The default total budget is 60 seconds with at most 30 PRs of
 detail. On Unix the deadline interrupts blocking operations and rolls back an
 uncommitted page or PR; committed progress remains. Use `--budget 600` for a

@@ -273,10 +273,7 @@ def checkpoint_manifest(data, repo):
         or data.get("source_format") != memory.SOURCE_FORMAT
     ):
         raise memory.Fail("unsupported checkpoint format", code="incompatible")
-    if (
-        type(data.get("index_version")) is not int
-        or data["index_version"] != memory.VERSION
-    ):
+    if type(data.get("index_version")) is not int or data["index_version"] < 1:
         raise memory.Fail("unsupported checkpoint index", code="incompatible")
     for name in ("run_id", "run_attempt"):
         if type(data.get(name)) is not int or data[name] < 1:
