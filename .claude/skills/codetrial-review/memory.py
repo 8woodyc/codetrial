@@ -1189,6 +1189,48 @@ def walk(db, repo, since, progress):
     return touched
 
 
+def diff_signature(pull):
+    """What a PR's files and commits are a function of: both ends of the diff
+    and its totals. None when the payload lacks one, so nothing is skipped."""
+    if not isinstance(pull, dict):
+        return None
+    head, base = pull.get("head") or {}, pull.get("base") or {}
+    sig = [
+        head.get("sha"),
+        base.get("sha"),
+        base.get("ref"),
+        pull.get("changed_files"),
+        pull.get("commits"),
+        pull.get("additions"),
+        pull.get("deletions"),
+    ]
+    return None if None in sig else sig
+
+
+def diff_unchanged(db, number, pull):
+    """Whether the stored files and commits still describe this PR. A comment
+    or a review moves a PR to the detail pass without touching its diff, and
+    then two of its four reads would return what is already stored. The totals
+    are part of the signature because the files list can shrink under an
+    unchanged head when another PR merges a commit this one carries."""
+    sig = diff_signature(pull)
+    if sig is None:
+        return False
+    row = db.execute(
+        "SELECT payload FROM raw WHERE key = ?", ("pull:{}".format(number),)
+    ).fetchone()
+    stored = db.execute(
+        "SELECT count(*) FROM raw WHERE key IN (?, ?)",
+        ("files:{}".format(number), "commits:{}".format(number)),
+    ).fetchone()[0]
+    if row is None or stored != 2:
+        return False
+    try:
+        return diff_signature(json.loads(row["payload"])) == sig
+    except ValueError:
+        return False
+
+
 def fetch_detail(db, repo, number):
     """What the listings leave out of a PR: its merge state and SHAs, every
     review, every changed file with its patch, and its commits."""
@@ -1198,19 +1240,22 @@ def fetch_detail(db, repo, number):
     reviews = gh(
         "repos/{}/pulls/{}/reviews?per_page=100".format(repo, number), paginate=True
     )
-    files = gh(
-        "repos/{}/pulls/{}/files?per_page=100".format(repo, number), paginate=True
-    )
-    commits = gh(
-        "repos/{}/pulls/{}/commits?per_page=100".format(repo, number), paginate=True
-    )
+    fresh = {}
+    if not diff_unchanged(db, number, pull):
+        fresh = {
+            name: gh(
+                "repos/{}/pulls/{}/{}?per_page=100".format(repo, number, name),
+                paginate=True,
+            )
+            for name in ("files", "commits")
+        }
     db.execute("BEGIN IMMEDIATE")
     store_raw(db, "pull:{}".format(number), number, "pull", pull)
     for review in reviews:
         if review.get("state") != "PENDING":
             store_raw(db, "review:{}".format(review["id"]), number, "review", review)
-    store_raw(db, "files:{}".format(number), number, "files", files)
-    store_raw(db, "commits:{}".format(number), number, "commits", commits)
+    for name, data in fresh.items():
+        store_raw(db, "{}:{}".format(name, number), number, name, data)
     # A review this fetch did not return was deleted or dismissed away.
     seen = {"review:{}".format(r["id"]) for r in reviews}
     for row in db.execute(
@@ -1769,7 +1814,7 @@ def cmd_detail(db, args):
     batch = todo[:limit]
     if len(batch) > 20:
         METER.say(
-            "memory.py: fetching detail for {} PRs, about four GitHub calls each "
+            "memory.py: fetching detail for {} PRs, two to four GitHub calls each "
             "(roughly {}); interrupting is safe, the next run picks up the "
             "rest".format(len(batch), duration(len(batch) * 3.5)),
             err=True,

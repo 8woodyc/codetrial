@@ -2273,6 +2273,62 @@ class SyncTests(MemoryCase):
             self.run_memory("fixes", "--text", "Spectraldisconnect").stdout,
         )
 
+    def test_detail_skips_files_and_commits_while_the_diff_is_unchanged(self):
+        memory = self.memory_module()
+        db = memory.connect(":memory:")
+        pull = {
+            "head": {"sha": "h"},
+            "base": {"sha": "b", "ref": "main"},
+            "changed_files": 1,
+            "commits": 1,
+            "additions": 1,
+            "deletions": 1,
+        }
+        self.assertFalse(memory.diff_unchanged(db, 9, None))
+        calls = []
+
+        def api(path, paginate=False):
+            calls.append(path.split("/pulls/")[1].split("?")[0])
+            if path.endswith("/pulls/9"):
+                return dict(pull)
+            # Each read of files or commits answers differently, so what is
+            # stored says which read it came from.
+            return [] if "/reviews" in path else [{"of": calls[-1]}]
+
+        def stored():
+            return {
+                key: json.loads(
+                    db.execute(
+                        "SELECT payload FROM raw WHERE key=?", (key,)
+                    ).fetchone()[0]
+                )
+                for key in ("files:9", "commits:9")
+            }
+
+        with patch.object(memory, "gh", api):
+            for expect, change in (
+                (["9", "9/reviews", "9/files", "9/commits"], {}),
+                (["9", "9/reviews"], {}),
+                (["9", "9/reviews", "9/files", "9/commits"], {"head": {"sha": "h2"}}),
+                (["9", "9/reviews", "9/files", "9/commits"], {"commits": 0}),
+                (["9", "9/reviews"], {}),
+            ):
+                pull.update(change)
+                before = None if "9/files" in expect else stored()
+                calls.clear()
+                memory.fetch_detail(db, "o/r", 9)
+                db.commit()
+                self.assertEqual(calls, expect, change)
+                # A skipped fetch leaves the stored detail as it was; a refetch
+                # replaces it with what that fetch read.
+                if "9/files" in expect:
+                    self.assertEqual(
+                        {k: v[0]["of"] for k, v in stored().items()},
+                        {"files:9": "9/files", "commits:9": "9/commits"},
+                    )
+                else:
+                    self.assertEqual(stored(), before, change)
+
     def test_a_tie_bucket_cursor_saved_at_another_page_size_loses_nothing(self):
         memory = self.memory_module()
         stamp = "2026-01-01T00:00:00Z"
