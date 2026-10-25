@@ -60,6 +60,14 @@ test("selecting an example pen color switches from erasing to drawing", async (t
   const pen = page.getByRole("button", { name: "Pen", exact: true });
   const eraser = page.getByRole("button", { name: "Eraser", exact: true });
   const red = page.getByRole("button", { name: "Pen Red", exact: true });
+  const pressedColors = () =>
+    page
+      .locator(".board-color")
+      .evaluateAll((buttons) =>
+        buttons
+          .filter((button) => button.getAttribute("aria-pressed") === "true")
+          .map((button) => button.getAttribute("aria-label")),
+      );
   const canvas = page.locator("canvas");
   async function draw() {
     const box = await canvas.boundingBox();
@@ -69,6 +77,7 @@ test("selecting an example pen color switches from erasing to drawing", async (t
     await page.mouse.up();
   }
 
+  assert.deepEqual(await pressedColors(), ["Pen Black"]);
   await draw();
   assert.equal(await page.evaluate(() => window.ops.length), 1);
   await eraser.click();
@@ -91,12 +100,12 @@ test("selecting an example pen color switches from erasing to drawing", async (t
   );
   assert.equal(await pen.getAttribute("aria-pressed"), "true");
   assert.equal(await eraser.getAttribute("aria-pressed"), "false");
-  assert.equal(await red.getAttribute("aria-pressed"), "true");
+  assert.deepEqual(await pressedColors(), ["Pen Red"]);
 
   await eraser.click();
   assert.equal(await pen.getAttribute("aria-pressed"), "false");
   assert.equal(await eraser.getAttribute("aria-pressed"), "true");
-  assert.equal(await red.getAttribute("aria-pressed"), "true");
+  assert.deepEqual(await pressedColors(), ["Pen Red"]);
   await draw();
   assert.deepEqual(
     await page.evaluate(() => {
