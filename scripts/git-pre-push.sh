@@ -15,6 +15,54 @@ set -u
 remote=${1:-}
 url=${2:-}
 
+# Read the pushed refs first: the tag sync below decides from them, and the
+# transport must not get a chance to consume them.
+refs=$(cat)
+
+# Release tags follow origin, and only a push to origin is held up by it, so an
+# origin that is slow or unreachable cannot block a push elsewhere. A push that
+# itself updates one of the tags keeps the local value. Missing tags are skipped
+# after discovery. Both network calls share one deadline.
+origin_url=$(git remote get-url origin 2> /dev/null) || origin_url=
+if [ -n "$origin_url" ] && {
+    [ "$remote" = origin ] || [ "$url" = "$origin_url" ]
+} \
+    && ! printf '%s\n' "$refs" \
+    | awk '$3 ~ /^refs\/tags\/(latest|desktop-latest)$/ { found = 1 } END { exit !found }'; then
+    bound=
+    for tool in timeout gtimeout; do
+        if command -v "$tool" > /dev/null 2>&1; then
+            bound="$tool -k 5 55"
+            break
+        fi
+    done
+
+    # Without a tool to enforce the deadline (stock macOS has neither) the sync
+    # is skipped rather than risking an unbounded wait on every push.
+    if [ -z "$bound" ]; then
+        echo "Note: release tags not synchronized; install timeout or gtimeout to enable it." >&2
+        bound=skip
+    fi
+    # The child shell expands its own discovery results, not this shell.
+    # shellcheck disable=SC2086,SC2016
+    [ "$bound" = skip ] || GIT_TERMINAL_PROMPT=0 $bound sh -c '
+        available=$(git ls-remote --refs origin refs/tags/latest refs/tags/desktop-latest) || exit 1
+        set --
+        while read -r oid ref; do
+            case "$ref" in
+                refs/tags/latest | refs/tags/desktop-latest) set -- "$@" "+$ref:$ref" ;;
+            esac
+        done << EOF
+$available
+EOF
+        [ "$#" -eq 0 ] || git fetch --no-tags origin "$@"
+    ' < /dev/null || {
+        echo "Push rejected: cannot synchronize release tags from origin." >&2
+        echo "Check origin connectivity, then retry." >&2
+        exit 1
+    }
+fi
+
 # From the repository, not from $0: git invokes the hook through the wrapper in
 # .git/hooks, so dirname of $0 names that directory and not scripts/. Hooks run
 # with the working tree root as the working directory.
@@ -87,6 +135,32 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         continue
     }
 
+    # Include merge resolutions and commits whose tip later removes a secret.
+    # What is already published is not going out again, so a merge of upstream
+    # work does not rescan it, and a first push to a new remote does not rescan
+    # the whole history another remote holds.
+    set -- "$local_sha" --not
+    if git cat-file -e "${remote_sha}^{commit}" 2> /dev/null; then
+        set -- "$@" "$remote_sha"
+    fi
+    set -- "$@" "$published"
+    secret_commits=$(git rev-list "$@") || {
+        echo "Push rejected: cannot inspect outgoing history." >&2
+        failed=1
+        continue
+    }
+    if [ -n "$secret_commits" ] && ! command -v python3 > /dev/null 2>&1; then
+        echo "Push rejected: python3 is required for the secret check." >&2
+        failed=1
+        continue
+    fi
+    if [ -n "$secret_commits" ] && ! printf '%s\n' "$secret_commits" \
+        | python3 "$script_dir/check-secrets.py" --commits; then
+        echo "Push rejected: outgoing history failed the secret check." >&2
+        failed=1
+        continue
+    fi
+
     # No new commit to judge (a head already published, or one only a merge
     # moved) still gets the review note below.
     if [ -n "$commits" ] \
@@ -108,7 +182,9 @@ while read -r local_ref local_sha remote_ref remote_sha; do
             fi
             ;;
     esac
-done
+done << EOF
+$refs
+EOF
 
 # Said once the whole push is judged, so a push refused over another ref does
 # not also advise a review of a head that is not going anywhere.

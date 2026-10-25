@@ -27,15 +27,26 @@ if sed "/$scissors/,\$d" "$message_file" | grep -qE "^[^[:space:]$comment_char]"
     exit 0
 fi
 
+marker='Commit rules, enforced by scripts/git-commit-msg.sh:'
+
+# Re-entering the editor must not duplicate the guidance block. Above the
+# scissors line only: the diff below it may quote this very phrase.
+if sed "/$scissors/,\$d" "$message_file" \
+    | grep -qF "$marker"; then
+    exit 0
+fi
+
 rules=$(mktemp) || exit 0
 trap 'rm -f "$rules"' EXIT
 
 # The list comes from the hook that enforces it, so the two cannot drift.
 {
-    printf '\nCommit rules, enforced by scripts/git-commit-msg.sh:\n\n'
+    printf '\n%s\n\n' "$marker"
     "$(git rev-parse --show-toplevel)/scripts/git-commit-msg.sh" --rules
     printf '\nStaged:\n'
-    git diff --cached --name-only | sed 's/^/  /'
+    git diff --cached --name-only | awk 'NR <= 40 { print "  " $0 } END { if (NR > 40) print "  ... and " NR - 40 " more" }'
+    printf '\nChange summary (describe the reason in your own words):\n'
+    git diff --cached --no-ext-diff --shortstat
 } | awk -v char="$comment_char" '{sub(/[[:space:]]+$/, ""); print char " " $0}' \
     | sed 's/[[:space:]]*$//' > "$rules"
 

@@ -163,11 +163,57 @@ verify()
         fi
         status=1
     done
+    if git remote get-url origin > /dev/null 2>&1; then
+        if ! has_refspec "$release_refspec"; then
+            printf '  MISSING remote.origin.fetch %s\n' "$release_refspec" >&2
+            status=1
+        fi
+    fi
     if [ "$status" -ne 0 ]; then
         echo "Not every hook is in effect in $hooks; run make hooks." >&2
     fi
     return "$status"
 }
+
+has_refspec()
+{
+    git config --local --get-all remote.origin.fetch | grep -qxF "$1"
+}
+
+# Git has no pre-pull hook. A configured refspec also runs when pull finds no
+# branch changes, without executing scripts from the incoming tree. A glob,
+# since git fails a fetch whose exact refspec names a tag the remote lacks (a
+# fork, or a release being replaced). It also takes a tag such as v1-latest from
+# origin; the push hook discovers the two exact tags instead.
+release_refspec='+refs/tags/*latest:refs/tags/*latest'
+
+# Value patterns, since --fixed-value needs git 2.30. The only regex characters
+# a refspec here carries are + and *.
+unset_fetch()
+{
+    pattern=^$(printf '%s' "$1" | sed 's/[+*]/[&]/g')\$
+    git config --local --unset-all remote.origin.fetch "$pattern"
+    result=$?
+    [ "$result" -eq 0 ] || [ "$result" -eq 5 ]
+}
+
+# The exact refspecs an earlier installer wrote fail a fetch when a tag is
+# absent.
+remove_legacy_release_refspecs()
+{
+    for tag in latest desktop-latest; do
+        unset_fetch "+refs/tags/$tag:refs/tags/$tag" || return 1
+    done
+}
+
+if [ "$mode" = install ] && git remote get-url origin > /dev/null 2>&1; then
+    remove_legacy_release_refspecs || exit 1
+    has_refspec "$release_refspec" \
+        || git config --local --add remote.origin.fetch "$release_refspec" || exit 1
+elif [ "$mode" = uninstall ]; then
+    remove_legacy_release_refspecs || exit 1
+    unset_fetch "$release_refspec" || exit 1
+fi
 
 if [ "$mode" = check ]; then
     verify

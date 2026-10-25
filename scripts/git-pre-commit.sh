@@ -35,6 +35,13 @@ cp "$index" "$work/.index" || exit 1
 GIT_INDEX_FILE=$work/.index
 export GIT_INDEX_FILE
 
+# Inspect the copied index before materializing its blobs in a temporary tree.
+if ! command -v python3 > /dev/null 2>&1; then
+    echo "Commit refused: python3 is required for the secret check." >&2
+    exit 1
+fi
+python3 "$ROOT/scripts/check-secrets.py" || exit 1
+
 # quotePath off, so a name with a byte past ASCII comes back as itself rather
 # than quoted and silently matched by no lane below.
 staged=$(git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMRT)
@@ -115,6 +122,27 @@ if [ -n "$sh_files" ]; then
     # file the checkout above already put beside it.
     # shellcheck disable=SC2086
     have shellcheck && run_in_work shellcheck -x $sh_files
+fi
+
+# Include deletions: removing a checker or a skill target can break its users.
+changed=$(git -c core.quotePath=false diff --cached --name-only)
+if [ "$(git config --get codetrial.hookSuite)" != true ] && printf '%s\n' "$changed" \
+    | grep -Eq '^scripts/(git-.*[.]sh|git-commit-msg[.]awk|install-git-hooks[.]sh|test-git-hooks[.]sh|check-commit-log[.]sh|check-secrets[.]py)$'; then
+    # The suite owns scratch repositories; none may inherit this index.
+    (
+        for variable in $(git rev-parse --local-env-vars); do
+            unset "$variable"
+        done
+        cd "$work" || exit 1
+        sh scripts/test-git-hooks.sh
+    ) || failed=1
+fi
+
+if printf '%s\n' "$changed" | grep -Eq '^(\.claude/skills/|scripts/|docs/|src/|web/|tests/|problem-bank/|\.github/|[^/]+$)' \
+    && [ -f "$work/.claude/skills/codetrial-verify/SKILL.md" ] \
+    && [ -f "$work/scripts/check-skill-refs.py" ]; then
+    run_in_work env GIT_DIR="$(git rev-parse --absolute-git-dir)" \
+        GIT_WORK_TREE="$work" python3 scripts/check-skill-refs.py
 fi
 
 # Formatting is scripts/indent.sh's, against this checkout and this index, so

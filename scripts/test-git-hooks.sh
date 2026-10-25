@@ -81,7 +81,7 @@ message()
 # they will in the field.
 mkdir -p "$work/repo/scripts" || exit 1
 cp "$ROOT"/scripts/git-*.sh "$ROOT/scripts/git-commit-msg.awk" \
-    "$ROOT/scripts/check-commit-log.sh" \
+    "$ROOT/scripts/check-commit-log.sh" "$ROOT/scripts/check-secrets.py" \
     "$ROOT/scripts/install-git-hooks.sh" "$ROOT/scripts/indent.sh" \
     "$work/repo/scripts/" || exit 1
 for config in .editorconfig .shellcheckrc; do
@@ -98,6 +98,10 @@ git init -q . || exit 1
 git config user.email hooks@test
 git config user.name "Hook Test"
 git config commit.gpgsign false
+
+# Nested commits exercise hooks without launching this suite again. A setting of
+# this scratch repository, so nothing exported by a user can switch it.
+git config codetrial.hookSuite true
 
 # Asked of git, not spelled `.git/hooks`: a contributor with a global
 # core.hooksPath sends the installer somewhere else, and assertions against the
@@ -161,6 +165,26 @@ contains "the check names the hook behind ours" "$work/last.out" "then pre-push.
 expect 0 "uninstalling puts the user's hook back" \
     ./scripts/install-git-hooks.sh --uninstall
 contains "the user's hook is restored" "$hooks/pre-push" 'exit 0'
+mv "$hooks/pre-push" "$hooks/pre-push.local"
+./scripts/install-git-hooks.sh > /dev/null 2>&1
+
+# The release-tag refspec is the installer's to add and to take back, and it
+# must leave the remote's own fetch setting alone.
+git remote add origin "$work/refspec.git"
+expect 0 "the installer adds the release refspec" ./scripts/install-git-hooks.sh
+expect 0 "the release refspec is configured" \
+    sh -c 'git config --get-all remote.origin.fetch | grep -qxF "+refs/tags/*latest:refs/tags/*latest"'
+git config --add remote.origin.fetch '+refs/tags/latest:refs/tags/latest'
+git config --add remote.origin.fetch '+refs/tags/desktop-latest:refs/tags/desktop-latest'
+expect 0 "reinstalling migrates the earlier exact mappings" ./scripts/install-git-hooks.sh
+expect 1 "the exact mappings are removed" sh -c \
+    'git config --get-all remote.origin.fetch | grep -qE "^[+]refs/tags/(desktop-)?latest:"'
+git config --add remote.origin.fetch '+refs/tags/latest:refs/tags/latest'
+expect 0 "uninstalling removes only the release refspec" sh -c \
+    './scripts/install-git-hooks.sh --uninstall > /dev/null \
+    && ! git config --get-all remote.origin.fetch | grep -qF latest \
+    && git config --get-all remote.origin.fetch | grep -qxF "+refs/heads/*:refs/remotes/origin/*"'
+git remote remove origin
 mv "$hooks/pre-push" "$hooks/pre-push.local"
 ./scripts/install-git-hooks.sh > /dev/null 2>&1
 
@@ -550,6 +574,18 @@ expect 0 "an empty message gets the rules" \
 contains "the rules are rendered" "$work/empty.msg" "Commit rules"
 contains "the enforced list is what is shown" "$work/empty.msg" "imperative mood"
 
+cp "$work/empty.msg" "$work/once.msg"
+expect 0 "reopening the editor preserves the existing guidance" \
+    sh ./scripts/git-prepare-commit-msg.sh "$work/empty.msg"
+expect 0 "guidance is not duplicated" cmp -s "$work/empty.msg" "$work/once.msg"
+contains "guidance includes a change summary" "$work/empty.msg" "Change summary"
+
+printf '\n# ------------------------ >8 ------------------------\n+Commit rules, enforced by scripts/git-commit-msg.sh:\n' \
+    > "$work/quoted.msg"
+expect 0 "a diff quoting the guidance heading is not the guidance" \
+    sh ./scripts/git-prepare-commit-msg.sh "$work/quoted.msg"
+contains "guidance is added above a diff that quotes it" "$work/quoted.msg" "# Commit rules"
+
 # `git commit -v` puts the diff below a scissors line and drops everything after
 # it, so the block has to land above the scissors or the author never sees it.
 printf '\n# hint\n# ------------------------ >8 ------------------------\ndiff --git a/x b/x\n' \
@@ -655,14 +691,143 @@ expect 0 "an intent-to-add file carries nothing to judge" sh ./scripts/git-pre-c
 git rm -q --cached later.js
 rm -f later.js
 
+printf 'ghp_%036d\n' 1 > credential.txt
+git add credential.txt
+expect 1 "the pre-commit hook refuses a staged credential" sh ./scripts/git-pre-commit.sh
+contains "the pre-commit refusal is redacted" "$work/last.out" "GitHub token (redacted)"
+git rm -q --cached credential.txt
+rm credential.txt
+
+echo "  HOOKS   path-triggered checks"
+printf '#!/bin/sh\necho hook-suite-fixture\nexit 1\n' > scripts/test-git-hooks.sh
+git add scripts/test-git-hooks.sh
+expect 1 "a changed hook suite runs and refuses failures" \
+    env GIT_CONFIG_PARAMETERS="'codetrial.hookSuite=false'" sh ./scripts/git-pre-commit.sh
+contains "the hook suite was invoked" "$work/last.out" "hook-suite-fixture"
+printf '#!/bin/sh\necho hook-suite-fixture\nexit 0\n' > scripts/test-git-hooks.sh
+expect 1 "an unstaged suite fix does not pass the staged suite" \
+    env GIT_CONFIG_PARAMETERS="'codetrial.hookSuite=false'" sh ./scripts/git-pre-commit.sh
+git add scripts/test-git-hooks.sh
+expect 0 "a passing staged hook suite permits the commit" \
+    env GIT_CONFIG_PARAMETERS="'codetrial.hookSuite=false'" sh ./scripts/git-pre-commit.sh
+git rm -q --cached scripts/test-git-hooks.sh
+rm scripts/test-git-hooks.sh
+
+mkdir -p .claude/skills/codetrial-verify
+printf '# Fixture skill\n' > .claude/skills/codetrial-verify/SKILL.md
+printf 'print("skill-refs-fixture")\nraise SystemExit(1)\n' > scripts/check-skill-refs.py
+git add .claude/skills/codetrial-verify/SKILL.md scripts/check-skill-refs.py
+expect 1 "skill changes run the reference checker" sh ./scripts/git-pre-commit.sh
+contains "the reference checker was invoked" "$work/last.out" "skill-refs-fixture"
+printf 'print("skill-refs-fixture")\n' > scripts/check-skill-refs.py
+expect 1 "an unstaged reference fix does not pass staged content" sh ./scripts/git-pre-commit.sh
+git add scripts/check-skill-refs.py
+expect 0 "passing staged skill references permit the commit" sh ./scripts/git-pre-commit.sh
+git rm -q --cached .claude/skills/codetrial-verify/SKILL.md scripts/check-skill-refs.py
+rm -rf .claude/skills/codetrial-verify
+rm scripts/check-skill-refs.py
+
 echo "  HOOKS   pre-push"
 git commit -q --allow-empty -m "Add the scratch repository" \
     -m "The push tests need a commit that the rules accept." > /dev/null 2>&1 \
     || fail "the hooks refused a commit that follows the rules"
 git init -q --bare "$work/remote.git"
 git remote add origin "$work/remote.git"
+./scripts/install-git-hooks.sh > /dev/null
+git tag latest
+git tag desktop-latest
+git -c core.hooksPath=/dev/null push -q origin refs/tags/latest refs/tags/desktop-latest
 expect 0 "a branch whose messages pass" git push -q origin HEAD:refs/heads/main
 contains "the hook behind ours read the same refs" "$work/local.in" "refs/heads/main"
+for tag in latest desktop-latest; do
+    git update-ref "refs/tags/$tag" HEAD~1
+done
+expect 0 "push refreshes moving release tags" git push -q origin HEAD:refs/heads/main
+for tag in latest desktop-latest; do
+    expect 0 "push updated $tag" test "$(git rev-parse "$tag")" = "$(git rev-parse HEAD)"
+    git update-ref "refs/tags/$tag" HEAD~1
+done
+# A minimal PATH models stock macOS without either GNU timeout command.
+mkdir "$work/deadline-bin"
+for tool in git cat awk mktemp rm sh; do
+    ln -s "$(command -v "$tool")" "$work/deadline-bin/$tool"
+done
+git update-ref refs/tags/latest HEAD~1
+expect 0 "missing timeout tools do not refuse the push" \
+    env PATH="$work/deadline-bin" "$hooks/pre-push" origin "$work/remote.git" < /dev/null
+contains "missing timeout tools say the sync was skipped" "$work/last.out" "release tags not synchronized"
+expect 0 "missing timeout tools leave release tags unchanged" \
+    test "$(git rev-parse latest)" = "$(git rev-parse HEAD~1)"
+expect 0 "another remote does not require timeout tools" \
+    env PATH="$work/deadline-bin" "$hooks/pre-push" backup "$work/backup.git" < /dev/null
+for tool in grep sed; do
+    ln -s "$(command -v "$tool")" "$work/deadline-bin/$tool"
+done
+# The generated tool reads its own arguments.
+# shellcheck disable=SC2016
+printf '#!/bin/sh\n[ "$1 $2 $3" = "-k 5 55" ] || exit 2\nshift 3\nexec "$@"\n' > "$work/deadline-bin/gtimeout"
+chmod +x "$work/deadline-bin/gtimeout"
+expect 0 "gtimeout receives the one-minute bound and refreshes tags" \
+    env PATH="$work/deadline-bin" "$hooks/pre-push" origin "$work/remote.git" < /dev/null
+expect 0 "gtimeout path refreshed the moving tag" test "$(git rev-parse latest)" = "$(git rev-parse HEAD)"
+for tag in latest desktop-latest; do
+    git update-ref "refs/tags/$tag" HEAD~1
+done
+git --git-dir="$work/remote.git" update-ref refs/tags/v1-latest "$(git rev-parse HEAD)"
+git update-ref refs/tags/v1-latest HEAD~1
+expect 0 "push synchronization succeeds with an unrelated latest-suffixed tag" \
+    git push -q origin HEAD:refs/heads/main
+expect 0 "push synchronization preserves unrelated local tags" \
+    test "$(git rev-parse v1-latest)" = "$(git rev-parse HEAD~1)"
+expect 0 "plain fetch takes a latest-suffixed tag from origin" git fetch origin
+expect 0 "the glob refspec updates a latest-suffixed tag" \
+    test "$(git rev-parse v1-latest)" = "$(git rev-parse HEAD)"
+git branch --set-upstream-to=origin/main > /dev/null
+expect 0 "an up-to-date pull refreshes release tags" git pull --ff-only
+for tag in latest desktop-latest; do
+    expect 0 "pull updated $tag" test "$(git rev-parse "$tag")" = "$(git rev-parse HEAD)"
+done
+git --git-dir="$work/remote.git" update-ref -d refs/tags/desktop-latest
+expect 0 "a missing release tag does not refuse the push" git push -q origin HEAD:refs/heads/main
+expect 0 "a missing release tag does not fail a plain fetch" git fetch origin
+git --git-dir="$work/remote.git" update-ref refs/tags/desktop-latest "$(git rev-parse HEAD)"
+git remote set-url origin "$work/unreachable.git"
+expect 1 "an unreachable origin refuses a push to origin" "$hooks/pre-push" origin "$work/remote.git" < /dev/null
+contains "unreachable origin names connectivity" "$work/last.out" "Check origin connectivity"
+expect 0 "an unreachable origin does not block another remote" "$hooks/pre-push" backup "$work/backup.git" < /dev/null
+git remote set-url origin "$work/remote.git"
+git init -q --bare "$work/tagless-fork.git"
+git remote set-url origin "$work/tagless-fork.git"
+expect 0 "a fork without release tags accepts the push" "$hooks/pre-push" origin "$work/tagless-fork.git" < /dev/null
+expect 0 "a fork without release tags accepts a plain fetch" git fetch origin
+git remote set-url origin "$work/remote.git"
+git update-ref refs/tags/latest HEAD~1
+printf '%s %s %s %s\n' refs/tags/latest "$(git rev-parse HEAD~1)" refs/tags/latest "$(git rev-parse HEAD)" \
+    | "$hooks/pre-push" origin "$work/remote.git" > /dev/null 2>&1
+expect 0 "a push of a release tag keeps the local value" test "$(git rev-parse latest)" = "$(git rev-parse HEAD~1)"
+for tag in latest desktop-latest; do
+    git update-ref "refs/tags/$tag" HEAD~1
+done
+expect 0 "an explicit branch pull succeeds" git pull --ff-only origin main
+for tag in latest desktop-latest; do
+    expect 0 "explicit pull leaves $tag unchanged" test "$(git rev-parse "$tag")" = "$(git rev-parse HEAD~1)"
+done
+expect 0 "publication restored allows synchronization" git push -q origin HEAD:refs/heads/main
+printf 'ghp_%036d\n' 2 > credential.txt
+git add credential.txt
+git -c core.hooksPath=/dev/null commit -q -m "Add a credential fixture" \
+    -m "The hook must inspect outgoing commits made without local checks."
+expect 1 "the pre-push hook refuses credentials in outgoing commits" \
+    git push -q origin HEAD:refs/heads/main
+contains "the pre-push refusal names the secret check" "$work/last.out" "outgoing history failed the secret check"
+git -c core.hooksPath=/dev/null push -q origin HEAD:refs/heads/leak
+git init -q --bare "$work/backup.git"
+expect 0 "a new remote does not rescan history another remote holds" \
+    git push -q "$work/backup.git" HEAD:refs/heads/main
+git push -q origin :refs/heads/leak
+git update-ref -d refs/remotes/origin/leak
+git reset -q --hard HEAD~1
+
 git commit -q --allow-empty --no-verify -m "wip: skipped the hook"
 expect 1 "a commit that skipped the hook" git push -q origin HEAD:refs/heads/main
 
