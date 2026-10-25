@@ -72,10 +72,13 @@ duration, loop and surface settings. Switching to Strict clears the retry
 language; its lobby URL contains neither that preference nor a specific problem.
 
 A direct Strict URL may request a coding language with `language`, just as in
-Practice. Python is the default when no supported language is requested. After
-assignment, language availability follows the assigned problem and its judge.
-A delayed judge may restore the requested language only before the candidate
-chooses a language, edits or runs code, or ends the interview.
+Practice; without one, the language the candidate last started an interview in
+is preselected. The problem arrives with the token, so the Before you join menu
+offers what every problem can run: C, the one language a problem can withhold,
+waits for a judge and is withheld. A requested or remembered C, or no usable
+preference, starts in Python. The token names that language and the assigned
+problem opens in it; a delayed judge may enable C in the editor tabs but does
+not switch to it.
 
 ## The previous-assignment receipt
 

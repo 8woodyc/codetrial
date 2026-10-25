@@ -1,3 +1,4 @@
+import { LANGUAGE_KEY } from "../../web/lib.js";
 import { PRACTICE_LIST_KEY } from "../../web/practice-list.js";
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
@@ -317,6 +318,73 @@ for (const action of ["wait", "edit", "choose", "run", "end"]) {
     if (action === "end")
       assert.equal(await page.locator("#ending-overlay").isVisible(), true);
     assert.equal(await page.locator("#editor").inputValue(), code);
+  });
+}
+
+/// A context whose interview page remembers `language` from an earlier start.
+async function rememberingContext(t, language, runtimeConfig) {
+  const context = await browser.newContext();
+  t.after(() => context.close());
+  if (language)
+    await context.addInitScript(
+      ([key, value]) => localStorage.setItem(key, value),
+      [LANGUAGE_KEY, language],
+    );
+  if (runtimeConfig)
+    await context.route("**/runtime-config.js", (route) =>
+      route.fulfill({ contentType: "text/javascript", body: runtimeConfig }),
+    );
+  return context;
+}
+
+for (const [remembered, picked, expected] of [
+  ["javascript", null, "javascript"],
+  [null, "javascript", "javascript"],
+  ["c", null, "python"],
+]) {
+  test(`Strict starts the assigned problem in ${expected} when ${remembered ?? "nothing"} is remembered and ${picked ?? "nothing"} is picked`, async (t) => {
+    if (!browser) return t.skip("playwright chromium unavailable");
+    // Compiled runs on, so C is withheld for want of a judge rather than by
+    // the server.
+    const context = await rememberingContext(
+      t,
+      remembered,
+      DEFAULT_RUNTIME_CONFIG.replace(
+        "ENABLED = false",
+        "ENABLED = true",
+      ).replace('BASE_URL = ""', 'BASE_URL = "https://godbolt.org"'),
+    );
+    let sent;
+    const page = await interview(
+      t,
+      "selection=strict",
+      (route) => {
+        sent = route.request().postDataJSON();
+        return route.fulfill({
+          json: grant("chargeback-pair-match", "chosen-language"),
+        });
+      },
+      context,
+    );
+    assert.equal(
+      await page.locator('#preflight-language option[value="c"]').isDisabled(),
+      true,
+    );
+    if (picked) await page.locator("#preflight-language").selectOption(picked);
+    assert.equal(
+      await page.locator("#preflight-language").inputValue(),
+      expected,
+    );
+    await preflight(page);
+    await page.locator("#editor:not([disabled])").waitFor();
+    assert.equal(sent.language, expected);
+    assert.equal(await page.locator("#language-select").inputValue(), expected);
+    assert.match(
+      await page.locator("#editor").inputValue(),
+      expected === "python"
+        ? /def matchDisputedCharge/
+        : /function matchDisputedCharge/,
+    );
   });
 }
 

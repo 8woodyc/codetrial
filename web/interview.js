@@ -781,6 +781,12 @@ async function init() {
     nodes.editor.disabled = true;
     nodes.run.disabled = true;
     nodes.end.disabled = true;
+    // The problem arrives with the token, so the token's language is chosen
+    // from what any problem runs. Only C needs a judge, and it is withheld.
+    applyLanguages(null);
+    state.language = startingLanguage();
+    nodes.languageSelect.value = state.language;
+    nodes.preflightLanguage.value = state.language;
   }
   bindEvents();
   document.querySelector("#audio-step-language").hidden = whiteboard;
@@ -1174,17 +1180,13 @@ function bindEvents() {
       nodes.hidePassedTests.checked,
     ).body;
   });
-  nodes.languageSelect.addEventListener("change", () => {
-    languageChoiceCommitted = true;
-    setLanguage(nodes.languageSelect.value);
-    nodes.languageSelect.value = state.language;
-  });
+  nodes.languageSelect.addEventListener("change", () =>
+    chooseLanguage(nodes.languageSelect.value),
+  );
   // The editor tab chosen before joining, so the interview opens in it.
-  nodes.preflightLanguage.addEventListener("change", () => {
-    languageChoiceCommitted = true;
-    setLanguage(nodes.preflightLanguage.value);
-    nodes.preflightLanguage.value = state.language;
-  });
+  nodes.preflightLanguage.addEventListener("change", () =>
+    chooseLanguage(nodes.preflightLanguage.value),
+  );
   for (const [button, step] of [
     [nodes.editorFontSmaller, -1],
     [nodes.editorFontLarger, 1],
@@ -2065,7 +2067,8 @@ async function connect(preflight, presenting = false) {
       judgePromise = loadJudge(problem.page).catch(() => null);
       state.codeByLanguage = { ...problem.starterCode };
       renderProblem();
-      initializeLanguages();
+      // The language the token named, so the agent and the editor agree.
+      initializeLanguages(state.language);
       void initializeCandidateCases();
     }
     // Before the room, and before anything that reads the length: the replay's
@@ -2893,9 +2896,21 @@ function startingLanguage() {
     : "python";
 }
 
-function initializeLanguages() {
+/// A pick from either language menu. Before a Strict assignment there is no
+/// buffer to switch, only the language the token will name.
+function chooseLanguage(language) {
+  languageChoiceCommitted = true;
+  if (problem) setLanguage(language);
+  else if (languages.includes(language)) state.language = language;
+  nodes.languageSelect.value = state.language;
+  nodes.preflightLanguage.value = state.language;
+}
+
+function initializeLanguages(language) {
   applyLanguages(null);
-  setLanguage(startingLanguage());
+  // Resolved only now: before `applyLanguages` no language is available, so a
+  // default argument would always have been Python.
+  setLanguage(language ?? startingLanguage());
   // Setup and event binding finish synchronously before this callback runs.
   // A late judge may enable the preferred language, but cannot replace a
   // language or buffer the candidate has already committed to.
