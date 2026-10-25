@@ -7,6 +7,7 @@ what GitHub said: the listings, each PR's detail, and what a later poll or
 sweep sees after an edit or a deletion.
 """
 
+import copy
 import importlib.util
 import gzip
 import hashlib
@@ -164,6 +165,30 @@ def changed(path, patch):
         "additions": 1,
         "deletions": 1,
         "patch": patch,
+    }
+
+
+def graphql_node(number, review_ids, more=False):
+    """One PR of the sweep's batched review listing."""
+    return {
+        "number": number,
+        "reviews": {
+            "pageInfo": {"hasNextPage": more},
+            "nodes": [{"databaseId": i} for i in review_ids],
+        },
+    }
+
+
+def graphql_page(nodes, after=None):
+    return {
+        "data": {
+            "repository": {
+                "pullRequests": {
+                    "pageInfo": {"hasNextPage": after is not None, "endCursor": after},
+                    "nodes": nodes,
+                }
+            }
+        }
     }
 
 
@@ -2271,6 +2296,171 @@ class SyncTests(MemoryCase):
             "no close precedent",
             self.run_memory("fixes", "--text", "Spectraldisconnect").stdout,
         )
+
+    def test_detail_skips_files_and_commits_while_the_diff_is_unchanged(self):
+        memory = self.memory_module()
+        db = memory.connect(":memory:")
+        pull = {
+            "head": {"sha": "h"},
+            "base": {"sha": "b", "ref": "main"},
+            "changed_files": 1,
+            "commits": 1,
+            "additions": 1,
+            "deletions": 1,
+        }
+        self.assertFalse(memory.diff_unchanged(db, 9, None))
+        calls = []
+
+        def api(path, paginate=False):
+            calls.append(path.split("/pulls/")[1].split("?")[0])
+            if path.endswith("/pulls/9"):
+                return dict(pull)
+            # Each read of files or commits answers differently, so what is
+            # stored says which read it came from.
+            return [] if "/reviews" in path else [{"of": calls[-1]}]
+
+        def stored():
+            return {
+                key: json.loads(
+                    db.execute(
+                        "SELECT payload FROM raw WHERE key=?", (key,)
+                    ).fetchone()[0]
+                )
+                for key in ("files:9", "commits:9")
+            }
+
+        with patch.object(memory, "gh", api):
+            for expect, change in (
+                (["9", "9/reviews", "9/files", "9/commits"], {}),
+                (["9", "9/reviews"], {}),
+                (["9", "9/reviews", "9/files", "9/commits"], {"head": {"sha": "h2"}}),
+                (["9", "9/reviews", "9/files", "9/commits"], {"commits": 0}),
+                (["9", "9/reviews"], {}),
+            ):
+                pull.update(change)
+                before = None if "9/files" in expect else stored()
+                calls.clear()
+                memory.fetch_detail(db, "o/r", 9)
+                db.commit()
+                self.assertEqual(calls, expect, change)
+                # A skipped fetch leaves the stored detail as it was; a refetch
+                # replaces it with what that fetch read.
+                if "9/files" in expect:
+                    self.assertEqual(
+                        {k: v[0]["of"] for k, v in stored().items()},
+                        {"files:9": "9/files", "commits:9": "9/commits"},
+                    )
+                else:
+                    self.assertEqual(stored(), before, change)
+
+    def test_review_ids_batches_prs_and_leaves_the_rest_to_rest(self):
+        memory = self.memory_module()
+        replies = [
+            graphql_page([graphql_node(2, [902]), graphql_node(3, [], True)], "c1"),
+            graphql_page([graphql_node(4, [904])]),
+        ]
+        sent = []
+
+        def api(path, paginate=False, fields=()):
+            sent.append(list(fields))
+            return replies[len(sent) - 1]
+
+        with patch.object(memory, "gh", api):
+            found = memory.review_ids("o/r", [2, 3, 4, 5])
+        # PR 3 holds more reviews than one page and PR 5 was never listed:
+        # both are the caller's to ask REST about.
+        self.assertEqual(found, {2: {"review:902"}, 4: {"review:904"}})
+        self.assertIn("after=c1", sent[1])
+        self.assertNotIn("after=c1", sent[0])
+
+        def raising(error):
+            def api(path, paginate=False, fields=()):
+                raise error
+
+            return api
+
+        answers = {
+            "502": raising(memory.Fail("gh api graphql failed: HTTP 502")),
+            "partial": lambda *a, **k: {"data": None, "errors": [{"message": "x"}]},
+            "no output": lambda *a, **k: None,
+            "bad json": lambda *a, **k: json.loads("{"),
+        }
+        for name, api in answers.items():
+            with patch.object(memory, "gh", api), self.subTest(name):
+                self.assertEqual(memory.review_ids("o/r", [2]), {})
+        with patch.object(memory, "gh", raising(memory.RateLimited("spent"))):
+            with self.assertRaises(memory.RateLimited):
+                memory.review_ids("o/r", [2])
+
+        # The fallback says how many PRs it leaves to REST, and says nothing
+        # when the failure came after every wanted PR was already listed.
+        first = graphql_page([graphql_node(2, [902])], "c1")
+        calls = []
+
+        def second_page_fails(path, paginate=False, fields=()):
+            calls.append(path)
+            if len(calls) == 1:
+                return first
+            raise memory.Fail("gh api graphql failed: HTTP 502")
+
+        for wanted, said in (([2], ""), ([2, 3], "the other 1")):
+            calls.clear()
+            err = io.StringIO()
+            with (
+                patch.object(memory, "gh", second_page_fails),
+                patch.object(memory.METER, "out", lambda: err),
+            ):
+                found = memory.review_ids("o/r", wanted)
+            self.assertEqual(found, {2: {"review:902"}}, wanted)
+            self.assertIn(said, err.getvalue(), wanted)
+            self.assertEqual(bool(err.getvalue()), bool(said), wanted)
+
+    def test_sweep_lists_reviews_in_one_batch_and_still_retires_a_gone_review(self):
+        self.run_memory("backfill")
+        batched = dict(HISTORY)
+        batched["graphql"] = graphql_page(
+            [graphql_node(2, [902]), graphql_node(3, []), graphql_node(4, [904])]
+        )
+        self.answer(batched)
+        Path(str(self.data) + ".calls").unlink(missing_ok=True)
+        self.run_memory("sweep")
+        seen = self.calls()
+        self.assertIn("graphql", seen)
+        self.assertFalse(any("/reviews?" in c for c in seen), seen)
+        # PR 3's review vanished from the batch and answers 404 on its own.
+        db = sqlite3.connect(self.dir / "memory.db")
+        kept = {
+            row[0]
+            for row in db.execute(
+                "SELECT key FROM raw WHERE key IN ('review:902', 'review:903')"
+            )
+        }
+        self.assertEqual(kept, {"review:902"})
+
+    def test_a_tie_bucket_cursor_saved_at_another_page_size_loses_nothing(self):
+        memory = self.memory_module()
+        stamp = "2026-01-01T00:00:00Z"
+        everything = [{"id": i, "updated_at": stamp} for i in range(1, 151)]
+
+        def api(path, paginate=False):
+            per = int(re.search(r"per_page=(\d+)", path).group(1))
+            page = int(re.search(r"&page=(\d+)", path).group(1))
+            return everything[(page - 1) * per : page * per]
+
+        with patch.object(memory, "gh", api):
+            for stop in range(1, 6):
+                seen, cursor = set(), memory.start(None)
+                for count, (items, cursor) in enumerate(
+                    memory.listing_pages("o/r", "x?", 50, cursor), 1
+                ):
+                    seen |= {x["id"] for x in items}
+                    if count == stop:
+                        break
+                for items, _ in memory.listing_pages(
+                    "o/r", "x?", 100, copy.deepcopy(cursor)
+                ):
+                    seen |= {x["id"] for x in items}
+                self.assertEqual(len(seen), 150, stop)
 
     def test_pass_checkpoint_does_not_skip_an_edit_between_listings(self):
         memory = self.memory_module()
