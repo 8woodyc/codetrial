@@ -37,8 +37,15 @@ that raises `permissions`, runs with the base repository's token and is P0
 until a maintainer says otherwise. A value a PR author controls (a title, a
 body, a branch name, `github.head_ref`) reaches a shell through `env:`, as
 `BASE_SHA` does, never as `${{ }}` inside `run:`. `secrets.` stays out of any
-job a PR triggers; `release`, the one job with `contents: write`, runs only on
-a push to `main`. A new third-party action is named with what it gets, and a
+job a PR triggers. In `.github/workflows/check.yml`, `release` alone has `contents: write` and
+runs only on a push to `main`. The separate `.github/workflows/review-memory.yml` runs only on
+schedule or manual dispatch at trusted main in the upstream repository. Its
+collector has read permissions; its checkpoint signer has OIDC/attestation write
+permissions; only its publisher and maintenance jobs have contents write. The
+signer verifies opaque digests without opening SQLite. Release content is never
+executed, and publication explicitly preserves the product latest pointer.
+`actions/attest` receives only package paths with scoped OIDC/attestation access.
+A new third-party action is named with what it gets, and a
 moved tag on an existing one is a change too. A change under `.github/actions/`
 runs inside every job that uses it. PR caches are scoped to the PR's ref, so a
 cache step is a finding only when it restores something a later step executes

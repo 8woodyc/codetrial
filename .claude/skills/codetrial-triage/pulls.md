@@ -453,7 +453,13 @@ comment needs a judgement of the PR, so it goes on the confirmed list.
 
 ## Review the queue
 
-`review` is the queue for "review what is waiting on me". Each PR in it gets the
+`review` is the queue for "review what is waiting on me". Before launching PR
+agents, run one bounded `memory.py ensure --budget 300 --max 60` using the handled
+JSON/exit-code flow in [review-prs.md](review-prs.md#one-agent-per-pr-all-in-one-message).
+Pass that exact shared status path, exit code, reason and coverage to every agent.
+Each agent runs local context only, without another ensure/poll/detail or backfill.
+Missing/degraded history appears in every review's coverage; it never aborts the
+code review or proves that no precedent exists. Each PR otherwise gets the
 whole of [codetrial-review](../codetrial-review/SKILL.md) through its step
 5, and they are independent, so run one read-only agent per PR in parallel
 rather than reading them in turn. Each agent gets the PR number, its head, the

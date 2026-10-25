@@ -332,6 +332,50 @@ win where they exist. That root is `web/` relative to the working directory
 unless `CODETRIAL_WEB_DIR` names another, so running the binary from a checkout
 picks up edits with no environment variable set.
 
+## Review memory and the review skill
+
+`/codetrial-review` in Claude Code, and `$codetrial-review` in Codex (which
+reads the same skill through `.agents/skills`), review a diff against the
+project's own history instead of from a blank slate. That history lives in
+`memory.db`, a SQLite file under the git common directory
+(`<git-dir>/codetrial-review/memory.db`), or wherever `CODETRIAL_MEMORY` points.
+It holds two kinds of data with different trust:
+
+- **Public project memory**: every pull request and issue discussion of this
+  repository, searchable, with author, date, trust level and source. Review
+  preparation draws the entries relevant to the diff into `history.md` for the
+  reviewers, and `memory.py search`, `why`, `fixes` and `show` open a decisive
+  source.
+- **Private review experience**: the findings a reviewer confirmed, the claims
+  it refuted, the questions left unproven, and later fixes, recorded by this
+  clone's own reviews. Preparation retrieves the cases that touch the same
+  files into `experience.md`. It is a lead to recheck against the current code,
+  never a maintainer ruling. It stays on the machine that wrote it: it is
+  excluded from every published snapshot and the file is owner-only.
+
+Each CodeTrial skill ends with a closeout step. Review closeout runs
+`review-lifecycle.py finish`, which checks that the report still matches the
+bundle it started from, records the report, and marks the head reviewed only
+after the record succeeded. A failed write is kept and retried with
+`review-lifecycle.py --retry`. Other skills record through
+`memory.py experience record`. The confirmed and refuted cases of complete
+runs are then retrieved for later reviews that touch the same files.
+
+A new clone does not collect the history itself. `memory.py ensure` downloads
+the latest verified `memory.db.gz` from a `review-memory-*` release, so the
+first review costs one download and an incremental poll rather than a backfill.
+The `Review memory` workflow (`.github/workflows/review-memory.yml`) builds and
+publishes that release from `main` every six hours; the file is checked against
+the signed manifest and the publisher's provenance before it is installed, and
+installing it keeps any private experience and local decisions already present.
+Until a release exists, or when the download cannot be verified, `ensure`
+reports a degraded status and the review continues without history. A full
+`backfill` from GitHub is slow and runs only when asked.
+
+The snapshot contract is in
+`.claude/skills/codetrial-review/snapshots.md`, and the experience contract in
+`.claude/skills/codetrial-review/experience.md`.
+
 ## Generated files
 
 `web/problems/`, `web/judges/`, and the problem cards in `web/index.html` are

@@ -8,6 +8,7 @@ a case names exactly what resolves and what does not.
 """
 
 import fnmatch
+import hashlib
 import importlib.util
 import json
 import os
@@ -810,8 +811,8 @@ class PrSweepTests(SweepCase):
 
     def test_workflow_facts_the_review_checklist_states_still_hold(self):
         # codetrial-review's workflow rules say check.yml runs on pull_request
-        # with contents: read, and that the only job granted contents: write
-        # is release, which runs on a push to main.
+        # with contents: read, and that within check.yml only release has
+        # contents: write, running on a push to main.
         workflow = (ROOT / ".github" / "workflows" / "check.yml").read_text()
         self.assertNotIn("pull_request_target", workflow)
         self.assertNotIn("workflow_run", workflow)
@@ -848,6 +849,49 @@ class PrSweepTests(SweepCase):
                 body = body[: body.index("steps:")]
                 self.assertIn("contents: write", body)
                 self.assertIn(guard, body)
+
+    def test_review_memory_publisher_keeps_privileges_off_collection_and_prs(self):
+        workflow = (ROOT / ".github/workflows/review-memory.yml").read_text()
+        for event in ("pull_request", "workflow_run", "issue_comment"):
+            self.assertNotIn(event, workflow)
+        self.assertIn("  schedule:\n", workflow)
+        self.assertIn("  workflow_dispatch:\n", workflow)
+        self.assertIn("permissions:\n  contents: read", workflow)
+        self.assertIn(
+            "github.repository == 'sysprog21/codetrial' && github.ref == 'refs/heads/main'",
+            workflow,
+        )
+        self.assertIn("cancel-in-progress: false", workflow)
+        self.assertEqual(workflow.count("contents: write"), 2)
+        prepare = workflow.split("\n  prepare:\n", 1)[1].split(
+            "\n  review-memory-sign-checkpoint:", 1
+        )[0]
+        self.assertNotIn("id-token: write", prepare)
+        self.assertNotIn("attestations: write", prepare)
+        signer = workflow.split("\n  review-memory-sign-checkpoint:\n", 1)[1].split(
+            "\n  publish:", 1
+        )[0]
+        self.assertNotIn("contents: write", signer)
+        self.assertIn("id-token: write", signer)
+        self.assertIn("publish-memory.py verify", signer)
+        self.assertNotIn("publish-memory.py prepare", signer)
+        self.assertNotIn("actions/cache", workflow)
+        lines = workflow.splitlines()
+        for number, line in enumerate(lines):
+            if line.lstrip().startswith(("run:", "- run:")):
+                indent = len(line) - len(line.lstrip())
+                block = [line]
+                for following in lines[number + 1 :]:
+                    if following.strip() and (
+                        len(following) - len(following.lstrip()) <= indent
+                    ):
+                        break
+                    block.append(following)
+                self.assertNotIn("${{", "\n".join(block), line)
+        product = (ROOT / ".github/workflows/check.yml").read_text()
+        self.assertIn(
+            'gh api --paginate "repos/$GH_REPO/releases?per_page=100"', product
+        )
 
     def test_hook_installer_prints_the_labels_conventions_explains(self):
         # codetrial-conventions tells an agent to read make hooks' output by
@@ -2020,6 +2064,14 @@ class ReviewBundleTests(unittest.TestCase):
         self.assertIn("    10  keep\n       --- x\n    11 +new\n", numbered)
         self.assertIn("## web/old.js\n(deleted)\n", numbered)
         self.assertNotIn("since.diff", written)
+        # Synthetic h1 is deliberately not a full SHA: optional private
+        # experience preparation must report its limitation without failing
+        # the otherwise valid review bundle.
+        for status in ("experience-status.json", "experience-context-status.json"):
+            self.assertEqual(json.loads(written[status])["outcome"], "unavailable")
+        self.assertNotIn("experience-start.json", written)
+        self.assertIn("full manifest head", written["experience-begin.stderr"])
+        self.assertIn("Local experience unavailable", written["experience.md"])
 
     def test_since_needs_enough_of_a_sha_to_name_a_commit(self):
         # A 1-digit prefix of the head would read as the head and review all.
@@ -2157,6 +2209,37 @@ class ReviewBundleTests(unittest.TestCase):
                 return json.loads(result.stdout)
 
             clean = local(base)
+            start_path = Path(out, "experience-start.json")
+            first_start = json.loads(start_path.read_text())
+            self.assertRegex(first_start["run_id"], r"^[0-9a-f]{32}$")
+            self.assertEqual(first_start["head"], clean["head"])
+            self.assertEqual(
+                first_start["diff_hash"],
+                hashlib.sha256(Path(out, "pr.diff").read_bytes()).hexdigest(),
+            )
+            self.assertEqual(
+                first_start["manifest_hash"],
+                hashlib.sha256(Path(out, "manifest.json").read_bytes()).hexdigest(),
+            )
+            self.assertEqual(
+                json.loads(Path(out, "experience-status.json").read_text()), first_start
+            )
+            context_status = json.loads(
+                Path(out, "experience-context-status.json").read_text()
+            )
+            self.assertEqual(context_status["outcome"], "ready")
+            self.assertEqual(context_status["cases"], 0)
+            self.assertIn(
+                "not evidence of absence", Path(out, "experience.md").read_text()
+            )
+            for name in (
+                "experience-start.json",
+                "experience-status.json",
+                "experience.md",
+            ):
+                self.assertEqual(Path(out, name).stat().st_mode & 0o777, 0o600)
+            self.assertEqual(local(base)["head"], clean["head"])
+            self.assertEqual(json.loads(start_path.read_text()), first_start)
             # Every commit carries the configured email: the account's own.
             self.assertEqual(clean["outside_reviewers"], "allowed")
             self.assertEqual(clean["against"], f"{base}...HEAD")
@@ -2187,6 +2270,14 @@ class ReviewBundleTests(unittest.TestCase):
             Path(repo, "web", "a.js").write_text("one\ntwo\nthree\n")
             Path(repo, "notes.txt").write_text("x\n")
             dirty = local()
+            dirty_start = json.loads(start_path.read_text())
+            Path(repo, "web", "a.js").write_text("one\ntwo\nfour\n")
+            same_head_new_diff = local()
+            new_start = json.loads(start_path.read_text())
+            self.assertEqual(same_head_new_diff["head"], dirty["head"])
+            self.assertNotEqual(new_start["diff_hash"], dirty_start["diff_hash"])
+            self.assertNotEqual(new_start["run_id"], dirty_start["run_id"])
+            Path(repo, "web", "a.js").write_text("one\ntwo\nthree\n")
             self.assertEqual(dirty["against"], "HEAD")
             self.assertEqual(dirty["size"]["additions"], 1)
             # With a base and uncommitted work, the base to the working tree:
@@ -2831,6 +2922,101 @@ class SkillRoutingTests(unittest.TestCase):
         self.assertFalse(any(n.startswith("target/") for n in names))
         env = [n for n in names if n.startswith("config/") and ".env." in n]
         self.assertEqual(env, ["config/codetrial.env.example"])
+
+
+class MemoryPreparationFlowTests(unittest.TestCase):
+    def test_documented_review_flow_handles_empty_interrupted_and_degraded_results(
+        self,
+    ):
+        text = (SKILLS / "codetrial-review/SKILL.md").read_text()
+        snippet = next(
+            block.split("```", 1)[0]
+            for block in text.split("```sh\n")[1:]
+            if block.startswith("bundle=")
+        )
+        triage_text = (SKILLS / "codetrial-triage/review-prs.md").read_text()
+        triage_snippet = next(
+            block.split("```", 1)[0]
+            for block in triage_text.split("```sh\n")[1:]
+            if block.lstrip().startswith("history_ok=")
+        )
+        flows = (("review", snippet), ("triage", triage_snippet))
+        cases = [
+            ("ready", 0, {"outcome": "ready", "code": "ready"}, True, False),
+            ("partial", 2, {"outcome": "degraded", "code": "budget"}, True, False),
+            ("busy", 1, {"outcome": "error", "code": "busy"}, True, False),
+            ("storage", 1, {"outcome": "error", "code": "storage"}, False, False),
+            ("invalid", 2, "invalid", False, False),
+            ("interrupted", 130, "", False, False),
+            ("multiple", 0, '{"outcome":"ready"} {"outcome":"ready"}', False, False),
+            ("wrong-exit", 2, {"outcome": "ready", "code": "ready"}, False, False),
+            ("context-failed", 0, {"outcome": "ready", "code": "ready"}, True, True),
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            (base / "bin").mkdir()
+            (base / "review-7").mkdir()
+            support.write_executable(
+                base / "bin/python3",
+                "#!"
+                + sys.executable
+                + "\n"
+                + """import os,sys
+from pathlib import Path
+if 'ensure' in sys.argv:
+    print(os.environ['CASE_JSON'])
+    sys.exit(int(os.environ['CASE_EXIT']))
+with open(os.environ['CALL_LOG'], 'a') as out:
+    out.write(' '.join(sys.argv[1:]) + '\\n')
+if os.environ['CONTEXT_FAIL'] == 'true':
+    sys.exit(1)
+Path(sys.argv[-1], 'history.md').write_text('fixture context')
+""",
+            )
+            for flow, snippet in flows:
+                for name, code, value, context_called, context_failed in cases:
+                    with self.subTest(flow=flow, case=name):
+                        log = base / "calls"
+                        if log.exists():
+                            log.unlink()
+                        env = dict(
+                            os.environ,
+                            PATH=str(base / "bin") + ":" + os.environ["PATH"],
+                            SCRATCH=str(base),
+                            dir=str(base / "review-7"),
+                            shared_memory_status=str(
+                                base / "review-7/memory-status.json"
+                            ),
+                            shared_memory_exit=str(code),
+                            pr="7",
+                            CASE_EXIT=str(code),
+                            CASE_JSON=json.dumps(value)
+                            if isinstance(value, dict)
+                            else value,
+                            CALL_LOG=str(log),
+                            CONTEXT_FAIL=str(context_failed).lower(),
+                        )
+                        (base / "review-7/memory-status.json").write_text(
+                            env["CASE_JSON"]
+                        )
+                        result = subprocess.run(
+                            ["bash", "-e", "-u", "-o", "pipefail", "-c", snippet],
+                            env=env,
+                            capture_output=True,
+                            text=True,
+                        )
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual(log.exists(), context_called)
+                        if context_called:
+                            calls = log.read_text().split()
+                            self.assertIn("context", calls)
+                            self.assertIn("--no-migrate", calls)
+                            self.assertNotIn("experience", calls)
+                        history = (base / "review-7/history.md").read_text()
+                        self.assertEqual(
+                            "fixture context" in history,
+                            context_called and not context_failed,
+                        )
 
 
 if __name__ == "__main__":
