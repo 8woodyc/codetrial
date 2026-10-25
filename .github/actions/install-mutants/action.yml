@@ -1,0 +1,25 @@
+name: Install cargo-mutants
+description: Install the pinned cargo-mutants, from its release binary when possible.
+
+# The release binary, checked against the digest the release records, and
+# compiled from source only when that cannot be had. This used to be a cache of
+# the compiled binary, and the cache never helped: the jobs that install it run
+# on pull requests only, a cache saved there is readable by that pull request
+# alone, so each new one paid the one to two minute compile before any shard
+# could start.
+#
+# The version is the workflow's CARGO_MUTANTS_VERSION, so the tag, the source
+# install and the pin have one definition. The caller needs the Rust toolchain
+# for the fallback and for `cargo mutants` itself.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        ./scripts/install-release-binary.sh sourcefrog/cargo-mutants \
+          "v$CARGO_MUTANTS_VERSION" cargo-mutants-x86_64-unknown-linux-gnu.tar.gz \
+          cargo-mutants \
+          || { echo "::warning::release binary unavailable; compiling cargo-mutants from source"
+               cargo install cargo-mutants --locked --version "$CARGO_MUTANTS_VERSION" --force; }

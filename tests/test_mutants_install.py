@@ -1,11 +1,9 @@
-"""Run the workflow's tool guards against cold and restored installations."""
+"""Run the workflow's cargo-mutants install against a stubbed release and cargo."""
 
 import importlib.util
 import os
 import re
-import shlex
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,135 +16,103 @@ SPEC.loader.exec_module(support)
 
 WORKFLOW = support.WORKFLOW
 write_executable = support.write_executable
+ACTION = support.ROOT / ".github/actions/install-mutants/action.yml"
 
-
-# Cargo forwards the subcommand name to its plugin. The plugin rejects a bare
-# --version, which is why a healthy restored binary used to be reinstalled.
-PLUGIN = """#!/bin/sh
-if [ "$*" != 'mutants --version' ]; then
-    exit 2
-fi
-printf '%s\\n' 'cargo-mutants {version}'
-exit {status}
+# CI's release installer, replaced so a case never reaches the network or
+# /usr/local/bin. It records its arguments and either succeeds or fails.
+FAKE_RELEASE = """#!/bin/sh
+printf '%s\\n' "$*" >> "$INSTALL_LOG.release"
+[ "$RELEASE_FAIL" != 1 ]
 """
 
-FAKE_CARGO = """import os
-import sys
-from pathlib import Path
-
-binary = Path(os.environ['FAKE_BIN']) / 'cargo-mutants'
-args = sys.argv[1:]
-if args == ['mutants', '--version']:
-    os.execv(binary, [str(binary), *args])
-if args != ['install', 'cargo-mutants', '--locked', '--version',
-            os.environ['CARGO_MUTANTS_VERSION'], '--force']:
-    sys.exit('unexpected cargo invocation: ' + repr(args))
-with Path(os.environ['INSTALL_LOG']).open('a') as log:
-    log.write('install\\n')
-if os.environ.get('INSTALL_FAIL') == '1':
-    sys.exit(1)
-binary.write_text(os.environ['INSTALLED_PLUGIN'])
-binary.chmod(0o755)
+FAKE_CARGO = """#!/bin/sh
+printf '%s\\n' "$*" >> "$INSTALL_LOG.cargo"
+[ "$CARGO_FAIL" != 1 ]
 """
-
-
-def install_steps():
-    """The install script of every job that installs cargo-mutants."""
-    workflow = WORKFLOW.read_text()
-    jobs = support.section(workflow, "\njobs:\n", "\0", "jobs")
-    steps = {}
-    for job in re.findall(r"^  ([\w-]+):$", jobs, re.M):
-        body = support.job(job, workflow)
-        if "      - name: Install cargo-mutants\n" in body:
-            step = support.step(body, "Install cargo-mutants")
-            steps[job] = support.run_block(step)
-    return steps
 
 
 class MutantsInstallTests(unittest.TestCase):
-    def setUp(self):
-        self.steps = install_steps()
-        self.assertEqual(set(self.steps), {"plan-mutants", "mutants"})
+    def run_install(self, *, release_fail=False, cargo_fail=False):
+        script = support.run_block(ACTION.read_text())
+        with tempfile.TemporaryDirectory(prefix="cargo test ") as directory:
+            sandbox = Path(directory)
+            (sandbox / "scripts").mkdir()
+            write_executable(
+                sandbox / "scripts/install-release-binary.sh", FAKE_RELEASE
+            )
+            write_executable(sandbox / "cargo", FAKE_CARGO)
+            log = sandbox / "log"
+            env = os.environ | {
+                "PATH": f"{sandbox}{os.pathsep}{os.environ['PATH']}",
+                "INSTALL_LOG": str(log),
+                "CARGO_MUTANTS_VERSION": self.version,
+                "RELEASE_FAIL": str(int(release_fail)),
+                "CARGO_FAIL": str(int(cargo_fail)),
+            }
+            result = subprocess.run(
+                ["bash", "-e", "-c", script],
+                env=env,
+                cwd=sandbox,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+
+            def calls(kind):
+                path = Path(f"{log}.{kind}")
+                return path.read_text().split() if path.exists() else []
+
+            return result, calls("release"), calls("cargo")
+
+    @property
+    def version(self):
         match = re.search(
             r"^  CARGO_MUTANTS_VERSION: (\S+)$", WORKFLOW.read_text(), re.M
         )
         self.assertIsNotNone(match)
-        self.version = match[1]
+        return match[1]
 
-    def check_install(self, cached=None, status=0, install_fail=False):
-        for job, script in self.steps.items():
-            with self.subTest(job=job):
-                with tempfile.TemporaryDirectory(prefix="cargo test ") as directory:
-                    sandbox = Path(directory)
-                    binary = sandbox / "cargo-mutants"
-                    if cached is not None:
-                        write_executable(
-                            binary, PLUGIN.format(version=cached, status=status)
-                        )
-                    cargo = sandbox / "cargo"
-                    fake_script = sandbox / "fake_cargo.py"
-                    fake_script.write_text(FAKE_CARGO)
-                    write_executable(
-                        cargo,
-                        f"#!/bin/sh\nexec {shlex.quote(sys.executable)} "
-                        f'{shlex.quote(str(fake_script))} "$@"\n',
-                    )
-                    log = sandbox / "installs"
-                    env = os.environ | {
-                        "PATH": f"{sandbox}{os.pathsep}{os.environ['PATH']}",
-                        "FAKE_BIN": str(sandbox),
-                        "INSTALL_LOG": str(log),
-                        "CARGO_MUTANTS_VERSION": self.version,
-                        "INSTALLED_PLUGIN": PLUGIN.format(
-                            version=self.version, status=0
-                        ),
-                        "INSTALL_FAIL": str(int(install_fail)),
-                    }
-                    result = subprocess.run(
-                        ["bash", "-e", "-c", script],
-                        env=env,
-                        capture_output=True,
-                        text=True,
-                        timeout=10,
-                    )
-                    if install_fail:
-                        self.assertNotEqual(result.returncode, 0)
-                    else:
-                        self.assertEqual(result.returncode, 0, result.stderr)
-                    expected = 0 if cached == self.version and status == 0 else 1
-                    self.assertEqual(
-                        log.read_text() if log.exists() else "", "install\n" * expected
-                    )
-                    if not install_fail:
-                        version = subprocess.run(
-                            [str(cargo), "mutants", "--version"],
-                            env=env,
-                            capture_output=True,
-                            text=True,
-                            timeout=10,
-                        )
-                        self.assertEqual(version.returncode, 0, version.stderr)
-                        self.assertEqual(
-                            version.stdout.strip(), f"cargo-mutants {self.version}"
-                        )
+    def test_both_jobs_use_the_shared_install(self):
+        workflow = WORKFLOW.read_text()
+        for name in ("plan-mutants", "mutants"):
+            with self.subTest(job=name):
+                step = support.step(
+                    support.job(name, workflow), "Install cargo-mutants"
+                )
+                self.assertIn("uses: ./.github/actions/install-mutants", step)
 
-    def test_valid_warm_cache_is_reused(self):
-        self.check_install(cached=self.version)
+    def test_the_release_binary_is_the_pin(self):
+        result, release, cargo = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            release,
+            [
+                "sourcefrog/cargo-mutants",
+                f"v{self.version}",
+                "cargo-mutants-x86_64-unknown-linux-gnu.tar.gz",
+                "cargo-mutants",
+            ],
+        )
+        self.assertEqual(cargo, [])
 
-    def test_cold_cache_installs_the_pin(self):
-        self.check_install()
-
-    def test_mismatched_cache_is_replaced(self):
-        self.check_install(cached="0.0.0")
-
-    def test_version_prefix_is_not_a_match(self):
-        self.check_install(cached=f"{self.version}.1")
-
-    def test_unusable_cache_is_replaced(self):
-        self.check_install(cached=self.version, status=1)
+    def test_missing_release_falls_back_to_a_source_install(self):
+        result, _, cargo = self.run_install(release_fail=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            cargo,
+            [
+                "install",
+                "cargo-mutants",
+                "--locked",
+                "--version",
+                self.version,
+                "--force",
+            ],
+        )
 
     def test_failed_installation_fails_the_step(self):
-        self.check_install(install_fail=True)
+        result, _, _ = self.run_install(release_fail=True, cargo_fail=True)
+        self.assertNotEqual(result.returncode, 0)
 
 
 if __name__ == "__main__":
