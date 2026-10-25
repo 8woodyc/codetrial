@@ -48,27 +48,9 @@ fn failed_session_insert_rolls_back_account_changes() {
 /// row each, forever. Rate limiting bounds the rate, not the total.
 #[test]
 fn sweeping_removes_expired_throwaways_and_keeps_everything_earned() {
-    // Its own directory because the sweep asserts on what is left on disk, and
-    // a `Scratch` guard so the directory goes when the test does.
-    let dir = Scratch(std::env::temp_dir().join(format!(
-        "codetrial-sweep-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    )));
-    std::fs::create_dir_all(&*dir).unwrap();
-    let path = dir.join("accounts.db");
+    let path = scratch("sweep");
     initialize_account_database(&path).unwrap();
-    let accounts = Accounts::open(GitHubLoginConfig {
-        oauth: None,
-        session_secret: "session".into(),
-        db_path: path.clone(),
-        oauth_base_url: String::new(),
-        api_base_url: String::new(),
-    })
-    .unwrap();
+    let accounts = accounts_at(&path);
 
     accounts
         .with(|connection| {
@@ -132,8 +114,6 @@ fn sweeping_removes_expired_throwaways_and_keeps_everything_earned() {
     // statement rather than skipped the row. 7 kept, a real GitHub account
     // outlives its sessions.
     assert_eq!(remaining, vec![-4, -3, -2, 7]);
-
-    let _ = std::fs::remove_file(&path);
 }
 
 /// A scratch database that removes itself, WAL sidecars included, when the
@@ -1420,5 +1400,35 @@ fn the_schema_version_is_the_number_of_migrations_there_are() {
         ACCOUNT_SCHEMA_VERSION,
         ACCOUNT_MIGRATIONS.len() as i64,
         "a migration was appended without bumping ACCOUNT_SCHEMA_VERSION"
+    );
+}
+
+#[test]
+fn interview_lookup_is_scoped_to_its_account() {
+    let path = scratch("lookup-owner");
+    initialize_account_database(&path).unwrap();
+    let accounts = accounts_at(&path);
+    let holder = user_id_for(&accounts, &sign_in_as(&path, "holder", -1));
+    let stranger = user_id_for(&accounts, &sign_in_as(&path, "stranger", -2));
+    create_interview(&accounts, "int-owned", holder, "2026-08-21", 5).unwrap();
+
+    assert_eq!(
+        interview_for_account(&accounts, "missing", holder).unwrap(),
+        None
+    );
+    assert_eq!(
+        interview_for_account(&accounts, "int-owned", stranger).unwrap(),
+        None
+    );
+    assert_eq!(
+        interview_for_account(&accounts, "int-owned", holder).unwrap(),
+        Some(Interview {
+            id: "int-owned".into(),
+            account_id: holder,
+            consent_version: "2026-08-21".into(),
+            consent_at: 5,
+            consent_withdrawn_at: None,
+            room_name: None,
+        })
     );
 }

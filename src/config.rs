@@ -1309,7 +1309,7 @@ fn recording_livekit(
     } else if !pool
         .providers
         .iter()
-        .any(|provider| same_livekit_host(&provider.url, &livekit.url))
+        .any(|provider| same_livekit_project(&provider.url, &livekit.url))
     {
         // Egress runs inside the project that holds the room, so recording
         // against a project this server never hands a token for records
@@ -1517,10 +1517,6 @@ fn is_unreachable_host(host: &str) -> bool {
 /// default port is normalized away, so `wss://host` and `https://host:443` are
 /// recognized as the same place rather than reported as a misconfiguration.
 pub fn same_livekit_project(left: &str, right: &str) -> bool {
-    same_livekit_host(left, right)
-}
-
-fn same_livekit_host(left: &str, right: &str) -> bool {
     fn authority(url: &str) -> Option<String> {
         let (scheme, rest) = url.split_once("://")?;
         let authority = rest.split(['/', '?', '#']).next()?;

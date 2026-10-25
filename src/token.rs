@@ -55,14 +55,11 @@ pub struct LivekitTokenInput<'a> {
 pub fn livekit_token(
     input: LivekitTokenInput<'_>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let mut claims = json!({
-        "iss": input.api_key,
-        "sub": input.identity,
-        "name": input.name,
-        "nbf": input.now_seconds,
-        "exp": input.now_seconds + TOKEN_TTL_SECONDS,
-        "metadata": input.metadata,
-        "video": {
+    let mut claims = livekit_claims(
+        input.api_key,
+        input.identity,
+        input.now_seconds,
+        json!({
             "room": input.room,
             "roomJoin": true,
             "canPublish": true,
@@ -70,8 +67,10 @@ pub fn livekit_token(
             "canPublishData": true,
             "agent": input.agent,
             "canUpdateOwnMetadata": input.agent
-        }
-    });
+        }),
+    )?;
+    claims["name"] = json!(input.name);
+    claims["metadata"] = json!(input.metadata);
     if input.agent {
         claims["kind"] = json!("agent");
     }
@@ -88,24 +87,21 @@ pub fn livekit_observer_token(
     room: &str,
     now_seconds: u64,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    sign_jwt(
-        api_secret,
-        &json!({
-            "iss": api_key,
-            "sub": identity,
-            "name": "Interviewer observer",
-            "nbf": now_seconds,
-            "exp": now_seconds + TOKEN_TTL_SECONDS,
-            "video": {
-                "room": room,
-                "roomJoin": true,
-                "canPublish": false,
-                "canSubscribe": true,
-                "canPublishData": false,
-                "canUpdateOwnMetadata": false
-            }
+    let mut claims = livekit_claims(
+        api_key,
+        identity,
+        now_seconds,
+        json!({
+            "room": room,
+            "roomJoin": true,
+            "canPublish": false,
+            "canSubscribe": true,
+            "canPublishData": false,
+            "canUpdateOwnMetadata": false
         }),
-    )
+    )?;
+    claims["name"] = json!("Interviewer observer");
+    sign_jwt(api_secret, &claims)
 }
 
 pub fn livekit_room_admin_token(
@@ -114,18 +110,12 @@ pub fn livekit_room_admin_token(
     room: &str,
     now_seconds: u64,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    sign_jwt(
+    sign_livekit_claims(
+        api_key,
         api_secret,
-        &json!({
-            "iss": api_key,
-            "sub": "room-admin",
-            "nbf": now_seconds,
-            "exp": now_seconds + TOKEN_TTL_SECONDS,
-            "video": {
-                "room": room,
-                "roomAdmin": true
-            }
-        }),
+        "room-admin",
+        now_seconds,
+        json!({"room": room, "roomAdmin": true}),
     )
 }
 
@@ -136,17 +126,12 @@ pub fn livekit_room_list_token(
     api_secret: &str,
     now_seconds: u64,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    sign_jwt(
+    sign_livekit_claims(
+        api_key,
         api_secret,
-        &json!({
-            "iss": api_key,
-            "sub": "credential-check",
-            "nbf": now_seconds,
-            "exp": now_seconds + TOKEN_TTL_SECONDS,
-            "video": {
-                "roomList": true
-            }
-        }),
+        "credential-check",
+        now_seconds,
+        json!({"roomList": true}),
     )
 }
 
@@ -162,17 +147,46 @@ pub fn livekit_room_create_token(
     api_secret: &str,
     now_seconds: u64,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    sign_livekit_claims(
+        api_key,
+        api_secret,
+        "room-cleanup",
+        now_seconds,
+        json!({"roomCreate": true}),
+    )
+}
+
+/// The claims every token here shares. The expiry is checked, not saturated:
+/// a clock too close to `u64::MAX` must fail rather than mint a credential
+/// that never expires.
+fn livekit_claims(
+    api_key: &str,
+    identity: &str,
+    now_seconds: u64,
+    video: Value,
+) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    let exp = now_seconds
+        .checked_add(TOKEN_TTL_SECONDS)
+        .ok_or("token expiry overflows")?;
+    Ok(json!({
+        "iss": api_key,
+        "sub": identity,
+        "nbf": now_seconds,
+        "exp": exp,
+        "video": video
+    }))
+}
+
+fn sign_livekit_claims(
+    api_key: &str,
+    api_secret: &str,
+    identity: &str,
+    now_seconds: u64,
+    video: Value,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     sign_jwt(
         api_secret,
-        &json!({
-            "iss": api_key,
-            "sub": "room-cleanup",
-            "nbf": now_seconds,
-            "exp": now_seconds + TOKEN_TTL_SECONDS,
-            "video": {
-                "roomCreate": true
-            }
-        }),
+        &livekit_claims(api_key, identity, now_seconds, video)?,
     )
 }
 
@@ -381,17 +395,11 @@ pub fn livekit_egress_token(
     room: &str,
     now_seconds: u64,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    sign_jwt(
+    sign_livekit_claims(
+        api_key,
         api_secret,
-        &json!({
-            "iss": api_key,
-            "sub": "recording",
-            "nbf": now_seconds,
-            "exp": now_seconds + TOKEN_TTL_SECONDS,
-            "video": {
-                "room": room,
-                "roomRecord": true
-            }
-        }),
+        "recording",
+        now_seconds,
+        json!({"room": room, "roomRecord": true}),
     )
 }

@@ -105,6 +105,8 @@ fn each_token_carries_only_the_grant_its_purpose_needs() {
         })
         .unwrap(),
     );
+    assert_eq!(candidate["name"], json!("Ada"));
+    assert_eq!(candidate["metadata"], json!("{}"));
     assert_eq!(candidate["video"]["canPublish"], json!(true));
     assert_eq!(candidate["video"]["agent"], json!(false));
     assert_eq!(candidate["video"]["roomAdmin"], Value::Null);
@@ -115,6 +117,7 @@ fn each_token_carries_only_the_grant_its_purpose_needs() {
         &livekit_observer_token(KEY, SECRET, "observer-1", "interview-a1b2c3d4", NOW).unwrap(),
     );
     assert_eq!(observer["iss"], json!(KEY));
+    assert_eq!(observer["name"], json!("Interviewer observer"));
     assert_eq!(observer["video"]["canPublish"], json!(false));
     assert_eq!(observer["video"]["canPublishData"], json!(false));
     assert_eq!(observer["video"]["canSubscribe"], json!(true));
@@ -170,33 +173,75 @@ fn each_token_carries_only_the_grant_its_purpose_needs() {
 
 #[test]
 fn every_token_expires() {
-    let tokens = [
+    for (now_seconds, expires_at) in [
+        (NOW, NOW + TOKEN_TTL_SECONDS),
+        (u64::MAX - TOKEN_TTL_SECONDS, u64::MAX),
+    ] {
+        let tokens = [
+            livekit_token(LivekitTokenInput {
+                api_key: KEY,
+                api_secret: SECRET,
+                name: "Ada",
+                identity: "candidate-1",
+                room: "interview-a1b2c3d4",
+                metadata: "{}",
+                now_seconds,
+                agent: true,
+            })
+            .unwrap(),
+            livekit_observer_token(KEY, SECRET, "observer-1", "interview-a1b2c3d4", now_seconds)
+                .unwrap(),
+            livekit_room_admin_token(KEY, SECRET, "interview-a1b2c3d4", now_seconds).unwrap(),
+            livekit_egress_token(KEY, SECRET, "interview-a1b2c3d4", now_seconds).unwrap(),
+            livekit_room_list_token(KEY, SECRET, now_seconds).unwrap(),
+            livekit_room_create_token(KEY, SECRET, now_seconds).unwrap(),
+        ];
+        for (token, identity) in tokens.into_iter().zip([
+            "candidate-1",
+            "observer-1",
+            "room-admin",
+            "recording",
+            "credential-check",
+            "room-cleanup",
+        ]) {
+            let (signing_input, signature) = token.rsplit_once('.').unwrap();
+            assert!(verify_hs256(SECRET, signing_input, signature));
+            let claims = claims_of(&token);
+            assert_eq!(claims["iss"], json!(KEY));
+            assert_eq!(claims["sub"], json!(identity));
+            assert_eq!(claims["nbf"], json!(now_seconds));
+            assert_eq!(
+                claims["exp"],
+                json!(expires_at),
+                "a token without an expiry is a permanent credential"
+            );
+        }
+    }
+}
+
+/// A clock too close to the top of `u64` must fail, not mint a token whose
+/// expiry saturates into a credential that never lapses.
+#[test]
+fn a_token_whose_expiry_overflows_is_refused() {
+    let now_seconds = u64::MAX - TOKEN_TTL_SECONDS + 1;
+    assert!(livekit_room_list_token(KEY, SECRET, now_seconds).is_err());
+    assert!(livekit_room_create_token(KEY, SECRET, now_seconds).is_err());
+    assert!(livekit_room_admin_token(KEY, SECRET, "r", now_seconds).is_err());
+    assert!(livekit_egress_token(KEY, SECRET, "r", now_seconds).is_err());
+    assert!(livekit_observer_token(KEY, SECRET, "o", "r", now_seconds).is_err());
+    assert!(
         livekit_token(LivekitTokenInput {
             api_key: KEY,
             api_secret: SECRET,
             name: "Ada",
             identity: "candidate-1",
-            room: "interview-a1b2c3d4",
+            room: "r",
             metadata: "{}",
-            now_seconds: NOW,
-            agent: true,
+            now_seconds,
+            agent: false,
         })
-        .unwrap(),
-        livekit_observer_token(KEY, SECRET, "observer-1", "interview-a1b2c3d4", NOW).unwrap(),
-        livekit_room_admin_token(KEY, SECRET, "interview-a1b2c3d4", NOW).unwrap(),
-        livekit_egress_token(KEY, SECRET, "interview-a1b2c3d4", NOW).unwrap(),
-        livekit_room_list_token(KEY, SECRET, NOW).unwrap(),
-        livekit_room_create_token(KEY, SECRET, NOW).unwrap(),
-    ];
-    for token in tokens {
-        let claims = claims_of(&token);
-        assert_eq!(claims["nbf"], json!(NOW));
-        assert_eq!(
-            claims["exp"],
-            json!(NOW + TOKEN_TTL_SECONDS),
-            "a token without an expiry is a permanent credential"
-        );
-    }
+        .is_err()
+    );
 }
 
 #[test]
