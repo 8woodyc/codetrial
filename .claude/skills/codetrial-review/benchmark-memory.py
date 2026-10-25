@@ -270,9 +270,7 @@ def fixture_response(db, arguments):
         return [values[i : i + 100] for i in range(0, len(values), 100)] or [[]]
 
     listing = {
-        "issues": ("issue", 100),
-        "issues/comments": ("issue_comment", 100),
-        "pulls/comments": ("review_comment", 50),
+        endpoint.split("?")[0]: (kind, size) for kind, endpoint, size in memory.LISTINGS
     }
     if tail in listing:
         kind, size = listing[tail]

@@ -146,7 +146,7 @@ PATHLIKE = re.compile(
 LISTINGS = (
     ("issue", "issues?state=all&", 100),
     ("issue_comment", "issues/comments?", 100),
-    ("review_comment", "pulls/comments?", 50),
+    ("review_comment", "pulls/comments?", 100),
 )
 # How far back a poll reaches before its checkpoint, so a change GitHub stamped
 # while the local clock ran ahead, or while the last poll ran, is still read.

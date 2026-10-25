@@ -7,6 +7,7 @@ what GitHub said: the listings, each PR's detail, and what a later poll or
 sweep sees after an edit or a deletion.
 """
 
+import copy
 import importlib.util
 import gzip
 import hashlib
@@ -2271,6 +2272,31 @@ class SyncTests(MemoryCase):
             "no close precedent",
             self.run_memory("fixes", "--text", "Spectraldisconnect").stdout,
         )
+
+    def test_a_tie_bucket_cursor_saved_at_another_page_size_loses_nothing(self):
+        memory = self.memory_module()
+        stamp = "2026-01-01T00:00:00Z"
+        everything = [{"id": i, "updated_at": stamp} for i in range(1, 151)]
+
+        def api(path, paginate=False):
+            per = int(re.search(r"per_page=(\d+)", path).group(1))
+            page = int(re.search(r"&page=(\d+)", path).group(1))
+            return everything[(page - 1) * per : page * per]
+
+        with patch.object(memory, "gh", api):
+            for stop in range(1, 6):
+                seen, cursor = set(), memory.start(None)
+                for count, (items, cursor) in enumerate(
+                    memory.listing_pages("o/r", "x?", 50, cursor), 1
+                ):
+                    seen |= {x["id"] for x in items}
+                    if count == stop:
+                        break
+                for items, _ in memory.listing_pages(
+                    "o/r", "x?", 100, copy.deepcopy(cursor)
+                ):
+                    seen |= {x["id"] for x in items}
+                self.assertEqual(len(seen), 150, stop)
 
     def test_pass_checkpoint_does_not_skip_an_edit_between_listings(self):
         memory = self.memory_module()
