@@ -1,0 +1,154 @@
+name: Review memory
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Build a ready snapshot even when the weekly snapshot is fresh
+        type: boolean
+        default: false
+      fresh:
+        description: Ignore previous inputs and start a new full collection
+        type: boolean
+        default: false
+      allow_badge_fallback:
+        description: Explicitly allow publication without the push-permission list
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: review-memory-publisher
+  cancel-in-progress: false
+
+env:
+  GH_REPO: sysprog21/codetrial
+
+jobs:
+  prepare:
+    if: github.repository == 'sysprog21/codetrial' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      attestations: read
+    outputs:
+      checkpoint: ${{ steps.prepare.outputs.checkpoint }}
+      ready: ${{ steps.prepare.outputs.ready }}
+      checkpoint_name: ${{ steps.prepare.outputs.checkpoint_name }}
+      ready_name: ${{ steps.prepare.outputs.ready_name }}
+      producer_attempt: ${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Collect within budget and build clean artifacts
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MEMORY_FORCE: ${{ inputs.force || false }}
+          MEMORY_FRESH: ${{ inputs.fresh || false }}
+          MEMORY_ALLOW_BADGE_FALLBACK: ${{ inputs.allow_badge_fallback || false }}
+        run: python3 .claude/skills/codetrial-review/publish-memory.py prepare
+      - name: Preserve resumable public checkpoint
+        if: steps.prepare.outputs.checkpoint == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.prepare.outputs.checkpoint_name }}
+          path: memory-artifacts/checkpoint/
+          retention-days: 7
+          if-no-files-found: error
+      - name: Hand off validated release bytes
+        if: steps.prepare.outputs.ready == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.prepare.outputs.ready_name }}
+          path: memory-artifacts/ready/
+          retention-days: 1
+          if-no-files-found: error
+
+  review-memory-sign-checkpoint:
+    needs: prepare
+    if: needs.prepare.outputs.checkpoint == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.prepare.outputs.checkpoint_name }}
+          path: memory-artifacts/checkpoint/
+      - name: Verify opaque checkpoint package
+        env:
+          MEMORY_RUN_ATTEMPT: ${{ needs.prepare.outputs.producer_attempt }}
+        run: python3 .claude/skills/codetrial-review/publish-memory.py verify
+      - name: Attest resumable checkpoint
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            memory-artifacts/checkpoint/checkpoint.json
+            memory-artifacts/checkpoint/checkpoint.db.gz
+
+  publish:
+    needs: [prepare, review-memory-sign-checkpoint]
+    if: needs.prepare.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.prepare.outputs.ready_name }}
+          path: memory-artifacts/ready/
+      - name: Verify opaque release package
+        env:
+          MEMORY_RUN_ATTEMPT: ${{ needs.prepare.outputs.producer_attempt }}
+        run: python3 .claude/skills/codetrial-review/publish-memory.py verify
+      - name: Attest ready public snapshot
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            memory-artifacts/ready/manifest.json
+            memory-artifacts/ready/memory.db.gz
+      - name: Upload, verify and publish without changing latest
+        env:
+          MEMORY_RUN_ATTEMPT: ${{ needs.prepare.outputs.producer_attempt }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .claude/skills/codetrial-review/publish-memory.py publish
+
+  maintenance:
+    needs: [prepare, review-memory-sign-checkpoint, publish]
+    if: always() && needs.prepare.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Retain verified recovery releases and clean owned drafts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .claude/skills/codetrial-review/publish-memory.py maintain

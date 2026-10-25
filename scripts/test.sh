@@ -561,6 +561,7 @@ gate wait-for-server-tests unittest_gate "$ROOT/tests/test_wait_for_server.py"
 gate skill-refs "$PYTHON" "$ROOT/scripts/check-skill-refs.py"
 gate skill-scripts-tests unittest_gate "$ROOT/tests/test_skill_scripts.py"
 gate review-memory-tests unittest_gate "$ROOT/tests/test_review_memory.py"
+gate review-memory-publisher-tests unittest_gate "$ROOT/tests/test_review_memory_publish.py"
 gate --lane browser browser-tests browser_tests static
 gate eslint eslint_gate
 gate --lane all cargo-audit cargo_audit_gate

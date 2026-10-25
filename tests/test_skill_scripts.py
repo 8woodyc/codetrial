@@ -810,8 +810,8 @@ class PrSweepTests(SweepCase):
 
     def test_workflow_facts_the_review_checklist_states_still_hold(self):
         # codetrial-review's workflow rules say check.yml runs on pull_request
-        # with contents: read, and that the only job granted contents: write
-        # is release, which runs on a push to main.
+        # with contents: read, and that within check.yml only release has
+        # contents: write, running on a push to main.
         workflow = (ROOT / ".github" / "workflows" / "check.yml").read_text()
         self.assertNotIn("pull_request_target", workflow)
         self.assertNotIn("workflow_run", workflow)
@@ -848,6 +848,38 @@ class PrSweepTests(SweepCase):
                 body = body[: body.index("steps:")]
                 self.assertIn("contents: write", body)
                 self.assertIn(guard, body)
+
+    def test_review_memory_publisher_keeps_privileges_off_collection_and_prs(self):
+        workflow = (ROOT / ".github/workflows/review-memory.yml").read_text()
+        for event in ("pull_request", "workflow_run", "issue_comment"):
+            self.assertNotIn(event, workflow)
+        self.assertIn("  schedule:\n", workflow)
+        self.assertIn("  workflow_dispatch:\n", workflow)
+        self.assertIn("permissions:\n  contents: read", workflow)
+        self.assertIn(
+            "github.repository == 'sysprog21/codetrial' && github.ref == 'refs/heads/main'",
+            workflow,
+        )
+        self.assertIn("cancel-in-progress: false", workflow)
+        self.assertEqual(workflow.count("contents: write"), 2)
+        prepare = workflow.split("\n  prepare:\n", 1)[1].split(
+            "\n  review-memory-sign-checkpoint:", 1
+        )[0]
+        self.assertNotIn("id-token: write", prepare)
+        self.assertNotIn("attestations: write", prepare)
+        signer = workflow.split("\n  review-memory-sign-checkpoint:\n", 1)[1].split(
+            "\n  publish:", 1
+        )[0]
+        self.assertNotIn("contents: write", signer)
+        self.assertIn("id-token: write", signer)
+        self.assertIn("publish-memory.py verify", signer)
+        self.assertNotIn("publish-memory.py prepare", signer)
+        self.assertNotIn("actions/cache", workflow)
+        self.assertNotRegex(workflow, r"run:.*\$\{\{")
+        product = (ROOT / ".github/workflows/check.yml").read_text()
+        self.assertIn(
+            'gh api --paginate "repos/$GH_REPO/releases?per_page=100"', product
+        )
 
     def test_hook_installer_prints_the_labels_conventions_explains(self):
         # codetrial-conventions tells an agent to read make hooks' output by

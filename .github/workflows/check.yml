@@ -1127,7 +1127,7 @@ jobs:
           # them into one round trip, but on a ref that is already gone it
           # fails, and it fails having already deleted the release, which ends
           # the job with `latest` taken down and nothing put back.
-          releases=$(gh release list --limit 100 --json tagName --jq '.[].tagName')
+          releases=$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" --jq '.[].tag_name')
           if printf '%s\n' "$releases" | grep -qxF "$tag"; then
             gh release delete "$tag" --yes
           fi
