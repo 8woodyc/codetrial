@@ -1034,6 +1034,7 @@ jobs:
 
   # One rolling release for the current main build. GitHub releases require a
   # tag; `latest` avoids exposing an implementation SHA as a release name.
+  # desktop.yml's `rolling` job repeats this swap for `desktop-latest`.
   release:
     needs: [gates, audit, build]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

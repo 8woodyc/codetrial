@@ -826,6 +826,29 @@ class PrSweepTests(SweepCase):
             release,
         )
 
+    def test_desktop_workflow_publishes_from_main_or_a_tag_only(self):
+        # desktop.yml also runs on pull_request, and a job's permissions
+        # apply to a pull request from a branch of this repository, so the two
+        # jobs granted contents: write each carry the guard that keeps a pull
+        # request from publishing.
+        workflow = (ROOT / ".github" / "workflows" / "desktop.yml").read_text()
+        self.assertNotIn("pull_request_target", workflow)
+        self.assertNotIn("workflow_run", workflow)
+        self.assertIn("\npermissions:\n  contents: read\n", workflow)
+        self.assertEqual(workflow.count("contents: write"), 2)
+        for job, guard in (
+            (
+                "rolling",
+                "if: github.event_name == 'push' && github.ref == 'refs/heads/main'",
+            ),
+            ("release", "if: startsWith(github.ref, 'refs/tags/desktop-v')"),
+        ):
+            with self.subTest(job=job):
+                body = workflow[workflow.index(f"\n  {job}:\n") :]
+                body = body[: body.index("steps:")]
+                self.assertIn("contents: write", body)
+                self.assertIn(guard, body)
+
     def test_hook_installer_prints_the_labels_conventions_explains(self):
         # codetrial-conventions tells an agent to read make hooks' output by
         # these labels, so renaming one has to move that text too.
