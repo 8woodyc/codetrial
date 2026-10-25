@@ -52,7 +52,7 @@
 #             first review, a re-review after a push, or a merge
 #   refs_only PRs that close no issue and name one with Refs, which
 #             CONTRIBUTING.md asks PRs to avoid; asked says a maintainer
-#             already asked for Closes #N on that PR
+#             already asked for Close #N on that PR
 #   viewer    the account that ran the sweep
 #   prerequisites  PRs that must land first: stacked on the other's branch,
 #             or stated in the body as depending on it

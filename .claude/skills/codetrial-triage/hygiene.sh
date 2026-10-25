@@ -75,19 +75,32 @@ gh api "repos/$repo/pulls/$pr/commits" --paginate > "$work/commits.json"
 gh api "repos/$repo/pulls/$pr/comments" --paginate > "$work/inline.json"
 
 # Each commit through the commit-msg hook's own rules, the ones CI applies too.
-# Merges are git's wording and get their own item; Dependabot's are skipped by
-# author, as check-commit-log.sh does. One JSON string per line, so a message's
-# own newlines survive the loop.
+# Its exit status adds up what is wrong, so one call answers both questions and
+# the AI-credit item and a refused commit cannot disagree: bit 1 is a style rule
+# broken, bit 2 a credit to a tool, and anything above 3 (the hook itself
+# failing) counts as a broken rule. A credit is looked for in every commit. The
+# style rules skip a merge, which is git's wording, and Dependabot's commits,
+# which are skipped by author as check-commit-log.sh does. Per commit, one line
+# saying whether the style rules apply and one JSON string for the message, so
+# its own newlines survive the loop.
 bad_messages=0
-jq -s -c 'add | .[]
-    | select((.parents | length) < 2
-        and .commit.author.email != "49699333+dependabot[bot]@users.noreply.github.com")
-    | .commit.message' "$work/commits.json" > "$work/messages"
-while IFS= read -r message; do
-    printf '%s\n' "$message" | jq -r . \
-        | sh "$root/scripts/git-commit-msg.sh" - > /dev/null 2>&1 \
-        || bad_messages=$((bad_messages + 1))
-done < "$work/messages"
+ai_messages=0
+jq -c '.[] | ((.parents | length) < 2
+        and .commit.author.email != "49699333+dependabot[bot]@users.noreply.github.com"
+        | if . then 1 else 0 end), .commit.message' "$work/commits.json" > "$work/commits.lines"
+while IFS= read -r styled && IFS= read -r message; do
+    printf '%s\n' "$message" | jq -r . > "$work/message"
+    status=0
+    sh "$root/scripts/git-commit-msg.sh" --stored "$work/message" > /dev/null 2>&1 || status=$?
+    if [ "$styled" -eq 1 ] && {
+        [ "$status" -gt 3 ] || [ $((status & 1)) -ne 0 ]
+    }; then
+        bad_messages=$((bad_messages + 1))
+    fi
+    if [ $((status & 2)) -ne 0 ]; then
+        ai_messages=$((ai_messages + 1))
+    fi
+done < "$work/commits.lines"
 
 # Failing checks at this head, and whether main shares them. A diagnosis that
 # fails, or that read another head, yields no CI item rather than a guess.
@@ -99,10 +112,9 @@ again=$(gh pr view "$pr" --repo "$repo" --json headRefOid --jq .headRefOid)
 
 jq -n -L "$(dirname "$0")" --slurpfile p "$work/pr.json" --slurpfile c "$work/commits.json" \
     --slurpfile ci "$work/ci.json" --slurpfile inline "$work/inline.json" \
-    --argjson bad "$bad_messages" \
+    --argjson bad "$bad_messages" --argjson ai "$ai_messages" \
     --argjson pushers "$pushers" --arg pushed "$pushed" \
     --arg again "$again" '
-  include "agent-marker";
   $p[0] as $pr | ($c | add) as $commits
   | (if $ci[0].head == $pr.headRefOid then $ci[0] else {} end) as $ci
   | def staff: .author.login | IN($pushers[]);
@@ -132,7 +144,7 @@ jq -n -L "$(dirname "$0")" --slurpfile p "$work/pr.json" --slurpfile c "$work/co
         "Do not merge `main` into this branch with `git merge`. Drop the merge commits, put your own commits on top of the latest `main`, and force-push."),
       item("commit_rules"; $bad > 0; "cbea\\.ms|chris\\.beams|make hooks";
         "Improve git commit messages per https://cbea.ms/git-commit/ and `CONTRIBUTING.md`; CI applies the same rules. Hint: run `make hooks` once per clone, so the hooks check every message before you push."),
-      item("co_authored"; any($commits[]; .commit.message | ai_marker);
+      item("co_authored"; $ai > 0;
         "co-authored|attribution|agent marker";
         "Remove AI agent markers (`Co-authored-by` an agent, \"Generated with\") from Git commit messages, as this attribution does not improve collaboration."),
       item("indent"; any($failing[]; .on_main == false

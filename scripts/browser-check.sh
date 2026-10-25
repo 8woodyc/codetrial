@@ -3,6 +3,7 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 . "$ROOT/scripts/session-cookie.sh"
+. "$ROOT/scripts/wait-for-server.sh"
 BROWSER_CHECK_AGENT=${BROWSER_CHECK_AGENT:-home}
 
 # Flows: voice (default), report, barge, avatar, soak. `avatar` is dispatched
@@ -270,21 +271,7 @@ else
     SERVER_PID=$!
 fi
 
-i=0
-until curl -fsS "$BASE_URL" > /dev/null 2>&1; do
-    i=$((i + 1))
-    if [ "$i" -gt 60 ]; then
-
-        # A server that is still starting under `cargo run --quiet` has written
-        # nothing yet, and a bare exit 1 is all CI showed when one ran out.
-        echo "$BASE_URL did not answer within 60 seconds." >&2
-        if [ -s "$SERVER_LOG" ]; then
-            cat "$SERVER_LOG" >&2
-        fi
-        exit 1
-    fi
-    sleep 1
-done
+wait_for_server "$BASE_URL" 60 "$SERVER_LOG" "${SERVER_PID:-}" || exit 1
 
 SESSION_COOKIE=${BROWSER_CHECK_SESSION_COOKIE:-}
 if [ -z "$SESSION_COOKIE" ]; then

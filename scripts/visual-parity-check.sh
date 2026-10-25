@@ -3,6 +3,7 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 . "$ROOT/scripts/session-cookie.sh"
+. "$ROOT/scripts/wait-for-server.sh"
 GOLDEN_DIR=${VISUAL_PARITY_GOLDEN_DIR:-$ROOT/tests/golden/visual}
 ARTIFACT_DIR=${VISUAL_PARITY_ARTIFACT_DIR:-$ROOT/tests/artifacts/visual}
 THRESHOLD=${VISUAL_PARITY_THRESHOLD:-0.05}
@@ -64,16 +65,7 @@ env -u LIVEKIT_URL -u LIVEKIT_API_KEY -u LIVEKIT_API_SECRET -u GOOGLE_API_KEY \
     > "$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
-i=0
-until curl -fsS "$BASE_URL" > /dev/null 2>&1; do
-    i=$((i + 1))
-    if [ "$i" -gt 90 ]; then
-        echo "$BASE_URL did not answer within 90 seconds." >&2
-        cat "$SERVER_LOG" >&2
-        exit 1
-    fi
-    sleep 1
-done
+wait_for_server "$BASE_URL" 90 "$SERVER_LOG" "$SERVER_PID" || exit 1
 
 echo "visual parity threshold: $THRESHOLD"
 

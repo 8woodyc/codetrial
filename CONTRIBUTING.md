@@ -113,10 +113,48 @@ what each hook and lane does, which generated files have to be regenerated
 first, and the checks that need credentials or a browser.
 
 ## Commit messages
+Clear and descriptive commit messages are crucial for maintaining a transparent
+history of changes and for facilitating effective debugging and tracking.
+Please adhere to the guidelines outlined in [How to Write a Git Commit Message](https://cbea.ms/git-commit/).
+1. Separate the subject from the body with a blank line.
+2. Limit the subject line to 50 characters.
+3. Capitalize the subject line.
+4. Do not end the subject line with a period.
+5. Use the imperative mood in the subject line.
+6. Wrap the body at 72 characters.
+7. Use the body to explain what and why, not how.
 
-The house style is Chris Beams' seven rules. `scripts/git-commit-msg.sh` both
-prints the enforced list and enforces it, so read it from there rather than from
-a copy that can drift:
+An example (derived from Chris' blog post) looks like the following:
+```text
+Summarize changes in around 50 characters or less
+
+More detailed explanatory text, if necessary. Wrap it to about 72
+characters or so. In some contexts, the first line is treated as the
+subject of the commit and the rest of the text as the body. The
+blank line separating the summary from the body is critical (unless
+you omit the body entirely); various tools like `log`, `shortlog`
+and `rebase` can get confused if you run the two together.
+
+Explain the problem that this commit is solving. Focus on why you
+are making this change as opposed to how (the code explains that).
+Are there side effects or other unintuitive consequences of this
+change? Here's the place to explain them.
+
+Further paragraphs come after blank lines.
+
+- Bullet points are okay, too
+
+- Typically a hyphen or asterisk is used for the bullet, preceded
+  by a single space, with blank lines in between, but conventions
+  vary here
+
+If you use an issue tracker, put references to them at the bottom,
+like this:
+Close #123
+```
+
+`scripts/git-commit-msg.sh` both prints the enforced list and enforces it, so
+read it from there rather than from a copy that can drift:
 
 ```bash
 ./scripts/git-commit-msg.sh --rules
@@ -141,6 +179,36 @@ mechanics duplicates that comment and then goes stale on its own.
 The hook rejects the shape that does it outright: a body line opening with
 `How:`, `Step:`, `Steps:`, `Changes:` or an `Implementation:` heading. Whether
 what is left says anything is the part only a reviewer can judge.
+
+Body lines wrap at 72 characters. The one exception is a token that cannot be
+wrapped without breaking it: a link or a file name longer than a whole line may
+run past the limit, and so may a trailer such as `Co-authored-by`, which git
+reads only as one line. A link or file name that fits on a line of its own goes
+there, and the sentence beside it never runs past.
+
+A subject that only names a file, such as `Update web/app.js` or `Fix app.js`,
+is refused. It says where the change is and not what it does, so the log, a
+later `git blame` and a bisect tell the reader nothing, and the web editor's
+default subject is the usual way one gets in. Say what behaves differently:
+`Recheck setup after the capture picker closes`. A specific verb with a path
+(`Remove web/old.js`, `Rename a.js to b.js`) still says what happened and is
+fine, and so is any subject that goes on to say what changed.
+
+A message carries no AI attribution: no `Co-Authored-By` naming an agent, no
+`Generated with` footer, no `Assisted-by` trailer, no link to a tool. Such a
+line says which tool ran, not whom to ask, and helps nobody collaborate. A human
+co-author keeps the credit. The hook refuses it at commit, at push and in CI
+alike. It recognizes a tool by the address agents commit with, or by a trailer
+or footer that names the tool itself; a person who shares a tool's first name,
+such as `Claude Shannon`, or works where one is made, is unaffected.
+
+An issue a commit finishes is closed with `Close #N` on the last line;
+`Closes #N` is accepted and closes it the same way. A `Refs #N` may appear in
+the description, where it reads as context, and never as the last line, which
+the hook refuses: a last line that closes nothing reads like the closing line,
+and the next reader cannot tell whether the issue is done. An issue too large
+for one change is split into sub-issues, each closed by one pull request,
+instead of being touched by several that each say `Refs`.
 
 Comments follow from the same rule: every line says something the code cannot.
 The ASCII rule the hook enforces covers the commit message, and source comments
@@ -169,11 +237,11 @@ reuses its subject. An issue title names the symptom or the outcome instead:
 
 Issue and pull request bodies are read in a browser, so write each paragraph as
 one line. The 72-column wrap is for commit messages only. A pull request that
-finishes an issue ends with `Closes #N` alone on the last line. Avoid `Refs #N`:
-a reference that closes nothing is easy to add to every pull request and tells
-the reviewer little. Use it only beside a `Closes #N`, or in a body that already
-states the motivation and the implementation in full, so the reference adds
-context rather than standing in for it.
+finishes an issue ends with `Close #N` alone on the last line. A pull request
+body has no `Refs #N`: a reference that closes nothing is easy to add to every
+pull request, tells the reviewer little, and leaves open whether the issue is
+finished. When the issue is too large for this change, split it into sub-issues
+and close one with each pull request.
 
 Working with Claude Code, run `/codetrial-review` on the committed branch
 before opening the pull request. It reads what the gate cannot: the scope the

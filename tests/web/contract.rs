@@ -897,11 +897,9 @@ fn run_browser_check_with_stub_cargo(build_fails: bool) -> (std::process::Output
     fs::create_dir_all(&scripts).unwrap();
     fs::create_dir_all(&bin).unwrap();
     fs::copy("scripts/browser-check.sh", scripts.join("browser-check.sh")).unwrap();
-    fs::copy(
-        "scripts/session-cookie.sh",
-        scripts.join("session-cookie.sh"),
-    )
-    .unwrap();
+    for helper in ["session-cookie.sh", "wait-for-server.sh"] {
+        fs::copy(format!("scripts/{helper}"), scripts.join(helper)).unwrap();
+    }
 
     for (path, source) in [
         (scripts.join("fetch-vendor.sh"), "#!/bin/sh\nexit 0\n"),

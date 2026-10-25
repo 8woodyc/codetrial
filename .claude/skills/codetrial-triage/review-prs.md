@@ -163,11 +163,11 @@ each of this PR's entries in outdated, or none>.
    with one step: for an open PR, read the other diff and reply with how the
    two relate (fold into one, rebase one on the other, or keep both with a
    sentence on why); for an issue it delivers, end the body with
-   `Closes #M`; for work already shipped, check whether this PR is still
+   `Close #M`; for work already shipped, check whether this PR is still
    needed and say so. It never picks a winner between two PRs. For an open
    PR, `other_notice` is the mirror text for that PR's thread, unless that
    thread already links this one; for an issue it is null, since the PR's
-   own `Closes` line is the link. Both follow comments.md.
+   own closing line is the link. Both follow comments.md.
 
 ## Verify and post each PR as it lands
 

@@ -55,7 +55,7 @@ neither a reminder nor a first answer on the issue (#370 and #385 sat in
   its author already knows the rule.
 - `linked`, with `merged` set: a merged pull request referenced the issue after
   it was filed, and GitHub did not close it, so that PR only touched it, or its
-  `Closes` line named another issue. Read the PR and the issue. When the PR does
+  closing line named another issue. Read the PR and the issue. When the PR does
   what the issue asks, ask for a retest in the shape [the notice
   shapes](SKILL.md#draft-the-notice-the-other-thread-needs) give, with the
   recipe from [codetrial-contribute](../codetrial-contribute/SKILL.md); #82 got
@@ -72,7 +72,7 @@ neither a reminder nor a first answer on the issue (#370 and #385 sat in
   that PR. Say how to check it out, since many reporters have never fetched a
   pull request. A maintainer's own fix PR gets the short back-link "See if PR #N
   resolves this issue." (#140, #149, #151). When a reporter closed an issue that
-  an open PR still `Closes`, check that the defect still holds on `main`; if it
+  an open PR still closes, check that the defect still holds on `main`; if it
   does, propose reopening it on the confirmed list, so the merge records the fix
   (#210).
 - `claimed`: a non-maintainer assignee, which is how the maintainers record who

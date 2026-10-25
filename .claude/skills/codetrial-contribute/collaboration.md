@@ -69,17 +69,19 @@ for its own issue, not folded in.
 - An alternative to an open PR has to justify itself against it: "Determine if
   this pull request is worth proceeding." (#245, closed while #244 fixed
   #131). Review the open one rather than writing a competitor.
-- Close what the PR finishes. CONTRIBUTING.md has the rule: `Closes #N` when
-  the PR finishes the issue, and `Refs #N` avoided, since a reference that
-  closes nothing is easy to add to every PR. Maintainers call `Refs` on a PR
-  that does finish its issue ambiguous ("Avoid ambiguous `Refs #210`. Do close
-  an issue when you submit a pull request." on #256, "Avoid using ambiguous
-  `Refs #261`" on #265), so decide by the issue's acceptance criteria, not by
-  caution. `Refs` belongs only beside a `Closes #N`, or in a body that states
-  the motivation and the implementation in full, including what remains:
-  [#161](https://github.com/sysprog21/codetrial/issues/161#issuecomment-6131824178)
-  asked for `Refs #161` because the cap and modality toggle stay open. One PR
-  may close two issues when that was agreed, each `Closes #N` on its own line
+- Close what the PR finishes. CONTRIBUTING.md has the rule: `Close #N` when
+  the PR finishes the issue, and no `Refs #N` in a PR body, since a reference
+  that closes nothing is easy to add to every PR. Maintainers call `Refs` on a
+  PR that does finish its issue ambiguous ("Avoid ambiguous `Refs #210`. Do
+  close an issue when you submit a pull request." on #256, "Avoid using
+  ambiguous `Refs #261`" on #265), so decide by the issue's acceptance
+  criteria, not by caution. An issue too large for the PR is split into
+  sub-issues, and the PR closes the one it finishes; [#161](https://github.com/sysprog21/codetrial/issues/161#issuecomment-6131824178)
+  was asked for `Refs #161` because the cap and modality toggle stay open, and
+  that remainder is what a sub-issue holds. In a commit message a `Refs #N`
+  may sit in the description and never on the last line, which the
+  commit-msg hook refuses. One PR
+  may close two issues when that was agreed, each `Close #N` on its own line
   ([#73](https://github.com/sysprog21/codetrial/issues/73#issuecomment-5991034506)
   with #85).
 
@@ -192,9 +194,9 @@ so the newest visible one is current. Each maps to one action;
 | "Fold similar commits" | One commit per functional change. |
 | "Check `CONTRIBUTING.md` carefully and enforce the rules." / "Check https://cbea.ms/git-commit/" | Usually the commit messages: run `./scripts/git-commit-msg.sh --rules`, then reread every commit and the PR title and body against CONTRIBUTING. |
 | "Remove AI agent markers" / "Remove unnecessary `Co-authored-by` markers" | Drop the AI-tool attribution trailers conventions names; keep a human co-author's credit. |
-| "Avoid ambiguous `Refs #N`" | The PR finishes the issue, so it ends with `Closes #N`. |
+| "Avoid ambiguous `Refs #N`" | The PR finishes the issue, so it ends with `Close #N`. |
 | "Explain the rationale and context" instead of "Related to #N" | The body says why on its own; an issue reference is not a reason. |
-| "Never write meaningless Git commit messages such as 'Update web/app.js'" | Reword that commit with a subject and body that say what changed and why. |
+| "Never write meaningless Git commit messages such as 'Update web/app.js'" | Reword that commit with a subject and body that say what changed and why. The commit-msg hook refuses a subject that only names a file, and says why. |
 | "Resolve regressions raised by CI." | The section above. |
 | "Create another pull request." / "split it into a separate pull request" | Move that change to its own branch and PR; drop it from this one. |
 | "Do more analysis and refinements." | Find the cause; a rerun or a local pass is not an answer. |

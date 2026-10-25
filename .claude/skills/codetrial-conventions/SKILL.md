@@ -45,12 +45,13 @@ calibration, so run this when a subject is hard to fit:
 git log --no-merges --format=%s | awk '{print length}' | sort -n
 ```
 
-Three things reviewers reject that the hook cannot see. The body stands on its
-own: "Related to #263" in place of the reason got "explain the rationale and
-context" (#268). No `Co-authored-by` or "Generated with" trailer attributing
-an AI tool (#251, #256, #285); a human co-author's credit stays. And a subject
-that names only the file, such as GitHub's web-editor default "Update
-web/app.js", is what a maintainer calls meaningless (#276).
+One thing reviewers reject that the hook cannot see: the body stands on its
+own. "Related to #263" in place of the reason got "explain the rationale and
+context" (#268). The hook now refuses the two other things maintainers used to
+ask for by hand: a `Co-authored-by` or "Generated with" trailer attributing an
+AI tool (#251, #256, #285; a human co-author's credit stays), and a subject that
+names only the file, such as GitHub's web-editor default "Update web/app.js"
+(#276), which says where and not what and which the refusal explains.
 
 ## Prose register
 

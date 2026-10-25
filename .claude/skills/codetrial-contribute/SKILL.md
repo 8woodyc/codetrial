@@ -203,7 +203,7 @@ the user with the draft rather than being acted on alone:
   work may already be done or declined; read the closing comment and say which
   in the draft.
 - `closes` empty while `refs` names the issue the branch finishes: the last
-  line should be `Closes #N`, not `Refs #N`, or the merge will not close it.
+  line should be `Close #N`, not `Refs #N`, or the merge will not close it.
   `refs` leaves out what `closes` already has, and both read `#N`,
   `sysprog21/codetrial#N` and the issue URL.
 - `same_files`: overlap by file is weak alone, since `web/interview.js` and
@@ -336,10 +336,10 @@ the git steps behind them:
   commit.
 - "Append `Closes #N`" or "avoid ambiguous `Refs`": the PR finishes the issue,
   so end the PR body, and by this tree's habit the commit message, with
-  `Closes #N`, each on its own line. Avoid `Refs #N`: it belongs only beside a
-  `Closes #N`, or in a body that states the motivation and the implementation
-  in full, including what is left; a bare `Refs: #60` told the reviewer
-  nothing.
+  `Close #N`, each on its own line (`Closes #N` is accepted too). No `Refs #N` in a PR body: a bare
+  `Refs: #60` told the reviewer nothing, and an issue with parts that stay open
+  is split into sub-issues so the PR can close the part it finishes. In a
+  commit message a `Refs #N` goes in the description, never on the last line.
 - A code change requested in review: check it against the
   current head, then make it. When any item in the review is unclear, ask
   about all of them before changing any, since items in one review are often

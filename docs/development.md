@@ -287,9 +287,14 @@ its own name; one git still quotes, or one with a blank, is refused by name
 rather than skipped. A file added with `--intent-to-add` carries no content
 into the commit and is not judged. A missing formatter refuses the commit; a
 missing linter is skipped and named in the closing line. The commit-msg hook
-holds the subject to 50 characters and the body to 72, imperative and ASCII.
-The pre-push hook
-replays the same message rules over commits a rebase or an amend rewrote after
+holds the subject to 50 characters and the body to 72, imperative and ASCII,
+with a link or file name longer than a line, or a trailer, allowed past the
+limit. It refuses a subject that only names a file, an AI attribution and a
+`Refs #N` on the last line, and says why (see CONTRIBUTING.md). The rules run
+in `scripts/git-commit-msg.awk`, one process per message, which is also what
+`scripts/check-commit-log.sh` and the PR sweep's hygiene check ask, with
+`--stored` for a message a commit already holds. The pre-push hook replays the
+same message rules over commits a rebase or an amend rewrote after
 the fact, and CI runs them over a pull request's own commits. On a topic branch
 it also prints one line when the head has no `/codetrial-review` on record (the
 skill records a reviewed head under the git directory); that line is advice and
