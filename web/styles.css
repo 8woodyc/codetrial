@@ -2871,14 +2871,20 @@ body:not([data-recording]) .replay-detail > :not(header) {
   gap: 0.75rem;
 }
 
-.interviewer-style-controls > div {
+.interviewer-style-controls > div,
+.preflight-language {
   display: grid;
   gap: 0.25rem;
   font-size: 0.875rem;
 }
 
+.preflight-language {
+  margin-bottom: 0.75rem;
+}
+
 /* The dark field: the setup check's selects and the test drawer's case. */
 .interviewer-style-controls select,
+.preflight-language select,
 #candidate-case textarea,
 #candidate-case input {
   width: 100%;
@@ -3184,7 +3190,8 @@ body:not([data-recording]) .replay-detail > :not(header) {
   margin: 0.5rem 0 0.75rem;
 }
 
-.interviewer-style-controls label {
+.interviewer-style-controls label,
+.preflight-language label {
   color: var(--sub);
   font-weight: 700;
 }

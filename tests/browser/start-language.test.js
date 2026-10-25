@@ -68,9 +68,9 @@ async function joinAndCaptureToken(page, { granted = false } = {}) {
 }
 
 /// Past `init()`, which runs after the problem loads and so after
-/// `domcontentloaded`: until then the menu shows the markup's Python, and a pick
-/// made before it is overwritten. The placeholder is written once the opening
-/// language is set and the menu has its handler.
+/// `domcontentloaded`: until then both menus show the markup's Python, and a
+/// pick made before it is overwritten. The placeholder is written once the
+/// opening language is set and the menus have their handlers.
 const interviewReady = (page) =>
   page.waitForFunction(
     () => document.querySelector("#candidate-case-input").placeholder !== "",
@@ -228,6 +228,114 @@ test("a whiteboard token carries no language", async (t) => {
     );
     const body = (await joinAndCaptureToken(page)).postDataJSON();
     assert.equal(Object.hasOwn(body, "language"), false);
+  } finally {
+    await page.close();
+  }
+});
+
+/// What the interview page wrote after the candidate's last interview.
+const rememberLanguage = (page, language) =>
+  page.addInitScript(
+    ([key, value]) => localStorage.setItem(key, value),
+    [LANGUAGE_KEY, language],
+  );
+
+/// The two menus that name the language: the preflight's and the editor's.
+const shown = (page) =>
+  page.evaluate(() => [
+    document.querySelector("#preflight-language").value,
+    document.querySelector("#language-select").value,
+  ]);
+
+test("the preflight preselects the language last interviewed in", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await browser.newPage();
+  try {
+    await rememberLanguage(page, "javascript");
+    await page.goto(`${base}/interview.html?problem=chargeback-pair-match`, {
+      waitUntil: "domcontentloaded",
+    });
+    await interviewReady(page);
+    assert.deepEqual(await shown(page), ["javascript", "javascript"]);
+    const body = (await joinAndCaptureToken(page)).postDataJSON();
+    assert.equal(body.language, "javascript");
+  } finally {
+    await page.close();
+  }
+});
+
+test("a language the lobby asked for wins over the remembered one", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await browser.newPage();
+  try {
+    await rememberLanguage(page, "javascript");
+    await page.goto(
+      `${base}/interview.html?problem=chargeback-pair-match&language=java`,
+      { waitUntil: "domcontentloaded" },
+    );
+    await interviewReady(page);
+    assert.deepEqual(await shown(page), ["java", "java"]);
+  } finally {
+    await page.close();
+  }
+});
+
+test("the language picked before joining is the one the token names", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await browser.newPage();
+  try {
+    await page.goto(`${base}/interview.html?problem=chargeback-pair-match`, {
+      waitUntil: "domcontentloaded",
+    });
+    await interviewReady(page);
+    // Python with nothing remembered, so the pick below is a change.
+    assert.deepEqual(await shown(page), ["python", "python"]);
+    await page.selectOption("#preflight-language", "java");
+    assert.deepEqual(await shown(page), ["java", "java"]);
+    const body = (await joinAndCaptureToken(page)).postDataJSON();
+    assert.equal(body.language, "java");
+  } finally {
+    await page.close();
+  }
+});
+
+test("the preflight withholds C from a class problem", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await browser.newPage();
+  try {
+    await rememberLanguage(page, "c");
+    await page.goto(`${base}/interview.html?problem=backend-pool-sampler`, {
+      waitUntil: "domcontentloaded",
+    });
+    await page.waitForFunction(() =>
+      document
+        .querySelector('#preflight-language option[value="c"]')
+        .textContent.includes("class problem"),
+    );
+    assert.equal(
+      await page
+        .locator('#preflight-language option[value="c"]')
+        .evaluate((option) => option.disabled),
+      true,
+    );
+    assert.deepEqual(await shown(page), ["python", "python"]);
+  } finally {
+    await page.close();
+  }
+});
+
+test("a whiteboard preflight offers no language", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await browser.newPage();
+  try {
+    await page.goto(
+      `${base}/interview.html?problem=chargeback-pair-match&mode=whiteboard`,
+      { waitUntil: "domcontentloaded" },
+    );
+    await page.waitForFunction(
+      () => document.querySelector("#audio-step-language").hidden,
+    );
+    assert.equal(await page.locator("#preflight-language").isVisible(), false);
   } finally {
     await page.close();
   }

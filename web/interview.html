@@ -495,6 +495,23 @@
               <h3 id="prefs-title" class="preflight-section-title">
                 Interview preferences
               </h3>
+              <!-- Outside the interviewer controls, which hold Jim's voice and
+                   accent; the interview opens in this language, so Jim does
+                   not ask for one. -->
+              <div class="preflight-language" id="audio-step-language">
+                <label for="preflight-language">Programming language</label>
+                <select id="preflight-language">
+                  <option value="python" data-language="python">
+                    Python 3
+                  </option>
+                  <option value="javascript" data-language="javascript">
+                    JavaScript
+                  </option>
+                  <option value="c" data-language="c">C</option>
+                  <option value="cpp" data-language="cpp">C++</option>
+                  <option value="java" data-language="java">Java</option>
+                </select>
+              </div>
               <div class="interviewer-style-controls">
                 <div>
                   <label for="interviewer-voice">Jim's voice</label>

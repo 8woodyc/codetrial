@@ -586,6 +586,7 @@ const nodes = {
   recordingState: document.querySelector("#recording-state"),
   editor: document.querySelector("#editor"),
   languageSelect: document.querySelector("#language-select"),
+  preflightLanguage: document.querySelector("#preflight-language"),
   editorHighlight: document.querySelector("#editor-highlight"),
   editorLines: document.querySelector("#editor-lines"),
   editorStack: document.querySelector(".editor-stack"),
@@ -782,6 +783,7 @@ async function init() {
     nodes.end.disabled = true;
   }
   bindEvents();
+  document.querySelector("#audio-step-language").hidden = whiteboard;
   if (whiteboard) initWhiteboard();
   else {
     document.querySelector("#example-board").hidden = !exampleDrawingEnabled;
@@ -1176,6 +1178,12 @@ function bindEvents() {
     languageChoiceCommitted = true;
     setLanguage(nodes.languageSelect.value);
     nodes.languageSelect.value = state.language;
+  });
+  // The editor tab chosen before joining, so the interview opens in it.
+  nodes.preflightLanguage.addEventListener("change", () => {
+    languageChoiceCommitted = true;
+    setLanguage(nodes.preflightLanguage.value);
+    nodes.preflightLanguage.value = state.language;
   });
   for (const [button, step] of [
     [nodes.editorFontSmaller, -1],
@@ -2908,7 +2916,10 @@ function initializeLanguages() {
 /// final submission with a starter buffer when the judge response arrives late.
 function applyLanguages(spec) {
   languages = languagesFor(spec, editorOptions.execution);
-  for (const option of nodes.languageSelect.options) {
+  for (const option of [
+    ...nodes.languageSelect.options,
+    ...nodes.preflightLanguage.options,
+  ]) {
     const label = option.dataset.label ?? option.textContent;
     const availability = harnessAvailability(
       option.dataset.language,
@@ -2976,6 +2987,7 @@ function setLanguage(language) {
   paintEditor();
   editorInitialized = true;
   nodes.languageSelect.value = language;
+  nodes.preflightLanguage.value = language;
   updateRunAvailability();
   // Debounced like a keystroke, and for the same reason. Publishing on every
   // click meant a candidate trying three tabs in a row produced three language
