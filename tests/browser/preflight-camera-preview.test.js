@@ -1,6 +1,10 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_RUNTIME_CONFIG, startStaticServer } from "./source.js";
+import {
+  DEFAULT_RUNTIME_CONFIG,
+  FAKE_SPEECH_CAPTURE,
+  startStaticServer,
+} from "./source.js";
 
 let browser;
 let server;
@@ -13,6 +17,7 @@ before(async () => {
       args: [
         "--use-fake-device-for-media-stream",
         "--use-fake-ui-for-media-stream",
+        FAKE_SPEECH_CAPTURE,
       ],
     });
   } catch (error) {
