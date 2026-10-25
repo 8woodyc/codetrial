@@ -3,6 +3,7 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 . "$ROOT/scripts/session-cookie.sh"
+. "$ROOT/scripts/wait-for-server.sh"
 TMP=$(mktemp -d)
 SERVER_LOG="$TMP/web.log"
 CONFIG_PATH="$TMP/codetrial.env.local"
@@ -57,18 +58,7 @@ else
     SERVER_PID=$!
 fi
 
-i=0
-while ! curl -fsS "$BASE_URL" > "$TMP/home.html" 2> /dev/null; do
-    i=$((i + 1))
-    if [ "$i" -gt 60 ]; then
-        echo "$BASE_URL did not answer within 60 seconds." >&2
-        if [ -s "$SERVER_LOG" ]; then
-            cat "$SERVER_LOG" >&2
-        fi
-        exit 1
-    fi
-    sleep 1
-done
+wait_for_server "$BASE_URL" 60 "$SERVER_LOG" "${SERVER_PID:-}" "$TMP/home.html" || exit 1
 
 grep -F "Practice a live technical interview" "$TMP/home.html" > /dev/null
 grep -F 'data-problem="template-delimiter-audit"' "$TMP/home.html" > /dev/null
