@@ -1,15 +1,16 @@
 # The desktop app's installers, built on the three platforms they are for.
 #
-# A workflow of its own rather than a leg of check.yml's `build`, because the
-# two publish different things on different schedules: `build` refreshes the
-# rolling CLI release on every push to main, and a desktop release is a
-# version somebody chose to cut. Nothing here touches the CLI artifacts or the
-# `latest` release.
+# A workflow of its own so an installer failure (a bundler, a web view) does
+# not hold the CLI's release back. A push to main refreshes the rolling
+# `desktop-latest` release, as check.yml's `build` does for `latest`, and a
+# `desktop-v*` tag cuts a versioned one. The CLI's `latest` is untouched.
 #
 # Pull requests run it only when the desktop app itself changed, because each
 # leg builds the server in release mode as well as the app around it. A change
 # to the server's side of the launch contract is still caught on Linux: the
-# check job's Rust lane compiles and tests desktop/ on every run.
+# check job's Rust lane compiles and tests desktop/ on every run. A push to
+# main skips only documentation, since the server inside every installer is
+# built from that commit.
 name: desktop
 
 on:
@@ -20,10 +21,9 @@ on:
       - .github/workflows/desktop.yml
   push:
     branches: [main]
-    paths:
-      - desktop/**
-      - scripts/desktop-smoke.sh
-      - .github/workflows/desktop.yml
+    paths-ignore:
+      - docs/**
+      - '**/*.md'
     tags: ['desktop-v*']
   workflow_dispatch:
 
@@ -160,6 +160,11 @@ jobs:
         with:
           name: codetrial-desktop-${{ matrix.target }}
           if-no-files-found: error
+          # The installers are already compressed, and a push to main hands
+          # them to `rolling` within minutes. Re-running a release job after
+          # the week needs the package jobs re-run first.
+          compression-level: 0
+          retention-days: 7
           path: |
             target/desktop/${{ matrix.target }}/release/bundle/deb/*.deb
             target/desktop/${{ matrix.target }}/release/bundle/rpm/*.rpm
@@ -167,6 +172,92 @@ jobs:
             target/desktop/${{ matrix.target }}/release/bundle/dmg/*.dmg
             target/desktop/${{ matrix.target }}/release/bundle/msi/*.msi
             target/desktop/${{ matrix.target }}/release/bundle/nsis/*.exe
+
+  # Rolling `desktop-latest` prerelease for main, the counterpart of
+  # check.yml's `latest` and the same draft-then-swap, so keep the two in step.
+  # Not marked Latest, so the CLI's release keeps that badge. It does not wait
+  # for check.yml's gates, because a job cannot `needs` another workflow; the
+  # next green commit replaces a bad one.
+  rolling:
+    needs: package
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    concurrency:
+      group: release-desktop-latest
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: codetrial-desktop-*
+          path: dist
+          merge-multiple: true
+      - name: Verify and publish the desktop-latest release
+        shell: bash
+        run: |
+          # One installer of each kind a platform is for, by extension, since
+          # the file names carry the version.
+          for ext in deb rpm AppImage dmg msi exe; do
+            compgen -G "dist/*/*.$ext" >/dev/null || {
+              echo "missing release asset: *.$ext" >&2
+              exit 1
+            }
+          done
+          assets=(dist/*/*)
+
+          tag=desktop-latest
+          superseded() {
+            # An API failure stops the job; it is not read as "superseded".
+            tip=$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq .object.sha) || exit 1
+            [ "$tip" != "$GITHUB_SHA" ] && echo "superseded by $tip; leaving $tag as it is"
+          }
+          # Before the upload, so an overtaken build skips it.
+          if superseded; then exit 0; fi
+          staged="staging-desktop-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+
+          published=false
+          trap '[ "$published" = true ] || gh release delete "$staged" --yes >/dev/null 2>&1 || true' EXIT
+
+          gh release create "$staged" --draft --prerelease --latest=false \
+            --target "$GITHUB_SHA" --title "CodeTrial desktop (main)" \
+            --notes "Automated desktop build of ${GITHUB_SHA:0:7}. The installers are not signed yet; docs/desktop.md lists what that means on each platform."
+          gh release upload "$staged" "${assets[@]}"
+
+          # Sizes, not just presence: a cut-off upload still leaves a named
+          # asset behind.
+          sizes=$(gh release view "$staged" --json assets --jq '.assets[] | "\(.name) \(.size)"')
+          for asset in "${assets[@]}"; do
+            name=$(basename "$asset")
+            want=$(stat -c%s "$asset")
+            got=$(printf '%s\n' "$sizes" | awk -v n="$name" '$1 == n { print $2 }')
+            [ "$want" = "$got" ] || {
+              echo "$name uploaded as ${got:-nothing}, expected $want bytes" >&2
+              exit 1
+            }
+          done
+
+          # Again as late as possible: a re-run of an older commit, or a build
+          # overtaken meanwhile, must not walk the pointer backwards.
+          if superseded; then exit 0; fi
+
+          # One release per tag, and the release and the tag go missing
+          # separately, so each is removed on its own and only if it exists.
+          releases=$(gh release list --limit 100 --json tagName --jq '.[].tagName')
+          if printf '%s\n' "$releases" | grep -qxF "$tag"; then
+            gh release delete "$tag" --yes
+          fi
+          refs=$(gh api "repos/$GH_REPO/git/matching-refs/tags/$tag" --jq '.[].ref')
+          if printf '%s\n' "$refs" | grep -qxF "refs/tags/$tag"; then
+            gh api -X DELETE "repos/$GH_REPO/git/refs/tags/$tag" --silent
+          fi
+
+          gh release edit "$staged" --tag "$tag" --target "$GITHUB_SHA" --draft=false --prerelease --latest=false
+          published=true
 
   # A tag names a version, and the version is the one desktop/Cargo.toml
   # says: an installer reporting 0.1.0 under a desktop-v0.2.0 release is the
@@ -199,7 +290,7 @@ jobs:
             echo "tag $tag does not match desktop/Cargo.toml version $version" >&2
             exit 1
           }
-          ls dist
+          ls dist/*
           cat > notes.md <<EOF
           Desktop build of ${GITHUB_SHA:0:7}. The installers are not signed yet.
 
@@ -214,4 +305,4 @@ jobs:
           qualified for yet.
           EOF
           gh release create "$tag" --prerelease --verify-tag \
-            --title "CodeTrial desktop $version" --notes-file notes.md dist/*
+            --title "CodeTrial desktop $version" --notes-file notes.md dist/*/*

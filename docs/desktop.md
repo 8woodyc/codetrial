@@ -256,6 +256,16 @@ the server went with it. On Linux, run it under `xvfb-run -a`.
 
 `.github/workflows/desktop.yml` builds the installers on all three platforms
 and runs the smoke test against each build, for pull requests that touch the
-app and for pushes to `main` that do. A tag `desktop-vX.Y.Z` additionally
-publishes them as a prerelease, after checking that `X.Y.Z` is the version in
-`desktop/Cargo.toml`. The CLI's rolling `latest` release is not touched.
+app and for pushes to `main` that change more than documentation. Two releases
+come out of it:
+
+- Each such push to `main` replaces the rolling `desktop-latest` prerelease
+  with that commit's installers, like the CLI's `latest`. That release, on the
+  repository's releases page, is where to download the app. It is not marked
+  Latest, and it does not wait for the gates and the audit in `check.yml`, so
+  a commit that fails them can be published until the next one replaces it.
+- A tag `desktop-vX.Y.Z` publishes a versioned prerelease, after checking that
+  `X.Y.Z` is the version in `desktop/Cargo.toml`.
+
+A pull request's installers are workflow artifacts, kept for a limited time and
+never released.
