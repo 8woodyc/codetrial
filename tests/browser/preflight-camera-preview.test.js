@@ -35,6 +35,24 @@ after(async () => {
   await new Promise((closed) => (server ? server.close(closed) : closed()));
 });
 
+// These lifecycle checks need a speaking mic to pass preflight. Keep the real
+// camera tracks while making microphone samples independent of headless audio.
+async function provideMicrophoneSignal(page) {
+  await page.addInitScript(() => {
+    const NativeAudioContext = window.AudioContext;
+    window.AudioContext = class extends NativeAudioContext {
+      createAnalyser() {
+        const analyser = super.createAnalyser();
+        analyser.getByteTimeDomainData = (samples) => {
+          for (let index = 0; index < samples.length; index++)
+            samples[index] = index % 2 ? 200 : 60;
+        };
+        return analyser;
+      }
+    };
+  });
+}
+
 test("preflight shows a live camera preview", async (t) => {
   if (!browser) return t.skip("playwright chromium unavailable");
 
@@ -133,6 +151,7 @@ test("starting the interview clears the camera preview", async (t) => {
 
   const page = await browser.newPage();
   t.after(() => page.close());
+  await provideMicrophoneSignal(page);
 
   await page.goto(`${base}/interview.html?problem=chargeback-pair-match`);
 
@@ -173,6 +192,7 @@ test("Meet presentation keeps the preflight preview until joining", async (t) =>
 
   const page = await browser.newPage();
   t.after(() => page.close());
+  await provideMicrophoneSignal(page);
 
   await page.addInitScript(() => {
     const capture = navigator.mediaDevices.getUserMedia.bind(
