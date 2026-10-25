@@ -1,4 +1,4 @@
-import { after, before, test } from "node:test";
+import { after, before, test as nodeTest } from "node:test";
 import assert from "node:assert/strict";
 import {
   closeSetupCheck,
@@ -6,6 +6,9 @@ import {
   launchChromium,
   startStaticServer,
 } from "./source.js";
+
+// Bound each interaction independently of the runner's cumulative file limit.
+const test = (name, fn) => nodeTest(name, { timeout: 30_000 }, fn);
 
 const LANGUAGES = ["python", "javascript", "c", "cpp", "java"];
 

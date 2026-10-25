@@ -10,7 +10,7 @@
     "prettier": "3.9.10"
   },
   "scripts": {
-    "test": "node --test tests/browser/*.test.js",
+    "test": "./scripts/test.sh browser",
     "browser-check": "scripts/browser-check.sh"
   }
 }

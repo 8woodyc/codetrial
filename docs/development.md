@@ -109,9 +109,15 @@ own skip, a Node browser test's skip or todo, a missing formatter in
 skips itself when sqlite3 or Playwright is missing is not in it, because `cargo
 test` hides
 a passing test's output. With `CI=true` the summary fails the run, and those
-Rust tests fail rather than skip. Optional tools still skip on a local run. Each Node browser test has a
-five-minute timeout, so a stalled test fails by name before its lane's job
-timeout. Local Node versions without that option still run the browser tests.
+Rust tests fail rather than skip. Optional tools still skip on a local run.
+Browser files run two at a time with a ten-minute timeout per file (Node
+also applies that limit to individual tests). The editor history suite bounds
+each interaction at thirty seconds separately, so adding passing cases cannot
+consume a single interaction's budget. Local Node versions without the timeout
+or concurrency option still run the browser tests. `npm test` uses the same
+browser lane as CI, including vendor verification and skip reporting; the
+server-tier face detector suite stays with the Rust lane, which builds the
+server it needs.
 Browser tests that wait out a timer jump the fake clock with
 `page.clock.fastForward` rather than `runFor`, which also steps every frame
 and interval in between and once made a single test take eighteen minutes.

@@ -1,0 +1,14 @@
+name: Prepare vendored browser assets
+description: Restore, fetch and verify the assets embedded in release binaries.
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/restore-vendor
+    - name: Fetch browser assets
+      run: ./scripts/fetch-vendor.sh
+      shell: bash
+    # rust-embed silently omits missing files, so verify before either the CLI
+    # or desktop release compiles the browser tree into its server.
+    - name: Verify the assets about to be embedded
+      run: ./scripts/verify-vendor.sh
+      shell: bash

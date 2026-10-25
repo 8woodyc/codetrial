@@ -154,12 +154,16 @@ browser_tests()
     # not.
     tap=$(mktemp)
 
-    # No healthy test takes half a minute, and a caption test that stepped a
-    # fake clock frame by frame once took eighteen. Fail a stalled test by name
-    # well inside the browser lane's 20-minute job ceiling, with headroom for a
-    # loaded runner. Node 18 remains supported locally and lacks this option.
-    if [ "${CI:-}" = true ] || node --test-timeout=300000 --version > /dev/null 2>&1; then
-        set -- --test-timeout=300000 "$@"
+    # Node applies this limit to the file as well as each test. The editor
+    # history suite legitimately exceeds five minutes on a busy runner. Keep the
+    # file budget below the job ceiling and bound concurrent files so each
+    # Chromium process gets CPU instead of slowing every suite at once.
+    if [ "${CI:-}" = true ] || node --test-timeout=600000 --version > /dev/null 2>&1; then
+        set -- --test-timeout=600000 "$@"
+    fi
+    # Older Node rejects the option outright, so probe it as the timeout is.
+    if node --test-concurrency=2 --version > /dev/null 2>&1; then
+        set -- --test-concurrency=2 "$@"
     fi
     node --test \
         --test-reporter=spec --test-reporter-destination=stdout \
