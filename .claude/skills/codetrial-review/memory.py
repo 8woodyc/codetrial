@@ -69,6 +69,7 @@ import functools
 import gzip
 import hashlib
 import http.client
+import importlib.util
 import json
 import os
 import re
@@ -84,6 +85,7 @@ import urllib.request
 import urllib.parse
 import zlib
 from pathlib import Path
+from types import SimpleNamespace
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -91,7 +93,7 @@ REPO = "sysprog21/codetrial"
 # Bumped whenever what is extracted from the raw payloads changes: a store at
 # another version rebuilds every derived table from `raw` when it is opened,
 # which costs no API call.
-VERSION = 9
+VERSION = 10
 # Source compatibility is independent of the disposable search indexes.
 SOURCE_FORMAT = 3
 SNAPSHOT_PREFIX = "review-memory-"
@@ -340,17 +342,22 @@ def validate_manifest(data, repo):
 HIDDEN = re.compile(
     r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u00ad\u034f\u061c\u180b-\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufe00-\ufe0f\ufeff\ufff9-\ufffb\U000e0000-\U000e007f\U000e0100-\U000e01ef]"
 )
+NOT_AFTER_WORD = r"(?<![A-Za-z0-9])"
 CREDENTIALS = (
     (
         "github",
         re.compile(
-            r"\b(?:gh[pousr]_[A-Za-z0-9]{36,255}|github_pat_[A-Za-z0-9_]{40,255})\b"
+            NOT_AFTER_WORD
+            + r"(?:gh[pousr]_[A-Za-z0-9]{36,255}|github_pat_[A-Za-z0-9_]{40,255})\b"
         ),
     ),
     ("google-api", re.compile(r"\bAIza[A-Za-z0-9_-]{35}\b")),
     (
         "provider-api",
-        re.compile(r"\bsk-(?:(?:proj|ant)-[A-Za-z0-9_-]{24,}|[A-Za-z0-9]{32,})\b"),
+        re.compile(
+            NOT_AFTER_WORD
+            + r"sk-(?:(?:proj|ant)-[A-Za-z0-9_-]{24,}|[A-Za-z0-9]{32,})\b"
+        ),
     ),
     (
         "private-key",
@@ -361,6 +368,23 @@ CREDENTIALS = (
     (
         "url-password",
         re.compile(r"\b[a-zA-Z][a-zA-Z0-9+.-]{0,31}://[^\s/:@]+:[^\s/@]+@"),
+    ),
+    ("aws", re.compile(NOT_AFTER_WORD + r"(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Za-z0-9])")),
+    ("slack", re.compile(NOT_AFTER_WORD + r"xox[abprs]-[A-Za-z0-9-]{10,}")),
+    (
+        "jwt",
+        re.compile(
+            NOT_AFTER_WORD
+            + r"eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"
+        ),
+    ),
+    (
+        "secret-assignment",
+        re.compile(
+            r"\b[A-Za-z0-9_]{0,64}(?:SECRET|TOKEN|PASSWORD|API_?KEY)[A-Za-z0-9_]{0,64}\s*[=:]\s*"
+            r"[\"']?(?=[A-Za-z+/_=-]*[0-9])[A-Za-z0-9+/_=-]{16,}(?![\w(.])",
+            re.I,
+        ),
     ),
 )
 MODEL_MARKERS = re.compile(
@@ -892,7 +916,11 @@ def connect(path, repo=REPO, allow_migration=True):
     # A sweep's agents open the store together; one that waits a minute for
     # another's write beats one that dies after SQLite's default five seconds.
     if allow_migration or path == ":memory:":
-        db = sqlite3.connect(path, timeout=min(remaining() or 60, 60))
+        db = sqlite3.connect(
+            ":memory:" if path == ":memory:" else Path(path).resolve().as_uri(),
+            uri=True,
+            timeout=min(remaining() or 60, 60),
+        )
     else:
         try:
             db = sqlite3.connect(
@@ -3461,11 +3489,16 @@ def empty_store(db):
         "decisions",
         "decision_sources",
         "authority",
-        "sync_state",
         "stale",
     ] + DERIVED_TABLES
-    return not any(
-        db.execute("SELECT 1 FROM " + table + " LIMIT 1").fetchone() for table in tables
+    return (
+        not any(
+            db.execute("SELECT 1 FROM " + table + " LIMIT 1").fetchone()
+            for table in tables
+        )
+        and not db.execute(
+            "SELECT 1 FROM sync_state WHERE pass != 'local_review_experience' LIMIT 1"
+        ).fetchone()
     )
 
 
@@ -3475,24 +3508,78 @@ def install_snapshot(db, path, data, repo):
         if not empty_store(db):
             raise Fail("existing memory data will not be replaced")
 
-        def progress(status, left, total):
-            remaining()
+        # Only canonical tables are replaced. Local experience and its marker
+        # survive even when this is the first official snapshot in the clone.
+        db.execute(
+            "ATTACH DATABASE ? AS verified_snapshot",
+            (Path(path).resolve().as_uri() + "?mode=ro",),
+        )
+        expired = [False]
 
-        source.backup(db, pages=128, progress=progress)
+        def progress():
+            if expired[0]:
+                return 0
+            try:
+                remaining()
+            except BudgetExhausted:
+                expired[0] = True
+                return 1
+            return 0
+
+        db.set_progress_handler(progress, 1000)
+        try:
+            with write_lock(db):
+                if not empty_store(db):
+                    raise Fail("existing memory data will not be replaced")
+                for table in [
+                    "raw",
+                    "public_projection",
+                    "authority",
+                    "sync_state",
+                ] + DERIVED_TABLES:
+                    remaining()
+                    columns = {
+                        "docs_fts": "rowid,title,body,terms,paths",
+                        "fixes_fts": "rowid,problem,paths,symbols,solution",
+                    }.get(table)
+                    if columns:
+                        db.execute(
+                            "INSERT INTO {0}({1}) SELECT {1} FROM verified_snapshot.{0}".format(
+                                table, columns
+                            )
+                        )
+                    else:
+                        db.execute(
+                            "INSERT INTO {0} SELECT * FROM verified_snapshot.{0}".format(
+                                table
+                            )
+                        )
+                db.execute("PRAGMA user_version = {}".format(data["index_version"]))
+                # Same transaction as the rows, so a crash cannot leave an
+                # installed store that looks empty to a later bootstrap.
+                mark(
+                    db,
+                    "bootstrap",
+                    json.dumps(
+                        {
+                            "release_id": data["release_id"],
+                            "generated_at": data["generated_at"],
+                            "source_format": data["source_format"],
+                            "sha256": data["sha256"],
+                        }
+                    ),
+                )
+        except sqlite3.OperationalError:
+            if expired[0]:
+                raise BudgetExhausted(
+                    "snapshot installation exceeded its budget"
+                ) from None
+            raise
+        finally:
+            db.set_progress_handler(None, 0)
+            db.execute("DETACH DATABASE verified_snapshot")
         # The installed schema is known before migration can execute any SQL.
         prepare(db, repo)
-        mark(
-            db,
-            "bootstrap",
-            json.dumps(
-                {
-                    "release_id": data["release_id"],
-                    "generated_at": data["generated_at"],
-                    "source_format": data["source_format"],
-                    "sha256": data["sha256"],
-                }
-            ),
-        )
         db.commit()
     finally:
         source.close()
@@ -3505,7 +3592,52 @@ def memory_status(db):
         r["pass"]: {"mark": r["mark"], "at": r["at"]}
         for r in db.execute("SELECT * FROM sync_state")
     }
+    if db.execute(
+        "SELECT 1 FROM sqlite_master WHERE name='local_review_meta'"
+    ).fetchone():
+        try:
+            counts["local_experience"] = {
+                name: db.execute("SELECT count(*) FROM " + table).fetchone()[0]
+                for name, table in (
+                    ("runs", "local_review_runs"),
+                    ("cases", "local_review_cases"),
+                    ("sources", "local_review_sources"),
+                )
+            }
+        except sqlite3.DatabaseError:
+            counts["local_experience"] = {"outcome": "unavailable"}
     return counts
+
+
+@functools.lru_cache(maxsize=1)
+def experience_module():
+    spec = importlib.util.spec_from_file_location(
+        "codetrial_review_experience", Path(__file__).with_name("review-experience.py")
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def experience_api():
+    names = (
+        "Fail",
+        "prepare",
+        "pass_lock",
+        "write_lock",
+        "statements",
+        "ready",
+        "repository_name",
+        "safe_text",
+        "safe_label",
+        "safe_locator",
+        "quoted",
+        "fts_query",
+        "now",
+        "memory_status",
+        "mark",
+    )
+    return SimpleNamespace(**{name: globals()[name] for name in names})
 
 
 def staging_prefix(path):
@@ -3732,6 +3864,35 @@ def main(argv=None):
     d.add_argument("--path", action="append", default=[])
     d.add_argument("--source", action="append", default=[])
     d.add_argument("--ref")
+    exp = sub.add_parser("experience", help="private nonbinding review experience")
+    exp_sub = exp.add_subparsers(dest="action", required=True)
+    record = exp_sub.add_parser("record")
+    record.add_argument("--report", required=True)
+    record.add_argument("--bundle")
+    record.add_argument("--skill", default="codetrial-review")
+    record.add_argument("--run-id")
+    record.add_argument("--expected-manifest-hash")
+    record.add_argument("--expected-diff-hash")
+    listing = exp_sub.add_parser("list")
+    listing.add_argument("--limit", type=int, default=10)
+    showing = exp_sub.add_parser("show")
+    showing.add_argument("run_id")
+    query = exp_sub.add_parser("search")
+    query.add_argument("text", nargs="*")
+    query.add_argument("--file", action="append", default=[])
+    query.add_argument("--limit", type=int, default=10)
+    query.add_argument("--include-unproven", action="store_true")
+    local_context = exp_sub.add_parser("context")
+    local_context.add_argument("--bundle", required=True)
+    resolution = exp_sub.add_parser("resolve")
+    resolution.add_argument("--case", type=int, required=True)
+    resolution.add_argument(
+        "--status",
+        choices=("fixed", "still-present", "not-reproduced", "accepted-risk"),
+        required=True,
+    )
+    resolution.add_argument("--head", required=True)
+    resolution.add_argument("--evidence", required=True)
     args = p.parse_args(argv)
     db = lock = None
     alarm = None
@@ -3761,6 +3922,8 @@ def main(argv=None):
             raise Fail("--ref {} is not a commit here".format(ref))
         path = args.db or default_db()
         args.store_path = path
+        if args.command == "experience":
+            return experience_module().run(path, args, experience_api())
         writing = args.command in SYNC_PASSES or (
             args.command == "decisions" and args.action in ("add", "drop")
         )

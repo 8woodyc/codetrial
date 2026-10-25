@@ -66,4 +66,5 @@ raises.
   commit series and the description are still read, and said once in the
   report, not on a line.
 - A follow-up the PR description already names as out of scope: ask for an
-  issue, not a change, and only if none exists.
+  issue, not a change, and only if none exists. A description never exempts a
+  defect the diff itself introduces.

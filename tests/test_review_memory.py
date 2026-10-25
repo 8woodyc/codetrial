@@ -1692,6 +1692,34 @@ class EvidenceSafetyTests(MemoryCase):
             )
             self.assertNotIn("B" * 36, projected)
 
+    def test_public_projection_covers_common_provider_credentials(self):
+        memory = self.memory_module()
+        secrets = {
+            "aws": "AKIA" + "A" * 16,
+            "slack": "xoxb-" + "1" * 12 + "-" + "a" * 12,
+            "jwt": "eyJ" + "a" * 10 + ".eyJ" + "b" * 10 + "." + "c" * 10,
+            "env": "LIVEKIT_API_SECRET=" + "q1" * 12,
+            "prefixed": "MY_TOKEN_ghp_" + "D" * 36,
+        }
+        for name, secret in secrets.items():
+            with self.subTest(name):
+                projected, changed = memory.credential_projection("log: " + secret)
+                self.assertTrue(changed)
+                self.assertNotIn(secret[-12:], projected)
+                self.assertEqual(
+                    memory.credential_projection(projected), (projected, False)
+                )
+
+    def test_secret_assignment_detector_leaves_ordinary_code_alone(self):
+        memory = self.memory_module()
+        for code in (
+            "api_key: api_key.to_string(),",
+            "google_api_keys: google_api_keys(&values),",
+            "token = some_long_identifier_name_here",
+        ):
+            with self.subTest(code):
+                self.assertEqual((code, False), memory.credential_projection(code))
+
     def test_projected_hunk_is_unknown_but_literal_placeholder_is_ordinary_source(self):
         memory = self.memory_module()
         row = {

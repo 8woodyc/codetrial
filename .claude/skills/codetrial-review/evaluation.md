@@ -2,7 +2,8 @@
 
 `evaluate-memory.py` measures standalone historical lookups against a frozen
 public snapshot. It does not simulate reviewing a target PR, reconstruct an
-earlier review cutoff, or establish that memory improves defect detection.
+earlier review cutoff, or establish that memory improves defect detection; see
+[defect-evaluation.md](defect-evaluation.md) for what would.
 Keep source-conditioned model labels separate from human judgments and
 independent user queries. A known-positive set is not exhaustive relevance:
 unjudged results are not false positives.

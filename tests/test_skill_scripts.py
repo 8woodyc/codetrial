@@ -8,6 +8,7 @@ a case names exactly what resolves and what does not.
 """
 
 import fnmatch
+import hashlib
 import importlib.util
 import json
 import os
@@ -875,7 +876,18 @@ class PrSweepTests(SweepCase):
         self.assertIn("publish-memory.py verify", signer)
         self.assertNotIn("publish-memory.py prepare", signer)
         self.assertNotIn("actions/cache", workflow)
-        self.assertNotRegex(workflow, r"run:.*\$\{\{")
+        lines = workflow.splitlines()
+        for number, line in enumerate(lines):
+            if line.lstrip().startswith(("run:", "- run:")):
+                indent = len(line) - len(line.lstrip())
+                block = [line]
+                for following in lines[number + 1 :]:
+                    if following.strip() and (
+                        len(following) - len(following.lstrip()) <= indent
+                    ):
+                        break
+                    block.append(following)
+                self.assertNotIn("${{", "\n".join(block), line)
         product = (ROOT / ".github/workflows/check.yml").read_text()
         self.assertIn(
             'gh api --paginate "repos/$GH_REPO/releases?per_page=100"', product
@@ -2052,6 +2064,14 @@ class ReviewBundleTests(unittest.TestCase):
         self.assertIn("    10  keep\n       --- x\n    11 +new\n", numbered)
         self.assertIn("## web/old.js\n(deleted)\n", numbered)
         self.assertNotIn("since.diff", written)
+        # Synthetic h1 is deliberately not a full SHA: optional private
+        # experience preparation must report its limitation without failing
+        # the otherwise valid review bundle.
+        for status in ("experience-status.json", "experience-context-status.json"):
+            self.assertEqual(json.loads(written[status])["outcome"], "unavailable")
+        self.assertNotIn("experience-start.json", written)
+        self.assertIn("full manifest head", written["experience-begin.stderr"])
+        self.assertIn("Local experience unavailable", written["experience.md"])
 
     def test_since_needs_enough_of_a_sha_to_name_a_commit(self):
         # A 1-digit prefix of the head would read as the head and review all.
@@ -2189,6 +2209,37 @@ class ReviewBundleTests(unittest.TestCase):
                 return json.loads(result.stdout)
 
             clean = local(base)
+            start_path = Path(out, "experience-start.json")
+            first_start = json.loads(start_path.read_text())
+            self.assertRegex(first_start["run_id"], r"^[0-9a-f]{32}$")
+            self.assertEqual(first_start["head"], clean["head"])
+            self.assertEqual(
+                first_start["diff_hash"],
+                hashlib.sha256(Path(out, "pr.diff").read_bytes()).hexdigest(),
+            )
+            self.assertEqual(
+                first_start["manifest_hash"],
+                hashlib.sha256(Path(out, "manifest.json").read_bytes()).hexdigest(),
+            )
+            self.assertEqual(
+                json.loads(Path(out, "experience-status.json").read_text()), first_start
+            )
+            context_status = json.loads(
+                Path(out, "experience-context-status.json").read_text()
+            )
+            self.assertEqual(context_status["outcome"], "ready")
+            self.assertEqual(context_status["cases"], 0)
+            self.assertIn(
+                "not evidence of absence", Path(out, "experience.md").read_text()
+            )
+            for name in (
+                "experience-start.json",
+                "experience-status.json",
+                "experience.md",
+            ):
+                self.assertEqual(Path(out, name).stat().st_mode & 0o777, 0o600)
+            self.assertEqual(local(base)["head"], clean["head"])
+            self.assertEqual(json.loads(start_path.read_text()), first_start)
             # Every commit carries the configured email: the account's own.
             self.assertEqual(clean["outside_reviewers"], "allowed")
             self.assertEqual(clean["against"], f"{base}...HEAD")
@@ -2219,6 +2270,14 @@ class ReviewBundleTests(unittest.TestCase):
             Path(repo, "web", "a.js").write_text("one\ntwo\nthree\n")
             Path(repo, "notes.txt").write_text("x\n")
             dirty = local()
+            dirty_start = json.loads(start_path.read_text())
+            Path(repo, "web", "a.js").write_text("one\ntwo\nfour\n")
+            same_head_new_diff = local()
+            new_start = json.loads(start_path.read_text())
+            self.assertEqual(same_head_new_diff["head"], dirty["head"])
+            self.assertNotEqual(new_start["diff_hash"], dirty_start["diff_hash"])
+            self.assertNotEqual(new_start["run_id"], dirty_start["run_id"])
+            Path(repo, "web", "a.js").write_text("one\ntwo\nthree\n")
             self.assertEqual(dirty["against"], "HEAD")
             self.assertEqual(dirty["size"]["additions"], 1)
             # With a base and uncommitted work, the base to the working tree:
@@ -2908,7 +2967,7 @@ if 'ensure' in sys.argv:
     print(os.environ['CASE_JSON'])
     sys.exit(int(os.environ['CASE_EXIT']))
 with open(os.environ['CALL_LOG'], 'a') as out:
-    out.write('context\\n')
+    out.write(' '.join(sys.argv[1:]) + '\\n')
 if os.environ['CONTEXT_FAIL'] == 'true':
     sys.exit(1)
 Path(sys.argv[-1], 'history.md').write_text('fixture context')
@@ -2948,6 +3007,11 @@ Path(sys.argv[-1], 'history.md').write_text('fixture context')
                         )
                         self.assertEqual(result.returncode, 0, result.stderr)
                         self.assertEqual(log.exists(), context_called)
+                        if context_called:
+                            calls = log.read_text().split()
+                            self.assertIn("context", calls)
+                            self.assertIn("--no-migrate", calls)
+                            self.assertNotIn("experience", calls)
                         history = (base / "review-7/history.md").read_text()
                         self.assertEqual(
                             "fixture context" in history,

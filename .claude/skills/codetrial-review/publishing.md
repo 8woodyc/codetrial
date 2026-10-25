@@ -31,18 +31,6 @@ If repository growth makes a complete sweep exceed one run's quota or time,
 add resumable sweep collection or revise the quota/cadence before relying on it.
 A completed sweep must be at most seven days old at publication.
 
-An exploratory read-only run at collector commit `9df57f83` used a personal
-token, not the workflow token: poll used 4 gh invocations in 3.9 seconds, detail
-used 20 in 19.0 seconds, and a complete sweep used 354 in 341.9 seconds. All
-invocations succeeded and each returned one JSON response page. HTTP retries
-inside gh were not instrumented. Its clean local snapshot held
-480 threads, 5,019 documents and 7,581 raw records, with zero pending PRs or
-incomplete file lists. Building the unsigned snapshot took 66.1 seconds and
-produced 28,878,433 compressed bytes from 127,373,312 SQLite bytes. Eleven raw
-records disclosed redactions. This single live observation supports the current
-sweep/time budgets; it is not a repeatable benchmark, an attested download test,
-or evidence that workflow-token collaborator access works.
-
 GitHub CLI must support `gh attestation verify` with signer-workflow, source-ref,
 source-digest and deny-self-hosted-runners flags. The workflow uses its scoped
 GitHub token. A personal token measurement does not establish that this token

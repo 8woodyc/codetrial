@@ -110,8 +110,12 @@ An older or newer index is accepted only if its physical schema is known; it is
 then rebuilt locally. An unknown schema is refused regardless of its version.
 
 A safely empty store is checked through SQLite, including hot-journal recovery,
-not by file existence. Installation uses SQLite backup while the sync lock is
-held, with a deadline callback. Populated or ambiguous stores are preserved.
+not by file existence. Installation copies only verified canonical tables in one
+SQLite transaction while the sync lock is held, with deadline checks and rollback.
+Private `local_review_*` tables and their protective marker survive bootstrap;
+a store containing only these experiences is eligible for its first snapshot.
+Public snapshots and publisher checkpoints omit those tables and the marker.
+Other populated or ambiguous stores are preserved.
 The ensure command refuses platforms without fcntl locking; the older manual
 sync commands keep their existing platform behavior.
 

@@ -89,6 +89,30 @@ delete them, and never assume a clone has them. Reports and analyses stay out
 of the tree the same way: a scratch directory, not a new tracked file. Every
 skill's `$SCRATCH` means that directory, the session's scratch space.
 
+## Local evidence at closeout
+
+Every CodeTrial skill invocation closes with an auditable local report following
+[codetrial-review/experience.md](../codetrial-review/experience.md). Include the
+full examined commit, explicit complete/incomplete outcome, relevant paths,
+skills actually used, confirmed/refuted findings and unresolved questions with
+concrete checks. Record canonical history as used, consulted or rejected with
+reasons and a concrete check against the examined head (or why code applicability
+is not relevant). Open
+and check the canonical source itself before assigning any of those roles.
+Search snippets and earlier local agent reports are leads, never maintainer
+rules. Open the owning contract rather than restating it from memory.
+
+Use one report for a combined invocation, listing every skill used; a separate
+subtask with another examined head needs its own report. A conversational
+answer with no code findings still records its scope and evidence, with empty
+case arrays. Incomplete work records its limits and next checks, not a successful
+review. Review bundle preparation now automates pinned begin and bounded private
+experience context; review closeout explicitly runs `review-lifecycle.py finish`
+and retains durable pending data for an explicit retry on failure. Other skills
+still explicitly use `experience record`, including combined invocations. There
+is no universal automatic hook or finalizer. Keep failed record attempts and
+diagnostics and disclose them rather than claiming durable storage. This local write authorizes no GitHub write.
+
 ## Contracts that refuse a change
 
 `CONTRIBUTING.md` names the owning documents and the rule that a document

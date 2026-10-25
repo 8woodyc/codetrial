@@ -442,3 +442,12 @@ intended relationship as a proposal, never as applied.
 Post any preserved reproduction evidence to the canonical issue before closing.
 Do not pair `--duplicate-of` with a `Duplicate of #N` comment; GitHub's marker
 already says it. Report applied actions separately from proposals, with links.
+
+## Local evidence at closeout
+
+Before ending this invocation, follow the shared
+[local evidence contract](../codetrial-conventions/SKILL.md#local-evidence-at-closeout)
+and explicitly record its report using
+[experience.md](../codetrial-review/experience.md). Include this skill in
+`skills_used`; a combined invocation may use one report for its examined head.
+Local experience is a lead to recheck, never a maintainer ruling.

@@ -88,3 +88,12 @@ The crates are pinned in `Cargo.lock`, and a bump is slow to build
 bump meets the `vendor/livekit-net` README's removal condition, then run the
 Rust lanes and a live interview through codetrial-verify: some regressions only
 show in a real room with a real browser.
+
+## Local evidence at closeout
+
+Before ending this invocation, follow the shared
+[local evidence contract](../codetrial-conventions/SKILL.md#local-evidence-at-closeout)
+and explicitly record its report using
+[experience.md](../codetrial-review/experience.md). Include this skill in
+`skills_used`; a combined invocation may use one report for its examined head.
+Local experience is a lead to recheck, never a maintainer ruling.

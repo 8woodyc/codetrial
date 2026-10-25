@@ -33,6 +33,10 @@
 #                this one, numbered the same way, when that head is an
 #                ancestor of this one; a force push or a merged base reads as
 #                a full review instead, and the manifest says why
+#   experience-start.json pins the local experience run to this manifest/diff;
+#   experience-status.json reports whether begin succeeded
+#   experience.md gives bounded private prior cases without migrating history;
+#   experience-context-status.json reports that independent read outcome
 # A rerun into the same <dir> replaces what an earlier head left there.
 #
 # Local mode with no base reviews the working tree against HEAD when it is dirty
@@ -55,6 +59,7 @@
 # are read against the general rules only, which the report says.
 
 set -eu
+umask 077
 
 usage='usage: review-bundle.sh <pr> <dir> [repo] [--since <sha>] | --local <dir> [<base>]'
 here=$(dirname "$0")
@@ -177,6 +182,13 @@ manifest()
          unruled: [$files[] | select(.rules == []) | .path]} + $extra' \
         "$dir/files.json" > "$dir/manifest.json"
     rm -f "$dir/rules.tsv" "$dir/files.json"
+    if ! python3 "$here/review-lifecycle.py" begin --bundle "$dir" > "$dir/experience-status.json" 2> "$dir/experience-begin.stderr"; then
+        printf '%s\n' '{"outcome":"unavailable","reason":"experience begin failed","diagnostics":"experience-begin.stderr"}' > "$dir/experience-status.json"
+    fi
+    if ! python3 "$here/memory.py" experience context --bundle "$dir" > "$dir/experience-context-status.json" 2> "$dir/experience-context.stderr"; then
+        printf '%s\n' 'Local experience unavailable; inspect experience-context-status.json and preparation diagnostics. Continue current-code verification.' > "$dir/experience.md"
+        printf '%s\n' '{"outcome":"unavailable","reason":"local experience read failed","diagnostics":"experience-context.stderr"}' > "$dir/experience-context-status.json"
+    fi
     cat "$dir/manifest.json"
 }
 

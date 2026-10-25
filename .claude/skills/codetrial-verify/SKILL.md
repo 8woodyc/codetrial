@@ -318,3 +318,12 @@ claim the phrase and its neighbor disclaim it, then confirm with `--only`
 naming the failing queries and `--runs 3`. For the same reason, do not install
 another skill set into this checkout whose descriptions claim requests these
 skills own.
+
+## Local evidence at closeout
+
+Before ending this invocation, follow the shared
+[local evidence contract](../codetrial-conventions/SKILL.md#local-evidence-at-closeout)
+and explicitly record its report using
+[experience.md](../codetrial-review/experience.md). Include this skill in
+`skills_used`; a combined invocation may use one report for its examined head.
+Local experience is a lead to recheck, never a maintainer ruling.
