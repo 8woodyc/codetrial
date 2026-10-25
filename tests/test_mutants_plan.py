@@ -143,7 +143,7 @@ done
         self.assertFalse(self.output.exists())
 
     def test_tool_setup_is_guarded_by_the_diff(self):
-        for name in ("Install Rust", "Cache cargo-mutants", "Install cargo-mutants"):
+        for name in ("Install Rust", "Install cargo-mutants"):
             self.assertIn(
                 "        if: steps.diff.outputs.changed == 'true'\n", planner_step(name)
             )

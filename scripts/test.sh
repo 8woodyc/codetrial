@@ -132,6 +132,44 @@ browser_tests()
         return 1
     fi
 
+    # BROWSER_SHARD=i/n runs one slice of the static suites, so CI can spread
+    # the lane over runners. The slices partition the files: each goes to the
+    # slice with the least source so far, largest first, which keeps the slow
+    # editor suites apart without a hand-kept list. An unset variable runs them
+    # all, which is what a local run wants.
+    if [ "$tier" = static ] && [ -n "${BROWSER_SHARD:-}" ]; then
+        case $BROWSER_SHARD in
+            [1-9]/[1-9]) ;;
+            *)
+                echo "BROWSER_SHARD must look like 1/2, not $BROWSER_SHARD" >&2
+                return 1
+                ;;
+        esac
+        if [ "${BROWSER_SHARD%/*}" -gt "${BROWSER_SHARD#*/}" ]; then
+            echo "BROWSER_SHARD $BROWSER_SHARD names a slice past the last" >&2
+            return 1
+        fi
+        slice=$(wc -c "$@" | sort -k1,1nr -k2 | awk \
+            -v index_="${BROWSER_SHARD%/*}" -v total="${BROWSER_SHARD#*/}" '
+            $2 == "total" { next }
+            {
+                pick = 0
+                for (k = 1; k < total; k++) if (load[k] < load[pick]) pick = k
+                load[pick] += $1
+                if (pick == index_ - 1) { sub(/^ *[0-9]+ /, ""); print }
+            }')
+        set --
+        while IFS= read -r test_file; do
+            [ -n "$test_file" ] && set -- "$@" "$test_file"
+        done << SLICE
+$slice
+SLICE
+        if [ "$#" -eq 0 ]; then
+            echo "browser shard $BROWSER_SHARD is empty" >&2
+            return 1
+        fi
+    fi
+
     # Two reporters: `spec` to the terminal for whoever is watching, and `tap`
     # to a file for the summary below. A skip reads as "unverified", not as
     # "fine", and both the reason and the total scroll past long before the

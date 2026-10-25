@@ -72,6 +72,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
@@ -84,9 +86,14 @@ jobs:
 
       - name: Install Rust
         run: rustup toolchain install --target ${{ matrix.target }}
+      # Saved from main only. Each platform's entry is 640 to 910 MB, a pull
+      # request's copy is readable by that pull request alone, and the
+      # repository's 10 GB limit was full: one desktop pull request wrote
+      # 2.2 GB that evicted the entries main's runs restore.
       - uses: Swatinem/rust-cache@v2
         with:
           key: desktop-${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
             . -> target
             desktop -> target/desktop
@@ -176,6 +183,8 @@ jobs:
       GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
           pattern: codetrial-desktop-*

@@ -145,7 +145,7 @@ gate()
         ]
         return result, gates
 
-    def run_browser_tests(self, root, tier, *, body=None, path=None):
+    def run_browser_tests(self, root, tier, *, body=None, path=None, env=None):
         """Run test.sh's browser_tests on root, then print what it skipped."""
         body = function_body("browser_tests") if body is None else body
         script = (
@@ -153,7 +153,7 @@ gate()
             f"browser_tests() {{\n{body}\n}}\n"
             f'browser_tests {tier}\nstatus=$?\nprintf "%s" "$skipped"\nexit "$status"\n'
         )
-        env = {**os.environ, "CI": "false"}
+        env = {**os.environ, "CI": "false", "BROWSER_SHARD": "", **(env or {})}
         if path:
             env["PATH"] = f"{path}{os.pathsep}{env['PATH']}"
         return subprocess.run(
@@ -379,10 +379,39 @@ printf 'python:%s\\n' "$*" >> "$CALLS"
                     )
                     self.assertEqual(calls, expected_calls)
 
+    def test_browser_shards_partition_the_static_suites(self):
+        with tempfile.TemporaryDirectory() as directory:
+            support.write_executable(
+                Path(directory) / "node",
+                "#!/bin/sh\nfor arg do\n"
+                'case "$arg" in *.test.js) printf "%s\\n" "$arg" >&2 ;; esac\ndone\n',
+            )
+            slices = []
+            for shard in ("1/2", "2/2"):
+                result = self.run_browser_tests(
+                    ROOT, "static", path=directory, env={"BROWSER_SHARD": shard}
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                slices.append({Path(line) for line in result.stderr.splitlines()})
+            self.assertTrue(slices[0] and slices[1])
+            self.assertFalse(slices[0] & slices[1])
+            full = self.run_browser_tests(ROOT, "static", path=directory)
+            self.assertEqual(
+                slices[0] | slices[1],
+                {Path(line) for line in full.stderr.splitlines()},
+            )
+            for bad in ("3/2", "0/2", "x"):
+                refused = self.run_browser_tests(
+                    ROOT, "static", path=directory, env={"BROWSER_SHARD": bad}
+                )
+                self.assertNotEqual(refused.returncode, 0, bad)
+
     def test_publishing_waits_on_the_lanes_not_on_check(self):
         # A push skips the mutation jobs `check` waits on, and the default
-        # `success()` would carry that skip through `check` to both of these.
-        self.assertIn("    needs: [gates, audit]\n", support.job("build"))
+        # `success()` would carry that skip through `check` to the release.
+        # The builds start beside the lanes and only the release waits on both,
+        # so nothing is published from a commit a lane rejected.
+        self.assertNotIn("    needs:", support.job("build"))
         self.assertIn("    needs: [gates, audit, build]\n", support.job("release"))
 
     def test_each_lane_has_a_bounded_job(self):
@@ -677,7 +706,7 @@ printf 'python:%s\\n' "$*" >> "$CALLS"
         self.assertEqual(
             set(matrix["portable"]["packages"].split()), {"shellcheck", "shfmt"}
         )
-        self.assertEqual(set(matrix["browser"]), {"lane", "timeout"})
+        self.assertEqual(set(matrix["browser"]), {"lane", "shard", "timeout"})
         for name in ("ruff", "commentflow", "actionlint"):
             with self.subTest(tool=name):
                 self.assertEqual(
