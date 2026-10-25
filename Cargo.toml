@@ -98,11 +98,12 @@ test = true
 
 # scripts/hook-check holds every `cargo build` to the git hooks being in
 # effect; its build.rs says why it is a member of its own. `vendor/` holds path
-# dependencies, not members.
+# dependencies, not members, and `desktop/` is a crate of its own with its own
+# lockfile that the root's builds must not need WebKitGTK to compile.
 [workspace]
 members = ["scripts/hook-check"]
 default-members = [".", "scripts/hook-check"]
-exclude = ["vendor"]
+exclude = ["vendor", "desktop"]
 
 # Release archives distribute the executable, not a debugging target. Cargo
 # already omits debug information in this profile; omit linker symbols too.

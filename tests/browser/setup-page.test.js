@@ -23,6 +23,8 @@ let browser = null;
 let server = null;
 let base = "";
 let submissions = [];
+// What /api/setup/offer answers, or null for the 404 of no offer.
+let offered = null;
 
 before(async () => {
   browser = await launchChromium();
@@ -32,6 +34,12 @@ before(async () => {
       if (url.pathname === "/setup") {
         response.setHeader("content-type", "text/html");
         response.end(html);
+        return true;
+      }
+      if (url.pathname === "/api/setup/offer") {
+        response.statusCode = offered ? 200 : 404;
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify(offered ?? {}));
         return true;
       }
       if (url.pathname === "/api/setup") {
@@ -82,6 +90,54 @@ test("setup palette stays aligned with the lobby", async (t) => {
         `${colorScheme} ${name} differs from the lobby`,
       );
     }
+  }
+});
+
+// The desktop app's starting page loads before any server can serve the lobby's
+// stylesheet, so it carries a copy; this is what keeps the copy from drifting.
+test("desktop start page palette stays aligned with the lobby", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const startCss = read("desktop/ui/start.css");
+  const startTokens = [
+    ...new Set(
+      [...startCss.matchAll(/^\s+(--[a-z-]+):/gm)].map((match) => match[1]),
+    ),
+  ];
+  assert.ok(startTokens.length > 0, "start page tokens exist");
+  for (const colorScheme of ["light", "dark"]) {
+    const startPage = await browser.newPage({ colorScheme });
+    const lobbyPage = await browser.newPage({ colorScheme });
+    t.after(() => Promise.all([startPage.close(), lobbyPage.close()]));
+    await startPage.setContent("<body></body>");
+    await startPage.addStyleTag({ content: startCss });
+    await lobbyPage.setContent('<body class="practice-page"></body>');
+    await lobbyPage.addStyleTag({ content: lobbyCss });
+
+    const tokensOn = (page, selector) =>
+      page.locator(selector).evaluate((element, names) => {
+        const style = getComputedStyle(element);
+        return Object.fromEntries(
+          names.map((name) => [name, style.getPropertyValue(name)]),
+        );
+      }, startTokens);
+    const startValues = await tokensOn(startPage, ":root");
+    const lobbyValues = await tokensOn(lobbyPage, ".practice-page");
+    const compact = (value) => value.replace(/\s+/g, "");
+    let compared = 0;
+    for (const name of startTokens) {
+      // A token the lobby does not define is the start page's own.
+      if (!lobbyValues[name].trim()) continue;
+      compared++;
+      assert.equal(
+        compact(startValues[name]),
+        compact(lobbyValues[name]),
+        `${colorScheme} ${name} differs from the lobby`,
+      );
+    }
+    assert.ok(
+      compared >= 8,
+      `${colorScheme}: only ${compared} tokens compared`,
+    );
   }
 });
 
@@ -161,4 +217,219 @@ test("setup validates required fields and preserves retry after server error", a
       googleApiKey: "",
     },
   ]);
+});
+
+const configFile = (name, text) => ({
+  name,
+  mimeType: "text/plain",
+  buffer: Buffer.from(text),
+});
+
+test("setup fills its fields from a chosen config file without sending it", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  submissions = [];
+  const page = await browser.newPage();
+  t.after(() => page.close());
+  await page.goto(`${base}/setup`);
+  assert.notEqual(
+    await page
+      .locator("#import-status")
+      .evaluate((element) => getComputedStyle(element).display),
+    "none",
+    "the import status region is present before its first update",
+  );
+  assert.equal(
+    await page.locator("#import-file").isVisible(),
+    false,
+    "the button stands in for the file input",
+  );
+
+  // What read_config_file accepts: comments, blank lines, spaces around the
+  // equals sign, quotes at either end, and keys Setup does not take.
+  await page
+    .locator("#import-file")
+    .setInputFiles(
+      configFile(
+        "codetrial.env.local",
+        [
+          "# saved by the CLI",
+          "",
+          'LIVEKIT_URL = "wss://example.livekit.cloud"',
+          "LIVEKIT_API_KEY=key",
+          "LIVEKIT_API_SECRET='secret'",
+          "GOOGLE_API_KEY=google",
+          "CODETRIAL_DB_PATH=/elsewhere/codetrial.db",
+        ].join("\r\n"),
+      ),
+    );
+  await page.locator("#import-status.ok").waitFor();
+  assert.match(
+    await page.locator("#import-status").innerText(),
+    /^Filled from codetrial\.env\.local\./,
+  );
+  assert.equal(submissions.length, 0, "importing sends nothing");
+  for (const [field, value] of [
+    ["#livekitUrl", "wss://example.livekit.cloud"],
+    ["#livekitApiKey", "key"],
+    ["#livekitApiSecret", "secret"],
+    ["#googleApiKey", "google"],
+  ]) {
+    assert.equal(await page.locator(field).inputValue(), value, field);
+  }
+
+  await page.locator("#submit").click();
+  await page.locator("#status.error").waitFor();
+  assert.deepEqual(submissions, [
+    {
+      livekitUrl: "wss://example.livekit.cloud",
+      livekitApiKey: "key",
+      livekitApiSecret: "secret",
+      googleApiKey: "google",
+    },
+  ]);
+});
+
+test("setup takes the first key of an imported rotation list and says so", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await browser.newPage();
+  t.after(() => page.close());
+  await page.goto(`${base}/setup`);
+  await page
+    .locator("#import-file")
+    .setInputFiles(
+      configFile(
+        "rotation.env",
+        [
+          "LIVEKIT_URL=wss://example.livekit.cloud",
+          "LIVEKIT_API_KEY=key",
+          "LIVEKIT_API_SECRET=secret",
+          "GOOGLE_API_KEY=single",
+          "GOOGLE_API_KEYS= first , second ",
+        ].join("\n"),
+      ),
+    );
+  await page.locator("#import-status.ok").waitFor();
+  assert.equal(await page.locator("#googleApiKey").inputValue(), "first");
+  assert.match(
+    await page.locator("#import-status").innerText(),
+    /GOOGLE_API_KEYS lists 2 keys; Setup saves the first/,
+  );
+});
+
+test("setup refuses an imported file it cannot read and keeps the fields", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await browser.newPage();
+  t.after(() => page.close());
+  await page.goto(`${base}/setup`);
+  await page.locator("#livekitApiKey").fill("typed");
+
+  await page
+    .locator("#import-file")
+    .setInputFiles(
+      configFile(
+        "broken.env",
+        "LIVEKIT_URL=wss://example.livekit.cloud\nnot a setting\n",
+      ),
+    );
+  await page.locator("#import-status.error").waitFor();
+  assert.equal(
+    await page.locator("#import-status").innerText(),
+    "broken.env: line 2 is not KEY=value",
+  );
+  assert.equal(await page.locator("#livekitApiKey").inputValue(), "typed");
+
+  await page
+    .locator("#import-file")
+    .setInputFiles(
+      configFile("partial.env", "LIVEKIT_URL=wss://example.livekit.cloud\n"),
+    );
+  // The status already shows the last refusal, so wait for this one.
+  await page
+    .locator("#import-status.error", { hasText: "partial.env" })
+    .waitFor();
+  assert.match(
+    await page.locator("#import-status").innerText(),
+    /^partial\.env does not set LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET\.$/,
+  );
+  assert.equal(await page.locator("#livekitApiKey").inputValue(), "typed");
+  assert.equal(await page.locator("#livekitUrl").inputValue(), "");
+});
+
+test("setup offers nothing when the launcher found no config", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  offered = null;
+  const page = await browser.newPage();
+  t.after(() => page.close());
+  await page.goto(`${base}/setup`);
+  await page.locator("#offer[data-checked]").waitFor({ state: "attached" });
+  assert.equal(await page.locator("#offer").isVisible(), false);
+  assert.equal(await page.locator("#import-status").innerText(), "");
+});
+
+test("setup names an offered config and uses it without the keys", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  submissions = [];
+  offered = {
+    path: "/home/me/checkout/config/codetrial.env.local",
+    livekitEndpoint: "wss://example.livekit.cloud",
+    google: true,
+    note: null,
+  };
+  t.after(() => {
+    offered = null;
+  });
+  const page = await browser.newPage();
+  t.after(() => page.close());
+  await page.goto(`${base}/setup`);
+  await page.locator("#offer").waitFor();
+  assert.equal(
+    await page.locator("#offer-text").innerText(),
+    "Keys found in /home/me/checkout/config/codetrial.env.local: LiveKit " +
+      "wss://example.livekit.cloud, with a Google key.",
+  );
+
+  await page.locator("#use-offer").click();
+  await page.locator("#offer-status.error").waitFor();
+  assert.deepEqual(submissions, [{ useOffer: true }]);
+  assert.equal(
+    await page.locator("#offer-status").innerText(),
+    "Check the LiveKit credentials",
+  );
+  assert.equal(await page.locator("#use-offer").isEnabled(), true);
+  assert.equal(await page.locator("#submit").isEnabled(), true);
+  // A refusal hands the keyboard back to the button that was pressed, and the
+  // button's description is the line naming whose keys it uses.
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.id),
+    "use-offer",
+  );
+  assert.equal(
+    await page.locator("#use-offer").getAttribute("aria-describedby"),
+    "offer-text",
+  );
+  for (const field of ["#livekitUrl", "#livekitApiKey", "#livekitApiSecret"]) {
+    assert.equal(await page.locator(field).inputValue(), "", field);
+  }
+});
+
+test("setup reports an offered config it cannot use", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  offered = {
+    path: "/home/me/codetrial.env.local",
+    error:
+      "/home/me/codetrial.env.local does not set LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET.",
+  };
+  t.after(() => {
+    offered = null;
+  });
+  const page = await browser.newPage();
+  t.after(() => page.close());
+  await page.goto(`${base}/setup`);
+  await page.locator("#offer").waitFor();
+  assert.match(
+    await page.locator("#offer-text").innerText(),
+    /^\/home\/me\/codetrial\.env\.local does not set LIVEKIT_URL/,
+  );
+  assert.equal(await page.locator("#use-offer").isVisible(), false);
+  assert.equal(await page.locator("#import-status").innerText(), "");
 });

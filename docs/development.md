@@ -72,13 +72,16 @@ npm ci                            # ESLint and Prettier, pinned
 npx playwright install chromium   # the browser tests, the whole lobby flow
 cargo install cargo-audit         # the dependency advisory scan
 cargo install cargo-deny          # dependency licenses and sources, deny.toml
+sudo apt install libwebkit2gtk-4.1-dev   # Linux: clippy and tests of desktop/
 ```
 
 CI runs `scripts/test.sh rust`, `scripts/test.sh portable` and
 `scripts/test.sh browser` in parallel, with fail-fast disabled so a failure in
 one lane does not hide the others. Clippy and Rust tests share the Rust lane's
-build cache; formatting, Python and shell checks run in the portable
-lane; Node browser tests have their own lane, except the face-detector suite,
+build cache; the desktop app's clippy and tests run in the same lane against
+their own lockfile and cache, after it installs WebKitGTK. Formatting, Python
+and shell checks run in the portable lane; Node browser tests have their own
+lane, except the face-detector suite,
 which needs the Rust binary and runs after its build. All lanes fetch and
 verify vendor assets; each restores the vendored-asset cache, and only the
 portable lane saves it, after its gates pass. Each lane has its own job
@@ -308,6 +311,10 @@ repository secrets are involved: the macOS binary ships with the linker's ad-hoc
 signature and nothing else, so a fork builds the same artifacts this repository
 does. Developer ID signing and notarization would need a paid Apple Developer
 Program membership, and the download instructions clear quarantine instead.
+
+The desktop app is released separately, from `.github/workflows/desktop.yml`
+when a `desktop-vX.Y.Z` tag is pushed, and never touches the CLI's `latest`;
+[desktop.md](desktop.md) has the procedure and what that workflow checks.
 
 The embed falls back per file rather than wholesale, so a partially populated
 web tree is filled in from the built-in copy rather than 404ing. Assets on disk

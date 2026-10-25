@@ -60,7 +60,7 @@ rather than guessing.
 | Phase | Required | Notes |
 |---|---|---|
 | Build time | Rust 1.98 or newer (rustup selects the release `rust-toolchain.toml` pins), `curl` or `wget`, and `sha256sum` or `shasum`; Linux also needs Clang 21+ and GLib development headers | Cargo resolves application crates from `Cargo.lock`. `make build` fetches the checksum-pinned browser assets on the first build. |
-| Test time | Build-time tools, Node.js 18+, and Python 3.9+ | Node runs browser and fixture checks; Python verifies generated problem-bank files. `npm ci` adds pinned Prettier, ESLint and Playwright for the full local browser gate. `ruff`, `shellcheck`, `shfmt`, `commentflow`, `actionlint`, `cargo-audit`, and `cargo-deny` are optional: each gate reports that it skipped rather than failing without them; locally the `actionlint` lane also takes its container image. CI installs these tools and enforces its test lanes whatever a checkout can run. The independent [dependency security check](docs/development.md#dependency-security-checks) blocks newly introduced vulnerabilities on PRs and runs full audits on main. |
+| Test time | Build-time tools, Node.js 18+, and Python 3.9+ | Node runs browser and fixture checks; Python verifies generated problem-bank files. `npm ci` adds pinned Prettier, ESLint and Playwright for the full local browser gate. `ruff`, `shellcheck`, `shfmt`, `commentflow`, `actionlint`, `cargo-audit`, `cargo-deny`, and on Linux `libwebkit2gtk-4.1-dev` (the desktop app's clippy and tests) are optional: each gate reports that it skipped rather than failing without them; locally the `actionlint` lane also takes its container image. CI installs these tools and enforces its test lanes whatever a checkout can run. The independent [dependency security check](docs/development.md#dependency-security-checks) blocks newly introduced vulnerabilities on PRs and runs full audits on main. |
 | Runtime | The compiled `codetrial` binary and a config file | No Node.js, Python, or `node_modules` is required. Rust dependencies are compiled into the binary; browser dependencies are vendored, checksum-pinned, and embedded, so a `web/` directory is optional and only overrides what is already inside. |
 
 On Linux x86_64, `make` downloads the checksum-pinned WebRTC compiler into
@@ -93,8 +93,9 @@ file. Extra `codetrial.env.*` files in the same directory are optional providers
 used for pooling.
 
 If `web` mode finds no config file at all, it serves a Setup page and prints the
-URL to open, so steps 2 and 3 above can be skipped: fill in your keys there and
-it writes `config/codetrial.env.local` for you. That page serves on a loopback
+URL to open, so steps 2 and 3 above can be skipped: fill in your keys there, or
+import them from a config file saved earlier, and it writes
+`config/codetrial.env.local` for you. That page serves on a loopback
 address only and refuses any other, so writing the file yourself is the way to
 deploy for other people. See [docs/install.md](docs/install.md).
 
@@ -102,7 +103,9 @@ deploy for other people. See [docs/install.md](docs/install.md).
 
 Prebuilt binaries for Linux, macOS, and Windows are published for every build of
 `main`. What they carry, the config file each needs beside it, and the platform
-notes are in [docs/install.md](docs/install.md). From a checkout instead:
+notes are in [docs/install.md](docs/install.md). A desktop app that starts the
+server itself and shows it in its own window is described in
+[docs/desktop.md](docs/desktop.md). From a checkout instead:
 
 ```bash
 INTERVIEW_ROOM_NAME=interview-local make web
@@ -321,6 +324,8 @@ The common ones:
 | `CODETRIAL_GEMINI_CANDIDATE_VIDEO_ENABLED` | `false` | Forward candidate video to Gemini, one low-resolution frame in five seconds; ignored in a whiteboard interview |
 | `CODETRIAL_COMPILER_EXPLORER_ENABLED` | `true` | Enable remote C, C++, and Java runs |
 | `CODETRIAL_MAX_CONCURRENT_INTERVIEWS` | `16` | Interviews one `web` process hosts agents for |
+| `CODETRIAL_ALLOWED_HOSTS` | empty | Comma-separated `Host` values the server answers; any other is refused with 421. Empty answers every name, but a value that names no host is refused at startup. `--allowed-hosts` sets it from the command line |
+| `CODETRIAL_EXIT_WITH_STDIN` | unset | For a program that starts the server as its child: exit when standard input reaches end of file, so the server does not outlive a launcher that crashed. Read from the process environment even under `--data-dir` |
 
 Two more matter in production. `SESSION_SECRET` signs the session cookie, and
 its built-in default is a string published in this repository, so the server
@@ -376,6 +381,7 @@ recorded rather than left implicit. See
 | [Contributing](CONTRIBUTING.md) | Reporting a bug, the commit and title rules, opening a pull request |
 | [Development](docs/development.md) | The gate, formatters, hooks, generated files, releases |
 | [Installing a binary](docs/install.md) | Published binaries, platform notes, the config beside them |
+| [Desktop app](docs/desktop.md) | The macOS, Windows and Linux app, its data folder, and what it has not been qualified for |
 | [Interview length](docs/interview-length.md) | What the lobby offers and what the endpoints enforce |
 | [Integrity evidence](docs/integrity-evidence.md) | Response windows, and what CodeTrial declines to look for |
 | [Third-party notices](THIRD-PARTY-NOTICES.md) | Bundled software, licenses, checksums |
@@ -397,6 +403,7 @@ recorded rather than left implicit. See
 
 ```text
 src/            Rust web server, interviewer, and problem bank
+desktop/        Desktop app that runs the server in its own window
 web/            Static browser application
 problem-bank/   Problem and judge source of truth
 config/         Env file templates and per-provider credentials
