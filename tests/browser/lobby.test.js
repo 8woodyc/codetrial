@@ -2282,6 +2282,271 @@ lobbyTest(
 );
 
 lobbyTest(
+  "clicking an already selected problem card releases manual selection",
+  async (page) => {
+    const easyCard = EASY[0];
+    await page.addInitScript(
+      ([key, id]) => localStorage.setItem(key, JSON.stringify([id])),
+      [PRACTICE_LIST_KEY, easyCard],
+    );
+
+    await lobby(page);
+    await awaitReady(page);
+
+    const initial = await snapshot(page);
+
+    // Draw out-of-filter Easy card from saved practice list
+    await page.click("#practice-list-pick");
+    assert.equal((await snapshot(page)).card, easyCard);
+
+    // Open problem picker so the card grid is visible in DOM
+    await page.click("details.problem-picker summary");
+    const cardButton = page.locator(`[data-problem="${easyCard}"]`);
+    assert.equal(
+      await cardButton.isVisible(),
+      true,
+      "selected card must be visible as an exception",
+    );
+
+    // Activate the card button via keyboard while it holds focus
+    await cardButton.focus();
+    await page.keyboard.press("Enter");
+
+    const after = await snapshot(page);
+    assert.notEqual(after.card, easyCard);
+    assert.match(after.note, /^Selected problem:/);
+    assert.equal(
+      await page.locator(`[data-problem="${after.card}"]`).isVisible(),
+      true,
+      "the redrawn card must be shown in the grid",
+    );
+    assert.equal(
+      after.duration,
+      initial.duration,
+      "releasing manual override must restore duration",
+    );
+    assert.equal(
+      await cardButton.isVisible(),
+      false,
+      "out-of-filter card must be hidden after deselection",
+    );
+
+    // Focus must move to problem-picker summary when deselected card hides
+    assert.equal(
+      await page.evaluate(
+        () =>
+          document.activeElement ===
+          document.querySelector("details.problem-picker summary"),
+      ),
+      true,
+      "focus must move to problem-picker summary when deselected card hides",
+    );
+  },
+);
+
+lobbyTest(
+  "deselecting a recommended problem card preserves the card but restores the recommendation note",
+  async (page) => {
+    const dueProblem = EASY[0];
+    reports = [savedAttempt(dueProblem)];
+
+    await lobby(page);
+    await setLevel(page, "Easy", true);
+    await setLevel(page, "Medium", false);
+    await awaitReady(page);
+
+    const initial = await snapshot(page);
+    assert.equal(initial.card, dueProblem);
+    assert.match(initial.note, /Review due after/);
+
+    // Open picker and manually select the recommended card
+    await page.click("details.problem-picker summary");
+    await page.click(`[data-problem="${dueProblem}"]`);
+
+    const selected = await snapshot(page);
+    assert.equal(selected.card, dueProblem);
+    assert.match(selected.note, /Selected problem:/);
+
+    // Click it again to deselect
+    await page.click(`[data-problem="${dueProblem}"]`);
+
+    const after = await snapshot(page);
+    assert.equal(
+      after.card,
+      dueProblem,
+      "card is unchanged when recommendation lands on the same problem",
+    );
+    assert.match(
+      after.note,
+      /Review due after/,
+      "note restores to review due explanation",
+    );
+  },
+);
+
+lobbyTest(
+  "releasing an in-filter card keeps focus on its button",
+  async (page) => {
+    await lobby(page);
+    await awaitReady(page);
+
+    const initial = await snapshot(page);
+
+    // Pick an in-filter card that differs from the default recommendation
+    const otherCard = MEDIUM.find((id) => id !== initial.card) ?? MEDIUM[1];
+    const cardButton = page.locator(`[data-problem="${otherCard}"]`);
+
+    await page.click("details.problem-picker summary");
+    await cardButton.click();
+
+    const manualPick = await snapshot(page);
+    assert.equal(manualPick.card, otherCard);
+
+    // Focus the button and release via keyboard
+    await cardButton.focus();
+    await page.keyboard.press("Enter");
+
+    // 1. Focus assertion
+    assert.equal(
+      await page.evaluate(
+        (id) =>
+          document.activeElement ===
+          document.querySelector(`[data-problem="${id}"]`),
+        otherCard,
+      ),
+      true,
+      "focus must remain on button when the released card stays visible",
+    );
+
+    // 2. Deselection assertion: state reverts to the recommendation
+    const released = await snapshot(page);
+    assert.equal(
+      released.card,
+      initial.card,
+      "selected card must revert to initial recommendation",
+    );
+    assert.equal(
+      released.note,
+      initial.note,
+      "recommendation note must revert to initial recommendation",
+    );
+  },
+);
+
+lobbyTest(
+  "releasing a manual pick before history loads clears selection and disables start",
+  async (page) => {
+    const release = await heldLobby(page);
+    try {
+      await page.click("details.problem-picker summary");
+      const card = MEDIUM[0];
+      const cardButton = page.locator(`[data-problem="${card}"]`);
+
+      // Manually select a problem before history completes
+      await cardButton.click();
+
+      const selected = await snapshot(page);
+      assert.equal(selected.card, card);
+      assert.equal(selected.startDisabled, false);
+
+      // Deselect the card while history is still held
+      await cardButton.click();
+
+      const released = await snapshot(page);
+      assert.equal(released.note, "", "recommendation note must be empty");
+      assert.equal(
+        released.startDisabled,
+        true,
+        "Start button must be disabled",
+      );
+      assert.equal(
+        await page.locator('[data-problem][aria-pressed="true"]').count(),
+        0,
+        "no problem card should be pressed after releasing before history loads",
+      );
+    } finally {
+      release();
+    }
+  },
+);
+
+lobbyTest(
+  "releasing a card after held history resolves applies the suggested level",
+  async (page) => {
+    reports = [missed(MEDIUM[0]), missed(MEDIUM[1])];
+    const release = await heldLobby(page);
+    try {
+      await page.click("details.problem-picker summary");
+      const card = MEDIUM[0];
+      const cardButton = page.locator(`[data-problem="${card}"]`);
+
+      // Manually pick a card before history finishes loading
+      await cardButton.click();
+      assert.equal((await snapshot(page)).card, card);
+
+      // Let history resolve while the card is manually selected
+      release();
+      await reaches(
+        page,
+        () => !document.querySelector("#random-problem").disabled,
+      );
+      // Deselect the card after held history has settled
+      await cardButton.click();
+
+      const released = await snapshot(page);
+      assert.deepEqual(
+        released.levels,
+        ["Easy"],
+        "Suggested difficulty level from resolved history must be applied",
+      );
+      assert.equal(
+        released.startDisabled,
+        false,
+        "Start button must be enabled once recommendation settles",
+      );
+    } finally {
+      release();
+    }
+  },
+);
+
+lobbyTest(
+  "releasing a card before history loads moves focus to summary if card gets hidden",
+  async (page) => {
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    reports = [missed(MEDIUM[0]), missed(MEDIUM[1])];
+    const release = await heldLobby(page);
+    try {
+      await page.click("details.problem-picker summary");
+      const cardButton = page.locator(`[data-problem="${MEDIUM[0]}"]`);
+
+      await cardButton.click();
+      await cardButton.click();
+      assert.equal(
+        await isFocused(cardButton),
+        true,
+        "focus should still be on the released card before history loads",
+      );
+
+      release();
+      await awaitReady(page);
+
+      assert.deepEqual((await snapshot(page)).levels, ["Easy"]);
+      assert.equal(await cardButton.isHidden(), true);
+      assert.equal(
+        await isFocused(page.locator("details.problem-picker summary")),
+        true,
+        "focus must move to the picker summary when the focused card is hidden",
+      );
+      assert.deepEqual(errors, []);
+    } finally {
+      release();
+    }
+  },
+);
+
+lobbyTest(
   "opening the picker preserves a due review outside the selected difficulty",
   async (page) => {
     const due = pageOf("valid-parentheses");

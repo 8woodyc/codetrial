@@ -292,7 +292,9 @@ function selectedEditorOptions() {
 }
 
 // A picked card is a choice about this one interview, not about the filter the
-// checkboxes carry, so it leaves them alone. It suggests a length to go with
+// checkboxes carry, so it leaves them alone. Clicking the currently chosen card
+// again toggles it off, releasing the manual selection and falling back to the
+// default recommendation. When selecting a card, it suggests a length to go with
 // the level it belongs to, which `setDuration` applies only if the candidate
 // has not already chosen one.
 for (const card of cards) {
@@ -309,6 +311,25 @@ for (const card of cards) {
     syncLobbyControls();
   });
   card.button.addEventListener("click", () => {
+    if (manualProblem && problem === card) {
+      const hadFocus = document.activeElement === card.button;
+      manualProblem = false;
+      keptDraw = null;
+      avoidedProblem = undefined;
+      applyDifficulties();
+      if (historyReady) {
+        const note = manualDifficulty ? "" : applySuggestedLevel();
+        // Releasing a manual pick falls back to deterministic recommendation.
+        // If the card is due or the only match, it intentionally stays selected.
+        recommend(note);
+      } else {
+        setProblem(null);
+        nodes.recommendation.textContent = "";
+      }
+      if (card.button.hidden) focusPickerSummary();
+      else if (hadFocus) card.button.focus();
+      return;
+    }
     // setProblem clears the exception; restore it when reselecting.
     const wasException = searchVisibilityException === card;
     manualProblem = true;
@@ -941,6 +962,9 @@ function refreshHistory() {
 /// describing history the page had already replaced.
 function settle() {
   historyReady = true;
+  const focusedCard = cards.find(
+    (card) => card.button === document.activeElement,
+  );
   // A back/forward restore reapplies the filters. Keep an explicit choice
   // visible, whether selected by card, practice draw or history's Try again.
   // A non-empty title search still owns card visibility during account refresh.
@@ -959,6 +983,8 @@ function settle() {
   // still stands, so the button the account refresh held down needs releasing
   // here rather than there.
   syncLobbyControls();
+  // If the card that held focus got hidden, recover focus to the picker summary
+  if (focusedCard?.button.hidden) focusPickerSummary();
 }
 
 async function loadAccount(generation) {
