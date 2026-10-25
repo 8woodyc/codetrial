@@ -238,7 +238,7 @@ gate()
             support.write_executable(
                 Path(directory) / "node",
                 "#!/bin/sh\nfor arg do\n"
-                'case "$arg" in --test-timeout=*) ;; '
+                'case "$arg" in --test-timeout=*|--test-concurrency=*) ;; '
                 '*.test.js) printf "%s\\n" "$arg" >&2 ;; esac\ndone\n',
             )
             for tier in ("server", "static"):
@@ -391,6 +391,43 @@ printf 'python:%s\\n' "$*" >> "$CALLS"
         self.assertLess(timeouts["browser"], timeouts["rust"])
         self.assertLess(timeouts["portable"], timeouts["rust"])
 
+    def test_browser_runner_bounds_concurrent_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tests = root / "tests/browser"
+            tests.mkdir(parents=True)
+            # Three simultaneous browsers on a two-core runner steal time from
+            # each other. The first two files wait for a peer to be active at
+            # once, proving the files really overlap, and every file fails if
+            # all three are ever active together.
+            for index in range(3):
+                overlap = (
+                    "    const deadline = Date.now() + 2000;\n"
+                    "    while (active() < 2 && Date.now() < deadline) await sleep(20);\n"
+                    "    assert.ok(active() >= 2, 'files never ran together');\n"
+                    if index < 2
+                    else ""
+                )
+                (tests / f"parallel-{index}.test.js").write_text(
+                    'const { test } = require("node:test");\n'
+                    'const fs = require("node:fs");\n'
+                    'const assert = require("node:assert/strict");\n'
+                    f"const marker = {str(root / f'active-{index}')!r};\n"
+                    f"const root = {str(root)!r};\n"
+                    "const active = () => fs.readdirSync(root)\n"
+                    '  .filter(n => n.startsWith("active-")).length;\n'
+                    "const sleep = ms => new Promise(r => setTimeout(r, ms));\n"
+                    'test("bounded workers", async () => {\n'
+                    '  fs.writeFileSync(marker, "");\n'
+                    "  try {\n" + overlap + "    await sleep(300);\n"
+                    "    assert.ok(active() <= 2, 'more than two files ran together');\n"
+                    "  } finally { fs.unlinkSync(marker); }\n"
+                    "});\n"
+                )
+            result = self.run_browser_tests(root, "static")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("tests 3", result.stdout)
+
     def test_browser_timeout_fails_a_stalled_suite(self):
         probe = subprocess.run(
             ["node", "--test-timeout=100", "--version"],
@@ -404,9 +441,9 @@ printf 'python:%s\\n' "$*" >> "$CALLS"
         timeout = re.search(r"--test-timeout=(\d+)", body)
         self.assertIsNotNone(timeout)
         self.assertGreater(int(timeout[1]), 0)
-        # Two stalled tests must still fail by name before the job is killed.
+        # A stalled file must fail before the job is killed.
         browser_minutes = int(lanes()["browser"]["timeout"])
-        self.assertLess(2 * int(timeout[1]), browser_minutes * 60 * 1000)
+        self.assertLess(int(timeout[1]), browser_minutes * 60 * 1000)
         with tempfile.TemporaryDirectory() as directory:
             tests = Path(directory) / "tests/browser"
             tests.mkdir(parents=True)

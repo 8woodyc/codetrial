@@ -121,8 +121,8 @@ jobs:
         # `timeout` is each lane's wedge detector: against the six-hour default
         # it catches a job that has stopped making progress, which is all it is
         # for. The browser lane gets far less than the cargo build, because
-        # `--test-timeout` bounds one test, not a file whose top level never
-        # settles.
+        # Node bounds each test file too, but a job can also stall during
+        # dependency installation before the test runner starts.
         include:
           - lane: rust
             timeout: 45
