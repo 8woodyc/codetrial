@@ -83,6 +83,9 @@ export function normalizeProgressEntry(raw) {
       typeof entry.problemId === "string"
         ? entry.problemId
         : String(wrapper.problemId ?? ""),
+    // Keep the saved title separate from the history display placeholder.
+    savedProblemTitle:
+      typeof entry.problemTitle === "string" ? entry.problemTitle.trim() : "",
     problemTitle:
       typeof entry.problemTitle === "string"
         ? entry.problemTitle
@@ -171,6 +174,7 @@ export function progressModelFrom(normalized, filters = {}) {
     String(entry[key]) === String(filters[key]);
   const attempts = normalized.filter(
     (entry) =>
+      matches(entry, "problemId") &&
       matches(entry, "difficulty") &&
       matches(entry, "language") &&
       matches(entry, "durationMin"),
@@ -293,6 +297,17 @@ function newestWordings(reports) {
 }
 
 function progressOptions(entries) {
+  const problems = new Map();
+  for (const entry of entries) {
+    if (entry.problemId.trim()) {
+      if (entry.savedProblemTitle || !problems.has(entry.problemId)) {
+        problems.set(
+          entry.problemId,
+          entry.savedProblemTitle || entry.problemId,
+        );
+      }
+    }
+  }
   const values = (key, compare = undefined) =>
     [
       ...new Set(
@@ -300,6 +315,13 @@ function progressOptions(entries) {
       ),
     ].sort(compare);
   return {
+    problemId: [...problems]
+      .map(([value, label]) => ({ value, label }))
+      .sort(
+        (left, right) =>
+          left.label.localeCompare(right.label) ||
+          left.value.localeCompare(right.value),
+      ),
     difficulty: values(
       "difficulty",
       (left, right) => LEVELS.indexOf(left) - LEVELS.indexOf(right),

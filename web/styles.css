@@ -856,6 +856,10 @@ p {
 }
 
 @media (max-width: 720px) {
+  .progress-problem-filter {
+    grid-column: 1 / -1;
+  }
+
   .progress-chart-table {
     display: block;
     width: 100%;

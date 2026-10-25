@@ -143,6 +143,7 @@ const nodes = {
   progressTrends: document.querySelector("#progress-trends"),
   progressWeaknesses: document.querySelector("#progress-weaknesses"),
   progressTopics: document.querySelector("#progress-topics"),
+  progressProblem: document.querySelector("#progress-problem"),
   progressDifficulty: document.querySelector("#progress-difficulty"),
   progressLanguage: document.querySelector("#progress-language"),
   progressDuration: document.querySelector("#progress-duration"),
@@ -518,6 +519,7 @@ const selectedProgressPhases = new Map();
 let accountHistory = null;
 
 for (const filter of [
+  nodes.progressProblem,
   nodes.progressDifficulty,
   nodes.progressLanguage,
   nodes.progressDuration,
@@ -1639,6 +1641,8 @@ function showProgressError(message) {
   // history it had last managed to load.
   reports = [];
   progressNormalized = [];
+  nodes.progressProblem.length = 1;
+  nodes.progressProblem.value = "all";
   shownAttempts = [];
   renderPracticeFocus();
   hideRecentPerformance();
@@ -1678,16 +1682,24 @@ function showProgress(entries, suffix) {
   nodes.historyHeader.hidden = !erasable;
   nodes.history.hidden = false;
   const model = progressModelFrom(progressNormalized);
+  syncFilter(nodes.progressProblem, model.options.problemId, "All problems");
   syncFilter(
     nodes.progressDifficulty,
-    model.options.difficulty,
-    (value) => value,
+    model.options.difficulty.map((value) => ({ value, label: value })),
   );
-  syncFilter(nodes.progressLanguage, model.options.language, languageLabel);
+  syncFilter(
+    nodes.progressLanguage,
+    model.options.language.map((value) => ({
+      value,
+      label: languageLabel(value),
+    })),
+  );
   syncFilter(
     nodes.progressDuration,
-    model.options.durationMin,
-    (value) => `${value} min`,
+    model.options.durationMin.map((value) => ({
+      value,
+      label: `${value} min`,
+    })),
   );
   renderProgress();
 }
@@ -2319,6 +2331,7 @@ function renderFrameworkChart(framework, model) {
 
 function renderProgress() {
   const filters = {
+    problemId: nodes.progressProblem.value,
     difficulty: nodes.progressDifficulty.value,
     language: nodes.progressLanguage.value,
     durationMin: nodes.progressDuration.value,
@@ -2387,11 +2400,11 @@ function renderProgress() {
     }
   }
 }
-function syncFilter(select, values, label) {
+function syncFilter(select, options, allLabel = "All") {
   const selected = select.value;
-  select.replaceChildren(new Option("All", "all"));
-  for (const value of values)
-    select.add(new Option(label(value), String(value)));
+  select.replaceChildren(new Option(allLabel, "all"));
+  for (const { value, label } of options)
+    select.add(new Option(label, String(value)));
   select.value = [...select.options].some((option) => option.value === selected)
     ? selected
     : "all";

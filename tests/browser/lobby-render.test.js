@@ -43,6 +43,7 @@ await import("/app.js");
 /// browser.
 const SIGNED_OUT = {
   "account-status": "Signed out",
+  "progress-problem": "all",
   start: "Start interview",
   "progress-summary": "Could not load progress saved on this device.",
   "practice-list-status":
