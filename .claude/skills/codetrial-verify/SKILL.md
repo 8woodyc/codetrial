@@ -203,17 +203,35 @@ neither fails a commit nor sneaks through one; a staged formatter setting
 widens the formatting check to every file. No script of ours runs while a merge
 is concluded, since it would execute the merged-in scripts. A formatter a staged file needs refuses
 the commit when missing; a missing linter is named in the closing line instead
-of reported as passed. It does not build, test or check generated-artifact
-drift; that is what the gate is for. `scripts/git-commit-msg.sh` holds the message to the
-rules it prints with `--rules`, `scripts/git-prepare-commit-msg.sh` splices the
-template above a `commit -v` scissors line, and `scripts/git-pre-push.sh`
-replays the rules over commits a rebase or an amend rewrote after the fact, and
-notes a topic head [codetrial-review](../codetrial-review/SKILL.md) has not
-recorded, without refusing it.
+of reported as passed. Changes to hooks, the installer or the commit-log
+checker also run the hook suite against that snapshot; the suite's scratch
+repository sets `codetrial.hookSuite` so its nested commits do not launch it
+again. Changes to skills or repository paths they can reference run
+`scripts/check-skill-refs.py` against the snapshot when this skill exists.
+Those checks include deletions. The hook does not build Rust, run the general
+test suites or check generated-artifact drift; that is what the gate is for.
+`scripts/git-commit-msg.sh` holds the message to the rules it prints with
+`--rules`, `scripts/git-prepare-commit-msg.sh` splices the template above a
+`commit -v` scissors line, and `scripts/git-pre-push.sh` replays the rules over
+commits a rebase or an amend rewrote after the fact, and notes a topic head
+[codetrial-review](../codetrial-review/SKILL.md) has not recorded, without
+refusing it. A push to `origin` also refreshes the rolling `latest` and
+`desktop-latest` tags first, bounded to a minute and skipped with a note when
+neither `timeout` nor `gtimeout` exists; an unreachable `origin` refuses that
+push. The installer adds a `+refs/tags/*latest:refs/tags/*latest` fetch refspec
+so a plain pull refreshes them too ([development](../../../docs/development.md)
+has the details).
 `make hooks` installs every `scripts/git-*.sh`, so adding one there installs
 itself. CI runs the same list over
 a pull request's own commits, so the rules bind someone who never installed the
 hooks as well.
+
+`scripts/check-secrets.py` checks staged blobs before the pre-commit snapshot
+is materialized, and pre-push checks every outgoing commit, including merges.
+It compares selected provider-key formats and literal local credential values
+without printing matches or invoking a provider. Pull-request CI repeats the
+history check. `tests/test_check_secrets.py` exercises the scanner with real Git
+objects; it runs as the `secret-check-tests` gate.
 
 The hooks have their own suite. `scripts/test-git-hooks.sh` builds a scratch
 repository, installs the hooks into it and drives every case: the messages that

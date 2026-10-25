@@ -265,6 +265,67 @@ repository is reported as `SHARED` and nothing is written there. A checkout
 from before the scripts existed has nothing to run and commits as before.
 `./scripts/install-git-hooks.sh --check` runs the verification alone.
 
+Changes to the hook scripts, installer, message checker or hook suite run
+`scripts/test-git-hooks.sh` during pre-commit. Changes under `.claude/skills/`,
+`scripts/`, `docs/`, `src/`, `web/`, `tests/`, `problem-bank/`, `.github/` or to
+root files run the skill reference checker when the verification skill exists.
+Both checks read the staged snapshot, including deletions. The hook suite
+suppresses recursive suite invocation in its nested test commits. Checks run
+before formatting and never stage their output.
+
+When a push goes to `origin`, the pre-push hook first fetches the rolling
+release tags `latest` and `desktop-latest` using forced exact refspecs.
+Discovery and fetch share a one-minute deadline, with TERM at 55 seconds and
+a forced kill five seconds later, and never prompt.
+Synchronization needs `timeout` or `gtimeout`; without either tool (stock
+macOS has neither) the hook says so and skips it. An unreachable `origin`
+refuses that push; a push to another remote, or one that
+itself updates those tags, does not fetch, and an `origin` without the tags (a
+fork) is not an error. A repository without `origin` skips this. The installer
+also adds the glob refspec `+refs/tags/*latest:refs/tags/*latest` to the clone's
+`remote.origin.fetch` (git fails a fetch whose exact refspec names a tag the
+remote lacks), so a plain `git pull` or `git fetch` tracking `origin` refreshes
+the tags even when the branch is already up to date. A missing tag is not an
+error there; the glob also takes any other tag ending in `latest` from `origin`. Explicit branch refspecs, as in
+`git pull origin main`, do not request those extra tags. Pulling another remote
+does not fetch `origin`. Git has no pre-pull hook. Installing replaces
+the exact refspecs an earlier installer wrote. Uninstalling removes the refspec;
+other fetch settings stay in place.
+
+### Offline credential checks and message guidance
+
+`scripts/check-secrets.py` checks the changed index blobs before pre-commit
+materializes the snapshot. It also checks the outgoing commit range in
+pre-push, including merge resolutions and an earlier commit whose secret was
+removed at the tip. Commits the destination remote already holds are not
+rescanned, and neither is history another remote already holds. Pull-request
+CI repeats the history check. Git inspection errors refuse the operation rather
+than reporting a clean scan.
+
+The checker uses Python's standard library. It detects private-key headers,
+Google API keys and GitHub token formats, and literal credential values from
+`.env`, `.env.local` and `config/codetrial.env.local`, for variables whose
+names contain KEY, TOKEN, PASSWORD or SECRET. Those local files are
+read as data, never sourced or interpolated; symbolic-link sources are refused.
+Values shorter than eight bytes, obvious placeholders and whole-value variable
+or command references are excluded; a password that merely contains `$` is
+kept. Paths under `tests/`, which carry throwaway private keys, are exempt
+from the private-key rule only.
+Changed live `.env` paths are refused; `.example`, `.sample` and `.template`
+paths are allowed but their contents are still scanned. Binary blobs are not
+exempt, and submodule commits are not read as files. Findings name the path,
+rule and commit, with matching values redacted even from filenames. No snippet,
+credential value or provider request is logged or transmitted. This is a
+bounded set of checks, not a claim to detect every secret format or encoding.
+The regression suite is `tests/test_check_secrets.py`.
+
+The prepare-commit-msg hook preserves supplied messages and adds its guidance
+only once. It shows at most forty staged filenames and a short change summary
+above the scissors line, without generating a subject or sending a diff to an
+AI service. The existing message rules remain authoritative.
+
+### Build-time installation
+
 Every `cargo build`, `cargo check`, `cargo run` and rust-analyzer pass in a
 clone or worktree runs the install through `scripts/hook-check`, a
 workspace member whose build script reruns on every build, so a deleted or

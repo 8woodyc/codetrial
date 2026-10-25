@@ -639,6 +639,7 @@ gate ruff ruff_gate
 # The hooks are the one part of this tree that runs on a contributor's machine
 # rather than here, so nothing else notices when one stops rejecting. The suite
 # builds a scratch repository, installs the hooks into it and drives them.
+gate secret-check-tests unittest_gate "$ROOT/tests/test_check_secrets.py"
 gate git-hooks "$ROOT/scripts/test-git-hooks.sh"
 gate shell-syntax shell_syntax
 gate browser-check-env env BROWSER_CHECK_VALIDATE_ENV_ONLY=1 sh "$ROOT/scripts/browser-check.sh"
