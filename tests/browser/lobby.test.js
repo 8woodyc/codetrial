@@ -287,6 +287,10 @@ const focusedAttempt = (
 const EASY = ["two-sum", "valid-parentheses"].map(pageOf);
 const MEDIUM = ["jump-game", "gas-station"].map(pageOf);
 const HARD = ["candy", "trapping-rain-water"].map(pageOf);
+// A title that overflowed even at 375px; the layout tests budget for it.
+const LONG_TITLE = pageOf(
+  "find-first-and-last-position-of-element-in-sorted-array",
+);
 
 /// A test with a page of its own, closed even when an assertion throws. The
 /// bare `await page.close()` each of these used to end on was skipped by any
@@ -1503,27 +1507,71 @@ lobbyTest(
   "the lobby fits on one screen instead of a wall of problems",
   async (page) => {
     await lobby(page);
+    // Exercise taller system-font metrics even on a developer's shorter font.
+    // Only text with `line-height: normal` grows; load() rejects if no source
+    // font is installed, so a runner without them fails instead of passing.
+    await page.evaluate(async () => {
+      const font = new FontFace(
+        "TallMetrics",
+        'local("Arial"), local("Liberation Sans"), local("DejaVu Sans")',
+        {
+          ascentOverride: "110%",
+          descentOverride: "25%",
+          lineGapOverride: "0%",
+        },
+      );
+      document.fonts.add(await font.load());
+    });
+    await page.click("details.problem-picker summary");
+    // A very long title, the same worst case the next test uses.
+    await page.click(`[data-problem="${LONG_TITLE}"]`);
+    await page.click("details.problem-picker summary");
 
     // Measured against the viewport this test actually runs at, not a number
     // beside it. The option was dropped once already when this became a
     // `lobbyTest`, leaving an 800 written here and a 720 on screen.
-    const { height } = page.viewportSize();
+    const { width, height } = page.viewportSize();
     // The whole reason the picker collapsed. 150 cards made this about 7500.
-    for (const font of ["", "Arial, sans-serif"]) {
+    for (const font of ["", "Arial, sans-serif", "TallMetrics"]) {
       await page.evaluate((font) => {
         document.body.style.fontFamily = font;
       }, font);
-      const closed = await page.evaluate(() => document.body.scrollHeight);
+      const layout = await page.evaluate(() => {
+        const bounds = (selector) => {
+          const { bottom, height } = document
+            .querySelector(selector)
+            .getBoundingClientRect();
+          return { bottom, height };
+        };
+        return {
+          height: document.body.scrollHeight,
+          width: document.scrollingElement.scrollWidth,
+          footer: bounds(".site-credits"),
+          start: bounds("#start"),
+        };
+      });
+      const diagnostic = `${font || "the system font"}: ${JSON.stringify(layout)}`;
       assert.ok(
-        closed <= height,
-        `the lobby is ${closed}px tall with ${font || "the system font"}, past one ${height}px screen`,
+        layout.height <= height,
+        `the lobby is past one ${height}px screen; ${diagnostic}`,
       );
+      assert.ok(
+        layout.width <= width,
+        `the lobby scrolls sideways; ${diagnostic}`,
+      );
+      for (const name of ["start", "footer"]) {
+        const bounds = layout[name];
+        assert.ok(
+          bounds.height > 0 && bounds.bottom <= height,
+          `${name} must remain on screen; ${diagnostic}`,
+        );
+      }
 
       // And the wall is still reachable, just not in the way.
       await page.click("details.problem-picker summary");
       await page.locator(".problem-grid").waitFor({ state: "visible" });
       const open = await page.evaluate(() => document.body.scrollHeight);
-      assert.ok(open > closed, "opening the picker shows nothing");
+      assert.ok(open > layout.height, "opening the picker shows nothing");
       await page.click("details.problem-picker summary");
       await page.locator(".problem-grid").waitFor({ state: "hidden" });
     }
@@ -1539,9 +1587,7 @@ lobbyTest(
   async (page) => {
     await lobby(page);
     await page.click("details.problem-picker summary");
-    await page.click(
-      `[data-problem="${pageOf("find-first-and-last-position-of-element-in-sorted-array")}"]`,
-    );
+    await page.click(`[data-problem="${LONG_TITLE}"]`);
     await page.click("details.problem-picker summary");
 
     for (const [width, beside] of [

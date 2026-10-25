@@ -3818,6 +3818,12 @@ body:not([data-recording]) .replay-detail > :not(header) {
 
 /* A laptop screen: keep the whole setup on one 1280x800 screen. */
 @media (min-width: 1024px) and (max-height: 850px) {
+  /* Leave room for taller system-font metrics without clipping the credits. */
+  .lobby .site-credits {
+    margin-top: 1rem;
+    padding-top: 0.5rem;
+  }
+
   .lobby > header {
     margin-bottom: 1.25rem;
   }
