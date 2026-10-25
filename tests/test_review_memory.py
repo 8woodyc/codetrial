@@ -168,6 +168,30 @@ def changed(path, patch):
     }
 
 
+def graphql_node(number, review_ids, more=False):
+    """One PR of the sweep's batched review listing."""
+    return {
+        "number": number,
+        "reviews": {
+            "pageInfo": {"hasNextPage": more},
+            "nodes": [{"databaseId": i} for i in review_ids],
+        },
+    }
+
+
+def graphql_page(nodes, after=None):
+    return {
+        "data": {
+            "repository": {
+                "pullRequests": {
+                    "pageInfo": {"hasNextPage": after is not None, "endCursor": after},
+                    "nodes": nodes,
+                }
+            }
+        }
+    }
+
+
 # Issue #1 reports a reconnect failure. PR #2 fixed it and was merged. PR #3
 # tried another way and was closed without merging. PR #4 is open on the same
 # file. A bot commented on #2.
@@ -2328,6 +2352,90 @@ class SyncTests(MemoryCase):
                     )
                 else:
                     self.assertEqual(stored(), before, change)
+
+    def test_review_ids_batches_prs_and_leaves_the_rest_to_rest(self):
+        memory = self.memory_module()
+        replies = [
+            graphql_page([graphql_node(2, [902]), graphql_node(3, [], True)], "c1"),
+            graphql_page([graphql_node(4, [904])]),
+        ]
+        sent = []
+
+        def api(path, paginate=False, fields=()):
+            sent.append(list(fields))
+            return replies[len(sent) - 1]
+
+        with patch.object(memory, "gh", api):
+            found = memory.review_ids("o/r", [2, 3, 4, 5])
+        # PR 3 holds more reviews than one page and PR 5 was never listed:
+        # both are the caller's to ask REST about.
+        self.assertEqual(found, {2: {"review:902"}, 4: {"review:904"}})
+        self.assertIn("after=c1", sent[1])
+        self.assertNotIn("after=c1", sent[0])
+
+        def raising(error):
+            def api(path, paginate=False, fields=()):
+                raise error
+
+            return api
+
+        answers = {
+            "502": raising(memory.Fail("gh api graphql failed: HTTP 502")),
+            "partial": lambda *a, **k: {"data": None, "errors": [{"message": "x"}]},
+            "no output": lambda *a, **k: None,
+            "bad json": lambda *a, **k: json.loads("{"),
+        }
+        for name, api in answers.items():
+            with patch.object(memory, "gh", api), self.subTest(name):
+                self.assertEqual(memory.review_ids("o/r", [2]), {})
+        with patch.object(memory, "gh", raising(memory.RateLimited("spent"))):
+            with self.assertRaises(memory.RateLimited):
+                memory.review_ids("o/r", [2])
+
+        # The fallback says how many PRs it leaves to REST, and says nothing
+        # when the failure came after every wanted PR was already listed.
+        first = graphql_page([graphql_node(2, [902])], "c1")
+        calls = []
+
+        def second_page_fails(path, paginate=False, fields=()):
+            calls.append(path)
+            if len(calls) == 1:
+                return first
+            raise memory.Fail("gh api graphql failed: HTTP 502")
+
+        for wanted, said in (([2], ""), ([2, 3], "the other 1")):
+            calls.clear()
+            err = io.StringIO()
+            with (
+                patch.object(memory, "gh", second_page_fails),
+                patch.object(memory.METER, "out", lambda: err),
+            ):
+                found = memory.review_ids("o/r", wanted)
+            self.assertEqual(found, {2: {"review:902"}}, wanted)
+            self.assertIn(said, err.getvalue(), wanted)
+            self.assertEqual(bool(err.getvalue()), bool(said), wanted)
+
+    def test_sweep_lists_reviews_in_one_batch_and_still_retires_a_gone_review(self):
+        self.run_memory("backfill")
+        batched = dict(HISTORY)
+        batched["graphql"] = graphql_page(
+            [graphql_node(2, [902]), graphql_node(3, []), graphql_node(4, [904])]
+        )
+        self.answer(batched)
+        Path(str(self.data) + ".calls").unlink(missing_ok=True)
+        self.run_memory("sweep")
+        seen = self.calls()
+        self.assertIn("graphql", seen)
+        self.assertFalse(any("/reviews?" in c for c in seen), seen)
+        # PR 3's review vanished from the batch and answers 404 on its own.
+        db = sqlite3.connect(self.dir / "memory.db")
+        kept = {
+            row[0]
+            for row in db.execute(
+                "SELECT key FROM raw WHERE key IN ('review:902', 'review:903')"
+            )
+        }
+        self.assertEqual(kept, {"review:902"})
 
     def test_a_tie_bucket_cursor_saved_at_another_page_size_loses_nothing(self):
         memory = self.memory_module()

@@ -964,11 +964,14 @@ def rebuild_all(db):
 # --- GitHub -----------------------------------------------------------------
 
 
-def gh(path, paginate=False):
+def gh(path, paginate=False, fields=()):
     """One `gh api` call: a list for a paginated listing, else one object. The
     pages of a listing arrive as JSON arrays back to back. gh's stderr is never
-    printed whole, since a header line may carry a token."""
+    printed whole, since a header line may carry a token. `fields` are the
+    `name=value` strings of a GraphQL request."""
     cmd = ["gh", "api", path] + (["--paginate"] if paginate else [])
+    for field in fields:
+        cmd += ["-f", field]
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=remaining())
     except FileNotFoundError:
@@ -1876,6 +1879,63 @@ def gone_upstream(repo, key, thread):
     return elsewhere is not None and elsewhere != repository_name(repo)
 
 
+# 100 PRs a page is GraphQL's cap; 50 reviews each keeps a page near one rate-limit
+# point, and a PR with more is left to the REST listing, which pages without a cap.
+REVIEW_IDS_QUERY = (
+    "query($owner: String!, $name: String!, $after: String) {"
+    " repository(owner: $owner, name: $name) {"
+    " pullRequests(first: 100, after: $after) {"
+    " pageInfo { hasNextPage endCursor }"
+    " nodes { number reviews(first: 50) { pageInfo { hasNextPage }"
+    " nodes { databaseId } } } } } }"
+)
+
+
+def whole_reviews(page, want):
+    """Number to review ids for the listed PRs a page holds in full."""
+    return {
+        node["number"]: {
+            "review:{}".format(r["databaseId"]) for r in node["reviews"]["nodes"]
+        }
+        for node in page["nodes"]
+        if node["number"] in want and not node["reviews"]["pageInfo"]["hasNextPage"]
+    }
+
+
+def review_ids(repo, numbers):
+    """The review ids of many PRs per call instead of one PR per call: number
+    to ids, for the PRs GraphQL listed whole. A PR with more reviews than one
+    page holds, a PR it did not list, and anything it fails to answer are left
+    out, and the caller asks REST about those exactly as before. Only a spent
+    rate limit stops the sweep."""
+    owner, name = repo.split("/", 1)
+    want, found, after = set(numbers), {}, None
+    while True:
+        fields = ["query=" + REVIEW_IDS_QUERY, "owner=" + owner, "name=" + name]
+        if after:
+            fields.append("after=" + after)
+        try:
+            reply = gh("graphql", fields=fields)
+            if not isinstance(reply, dict) or reply.get("errors"):
+                raise Fail("graphql answered no data")
+            page = reply["data"]["repository"]["pullRequests"]
+            found.update(whole_reviews(page, want))
+            if not page["pageInfo"]["hasNextPage"]:
+                return found
+            after = page["pageInfo"]["endCursor"]
+        except RateLimited:
+            raise
+        except (Fail, ValueError, KeyError, TypeError):
+            left = len(want - found.keys())
+            if left:
+                METER.say(
+                    "memory.py: GraphQL could not list every PR's reviews; asking "
+                    "REST for the other {} (slower)".format(left),
+                    err=True,
+                )
+            return found
+
+
 def cmd_sweep(db, args):
     """Every id GitHub still lists, against every id stored. What is stored,
     no longer listed, and answered with 404 was deleted (or transferred)
@@ -1886,9 +1946,10 @@ def cmd_sweep(db, args):
         "SELECT number FROM threads WHERE kind = 'pr' AND deleted IS NULL"
     ).fetchall()
     METER.say(
-        "memory.py: sweep lists every id, then each of {} PRs' reviews, and asks "
-        "GitHub about anything missing (roughly {})".format(
-            len(prs), duration(len(prs) * 1.1 + 60)
+        "memory.py: sweep lists every id, then the reviews of {} PRs in batches, "
+        "and asks GitHub about anything missing (roughly {}; a PR GraphQL cannot "
+        "list whole costs one more call)".format(
+            len(prs), duration(len(prs) * 0.1 + 60)
         ),
         err=True,
     )
@@ -1899,11 +1960,15 @@ def cmd_sweep(db, args):
             if n % 50 == 1:
                 METER.step(label, n)
             listed.add(item_key(kind, item))
-    for i, row in enumerate(prs, 1):
-        number = row["number"]
-        METER.step("listing PR reviews", i, len(prs), "#{}".format(number))
-        if "issue:{}".format(number) not in listed:
-            continue
+    numbers = [
+        row["number"] for row in prs if "issue:{}".format(row["number"]) in listed
+    ]
+    batched = review_ids(args.repo, numbers)
+    for ids in batched.values():
+        listed |= ids
+    rest = [n for n in numbers if n not in batched]
+    for i, number in enumerate(rest, 1):
+        METER.step("listing PR reviews", i, len(rest), "#{}".format(number))
         for review in gh(
             "repos/{}/pulls/{}/reviews?per_page=100".format(args.repo, number),
             paginate=True,
