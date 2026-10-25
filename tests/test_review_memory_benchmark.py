@@ -5,6 +5,7 @@ import contextlib
 import importlib.util
 import json
 import os
+import shlex
 from pathlib import Path
 import subprocess
 import sys
@@ -195,7 +196,7 @@ class BenchmarkTests(fixtures.MemoryCase):
                 "UPDATE raw SET payload=? WHERE key='files:2'", (json.dumps(values),)
             )
         log = self.dir / "pagination.jsonl"
-        with self.benchmark.fixture_environment(self.fixture, log, self.dir):
+        with self.benchmark.fixture_environment(self.fixture, log):
             result = self.benchmark.memory.gh(
                 "repos/sysprog21/codetrial/pulls/2/files?per_page=100", paginate=True
             )
@@ -203,6 +204,47 @@ class BenchmarkTests(fixtures.MemoryCase):
         record = json.loads(log.read_text())
         self.assertEqual(record["pages_simulated"], 2)
         self.assertFalse(record["miss"])
+
+    def test_spaced_interpreter_never_falls_through_to_another_gh(self):
+        executable_dir = self.dir / "python space"
+        executable_dir.mkdir()
+        executable = executable_dir / "python3"
+        executable.symlink_to(sys.executable)
+        fallback = self.dir / "fallback"
+        fallback.mkdir()
+        marker = self.dir / "fallback-used"
+        fixtures.support.write_executable(
+            fallback / "gh",
+            "#!/bin/sh\nprintf fallback > " + shlex.quote(str(marker)) + "\nexit 77\n",
+        )
+        script = """import importlib.util,json,sys
+from pathlib import Path
+spec=importlib.util.spec_from_file_location('b',sys.argv[1]);b=importlib.util.module_from_spec(spec);spec.loader.exec_module(b)
+with b.fixture_environment(Path(sys.argv[2]),Path(sys.argv[3])):
+    value=b.memory.gh('repos/sysprog21/codetrial/pulls/2/files?per_page=100',paginate=True)
+print(json.dumps({'spaced_interpreter':' ' in sys.executable,'files':len(value)}))
+"""
+        log = self.dir / "spaced-requests.jsonl"
+        result = subprocess.run(
+            [
+                str(executable),
+                "-c",
+                script,
+                str(BENCHMARK),
+                str(self.fixture),
+                str(log),
+            ],
+            env=dict(os.environ, PATH=str(fallback) + ":" + os.environ["PATH"]),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(result.stdout), {"spaced_interpreter": True, "files": 1}
+        )
+        self.assertFalse(marker.exists())
+        self.assertFalse(json.loads(log.read_text())["miss"])
 
     def test_miss_swallowed_by_detail_still_fails_the_trial(self):
         import sqlite3

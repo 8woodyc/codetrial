@@ -104,7 +104,7 @@ each of this PR's entries in outdated, or none>.
    ```sh
    history_ok=false
    if jq -se --argjson rc "$shared_memory_exit" 'length == 1 and (.[0] | (.outcome == "ready" and $rc == 0) or (.outcome == "degraded" and $rc == 2) or (.outcome == "error" and .code == "busy" and $rc == 1))' "$shared_memory_status" > /dev/null; then
-     if python3 .claude/skills/codetrial-review/memory.py context "$dir"; then
+     if python3 .claude/skills/codetrial-review/memory.py context --no-migrate "$dir"; then
        history_ok=true
      fi
    fi

@@ -130,6 +130,10 @@ uncommitted page or PR; committed progress remains. Use `--budget 600` for a
 large initial artifact on a slow connection. Downloads restart after interruption;
 API synchronization resumes. If a local index rebuild exceeds the budget,
 run status explicitly to finish that migration or increase the ensure budget.
+Automatic review/triage context uses `--no-migrate`, opening a ready index
+read-only without waiting; an unfinished migration leaves history unavailable
+instead of restarting without a deadline. An unavailable authority refresh
+keeps cached roles but returns degraded with code `authority-unavailable`.
 Budget exhaustion is distinct from an upstream failure and is reported as
 degraded, not as a corrupt store. No background backfill starts automatically.
 Interrupted staging directories for the same database are reclaimed on the next

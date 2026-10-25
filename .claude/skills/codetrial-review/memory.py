@@ -884,17 +884,33 @@ def prepare(db, repo):
             db.execute("PRAGMA user_version = {}".format(VERSION))
 
 
-def connect(path, repo=REPO):
+def connect(path, repo=REPO, allow_migration=True):
     """Open the store for repo, writing only when it has to (see prepare)."""
     repo = repository_name(repo)
-    if path != ":memory:":
+    if path != ":memory:" and allow_migration:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     # A sweep's agents open the store together; one that waits a minute for
     # another's write beats one that dies after SQLite's default five seconds.
-    db = sqlite3.connect(path, timeout=min(remaining() or 60, 60))
+    if allow_migration or path == ":memory:":
+        db = sqlite3.connect(path, timeout=min(remaining() or 60, 60))
+    else:
+        try:
+            db = sqlite3.connect(
+                Path(path).resolve().as_uri() + "?mode=ro", uri=True, timeout=0
+            )
+        except sqlite3.OperationalError:
+            raise Fail(
+                "existing local index is unavailable in no-migration mode",
+                code="index-not-ready",
+            ) from None
     db.row_factory = sqlite3.Row
     try:
         if not ready(db, repo):
+            if not allow_migration:
+                raise Fail(
+                    "local index is not ready; run status or increase the ensure budget explicitly",
+                    code="index-not-ready",
+                )
             prepare(db, repo)
     except BaseException:
         db.close()
@@ -1930,7 +1946,7 @@ def under(path, prefix):
     return path == prefix or path.startswith(prefix + "/")
 
 
-def search(
+def _search_report(
     db,
     text="",
     files=(),
@@ -1943,14 +1959,26 @@ def search(
     exclude=(),
     limit=10,
     per_thread=3,
+    strict=False,
+    candidate_limit=256,
 ):
-    """Documents ranked by BM25 (title, then paths, then terms, then body)
-    within the filters. Every word must match; when none does, any may, which
-    ranks by how many matched. Text with no searchable word matches nothing.
-    Bots are left out unless trust names them. Each thread filter is one
-    subquery run once, not once per document."""
-    where, params = [], []
-    trust_in = trust_in or ["maintainer", "reported"]
+    """Bound materialized candidates; keep every explicit filter in each query.
+
+    Counts describe matched documents before diversity. Evidence outside the
+    candidate window remains unknown rather than becoming a negative claim.
+    """
+    if any(
+        type(value) is not int for value in (limit, per_thread, candidate_limit)
+    ) or not (
+        1 <= limit <= 100 and 1 <= per_thread <= 100 and 1 <= candidate_limit <= 1000
+    ):
+        raise Fail(
+            "search limits must be positive; limit/per-thread <=100, candidates <=1000"
+        )
+    files = [value.strip("/") for value in files]
+    symbols, errors, kinds, exclude = map(list, (symbols, errors, kinds, exclude))
+    where, params = ["t.deleted IS NULL"], []
+    trust_in = ["maintainer", "reported"] if trust_in is None else list(trust_in)
     where.append("d.trust IN ({})".format(",".join("?" * len(trust_in))))
     params += trust_in
     if kinds:
@@ -1987,40 +2015,182 @@ def search(
         )
         # The index holds normalized messages; the body is searched as written.
         params += [normalize_error(e), e.lower()]
-    rows = []
-    for mode in ("AND", "OR"):
-        q = fts_query(text, mode)
-        if q:
-            sql = (
-                "SELECT d.*, t.number, t.title, t.state, t.kind, "
-                "snippet(docs_fts, 1, '[', ']', '...', 24) AS snip, "
-                "bm25(docs_fts, 6.0, 1.0, 1.5, 3.0) AS rank "
-                "FROM docs_fts JOIN documents d ON d.id = docs_fts.rowid "
-                "JOIN threads t ON t.number = d.thread "
-                "WHERE docs_fts MATCH ? AND " + " AND ".join(where) + " ORDER BY rank"
-            )
-            rows = db.execute(sql, [q] + params).fetchall()
-        elif (text or "").strip():
-            return []
-        else:
-            rows = db.execute(
-                THREAD_DOC
-                + "WHERE "
-                + " AND ".join(where)
-                + " ORDER BY (d.trust = 'maintainer') DESC, d.created DESC",
-                params,
-            ).fetchall()
-        if rows or not q:
-            break
-    out, per = [], {}
-    for row in rows:
-        if per.get(row["thread"], 0) >= per_thread:
-            continue
-        per[row["thread"]] = per.get(row["thread"], 0) + 1
-        out.append(row)
-        if len(out) >= limit:
-            break
-    return out
+    scope = " AND ".join(where)
+    filters = {
+        "files": list(files),
+        "symbols": list(symbols),
+        "errors": list(errors),
+        "normalized_errors": [normalize_error(value) for value in errors],
+        "trust_in": trust_in,
+        "kinds": list(kinds),
+        "state": state,
+        "since": since,
+        "exclude": list(exclude),
+    }
+    report = {
+        "rows": [],
+        "effective_filters": filters,
+        "text": text,
+        "mode": "filters",
+        "effective_query": "",
+        "fallback": False,
+        "strict": strict,
+        "limit": limit,
+        "per_thread": per_thread,
+        "candidate_limit": candidate_limit,
+        "known_total_documents": None,
+        "known_total_threads": None,
+        "searched": False,
+        "returned": 0,
+        "materialized_candidates": 0,
+        "candidate_limited": False,
+        "eligible_within_candidates": 0,
+        "diversity_suppressed_within_candidates": 0,
+        "omitted_eligible_within_candidates": 0,
+        "outside_candidate_limit": 0,
+        "eligible_beyond_candidates_unknown": False,
+    }
+    query = fts_query(text, "AND")
+    if (text or "").strip() and not query:
+        report.update(mode="none", empty_reason="no searchable terms")
+        return report
+    match = "docs_fts MATCH ? AND " if query else ""
+    tables = (
+        "FROM docs_fts JOIN documents d ON d.id=docs_fts.rowid "
+        "JOIN threads t ON t.number=d.thread "
+        if query
+        else "FROM documents d JOIN threads t ON t.number=d.thread "
+    )
+
+    def count(value):
+        values = ([value] if value else []) + params
+        return db.execute(
+            "SELECT count(*),count(DISTINCT d.thread) "
+            + tables
+            + "WHERE "
+            + match
+            + scope,
+            values,
+        ).fetchone()
+
+    totals = count(query)
+    report["mode"] = "AND" if query else "filters"
+    if query and not totals[0] and not strict:
+        wider = fts_query(text, "OR")
+        distinct = {
+            part.lower() if part.isascii() else part for part in query.split(" AND ")
+        }
+        if wider != query and len(distinct) > 1:
+            query = wider
+            totals = count(query)
+            report.update(mode="OR", fallback=True)
+    report.update(
+        searched=True,
+        effective_query=query,
+        known_total_documents=totals[0],
+        known_total_threads=totals[1],
+        materialized_candidates=min(totals[0], candidate_limit),
+        candidate_limited=totals[0] > candidate_limit,
+        outside_candidate_limit=max(0, totals[0] - candidate_limit),
+        eligible_beyond_candidates_unknown=totals[0] > candidate_limit,
+    )
+    if not totals[0]:
+        report["empty_reason"] = "no documents match the effective query and filters"
+        return report
+    order = "rank,key" if query else "priority,created DESC,key"
+    projection = (
+        "bm25(docs_fts,6.0,1.0,1.5,3.0) AS rank,0 AS priority"
+        if query
+        else "0 AS rank,(d.trust != 'maintainer') AS priority"
+    )
+    # LIMIT prevents flattening rank evaluation into the window expression on
+    # SQLite 3.31; FTS auxiliary functions cannot run in that window context.
+    sql = (
+        "WITH candidates AS (SELECT d.id,d.thread,d.key,d.created,"
+        + projection
+        + " "
+        + tables
+        + "WHERE "
+        + match
+        + scope
+        + " ORDER BY "
+        + order.replace("created", "d.created")
+        + " LIMIT ?),"
+        "diverse AS (SELECT *,row_number() OVER (PARTITION BY thread ORDER BY "
+        + order
+        + ") AS nth FROM candidates),"
+        "eligible AS (SELECT * FROM diverse WHERE nth <= ?),"
+        "selected AS (SELECT * FROM eligible ORDER BY " + order + " LIMIT ?) "
+        "SELECT d.*,t.number,t.title,t.state,t.kind,s.rank,"
+        "(SELECT count(*) FROM eligible) AS candidate_eligible,"
+        + ("snippet(docs_fts,1,'[',']','...',24)" if query else "substr(d.body,1,360)")
+        + " AS snip FROM selected s JOIN documents d ON d.id=s.id "
+        "JOIN threads t ON t.number=d.thread "
+        + (
+            "JOIN docs_fts ON docs_fts.rowid=d.id WHERE docs_fts MATCH ? "
+            if query
+            else ""
+        )
+        + "ORDER BY "
+        + ",".join("s." + part for part in order.split(","))
+    )
+    values = ([query] if query else []) + params + [candidate_limit, per_thread, limit]
+    if query:
+        values.append(query)
+    rows = db.execute(sql, values).fetchall()
+    eligible = rows[0]["candidate_eligible"] if rows else 0
+    report.update(
+        rows=rows,
+        returned=len(rows),
+        eligible_within_candidates=eligible,
+        diversity_suppressed_within_candidates=report["materialized_candidates"]
+        - eligible,
+        omitted_eligible_within_candidates=max(0, eligible - len(rows)),
+    )
+    return report
+
+
+def search_report(db, *args, **kwargs):
+    """Counts and evidence share one read snapshot, including during local sync."""
+    db.execute("SAVEPOINT review_memory_search", [])
+    try:
+        return _search_report(db, *args, **kwargs)
+    finally:
+        db.execute("RELEASE review_memory_search", [])
+
+
+def search(
+    db,
+    text="",
+    files=(),
+    symbols=(),
+    errors=(),
+    trust_in=None,
+    kinds=(),
+    state=None,
+    since=None,
+    exclude=(),
+    limit=10,
+    per_thread=3,
+    strict=False,
+    candidate_limit=256,
+):
+    return search_report(
+        db,
+        text,
+        files,
+        symbols,
+        errors,
+        trust_in,
+        kinds,
+        state,
+        since,
+        exclude,
+        limit,
+        per_thread,
+        strict,
+        candidate_limit,
+    )["rows"]
 
 
 def render(row, ref=None):
@@ -2044,7 +2214,9 @@ def render(row, ref=None):
     )
     note = applies(row, ref) if ref else ""
     snip = re.sub(r"\s+", " ", safe_text(row["snip"] or "")).strip()
-    return "{}{}\n{}".format(head, "\n  " + note if note else "", quoted(snip))
+    return "{}{}\n{}\nFull source in this store: memory.py show {}".format(
+        head, "\n  " + note if note else "", quoted(snip), safe_label(row["key"])
+    )
 
 
 def render_fix(t, why, shared):
@@ -2132,7 +2304,7 @@ def default_ref(repo=REPO):
 
 
 def cmd_search(db, args):
-    rows = search(
+    report = search_report(
         db,
         " ".join(args.text),
         args.file,
@@ -2144,8 +2316,64 @@ def cmd_search(db, args):
         args.since,
         args.exclude,
         args.limit,
+        strict=args.strict,
+        candidate_limit=args.candidate_limit,
     )
+    rows = report.pop("rows")
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "notice": ENVELOPE,
+                    "retrieval": report,
+                    "results": [
+                        {
+                            "key": row["key"],
+                            "thread": row["thread"],
+                            "url": row["url"],
+                            "trust": row["trust"],
+                            "rendered": render(row, args.ref),
+                            "followup": "memory.py show " + row["key"],
+                        }
+                        for row in rows
+                    ],
+                },
+                indent=2,
+            )
+        )
+        return
     print(ENVELOPE)
+    print(
+        "Retrieval: {} query={} strict={} fallback={}; returned {}, matched {} indexed documents; "
+        "candidates {}/{}, outside cap {} (eligible unknown: {}); "
+        "within candidates: {} suppressed by diversity, {} eligible omitted.".format(
+            report["mode"],
+            json.dumps(report["effective_query"]),
+            str(report["strict"]).lower(),
+            str(report["fallback"]).lower(),
+            report["returned"],
+            report["known_total_documents"],
+            report["materialized_candidates"],
+            report["candidate_limit"],
+            report["outside_candidate_limit"],
+            report["eligible_beyond_candidates_unknown"],
+            report["diversity_suppressed_within_candidates"],
+            report["omitted_eligible_within_candidates"],
+        )
+    )
+    print(
+        "Active filters: "
+        + json.dumps(
+            {
+                key: value
+                for key, value in report["effective_filters"].items()
+                if key == "trust_in" or value not in (None, [])
+            },
+            sort_keys=True,
+        )
+    )
+    if report.get("empty_reason"):
+        print(report["empty_reason"])
     if not rows:
         print("no matches")
     for row in rows:
@@ -3364,6 +3592,13 @@ def cmd_ensure(db, args):
     if status["stale_prs"] and reason is None:
         reason = "PR detail remains incomplete; rerun ensure to resume"
         code = "partial"
+    if (
+        not args.bootstrap_only
+        and mark(db, "authority_attempt") == "unavailable"
+        and reason is None
+    ):
+        reason = "authority refresh unavailable; using cached authority with incomplete freshness"
+        code = "authority-unavailable"
     outcome = "degraded" if reason else "ready"
     print(
         json.dumps(
@@ -3459,6 +3694,15 @@ def main(argv=None):
     s.add_argument("--since")
     s.add_argument("--exclude", type=int, action="append", default=[])
     s.add_argument("--limit", type=int, default=10)
+    s.add_argument("--candidate-limit", type=int, default=256)
+    s.add_argument(
+        "--strict", action="store_true", help="do not widen an empty AND query"
+    )
+    s.add_argument(
+        "--json",
+        action="store_true",
+        help="include structured retrieval scope and source keys",
+    )
     s.add_argument("--ref", help="mark whether each hit still applies at this ref")
     f = sub.add_parser("fixes")
     f.add_argument("--text", action="append")
@@ -3475,6 +3719,11 @@ def main(argv=None):
     c.add_argument("--max-items", type=int, default=24)
     c.add_argument("--max-chars", type=int, default=12000)
     c.add_argument("--ref")
+    c.add_argument(
+        "--no-migrate",
+        action="store_true",
+        help="use a ready local index without writes or waiting for a migration",
+    )
     d = sub.add_parser("decisions")
     d.add_argument("action", choices=["list", "add", "stale", "drop"])
     d.add_argument("--id", type=int)
@@ -3516,7 +3765,11 @@ def main(argv=None):
             args.command == "decisions" and args.action in ("add", "drop")
         )
         lock = pass_lock(path, required=args.command == "ensure") if writing else None
-        db = connect(path, args.repo)
+        db = connect(
+            path,
+            args.repo,
+            allow_migration=not (args.command == "context" and args.no_migrate),
+        )
         handler = globals()["cmd_" + args.command]
         result = handler(db, args)
         if args.command == "ensure":

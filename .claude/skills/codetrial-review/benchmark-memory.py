@@ -374,66 +374,50 @@ def serve_fixture(path, log, arguments):
 
 
 @contextlib.contextmanager
-def fixture_environment(fixture, log, parent, process_times=None):
-    with tempfile.TemporaryDirectory(dir=parent) as temporary:
-        binary = Path(temporary)
-        wrapper = binary / "gh"
-        wrapper.write_text(
-            "#!"
-            + sys.executable
-            + "\nimport os,sys\nos.execv(sys.executable,"
-            + repr(
-                [
-                    sys.executable,
-                    str(Path(__file__).resolve()),
-                    "_fixture-gh",
-                    str(fixture),
-                ]
-            )
-            + "+[os.environ['REPLAY_LOG']]+sys.argv[1:])\n"
-        )
-        wrapper.chmod(0o700)
-        environment = dict(
-            os.environ,
-            PATH=str(binary) + ":" + os.environ.get("PATH", ""),
-            REPLAY_LOG=str(log),
-        )
-        original = memory.subprocess
+def fixture_environment(fixture, log, process_times=None):
+    original = memory.subprocess
 
-        class FixtureProcess:
-            def __getattr__(self, name):
-                return getattr(subprocess, name)
+    class FixtureProcess:
+        def __getattr__(self, name):
+            return getattr(subprocess, name)
 
-            def run(self, command, **kwargs):
-                if command and command[0] == "gh":
-                    kwargs["env"] = environment
-                else:
-                    with open(log, "a") as out:
-                        out.write(
-                            json.dumps(
-                                {
-                                    "argv": list(command),
-                                    "pages_simulated": 0,
-                                    "bytes_simulated": 0,
-                                    "service_s": 0,
-                                    "miss": True,
-                                }
-                            )
-                            + "\n"
+        def run(self, command, **kwargs):
+            if not command or command[0] != "gh":
+                with open(log, "a") as out:
+                    out.write(
+                        json.dumps(
+                            {
+                                "argv": list(command),
+                                "pages_simulated": 0,
+                                "bytes_simulated": 0,
+                                "service_s": 0,
+                                "miss": True,
+                            }
                         )
-                    raise ReplayMiss("unexpected subprocess in offline trial")
-                started = time.perf_counter()
-                try:
-                    return subprocess.run(command, **kwargs)
-                finally:
-                    if command[0] == "gh" and process_times is not None:
-                        process_times.append(time.perf_counter() - started)
+                        + "\n"
+                    )
+                raise ReplayMiss("unexpected subprocess in offline trial")
+            # An absolute argv bypasses executable PATH/shebang fallback even
+            # when the selected Python or the frozen runner contains spaces.
+            invocation = [
+                sys.executable,
+                str(Path(__file__).resolve()),
+                "_fixture-gh",
+                str(fixture),
+                str(log),
+            ] + list(command[1:])
+            started = time.perf_counter()
+            try:
+                return subprocess.run(invocation, **kwargs)
+            finally:
+                if process_times is not None:
+                    process_times.append(time.perf_counter() - started)
 
-        memory.subprocess = FixtureProcess()
-        try:
-            yield
-        finally:
-            memory.subprocess = original
+    memory.subprocess = FixtureProcess()
+    try:
+        yield
+    finally:
+        memory.subprocess = original
 
 
 def trial(operation, fixture, snapshot, target, log, frozen):
@@ -490,7 +474,7 @@ def trial(operation, fixture, snapshot, target, log, frozen):
         setattr(memory, name, measured)
     started = time.perf_counter()
     with (
-        fixture_environment(fixture, log, Path(target).parent, process_times),
+        fixture_environment(fixture, log, process_times),
         open(log + ".core", "w") as core_log,
         contextlib.redirect_stdout(core_log),
         contextlib.redirect_stderr(core_log),

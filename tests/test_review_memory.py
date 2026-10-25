@@ -766,6 +766,9 @@ class BootstrapTests(MemoryCase):
             self.assertEqual(verify.call_count, 2)
         self.assertEqual(memory.mark(target, "poll"), manifest["passes"]["poll"])
         self.assertEqual(memory.snapshot_counts(target), manifest["counts"])
+        history = json.loads(json.dumps(HISTORY))
+        history[REPO + "/collaborators"] = [{"login": "maint"}]
+        self.answer(history)
         before = len(self.calls())
         result = self.run_memory("--db", str(self.dir / "fresh.db"), "ensure")
         self.assertEqual(json.loads(result.stdout)["outcome"], "ready")
@@ -832,6 +835,7 @@ sys.exit(memory.main(['--db',sys.argv[3],*sys.argv[4:]]))
     def test_fresh_ensure_cli_and_later_edits_reviews_and_deletion(self):
         memory, manifest, path = self.artifact()
         history = json.loads(json.dumps(HISTORY))
+        history[REPO + "/collaborators"] = [{"login": "maint"}]
         history[REPO + "/releases"] = [
             {
                 "tag_name": manifest["release_id"],
@@ -1173,6 +1177,7 @@ sys.exit(memory.main(['--db',sys.argv[3],*sys.argv[4:]]))
     def test_existing_store_update_budget_and_partial_detail_are_explicit(self):
         self.run_memory("backfill")
         history = json.loads(json.dumps(HISTORY))
+        history[REPO + "/collaborators"] = [{"login": "maint"}]
         history[REPO + "/issues"][1]["body"] += " changed"
         self.answer(history)
         partial = self.run_memory("ensure", "--max", "0", ok=False)

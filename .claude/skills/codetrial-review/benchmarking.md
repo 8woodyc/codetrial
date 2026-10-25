@@ -49,7 +49,10 @@ the real collector. Unmatched requests are recorded as fatal misses, using a
 neutral error rather than pretending an upstream deletion or missing resource.
 A skipped detail request cannot become a successful measurement.
 
-The collector's subprocess adapter permits only fixture `gh` calls. Git metadata
+The collector's subprocess adapter permits only fixture `gh` calls and invokes
+the frozen runner through an absolute interpreter argv. It does not use a
+shebang/PATH shim, so interpreter or runner paths containing spaces cannot
+fall through to a real GitHub CLI. Git metadata
 is read from the script checkout with inherited `GIT_*` overrides removed. The ensure arm reads two exact local artifact paths;
 attestation checks are stubbed only inside the benchmark child process. The
 production CLI gains no bypass flag. Each arm starts with a new scratch database
