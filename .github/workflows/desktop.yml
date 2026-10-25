@@ -133,16 +133,30 @@ jobs:
       # `NO_STRIP`, because the AppImage tool's own strip is older than the
       # toolchain and fails on sections it does not know. Both programs are
       # already stripped by their release profiles, so nothing is lost.
+      #
+      # `hdiutil` on the macOS runners sometimes fails with "Resource busy"
+      # while it creates the disk image. Only that failure is built again; any
+      # other one stops the step on the first attempt.
       - name: Build the installers
         working-directory: desktop
         shell: bash
         env:
           NO_STRIP: 'true'
-        run: >-
-          npx --yes "@tauri-apps/cli@$TAURI_CLI_VERSION" build --ci
-          --target ${{ matrix.target }}
-          --bundles ${{ github.event_name == 'pull_request' && matrix.pr_bundles || matrix.bundles }}
-          --config tauri.bundle.json
+        run: |
+          set -o pipefail
+          log="$RUNNER_TEMP/tauri-build.log"
+          for attempt in 1 2 3; do
+            if npx --yes "@tauri-apps/cli@$TAURI_CLI_VERSION" build --ci \
+              --target ${{ matrix.target }} \
+              --bundles ${{ github.event_name == 'pull_request' && matrix.pr_bundles || matrix.bundles }} \
+              --config tauri.bundle.json 2>&1 | tee "$log"; then
+              exit 0
+            fi
+            grep -q 'hdiutil.*Resource busy' "$log" || exit 1
+            [ "$attempt" -lt 3 ] || exit 1
+            echo "hdiutil was busy; building again (attempt $attempt of 3)"
+            sleep 10
+          done
 
       # The built app, not the installer, but with the server beside it the
       # way every installer puts it.
