@@ -92,6 +92,7 @@ import {
   roomInterviewer,
   sanitizeReport,
   sessionReport,
+  LANGUAGE_KEY,
   SHOW_SOURCES_KEY,
   testPayload,
   timeWarningPayload,
@@ -245,6 +246,9 @@ const CODE_PUBLISH_DEBOUNCE_MS = 300;
 // Bounds startup through the response headers. The server may finish claim and
 // dispatch after the browser has fallen back to offline practice.
 const TOKEN_REQUEST_TIMEOUT_MS = 20_000;
+// How long Start waits for a pending judge, which only C needs, before the
+// token names the language. A slow judge must not hold the interview back.
+const JUDGE_LANGUAGE_WAIT_MS = 5_000;
 /// Long enough to read twice, short enough that it is gone before the answer
 /// it is about. Measured against the hint text, not chosen round.
 const FRAMEWORK_HINT_MS = 12000;
@@ -335,6 +339,11 @@ const interviewLoop = codingLoop(params.get("loop"));
 /// an interview that has neither.
 const whiteboard = modeIsWhiteboard(params.get("mode"));
 const requestedLanguage = whiteboard ? null : params.get("language");
+/// The tab the interview opens on, when the problem can run it: what the URL
+/// asked for, as Try again does, else the language the candidate last started
+/// an interview in.
+const preferredLanguage =
+  requestedLanguage ?? (whiteboard ? null : readStored(LANGUAGE_KEY));
 /// The same answer as the wire spelling, which the token request and the
 /// checklist both need. Derived from the boolean rather than from the URL a
 /// second time, so an unrecognized value cannot reach the server as itself.
@@ -1968,6 +1977,22 @@ async function connect(preflight, presenting = false) {
     const previous = strict ? previousAssignment(tabStorage) : null;
     const interviewId = await recordConsent();
     state.interviewId = interviewId;
+    // The token names the language the interview starts in. Only C waits for
+    // the judge, so a preferred C still loading gets a bounded turn first;
+    // every other start goes straight on. Afterwards only the candidate
+    // switches, so a judge arriving later cannot move the interview off the
+    // language the token named.
+    if (!whiteboard && preferredLanguage === "c" && !languageChoiceCommitted) {
+      let timer;
+      await Promise.race([
+        judgePromise,
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, JUDGE_LANGUAGE_WAIT_MS);
+        }),
+      ]);
+      clearTimeout(timer);
+    }
+    languageChoiceCommitted = true;
     // `hideExamples` goes only when ticked, so Jim is not told the examples are
     // on a screen that does not show them. The preflight holding the box is
     // closed for good by now, so this is the choice the page renders.
@@ -1989,6 +2014,7 @@ async function connect(preflight, presenting = false) {
         interviewId,
         interviewLoop,
         interviewMode: mode,
+        ...(!whiteboard ? { language: state.language } : {}),
         interviewProfile,
         ...(interviewGrounding ? { interviewGrounding } : {}),
         ...(nodes.interviewerAccent.value
@@ -2014,6 +2040,8 @@ async function connect(preflight, presenting = false) {
     }
     const connection = await response.json();
     state.isGuest = connection.guest === true;
+    // The language this interview started in, which the next one preselects.
+    if (!whiteboard) writeStored(LANGUAGE_KEY, state.language);
     if (strict) {
       // Save before revealing the problem or joining. A later load or join
       // failure must still exclude this assignment on the next attempt.
@@ -2849,26 +2877,28 @@ function selectTab(tab) {
   nodes.transcriptTab.classList.toggle("selected", transcript);
 }
 
+/// The tab an interview opens on: the preferred language when this problem
+/// can run it, else Python, which runs in the browser on every server.
+function startingLanguage() {
+  return preferredLanguage && languages.includes(preferredLanguage)
+    ? preferredLanguage
+    : "python";
+}
+
 function initializeLanguages() {
   applyLanguages(null);
-  setLanguage(
-    requestedLanguage && languages.includes(requestedLanguage)
-      ? requestedLanguage
-      : "python",
-  );
+  setLanguage(startingLanguage());
   // Setup and event binding finish synchronously before this callback runs.
-  // A late judge may enable the requested language, but cannot replace a
+  // A late judge may enable the preferred language, but cannot replace a
   // language or buffer the candidate has already committed to.
   void judgePromise.then((spec) => {
     applyLanguages(spec);
     if (
       state.phase === "live" &&
       !languageChoiceCommitted &&
-      requestedLanguage &&
-      state.language !== requestedLanguage &&
-      languages.includes(requestedLanguage)
+      state.language !== startingLanguage()
     )
-      setLanguage(requestedLanguage);
+      setLanguage(startingLanguage());
   });
 }
 

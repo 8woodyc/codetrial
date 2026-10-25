@@ -243,7 +243,7 @@ for (const [requested, expected] of [
   });
 }
 
-for (const action of ["restore", "edit", "choose", "run", "end"]) {
+for (const action of ["wait", "edit", "choose", "run", "end"]) {
   test(`Strict delayed judge language restoration respects ${action}`, async (t) => {
     if (!browser) return t.skip("playwright chromium unavailable");
     let releaseJudge;
@@ -305,9 +305,9 @@ for (const action of ["restore", "edit", "choose", "run", "end"]) {
       await pauseClock(page);
       await page.locator("#end").click();
       await page.locator("#ending-overlay:not([hidden])").waitFor();
-    } else {
-      expected = "c";
     }
+    // The token named Python, so a judge enabling C afterwards does not
+    // switch to it even when the candidate only waited.
     releaseJudge();
     await page.waitForFunction(
       () =>
@@ -316,12 +316,7 @@ for (const action of ["restore", "edit", "choose", "run", "end"]) {
     assert.equal(await page.locator("#language-select").inputValue(), expected);
     if (action === "end")
       assert.equal(await page.locator("#ending-overlay").isVisible(), true);
-    if (action === "restore")
-      assert.match(
-        await page.locator("#editor").inputValue(),
-        /int\* matchDisputedCharge/,
-      );
-    else assert.equal(await page.locator("#editor").inputValue(), code);
+    assert.equal(await page.locator("#editor").inputValue(), code);
   });
 }
 

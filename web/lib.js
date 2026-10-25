@@ -10,6 +10,9 @@ const HTML_ESCAPES = {
 };
 
 export const SHOW_SOURCES_KEY = "codetrial.showProblemSources";
+/// The language the candidate last started an interview in, which the next
+/// interview preselects.
+export const LANGUAGE_KEY = "codetrial.language";
 
 export function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (char) => HTML_ESCAPES[char]);
