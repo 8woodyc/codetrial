@@ -29,6 +29,8 @@ import {
 } from "./progress.js";
 import {
   categoryComparisonMarkup,
+  FINAL_CODE_NOT_SAVED,
+  mountFinalCodeCopy,
   reportMarkdown,
   reportMarkup,
 } from "./render.js";
@@ -1974,9 +1976,10 @@ function renderAttemptHistory(attempts) {
       report: attempt.report,
       problemTitle: attempt.problemTitle,
       language: languageLabel(attempt.language ?? "not recorded"),
-      code: attempt.code ?? "(final code was not saved)",
+      code: attempt.code ?? FINAL_CODE_NOT_SAVED,
       unclearLines: attempt.unclearLines,
     });
+    mountFinalCodeCopy(report, attempt.code);
     report.querySelector(".report-actions")?.remove();
     report.hidden = true;
     open.addEventListener("click", () => {
