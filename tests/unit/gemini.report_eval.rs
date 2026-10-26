@@ -97,6 +97,15 @@ fn variant_input(item: &Item, variant: &Variant) -> Value {
     input
 }
 
+fn candidate_turns(input: &Value) -> u32 {
+    input["transcript"]
+        .as_str()
+        .unwrap()
+        .lines()
+        .filter(|line| line.starts_with("Candidate:"))
+        .count() as u32
+}
+
 fn prompt(input: &Value) -> String {
     crate::agent::report_prompt(crate::agent::ReportPromptInput {
         problem: crate::agent::get_problem(input["problem"].as_str()),
@@ -124,6 +133,7 @@ fn prompt(input: &Value) -> String {
             crate::agent::BehavioralRound::NeverOpened
         },
         follow_ups_released: input["follow_ups_released"].as_bool().unwrap(),
+        candidate_turns: candidate_turns(input),
     })
 }
 
@@ -1633,11 +1643,18 @@ mod runner {
                     }
                     journal.start_row(&id)?;
                     let input = variant_input(item, variant);
+                    let turn_count = candidate_turns(&input);
                     let refused = std::sync::atomic::AtomicBool::new(false);
                     let calls = ReportCalls {
                         keys,
                         url: url.into(),
                         material: crate::gemini::tests::EDITOR,
+                        communication_assessed: crate::agent::ReportRounds {
+                            behavioral_opened: input["behavioral_opened"].as_bool().unwrap(),
+                            follow_ups_released: input["follow_ups_released"].as_bool().unwrap(),
+                            candidate_turns: turn_count,
+                        }
+                        .communication_assessed(),
                         budget: ReportCallBudget::new(),
                         backoff: REPORT_RETRY_BACKOFF,
                         run: ReportRun {
@@ -1658,6 +1675,7 @@ mod runner {
                                 follow_ups_released: input["follow_ups_released"]
                                     .as_bool()
                                     .unwrap(),
+                                candidate_turns: turn_count,
                             },
                         ),
                     )
@@ -1925,6 +1943,7 @@ mod runner {
             keys: &keys,
             url,
             material: crate::gemini::tests::EDITOR,
+            communication_assessed: true,
             budget: ReportCallBudget::new(),
             backoff: Duration::ZERO,
             run: ReportRun {
@@ -1941,6 +1960,7 @@ mod runner {
             crate::agent::ReportRounds {
                 behavioral_opened: true,
                 follow_ups_released: false,
+                candidate_turns: 1,
             },
         )
         .await

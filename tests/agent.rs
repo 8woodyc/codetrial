@@ -728,6 +728,7 @@ fn prompt_samples() -> Value {
             evidence: &working_report,
             behavioral_round: BehavioralRound::Opened,
             follow_ups_released: true,
+            candidate_turns: 1,
         }),
         "boardReport": report_prompt(ReportPromptInput {
             problem,
@@ -747,6 +748,7 @@ fn prompt_samples() -> Value {
             evidence: "",
             behavioral_round: BehavioralRound::NotConfigured,
             follow_ups_released: false,
+            candidate_turns: 1,
         }),
         "boardReportNoBoard": report_prompt(ReportPromptInput {
             problem,
@@ -766,6 +768,7 @@ fn prompt_samples() -> Value {
             evidence: "",
             behavioral_round: BehavioralRound::NotConfigured,
             follow_ups_released: false,
+            candidate_turns: 1,
         }),
         "reportEmpty": report_prompt(ReportPromptInput {
             problem,
@@ -785,6 +788,7 @@ fn prompt_samples() -> Value {
             evidence: "",
             behavioral_round: BehavioralRound::NeverOpened,
             follow_ups_released: false,
+            candidate_turns: 0,
         }),
         "reportHalfElapsed": report_prompt(ReportPromptInput {
             problem,
@@ -804,6 +808,7 @@ fn prompt_samples() -> Value {
             evidence: "",
             behavioral_round: BehavioralRound::NotConfigured,
             follow_ups_released: false,
+            candidate_turns: 0,
         }),
 
         // Assembled by the real builder rather than written out here. A
@@ -843,6 +848,7 @@ fn prompt_samples() -> Value {
             evidence: "",
             behavioral_round: BehavioralRound::Opened,
             follow_ups_released: false,
+            candidate_turns: 1,
         }),
         "reportMultiline": report_prompt(ReportPromptInput {
             problem,
@@ -862,6 +868,7 @@ fn prompt_samples() -> Value {
             evidence: "",
             behavioral_round: BehavioralRound::Opened,
             follow_ups_released: false,
+            candidate_turns: 1,
         }),
     });
 
@@ -1227,25 +1234,30 @@ fn evaluation_reaction(case: &Value, state: &mut RuntimeState) -> String {
             .generate_reply
             .expect("round gate produces a reaction")
         }
-        "report" => model_report_input(report_prompt(ReportPromptInput {
-            problem: get_problem(Some("two-sum")),
-            interview_mode: InterviewMode::Coding,
-            board_attached: false,
-            transcript: case["transcript"].as_str().expect("transcript is text"),
-            rolling_assessment: "",
-            final_code: code,
-            language: "python",
-            hints_used: case["hintsUsed"].as_u64().expect("hint count is integer") as u32,
-            hint_rung: 0,
-            volunteered_hints: 0,
-            duration_min: 45,
-            elapsed_min: 20.0,
-            test_summary: "No trusted server-side test was available.",
-            practice_level: None,
-            evidence: "",
-            behavioral_round: BehavioralRound::of(state),
-            follow_ups_released: false,
-        })),
+        "report" => {
+            let transcript = case["transcript"].as_str().expect("transcript is text");
+            let candidate_turns = u32::from(!transcript.trim().is_empty());
+            model_report_input(report_prompt(ReportPromptInput {
+                problem: get_problem(Some("two-sum")),
+                interview_mode: InterviewMode::Coding,
+                board_attached: false,
+                transcript,
+                rolling_assessment: "",
+                final_code: code,
+                language: "python",
+                hints_used: case["hintsUsed"].as_u64().expect("hint count is integer") as u32,
+                hint_rung: 0,
+                volunteered_hints: 0,
+                duration_min: 45,
+                elapsed_min: 20.0,
+                test_summary: "No trusted server-side test was available.",
+                practice_level: None,
+                evidence: "",
+                behavioral_round: BehavioralRound::of(state),
+                follow_ups_released: false,
+                candidate_turns,
+            }))
+        }
         other => panic!("unknown reaction kind {other}"),
     }
 }
