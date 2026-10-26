@@ -1139,3 +1139,250 @@ test("taking the offline summary releases the room", () => {
   assert.match(show, /state\.room = null/);
   assert.match(show, /state\.connected = false/);
 });
+
+/// "Skip report and exit": the way out of the report wait that discards the
+/// report instead of waiting for it, showing it, or saving it.
+///
+/// The button lives on the ending overlay, so it is offered for the whole wait
+/// rather than after the escape timer, and nothing about leaving may build the
+/// offline summary or touch report history.
+test("the ending overlay offers Skip report and exit for the whole wait", () => {
+  const page = read("interview.html");
+  const overlay = page.slice(
+    page.indexOf('id="ending-overlay"'),
+    page.indexOf('id="jim-stage"'),
+  );
+  assert.match(
+    overlay,
+    /<button[^>]*id="skip-report"[\s\S]*?Skip report and exit/,
+    "the skip button is missing from the ending overlay",
+  );
+
+  const ending = functionBody(interviewSource(), "endInterview");
+  assert.match(
+    ending,
+    /nodes\.skipReport\.hidden = !reportComing/,
+    "the skip is offered as soon as an agent is writing a report",
+  );
+  const escape = ending.slice(ending.search(/REPORT_ESCAPE_WAIT_MS/) - 600);
+  assert.ok(
+    !escape.includes("nodes.skipReport"),
+    "the skip must not wait for the escape timer",
+  );
+});
+
+test("confirming Skip changes the overlay and keeps focus off the page body", () => {
+  const skip = functionBody(interviewSource(), "skipReport");
+  // Focus moves before the focused button is disabled, or it drops to <body>.
+  assert.ok(
+    skip.indexOf("nodes.endingTitle.focus()") <
+      skip.indexOf("nodes.skipReport.disabled = true"),
+    "focus must leave the Skip button before it is disabled",
+  );
+  assert.match(
+    skip,
+    /nodes\.endingTitle\.textContent = "Skipping report\.\.\."/,
+  );
+  assert.match(skip, /nodes\.endingDetail\.textContent =/);
+  assert.match(skip, /querySelector\("\.spinner"\)\.hidden = true/);
+});
+
+test("skipping the report tells the agent, ignores any report, and saves nothing", () => {
+  const script = interviewSource();
+  const skip = functionBody(script, "skipReport");
+
+  assert.match(skip, /window\.confirm\(SKIP_REPORT_CONFIRM\)/);
+  assert.match(
+    script,
+    /End this interview without waiting for a report\? Any report in progress will be discarded and will not be saved\./,
+  );
+  assert.match(skip, /state\.reportSkipped = true/);
+  assert.match(skip, /publish\(topics\.control, skipReportPayload\(\)\)/);
+  assert.match(skip, /leaveRoom\(\)/);
+  // The end must have gone out first, or there is no report to cancel.
+  assert.ok(skip.indexOf("endSent") < skip.indexOf("skipReportPayload"));
+  for (const built of ["showReport", "saveHistory", "saveReportHistory"]) {
+    assert.ok(!skip.includes(built), `skipping must not call ${built}`);
+  }
+
+  // A report already on its way, and the offline summary, are both refused.
+  assert.match(
+    script,
+    /if \(!acceptsReport\(topic, participant\)\) return;\s*(?:\/\/[^\n]*\n\s*)*if \(state\.reportSkipped\) return;/,
+  );
+  assert.match(
+    functionBody(script, "showReport"),
+    /if \(state\.reportSkipped\) return;/,
+  );
+});
+
+test("the skip button is taken away once a report or recovery owns the ways out", () => {
+  const script = interviewSource();
+  assert.match(
+    script,
+    /nodes\.leaveRoom\.hidden = true;\s*nodes\.skipReport\.hidden = true;/,
+    "a report that lands must hide the skip",
+  );
+  assert.match(
+    functionBody(script, "reportRenderFailed"),
+    /nodes\.skipReport\.hidden = true/,
+  );
+  assert.match(
+    script,
+    /nodes\.skipReport\.hidden = true;\s*nodes\.leaveRoom\.hidden = false;\s*nodes\.leaveRoom\.textContent = "Save incomplete report and leave"/,
+  );
+});
+
+test("late report and every history save entry reject a confirmed skip", () => {
+  const script = interviewSource();
+  assert.match(
+    functionBody(script, "receiveReport"),
+    /if \(state\.reportSkipped\) return;/,
+    "a report delivered after Skip must not be processed",
+  );
+  assert.match(
+    functionBody(script, "saveHistory"),
+    /if \(state\.reportSkipped\) return;/,
+    "recovery or offline saves must not bypass Skip",
+  );
+});
+
+test("the skip packet is the control message the agent listens for", async () => {
+  const { skipReportPayload } = await import(webUrl("lib.js"));
+  assert.deepEqual(skipReportPayload(), { type: "skip_report" });
+});
+
+test("skip waits for agent acknowledgement before disconnecting", async () => {
+  const script = interviewSource();
+  const { skipReportPayload } = await import(webUrl("lib.js"));
+  const bodies = ["skipReport", "leaveRoom", "receiveControl"]
+    .map((name) => `${functionBody(script, name)}\n}`)
+    .join("\n");
+
+  function setup() {
+    const events = [];
+    const timers = new Map();
+    let timerId = 0;
+    const room = {
+      disconnect: async () => events.push("disconnect"),
+    };
+    const scope = {
+      state: {
+        phase: "ending",
+        reportReceiving: false,
+        reportSkipped: false,
+        room,
+      },
+      nodes: {
+        skipReport: {},
+        forceReport: {},
+        leaveRoom: {},
+        endingTitle: { focus() {} },
+        endingDetail: {},
+        ending: { querySelector: () => ({}) },
+      },
+      window: {
+        confirm: () => true,
+        location: { href: "/interview" },
+      },
+      globalThis: {
+        setTimeout(callback, delay) {
+          const id = ++timerId;
+          timers.set(id, { callback, delay });
+          return id;
+        },
+        clearTimeout(id) {
+          timers.delete(id);
+        },
+      },
+      topics: { control: "control" },
+      skipReportPayload,
+      endSent: Promise.resolve(),
+      publish: async () => events.push("publish"),
+      stopEndingEscape() {},
+      stopEndingClock() {},
+      stopAvatar() {},
+      stopLocalMedia() {},
+      beforeUnloadGuard: { dispose() {} },
+      reportRecovery: {
+        stop: () => events.push("stop-recovery"),
+        finish: () => events.push("finish-recovery"),
+      },
+    };
+
+    const page = new Function(
+      "scope",
+      `with (scope) {
+        let resolveSkipReportAck = null;
+        const SKIP_REPORT_SEND_WAIT_MS = 3000;
+        const SKIP_REPORT_CONFIRM = "Skip report?";
+        ${bodies}
+        return { skipReport, receiveControl };
+      }`,
+    )(new Proxy(scope, { has: (target, key) => key in target }));
+
+    const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+    return {
+      ...page,
+      scope,
+      events,
+      timers,
+      settle,
+      acknowledge() {
+        page.receiveControl(
+          new TextEncoder().encode(JSON.stringify({ type: "skip_report_ack" })),
+        );
+      },
+      expire() {
+        for (const [id, timer] of [...timers]) {
+          if (timer.delay === 3000) {
+            timers.delete(id);
+            timer.callback();
+          }
+        }
+      },
+    };
+  }
+
+  // A resolved publish promise does not prove the agent received the packet.
+  {
+    const page = setup();
+    const leaving = page.skipReport();
+    await page.settle();
+    assert.ok(page.events.includes("publish"));
+    assert.ok(!page.events.includes("disconnect"));
+    assert.equal(page.scope.window.location.href, "/interview");
+
+    page.acknowledge();
+    await leaving;
+    assert.equal(page.events.filter((e) => e === "disconnect").length, 1);
+    assert.equal(page.scope.window.location.href, "/");
+  }
+
+  // Missing acknowledgements must not trap the candidate indefinitely.
+  {
+    const page = setup();
+    const leaving = page.skipReport();
+    await page.settle();
+    assert.ok(!page.events.includes("disconnect"));
+    page.expire();
+    await leaving;
+    assert.ok(page.events.includes("disconnect"));
+    assert.equal(page.scope.window.location.href, "/");
+  }
+
+  // Recovery arriving during the ACK wait must not finalize a skipped report.
+  {
+    const page = setup();
+    const leaving = page.skipReport();
+    await page.settle();
+    page.scope.state.phase = "report_recovery";
+    page.acknowledge();
+    await leaving;
+    assert.ok(page.events.includes("stop-recovery"));
+    assert.ok(!page.events.includes("finish-recovery"));
+    assert.ok(page.events.includes("disconnect"));
+    assert.equal(page.scope.window.location.href, "/");
+  }
+});

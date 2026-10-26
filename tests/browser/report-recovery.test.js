@@ -258,6 +258,7 @@ function pageHarness(phase = "live") {
       "editor",
       "ending",
       "forceReport",
+      "skipReport",
       "leaveRoom",
       "endingDetail",
     ].map((key) => [key, {}]),

@@ -98,6 +98,7 @@ import {
   endInterviewPayload,
   drawingActivityPayload,
   retryReportPayload,
+  skipReportPayload,
   escapeHtml,
   formatTime,
   integrityEventPayload,
@@ -514,6 +515,7 @@ const state = {
   downloadingReport: false,
   reportSaveComplete: false,
   reportReceiving: false,
+  reportSkipped: false,
   /// Set when the interviewer's report reached this page and could not be
   /// rendered. The offline summary that follows is written from what this page
   /// holds either way; what this changes is the sentence explaining why the
@@ -644,6 +646,7 @@ const nodes = {
   endingTitle: document.querySelector("#ending-title"),
   endingWithdrawConsent: document.querySelector("#ending-withdraw-consent"),
   retryReport: document.querySelector("#retry-report"),
+  skipReport: document.querySelector("#skip-report"),
   forceReport: document.querySelector("#force-report"),
   leaveRoom: document.querySelector("#leave-room"),
   endingDetail: document.querySelector("#ending-detail"),
@@ -1110,6 +1113,7 @@ function bindEvents() {
     withdrawRecordingConsent,
   );
   nodes.retryReport.addEventListener("click", () => reportRecovery.retry());
+  nodes.skipReport.addEventListener("click", () => void skipReport());
   nodes.forceReport.addEventListener("click", showReport);
   nodes.leaveRoom.addEventListener("click", leaveRoom);
   nodes.run.addEventListener("click", runTests);
@@ -2287,6 +2291,9 @@ async function connectLiveKit(connection, preflight, presenting = false) {
         return;
       }
       if (!acceptsReport(topic, participant)) return;
+      // The candidate chose to leave without a report. One that was already on
+      // its way is dropped unread, so it is neither drawn nor saved.
+      if (state.reportSkipped) return;
       // The report has arrived. Nothing may offer the offline summary or a way
       // out while it is drawn, or the candidate could save an unscored summary
       // beside it; `reportRenderFailed` gives the ways out back. Only the copy
@@ -2298,6 +2305,7 @@ async function connectLiveKit(connection, preflight, presenting = false) {
         nodes.end.disabled = true;
         nodes.forceReport.hidden = true;
         nodes.leaveRoom.hidden = true;
+        nodes.skipReport.hidden = true;
         stopEndingEscape();
       }
       await receiveReportDelivery(
@@ -2570,6 +2578,9 @@ const reportRecovery = createReportRecovery({
       : "Evaluation temporarily unavailable";
     nodes.ending.querySelector(".spinner").hidden = true;
     nodes.forceReport.hidden = true;
+    // Recovery owns the ways out from here; the agent is no longer writing a
+    // report that a skip could stop.
+    nodes.skipReport.hidden = true;
     nodes.leaveRoom.hidden = false;
     nodes.leaveRoom.textContent = "Save incomplete report and leave";
     nodes.retryReport.hidden = false;
@@ -2648,6 +2659,8 @@ window.addEventListener("pagehide", finalizeRecoveryOnPageHide);
 /// room stays up until then so the agent can stop retransmitting. Recovery's
 /// own finalize has no receipt to wait for.
 async function receiveReport(room, payload, flushed = Promise.resolve()) {
+  // A late packet must never restart report handling after Skip.
+  if (state.reportSkipped) return;
   // The wait ended when this packet arrived, whatever becomes of it below.
   stopEndingEscape();
   let rendered = false;
@@ -3227,7 +3240,9 @@ function showFrameworkHint() {
 function receiveControl(bytes) {
   try {
     const message = JSON.parse(new TextDecoder().decode(bytes));
-    if (message.type === "report_retry") {
+    if (message.type === "skip_report_ack") {
+      resolveSkipReportAck?.();
+    } else if (message.type === "report_retry") {
       reportRecovery.notice(message);
     } else if (
       message.type === "thinking_state" &&
@@ -4031,6 +4046,12 @@ const REPORT_ESCAPE_WAIT_MS = 155000;
 /// "preparing your report" and then with an offer to retry the provider.
 let endingEscape = [];
 
+/// Settles once `end_interview` has been sent. A skip must follow it: sent
+/// first, the agent would have no report in progress to cancel and would write
+/// one for a page that has already left. The whiteboard and example drawing
+/// delay the end until their uploads settle, so this can lag the click.
+let endSent = Promise.resolve();
+
 /// A final packet can arrive after the participant's departure notification,
 /// particularly from an older agent that leaves without waiting for a receipt.
 /// Offering the offline summary immediately lets the candidate disconnect
@@ -4111,6 +4132,9 @@ function endInterview(reason) {
     roomInterviewer(roomParticipants(), state.agentIdentity),
   );
   nodes.forceReport.hidden = reportComing;
+  // Only while an agent is writing a report there is something to skip; with
+  // none in the room the offline summary follows within a moment instead.
+  nodes.skipReport.hidden = !reportComing;
   startEndingClock();
   if (reportComing) {
     // The wait clears report generation, the timer-driven wrap-up, the Gemini
@@ -4145,11 +4169,11 @@ function endInterview(reason) {
       endInterviewPayload(reason, currentCode(), state.language),
     );
   if (whiteboard) {
-    void boardUploadsSettled().then(publishEnd);
+    endSent = boardUploadsSettled().then(publishEnd);
   } else if (exampleFinished) {
-    void exampleFinished.then(publishEnd);
+    endSent = exampleFinished.then(publishEnd);
   } else {
-    publishEnd();
+    endSent = Promise.resolve(publishEnd());
   }
   if (!reportComing) setTimeout(showReport, 300);
 }
@@ -4177,11 +4201,73 @@ function stopEndingClock() {
   nodes.endingElapsed.textContent = "";
 }
 
+const SKIP_REPORT_CONFIRM =
+  "End this interview without waiting for a report? Any report in progress will be discarded and will not be saved.";
+
+/// Wait at most this long for the agent to acknowledge an accepted Skip.
+/// If the acknowledgement never arrives, leave anyway: cancellation is
+/// best-effort, and a missing packet must not trap the candidate.
+const SKIP_REPORT_SEND_WAIT_MS = 3000;
+let resolveSkipReportAck = null;
+
+/// "Skip report and exit": the candidate leaves without waiting for, seeing,
+/// or saving a report. Tells the agent to drop the one it is writing, then
+/// leaves exactly as `leaveRoom` does. Nothing is built from what this page
+/// holds, so no offline summary and no history entry exist to be saved.
+async function skipReport() {
+  if (state.phase !== "ending" || state.reportReceiving) return;
+  if (!window.confirm(SKIP_REPORT_CONFIRM)) return;
+  // The report may have landed while the dialog was open. Taking a report the
+  // candidate is already reading away would be the wrong answer to a click
+  // made about a wait.
+  if (state.phase !== "ending" || state.reportReceiving) return;
+  state.reportSkipped = true;
+  // The overlay must show that Skip took effect, or it keeps saying a report
+  // is being written. Focus moves to the title first: disabling the button
+  // that has it would drop focus to the page body.
+  nodes.endingTitle.focus();
+  nodes.skipReport.disabled = true;
+  nodes.endingTitle.textContent = "Skipping report...";
+  nodes.endingDetail.textContent =
+    "Letting the interviewer know. This can take a few seconds.";
+  nodes.ending.querySelector(".spinner").hidden = true;
+  nodes.forceReport.hidden = true;
+  nodes.leaveRoom.hidden = true;
+  stopEndingEscape();
+  let acknowledge;
+  const acknowledged = new Promise((resolve) => {
+    acknowledge = resolve;
+  });
+  resolveSkipReportAck = acknowledge;
+
+  void Promise.resolve(endSent)
+    .then(() => publish(topics.control, skipReportPayload()))
+    .catch(() => {});
+
+  let timeout;
+  try {
+    await Promise.race([
+      acknowledged,
+      new Promise((resolve) => {
+        timeout = globalThis.setTimeout(resolve, SKIP_REPORT_SEND_WAIT_MS);
+      }),
+    ]);
+  } finally {
+    globalThis.clearTimeout(timeout);
+    resolveSkipReportAck = null;
+  }
+  leaveRoom();
+}
+
 function leaveRoom() {
   if (state.downloadingReport) return;
   if (state.phase === "report_recovery") {
-    reportRecovery.finish();
-    return;
+    if (state.reportSkipped) {
+      reportRecovery.stop();
+    } else {
+      reportRecovery.finish();
+      return;
+    }
   }
   if (state.reportReceiving) return;
   if (
@@ -4203,6 +4289,9 @@ async function showReport() {
   // An arrived report outranks the offline summary, including from the timer
   // `endInterview` sets when no report is expected.
   if (state.phase === "report" || state.reportReceiving) return;
+  // Leaving without a report: the offline summary is a report too, and it is
+  // saved to history the same way.
+  if (state.reportSkipped) return;
   state.phase = "report";
   // The offline summary is now offered while a room is still up -- it used to
   // be hidden for the whole life of one -- so this is the one report path that
@@ -4291,6 +4380,7 @@ function reportRenderFailed(error, { offlineSummary }) {
   ).message;
   nodes.leaveRoom.hidden = false;
   nodes.forceReport.hidden = !offlineSummary;
+  nodes.skipReport.hidden = true;
 }
 
 function renderReport() {
@@ -4438,6 +4528,8 @@ function unclearLines() {
 }
 
 async function saveHistory(report = state.report) {
+  // Covers normal delivery, offline summary, and recovery persistence.
+  if (state.reportSkipped) return;
   // The interview id travels with the report so the replay page can put the
   // two beside each other. Reports are keyed by their own id and recordings by
   // theirs, and without this the only thing relating them is the clock.

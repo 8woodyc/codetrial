@@ -1415,7 +1415,10 @@ fn the_ending_leaves_only_after_the_report_delivery_settles() {
     let publish = ending
         .find("publish_with_recovery(")
         .expect("the ending publishes through recovery");
-    let leave = ending.find("leave_room(").expect("the ending leaves");
+    let leave = ending[publish..]
+        .find("leave_room(")
+        .map(|offset| publish + offset)
+        .expect("the normal report path leaves after publishing");
     assert!(publish < leave);
     assert!(!ending[publish..leave].contains("sleep("));
 
@@ -1432,6 +1435,36 @@ fn the_ending_leaves_only_after_the_report_delivery_settles() {
         .nth(1)
         .expect("the live room publishes reports");
     assert!(publish.contains("deliver_report("));
+}
+
+/// A skipped report is acknowledged before the agent leaves. The page waits
+/// for that packet before it disconnects, so one published after `leave_room`,
+/// or dropped from this branch, sends every Skip to the page's timeout.
+#[test]
+fn a_skip_is_acknowledged_before_the_agent_leaves() {
+    let source = include_str!("../../src/livekit/packets.rs");
+    let ending = source
+        .split("async fn apply_data_packet(")
+        .nth(1)
+        .expect("apply_data_packet is still defined here")
+        .split("\n}\n")
+        .next()
+        .unwrap_or_default();
+    let skipped = ending
+        .split("let Some((generated, ())) = outcome else {")
+        .nth(1)
+        .expect("the skip branch is still where generation ends")
+        .split("\n    };\n")
+        .next()
+        .unwrap_or_default();
+    let ack = skipped
+        .find("skip_report_ack()")
+        .expect("the skip branch publishes the acknowledgement");
+    let leave = skipped
+        .find("leave_room(")
+        .expect("the skip branch leaves the room");
+    assert!(skipped.contains("publish_control("));
+    assert!(ack < leave);
 }
 
 /// Each pause reads the stretch since the last one, and never that stretch

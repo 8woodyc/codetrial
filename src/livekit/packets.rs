@@ -468,21 +468,57 @@ pub(super) async fn apply_data_packet(
         close_turns(room, context);
         context.transcripts.flush(TRANSCRIPT_FLUSH_LIMIT).await;
     };
-    let (generated, ()) = tokio::join!(
-        generate_report_bounded(
-            interview.boot,
-            &assessment.prompt,
-            &report_boards,
-            (assessment.rounds(), assessment.drawing_received()),
-            api_key,
-            crate::gemini::GENERATION_SEED,
-            &assessment.refused,
-        ),
-        farewell
-    );
+    let generation = async {
+        tokio::join!(
+            generate_report_bounded(
+                interview.boot,
+                &assessment.prompt,
+                &report_boards,
+                (assessment.rounds(), assessment.drawing_received()),
+                api_key,
+                crate::gemini::GENERATION_SEED,
+                &assessment.refused,
+            ),
+            farewell
+        )
+    };
+
+    // The candidate can give up on the report while it is being written. This
+    // handler is the only thing reading the room until it returns, so the wait
+    // is raced against a `skip_report` packet. `biased` so a skip that arrives
+    // with the report loses nothing: the report is then discarded rather than
+    // published. Dropping `generation` stops the wait on the model; a request
+    // already on the wire still finishes server-side, and its answer is never
+    // read.
+    let outcome = tokio::select! {
+        biased;
+        () = report::wait_for_skip(&mut recovery_events, interview.candidate_identity) => None,
+        done = generation => Some(done),
+    };
     context.media.audio = None;
     context.media.video = None;
     context.media.audio_bytes.clear();
+    let Some((generated, ())) = outcome else {
+        eprintln!(
+            "candidate skipped the report; discarding it room={}",
+            interview.boot.room_name
+        );
+        // A stalled ACK must not delay Gemini shutdown indefinitely.
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            publish_control(
+                room,
+                &report::skip_report_ack(),
+                "skip report acknowledgement",
+            ),
+        )
+        .await;
+        if let Err(error) = context.gemini.shutdown().await {
+            eprintln!("Gemini close failed ({error}); leaving anyway");
+        }
+        leave_room(room).await;
+        return Ok(ControlFlow::Break(()));
+    };
     let close_live = async {
         if let Err(error) = context.gemini.shutdown().await {
             eprintln!("Gemini close failed ({error}); leaving anyway");

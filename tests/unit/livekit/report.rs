@@ -1087,6 +1087,86 @@ fn only_the_original_candidate_can_request_report_regeneration() {
     ));
 }
 
+/// The page leaves on this packet alone, so its spelling is the contract. A
+/// rename here that the page does not follow would send every Skip to the
+/// timeout while both suites stayed green; the page is read for the same type.
+#[test]
+fn the_skip_acknowledgement_is_the_packet_the_page_waits_for() {
+    assert_eq!(
+        skip_report_ack(),
+        serde_json::json!({ "type": "skip_report_ack" })
+    );
+    let page = include_str!("../../../web/interview.js");
+    assert!(page.contains("message.type === \"skip_report_ack\""));
+}
+
+/// A skip is the candidate's word alone. The packet that cancels a report in
+/// progress is checked the way a retry is: right topic, right type, and sent by
+/// the original candidate rather than a bystander or an unattributed sender.
+#[test]
+fn only_the_original_candidate_can_skip_the_report() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../../fixtures/control.json")).unwrap();
+    let cases = fixture
+        .as_array()
+        .unwrap_or_else(|| fixture["cases"].as_array().unwrap());
+    let skip = cases
+        .iter()
+        .find(|case| case["name"] == "skip report")
+        .expect("generated skip fixture");
+    let payload = serde_json::to_vec(&skip["payload"]).unwrap();
+    assert!(skip_request(
+        Some(crate::runtime::TOPIC_CONTROL),
+        Some("candidate-original"),
+        "candidate-original",
+        &payload
+    ));
+    for sender in [None, Some("candidate-other"), Some("interviewer-room")] {
+        assert!(!skip_request(
+            Some(crate::runtime::TOPIC_CONTROL),
+            sender,
+            "candidate-original",
+            &payload
+        ));
+    }
+    assert!(!skip_request(
+        Some(crate::runtime::TOPIC_CODE_UPDATE),
+        Some("candidate-original"),
+        "candidate-original",
+        &payload
+    ));
+    assert!(!skip_request(
+        None,
+        Some("candidate-original"),
+        "candidate-original",
+        &payload
+    ));
+    assert!(!skip_request(
+        Some(crate::runtime::TOPIC_CONTROL),
+        Some("candidate-original"),
+        "candidate-original",
+        b"not JSON"
+    ));
+
+    // The other control packets this path sees are not a skip, and a skip is
+    // not a retry: the recovery wait must not treat it as one.
+    for other in ["retry_report", "end_interview", "report_received"] {
+        let other = serde_json::to_vec(&serde_json::json!({ "type": other })).unwrap();
+        assert!(!skip_request(
+            Some(crate::runtime::TOPIC_CONTROL),
+            Some("candidate-original"),
+            "candidate-original",
+            &other
+        ));
+    }
+    assert!(!recovery_request(
+        Some(crate::runtime::TOPIC_CONTROL),
+        Some("candidate-original"),
+        "candidate-original",
+        &payload
+    ));
+}
+
 #[tokio::test]
 async fn only_a_failed_report_can_offer_regeneration() {
     let keys = GeminiKeys::single("test");
@@ -1546,6 +1626,35 @@ fn recovery_offer_matches_browser_limits_and_generation_deadline() {
     let delivery = DELIVERY_WAIT * DELIVERY_ATTEMPTS as u32;
     assert!(
         limits["retryWaitSeconds"].as_u64().unwrap() > (REPORT_TIMEOUT + delivery).as_secs() + 3
+    );
+}
+
+/// An unattributed skip must not finish the wait. Closing the event
+/// stream must not make it finish either.
+#[tokio::test]
+async fn skip_wait_does_not_finish_without_candidate_authorization() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+    tx.send(::livekit::RoomEvent::Reconnecting).unwrap();
+    tx.send(::livekit::RoomEvent::DataReceived {
+        payload: std::sync::Arc::new(br#"{"type":"skip_report"}"#.to_vec()),
+        topic: Some(crate::runtime::TOPIC_CONTROL.into()),
+        kind: ::livekit::DataPacketKind::Reliable,
+        participant: None,
+    })
+    .unwrap();
+
+    drop(tx);
+
+    let result = tokio::time::timeout(
+        std::time::Duration::from_millis(50),
+        wait_for_skip(&mut rx, "candidate-original"),
+    )
+    .await;
+
+    assert!(
+        result.is_err(),
+        "an unattributed skip or closed stream must not cancel the report"
     );
 }
 

@@ -799,3 +799,7 @@ does an actual transport close. This does not promise lossless recovery from an
 unavailable provider. Microphone energy is measured during provider activity
 even after the first transcription, without letting that energy suppress
 silence nudges indefinitely.
+
+### Skipping the evaluation report
+
+When the agent receives and accepts a candidate's `skip_report` request, it discards the evaluation report and sends `skip_report_ack` before leaving the room. Skipping does not undo the cost of Gemini requests already in flight, which may still be billed. A successfully skipped interview produces no evaluation report or new report-history entry; existing recordings and recording consent are unaffected.

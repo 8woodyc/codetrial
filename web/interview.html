@@ -819,6 +819,13 @@
         <button id="force-report" class="pill-button" type="button">
           Show offline summary
         </button>
+        <!-- Offered for the whole wait, unlike the two above: a candidate who
+             does not want the report should not have to sit out the timer to
+             leave. Hidden by interview.js once a report arrives or recovery
+             takes over the ways out. -->
+        <button id="skip-report" class="pill-button" type="button" hidden>
+          Skip report and exit
+        </button>
         <!-- The sidebar's Stop recording is behind this overlay, and the
              recording runs until the report arrives. interview.js keeps this
              one in step with it. -->
