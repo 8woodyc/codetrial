@@ -1072,10 +1072,10 @@ fn setup_page_renders_a_form_with_all_four_credential_fields() {
     }
     assert!(response.contains("/api/setup"), "{response}");
 
-    // The setup page explains what happens when the optional key is blank: an
-    // interviewer hosted elsewhere still needs to join the room.
+    // The setup page explains what happens when the key is blank: nobody speaks
+    // unless an interviewer hosted elsewhere joins the room.
     assert!(
-        response.contains("an interviewer running elsewhere must join the room"),
+        response.contains("unless an interviewer running elsewhere joins the room"),
         "{response}"
     );
 }

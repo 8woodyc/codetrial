@@ -350,14 +350,14 @@ const SETUP_PAGE: &str = r#"<!doctype html>
       <small>Find both on the project's Keys page.</small>
     </fieldset>
     <fieldset>
-      <legend>Google AI <span class="requirement">Optional</span></legend>
-      <p class="group-note">Add a key if this server will host the interviewer.</p>
+      <legend>Google AI <span class="requirement">Needed for the interviewer</span></legend>
+      <p class="group-note">The interviewer speaks through this key. Leave it empty only when another server runs the interviewer, or when <code>GOOGLE_API_KEY</code> or <code>GOOGLE_API_KEYS</code> is exported to a launch that does not use <code>--data-dir</code>.</p>
       <p class="group-note">Each Gemini Live turn is billed on the whole context it runs in, to the Google AI project of whichever configured key it uses: this key or an exported key list, unless the interview's LiveKit provider sets Google keys of its own. Retained audio and images cost again on every later turn. The reports, interim reviews and phase judge draw from the same configured keys and bill the project of whichever key each request uses.</p>
       <div class="field">
         <label for="googleApiKey">Google API Key</label>
         <input id="googleApiKey" name="googleApiKey" type="password">
         <small>Get a key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com</a>.</small>
-        <small>Without a key, the app still loads and an interview can start, but an interviewer running elsewhere must join the room.</small>
+        <small>Without a Google key, an interview starts but nobody speaks in it unless an interviewer running elsewhere joins the room.</small>
       </div>
     </fieldset>
     <div class="action-row">

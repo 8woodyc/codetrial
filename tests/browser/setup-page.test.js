@@ -157,7 +157,7 @@ test("setup shows distinct credential groups without narrow-screen overflow", as
     );
     assert.match(
       await page.locator("fieldset").last().innerText(),
-      /Optional/i,
+      /Needed for the interviewer/i,
     );
     // Beside the key, so whoever enters it learns whose project pays.
     assert.match(
