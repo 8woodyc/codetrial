@@ -5,6 +5,9 @@
 
 use super::*;
 
+#[path = "dispatch_http.rs"]
+mod http_probe;
+
 /// The capacity slot is released by dropping, so an interview that panics
 /// gives its slot back like one that ends. A cap's worth of leaked slots
 /// would refuse every interview after them for the life of the process.
