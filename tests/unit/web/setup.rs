@@ -344,3 +344,19 @@ fn an_offered_url_is_shown_as_its_scheme_and_host() {
     let _ = std::fs::remove_file(&path);
     assert_eq!(endpoint, "wss://example.livekit.cloud:7880");
 }
+
+/// An offered file saved as UTF-8 with a byte order mark is read as the
+/// server reads its own config, the mark ahead of a first-line comment
+/// included.
+#[test]
+fn an_offer_saved_with_a_byte_order_mark_is_accepted() {
+    let path = offer_file(
+        "bom",
+        "\u{feff}# Local configuration\r\nLIVEKIT_URL=wss://example.livekit.cloud\r\n\
+         LIVEKIT_API_KEY=key\r\nLIVEKIT_API_SECRET=secret\r\n",
+    );
+    let (submission, endpoint, _) = read_offer(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(endpoint, "wss://example.livekit.cloud");
+    assert_eq!(submission["livekitApiKey"], "key");
+}
