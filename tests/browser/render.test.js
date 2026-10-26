@@ -662,6 +662,8 @@ test("report markup renders scores, verdict, and escaped feedback", () => {
 
   assert.match(body, /class="good">HIRE</);
   assert.match(body, /Coding \+ behavioral/);
+  assert.match(body, /<h3>Round budgets<\/h3>/);
+  assert.doesNotMatch(body, /Interview rounds/);
   assert.match(body, /coding · 37 min · complete/);
   assert.match(body, /behavioral · 8 min · started/);
   assert.match(body, />82<span> \/ 100<\/span>/);
@@ -1369,8 +1371,9 @@ test("markdown export carries the whole session", () => {
   assert.match(markdown, /^Loop: Coding only$/m);
   assert.match(
     markdown,
-    /^Rounds: coding \(45 min, complete\); behavioral \(0 min, not_configured\)$/m,
+    /^Round budgets: coding \(45 min, complete\); behavioral \(0 min, not_configured\)$/m,
   );
+  assert.doesNotMatch(markdown, /^Rounds:/m);
   assert.match(markdown, /^## Verdict: HIRE$/m);
   assert.match(markdown, /^\| Coding \| 82 \/ 100 \|$/m);
   assert.match(markdown, /^\| Hints used \| 2 \|$/m);
@@ -1900,6 +1903,11 @@ test("report views identify active and legacy scoring contracts", () => {
   assert.match(
     reportMarkdown({ ...legacy, transcript: [] }),
     /Contract: legacy\/unversioned/,
+  );
+  assert.doesNotMatch(reportMarkup(legacy), /Round budgets/);
+  assert.doesNotMatch(
+    reportMarkdown({ ...legacy, transcript: [] }),
+    /^Round budgets:/m,
   );
 });
 

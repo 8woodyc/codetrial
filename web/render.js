@@ -20,6 +20,8 @@ import {
 /// order, so index `i` here is index `i` of `FRAMEWORKS.coding.steps`.
 const BOARD_STEPS = frameworkChecklist("coding", [], "whiteboard").steps;
 
+const ROUND_BUDGETS_LABEL = "Round budgets";
+
 /// Whether a report is of a whiteboard interview.
 ///
 /// The report's own field where it recorded one. A board handed in by the page
@@ -379,7 +381,7 @@ export function reportMarkup({
     ? ` · ${surfaceLabel(report.interviewMode)}`
     : "";
   const rounds = report.rounds?.length
-    ? `<section><h3>Interview rounds</h3><ul>${report.rounds.map((round) => `<li>${escapeHtml(round.kind)} · ${escapeHtml(round.budgetMin)} min · ${escapeHtml(round.status)}</li>`).join("")}</ul></section>`
+    ? `<section><h3>${ROUND_BUDGETS_LABEL}</h3><ul>${report.rounds.map((round) => `<li>${escapeHtml(round.kind)} · ${escapeHtml(round.budgetMin)} min · ${escapeHtml(round.status)}</li>`).join("")}</ul></section>`
     : "";
   const executionNote =
     report.codeExecution === false
@@ -809,7 +811,7 @@ export function reportMarkdown({
     ...(interviewerStyle(report) ? [mdText(interviewerStyle(report))] : []),
     ...(report.rounds?.length
       ? [
-          "Rounds: " +
+          `${ROUND_BUDGETS_LABEL}: ` +
             report.rounds
               .map(
                 (round) =>
