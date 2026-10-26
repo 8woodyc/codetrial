@@ -356,9 +356,10 @@ test("the stylesheet puts no words on the page either", () => {
   // earlier version of this: `content : "..."` matched nothing.
   const draws =
     /(?:^|[;{\s])(content|list-style-type|list-style)\s*:\s*([^;}]+)/gim;
+  // Empty content supplies a resize handle's hit area without adding speech.
   assert.deepEqual(
     new Set([...styles.matchAll(draws)].map((match) => match[2].trim())),
-    new Set(['"\u2713"', "none"]),
+    new Set(['"\u2713"', '""', "none"]),
     "a stylesheet that spells a word is a stylesheet saying something",
   );
   // `attr()` draws an attribute, so a dataset value becomes text a browser

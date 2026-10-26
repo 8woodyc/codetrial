@@ -32,6 +32,12 @@ export const BOARD_BACKGROUND = "#ffffff";
 /// oldest work would have to start disappearing under the candidate, so the
 /// board stops accepting instead, which is at least visible.
 export const MAX_STROKES = 600;
+export const TEXT_SIZE = 32;
+export const TEXT_MIN_SIZE = 12;
+export const TEXT_MAX_SIZE = 128;
+export const TEXT_LINE_HEIGHT = 1.25;
+export const TEXT_MAX_LENGTH = 500;
+export const TEXT_MAX_LINES = 20;
 /// Points in one stroke.
 ///
 /// Sized by the replay rather than by the drawing: a stroke is journalled and
@@ -189,6 +195,40 @@ export function createBoard() {
     canUndo: () => strokes.length > 0 || cleared !== null,
     canRedo: () => undone.length > 0,
     isDrawing: () => open !== null,
+
+    // Drafts live outside this model. Only confirmation discards redo history.
+    addText({ text, color, x, y, fontSize }, record = true) {
+      if (open || strokes.length >= MAX_STROKES) return false;
+      if (
+        typeof text !== "string" ||
+        !text.trim() ||
+        text.length > TEXT_MAX_LENGTH
+      )
+        return false;
+      text = text.replace(/\r\n?/g, "\n");
+      if (text.split("\n").length > TEXT_MAX_LINES) return false;
+      if (typeof color !== "string" || !/^#[0-9a-f]{6}$/i.test(color))
+        return false;
+      if (
+        ![x, y, fontSize].every(Number.isFinite) ||
+        fontSize < TEXT_MIN_SIZE ||
+        fontSize > TEXT_MAX_SIZE
+      )
+        return false;
+      if (
+        x < 0 ||
+        x > BOARD_WIDTH ||
+        y < 0 ||
+        y + text.split("\n").length * fontSize * TEXT_LINE_HEIGHT > BOARD_HEIGHT
+      )
+        return false;
+      const item = Object.freeze({ kind: "text", text, color, x, y, fontSize });
+      strokes.push(item);
+      undone = [];
+      cleared = null;
+      if (record) journal.push({ op: "text", text, color, x, y, fontSize });
+      return true;
+    },
 
     /// Starts a stroke, and returns whether the board took it.
     begin(tool, color, x, y, eraserWidth = ERASER_WIDTH) {
@@ -349,6 +389,8 @@ export function applyOp(board, op) {
   switch (op?.op) {
     case "stroke":
       return board.push(op.color, op.width, op.points);
+    case "text":
+      return board.addText(op, false);
     case "undo":
       return board.undo();
     case "redo":
@@ -458,6 +500,27 @@ function drawStrokes(context, strokes) {
 /// that made it would simply vanish, on the board and in the image the
 /// interviewer is sent.
 function drawStroke(context, stroke) {
+  if (stroke.kind === "text") {
+    context.font = `${stroke.fontSize}px Arial, sans-serif`;
+    context.textBaseline = "alphabetic";
+    context.textAlign = "left";
+    context.direction = "ltr";
+    context.fillStyle = stroke.color;
+    const metrics = context.measureText(stroke.text);
+    const ascent = metrics.fontBoundingBoxAscent;
+    const descent = metrics.fontBoundingBoxDescent;
+    const lineHeight = stroke.fontSize * TEXT_LINE_HEIGHT;
+    // Match the textarea's half-leading above and below the font box.
+    const baseline = (lineHeight - ascent - descent) / 2 + ascent;
+    stroke.text.split("\n").forEach((line, index) => {
+      context.fillText(
+        line,
+        stroke.x,
+        stroke.y + index * lineHeight + baseline,
+      );
+    });
+    return;
+  }
   const points = stroke.points;
   context.strokeStyle = stroke.color;
   context.fillStyle = stroke.color;

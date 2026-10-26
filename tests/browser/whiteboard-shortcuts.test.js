@@ -1,6 +1,10 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  exerciseTextDraft,
+  exerciseTextBaseline,
+} from "./board-text-fixture.js";
+import {
   DEFAULT_RUNTIME_CONFIG,
   launchChromium,
   read,
@@ -92,13 +96,14 @@ after(async () => {
   await new Promise((resolve) => (server ? server.close(resolve) : resolve()));
 });
 
-async function boardPage(t, mac = false) {
+async function boardPage(t, mac = false, deviceScaleFactor = 1) {
   if (!browser) {
     t.skip("playwright chromium unavailable");
     return null;
   }
   const page = await browser.newPage({
     viewport: { width: 1440, height: 1000 },
+    deviceScaleFactor,
   });
   t.after(() => page.close());
   const errors = [];
@@ -135,6 +140,69 @@ async function boardPage(t, mac = false) {
 }
 
 const inspect = (page) => page.evaluate(() => globalThis.boardTest.inspect());
+test("whiteboard confirmation preserves draft glyph positions", async (t) => {
+  const session = await boardPage(t);
+  if (!session) return;
+  await exerciseTextBaseline(
+    session.page,
+    session.page.locator("#board"),
+    session.page.locator("#board-text"),
+  );
+});
+test("text placement and serialized rendering survive a high-DPI viewport", async (t) => {
+  const session = await boardPage(t, false, 2);
+  if (!session) return;
+  const { page } = session;
+  await exerciseTextDraft(
+    page,
+    page.locator("#board"),
+    page.locator("#board-text"),
+  );
+  const live = await inspect(page);
+  await page.setViewportSize({ width: 1000, height: 800 });
+  const replay = await page.evaluate(async (strokes) => {
+    const { createBoard, applyOp, drawBoard } = await import("/whiteboard.js");
+    const board = createBoard();
+    for (const { kind, ...label } of strokes) {
+      if (kind !== "text") throw new Error("expected a text label");
+      applyOp(board, JSON.parse(JSON.stringify({ op: "text", ...label })));
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = 1600;
+    canvas.height = 1000;
+    drawBoard(canvas.getContext("2d"), board.strokes());
+    return canvas.toDataURL();
+  }, live.strokes);
+  assert.equal(replay, live.image);
+});
+test("whiteboard text drafts preserve history, share images and record multiline labels", async (t) => {
+  const session = await boardPage(t);
+  if (!session) return;
+  const { page, events } = session;
+  const blank = await exerciseTextDraft(
+    page,
+    page.locator("#board"),
+    page.locator("#board-text"),
+  );
+  const committed = await inspect(page);
+  assert.equal(committed.strokes.length, 1);
+  assert.equal(committed.strokes[0].text, "head\ntail");
+  assert.equal(committed.strokes[0].color, "#c2261b");
+  const uploads = await expectBoardUpload(page, 0, 1);
+  await page.waitForFunction(() => globalThis.recordedBoardOps >= 1);
+  assert.equal(ops(events).filter((op) => op.op === "text").length, 1);
+  await page.locator("#board-undo").click();
+  assert.equal((await inspect(page)).image, blank);
+  assert.equal((await inspect(page)).canRedo, true);
+  await page.locator("#board-text").click();
+  await page.locator("#board").click({ position: { x: 50, y: 50 } });
+  await page.getByRole("textbox", { name: "Label text" }).fill("discard me");
+  await page.getByRole("textbox", { name: "Label text" }).press("Escape");
+  assert.equal((await inspect(page)).canRedo, true);
+  await page.locator("#board-redo").click();
+  assert.equal((await inspect(page)).image, committed.image);
+  await expectBoardUpload(page, uploads, 1);
+});
 const scrollPosition = (page) =>
   page.evaluate(() => {
     const panel = document.querySelector("#board-panel");
@@ -520,7 +588,7 @@ for (const mac of [false, true]) {
   });
 }
 
-test("Tab focuses the canvas; keyboard and button edits keep it usable", async (t) => {
+test("Tab skips the canvas; programmatic focus keeps keyboard and button edits usable", async (t) => {
   const ctx = await boardPage(t);
   if (!ctx) return;
   const { page } = ctx;
@@ -528,6 +596,8 @@ test("Tab focuses the canvas; keyboard and button edits keep it usable", async (
   assert.equal((await inspect(page)).focus, "board");
   await page.locator("#board-clear").focus();
   await page.keyboard.press("Tab");
+  assert.notEqual((await inspect(page)).focus, "board");
+  await page.locator("#board").focus();
   assert.equal((await inspect(page)).focus, "board");
   assert.equal(
     await page

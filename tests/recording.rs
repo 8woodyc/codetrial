@@ -3039,6 +3039,34 @@ mod replay {
         }
 
         #[tokio::test]
+        async fn replay_ingest_preserves_board_text_prefixes() {
+            let (_scratch, accounts) = harness("board-text-prefixes");
+            let labels = ["data: users", "blob: node", "  DATA: [1, 2, 3]"];
+            let events: Vec<_> = labels
+                .iter()
+                .map(|text| {
+                    parse_replay_event(&super::envelope(
+                        "board",
+                        json!({"ops": [{"op": "text", "text": text,
+                            "color": "#000000", "x": 20, "y": 20, "fontSize": 32,
+                            "frame": "data:image/png;base64,AAAA", "accessToken": "hidden"}]}),
+                    ))
+                    .unwrap()
+                })
+                .collect();
+            assert_eq!(
+                append_replay_events(&accounts, "int-1", 1, &events, 10).unwrap(),
+                Ingest::Stored { first: 0, last: 2 }
+            );
+            let stored = replay_events(&accounts, "int-1", 1, -1).unwrap();
+            for ((_, row), text) in stored.iter().zip(labels) {
+                assert_eq!(row.payload["ops"][0]["text"], text);
+                assert_eq!(row.payload["ops"][0]["frame"], "[media removed]");
+                assert!(row.payload["ops"][0].get("accessToken").is_none());
+            }
+        }
+
+        #[tokio::test]
         async fn replay_ingest_monotonic() {
             let (_scratch, accounts) = harness("ingest-monotonic");
 
@@ -3744,6 +3772,41 @@ mod replay {
             Err(ReplayRejection::Oversize),
             "an oversized event is oversized whether or not its bulk survives redaction"
         );
+    }
+
+    #[test]
+    fn replay_board_text_exception_is_scoped_and_bounded() {
+        let label = format!("data:{}", "x".repeat(495));
+        let payload = json!({"ops": [
+            {"op": "text", "text": label, "nested": {"text": "data: hidden"}},
+            {"op": "text", "text": format!("{label}x")},
+            {"op": "stroke", "text": "data: hidden"}
+        ], "text": "blob: hidden", "nested": {"ops": [{"op": "text", "text": "data: hidden"}]}});
+        let board = parse_replay_event(&envelope("board", payload.clone())).unwrap();
+        assert_eq!(board.payload["ops"][0]["text"], label);
+        assert_eq!(board.payload["ops"][0]["nested"]["text"], "[media removed]");
+        assert_eq!(board.payload["ops"][1]["text"], "[media removed]");
+        assert_eq!(board.payload["ops"][2]["text"], "[media removed]");
+        assert_eq!(board.payload["text"], "[media removed]");
+        assert_eq!(board.payload["nested"]["ops"][0]["text"], "[media removed]");
+        let editor = parse_replay_event(&envelope("editor", payload)).unwrap();
+        assert_eq!(editor.payload["ops"][0]["text"], "[media removed]");
+        for units in [498, 500, 502] {
+            let text = format!("data: {}", "\u{1f600}".repeat((units - 6) / 2));
+            let parsed = parse_replay_event(&envelope(
+                "board",
+                json!({"ops": [{"op": "text", "text": text}]}),
+            ))
+            .unwrap();
+            assert_eq!(
+                parsed.payload["ops"][0]["text"],
+                if text.encode_utf16().count() <= 500 {
+                    text.as_str()
+                } else {
+                    "[media removed]"
+                }
+            );
+        }
     }
 
     #[test]

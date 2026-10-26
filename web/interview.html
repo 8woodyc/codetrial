@@ -464,6 +464,15 @@
             role="group"
             aria-label="Eraser size"
           ></div>
+          <button
+            id="board-text"
+            class="board-tool"
+            type="button"
+            aria-pressed="false"
+            title="Drag on the board to create a text label"
+          >
+            Text
+          </button>
           <button id="board-undo" class="board-tool" type="button">Undo</button>
           <button id="board-redo" class="board-tool" type="button">Redo</button>
           <button
@@ -479,7 +488,7 @@
         <div class="board-surface">
           <canvas
             id="board"
-            tabindex="0"
+            tabindex="-1"
             width="1600"
             height="1000"
             aria-label="Whiteboard"

@@ -52,6 +52,11 @@ function recordingContext() {
     arc: record("arc"),
     fillRect: record("fillRect"),
     drawImage: record("drawImage"),
+    fillText: record("fillText"),
+    measureText: () => ({
+      fontBoundingBoxAscent: 30,
+      fontBoundingBoxDescent: 8,
+    }),
   };
 }
 
@@ -72,6 +77,111 @@ function recordingPainter() {
 function strokesPainted(context) {
   return context.calls.filter(([name]) => name === "stroke").length;
 }
+
+test("text is normalized, serialized and rendered at explicit board coordinates", () => {
+  const board = createBoard();
+  assert.equal(
+    board.addText({
+      text: "head\r\ntail",
+      color: BLACK,
+      x: 120,
+      y: 80,
+      fontSize: 32,
+    }),
+    true,
+  );
+  const operations = JSON.parse(JSON.stringify(board.takeOps()));
+  assert.deepEqual(operations, [
+    {
+      op: "text",
+      text: "head\ntail",
+      color: BLACK,
+      x: 120,
+      y: 80,
+      fontSize: 32,
+    },
+  ]);
+  const replay = createBoard();
+  operations.forEach((op) => applyOp(replay, op));
+  assert.deepEqual(replay.strokes(), board.strokes());
+  const context = recordingContext();
+  drawBoard(context, replay.strokes());
+  assert.deepEqual(
+    context.calls.filter(([name]) => name === "fillText"),
+    [
+      ["fillText", "head", 120, 111],
+      ["fillText", "tail", 120, 151],
+    ],
+  );
+  assert.equal(context.font, "32px Arial, sans-serif");
+  assert.equal(context.textBaseline, "alphabetic");
+  assert.equal(context.fillStyle, BLACK);
+});
+
+test("invalid text does not discard redo or add recorded operations", () => {
+  const board = createBoard();
+  stroke(board, 10, 10, 20, 20);
+  board.undo();
+  board.takeOps();
+  const valid = { text: "head", color: BLACK, x: 20, y: 20, fontSize: 32 };
+  for (const invalid of [
+    { text: "  \n " },
+    { text: "x".repeat(501) },
+    { text: "x\n".repeat(20) },
+    { color: "red" },
+    { x: NaN },
+    { x: -1 },
+    { y: 999 },
+    { fontSize: 0 },
+    { fontSize: 129 },
+  ]) {
+    assert.equal(board.addText({ ...valid, ...invalid }), false);
+    assert.equal(board.canRedo(), true);
+    assert.deepEqual(board.strokes(), []);
+    assert.deepEqual(board.takeOps(), []);
+  }
+  assert.equal(board.redo(), true);
+});
+
+test("text, ink, erasing and clear replay each history transition", () => {
+  const board = createBoard();
+  const replay = createBoard();
+  const actions = [
+    () => stroke(board, 5, 5, 50, 50),
+    () =>
+      board.addText({
+        text: "O(n)\ntime",
+        color: BLACK,
+        x: 60,
+        y: 60,
+        fontSize: 24,
+      }),
+    () => stroke(board, 60, 60, 90, 60, "eraser"),
+    () => board.undo(),
+    () => board.redo(),
+    () => board.clear(),
+    () => board.undo(),
+    () => board.redo(),
+    () => board.undo(),
+    () => board.undo(),
+    () => board.undo(),
+    () => board.redo(),
+  ];
+  for (const action of actions) {
+    assert.equal(action(), true);
+    JSON.parse(JSON.stringify(board.takeOps())).forEach((op) =>
+      applyOp(replay, op),
+    );
+    assert.deepEqual(replay.strokes(), board.strokes());
+    assert.equal(replay.canRedo(), board.canRedo());
+    const live = recordingContext();
+    const recorded = recordingContext();
+    drawBoard(live, board.strokes());
+    drawBoard(recorded, replay.strokes());
+    assert.deepEqual(recorded.calls, live.calls);
+  }
+  assert.equal(board.strokes().at(-1).kind, "text");
+});
 
 test("a stroke is kept as the points it was drawn from", () => {
   const board = createBoard();
@@ -665,6 +775,37 @@ test("a pen takes the board from a palm that landed first", () => {
   const desk = createPointerGate();
   desk.down(mouse(1));
   assert.equal(desk.down(pen(2)), null);
+});
+
+test("text creation shares palm rejection and releases the gate after cancellation", async (t) => {
+  const { launchChromium, startStaticServer } = await import("./source.js");
+  const { exerciseTextPalmRejection } = await import("./board-text-fixture.js");
+  const browser = await launchChromium();
+  if (!browser) return t.skip("playwright chromium unavailable");
+  t.after(() => browser.close());
+  const { server, base } = await startStaticServer();
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const page = await browser.newPage();
+  await page.goto(base);
+  await page.evaluate(async () => {
+    const { mountBoardText } = await import("/board-text.js");
+    const { createPointerGate } = await import("/whiteboard.js");
+    document.body.innerHTML =
+      '<div style="position:relative"><canvas width="1600" height="1000" style="width:800px;height:500px"></canvas></div>';
+    const style = document.createElement("link");
+    style.rel = "stylesheet";
+    style.href = "/styles.css";
+    document.head.append(style);
+    mountBoardText(document.querySelector("canvas"), {
+      active: () => true,
+      locked: () => false,
+      pointers: createPointerGate(),
+      commit: () => {
+        throw new Error("pointer gestures must not commit text");
+      },
+    });
+  });
+  await exerciseTextPalmRejection(page, page.locator("canvas"));
 });
 
 test("a cancelled stroke leaves the board, the journal and redo as they were", () => {

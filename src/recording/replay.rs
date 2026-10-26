@@ -283,7 +283,24 @@ pub fn parse_replay_event(value: &Value) -> Result<ReplayEvent, ReplayRejection>
     // again, because removal is not something a producer may rely on to get
     // under the limit: a megabyte arriving under a key that happens to be
     // redacted is a megabyte.
-    let payload = trim_replay_payload(payload);
+    let mut trimmed = trim_replay_payload(payload);
+
+    // Board labels are painted as text, never loaded as media URLs. Keep this
+    // exception at the producer's field, not every nested field named text.
+    if kind == ReplayKind::Board
+        && let Some(ops) = payload.get("ops").and_then(Value::as_array)
+        && let Some(saved) = trimmed.get_mut("ops").and_then(Value::as_array_mut)
+    {
+        for (op, saved) in ops.iter().zip(saved) {
+            if op.get("op").and_then(Value::as_str) == Some("text")
+                && let Some(text) = op.get("text").and_then(Value::as_str)
+                && text.encode_utf16().count() <= 500
+            {
+                saved["text"] = Value::String(text.to_string());
+            }
+        }
+    }
+    let payload = trimmed;
     if payload_bytes(&payload) > MAX_REPLAY_EVENT_BYTES {
         return Err(ReplayRejection::Oversize);
     }
