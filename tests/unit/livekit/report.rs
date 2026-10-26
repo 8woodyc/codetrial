@@ -718,6 +718,60 @@ fn report_carries_the_debrief() {
     assert_eq!(fallback["incomplete"], true);
 }
 
+/// Publication validates the same drawing receipt that report generation saw.
+/// Whiteboard reports may assess their board, while coding reports may not use
+/// an optional example drawing as scored evidence. The lobby opt-in cannot
+/// erase a snapshot that actually reached the server.
+#[test]
+fn report_value_validates_received_drawings_in_every_mode() {
+    let config = report_test_config();
+    let mut raw = crate::gemini::tests::valid_report();
+    raw["codingFeedback"]["strengths"][0] =
+        serde_json::json!("Your drawing clearly showed the chosen approach.");
+
+    for (mode, drawing_enabled, snapshots, incomplete) in [
+        (crate::agent::InterviewMode::Whiteboard, false, 1, false),
+        (crate::agent::InterviewMode::Coding, false, 0, false),
+        (crate::agent::InterviewMode::Coding, true, 0, false),
+        (crate::agent::InterviewMode::Coding, false, 1, true),
+        (crate::agent::InterviewMode::Coding, true, 1, true),
+    ] {
+        let boot = crate::runtime::bootstrap_with_rounds(
+            &config,
+            "interview-drawing-report",
+            Some("two-sum"),
+            45,
+            crate::runtime::RuntimeOptions {
+                example_drawing_enabled: drawing_enabled,
+                interview_mode: mode,
+                ..Default::default()
+            },
+        );
+        let mut state = RuntimeState {
+            interview_mode: mode,
+            board_snapshots: snapshots,
+            behavioral_round_started: true,
+            ..RuntimeState::default()
+        };
+        state
+            .evidence_ledger
+            .record_conversation_turn(1, "candidate");
+
+        let report = report_value(
+            &boot,
+            &mut state,
+            "candidate_ended",
+            &GeminiKeys::single("test"),
+            Ok(Ok(raw.clone())),
+        );
+        assert_eq!(
+            report.get("incomplete").is_some(),
+            incomplete,
+            "mode={mode:?}, drawing_enabled={drawing_enabled}, snapshots={snapshots}: {report}"
+        );
+    }
+}
+
 /// An original exercise has no published title, so the filter checks its
 /// teaching material against an empty one. That must refuse a practice site
 /// and nothing else: a rule that matched everything would blank the debrief

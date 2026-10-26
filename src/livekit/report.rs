@@ -857,6 +857,10 @@ fn report_value(
     api_key: &GeminiKeys,
     generated: GeneratedReport,
 ) -> serde_json::Value {
+    // Generation sees every received snapshot. Publication must validate the
+    // report against that same evidence, independently of whether the lobby
+    // offered the optional coding exercise drawing control.
+    let drawing_received = state.board_snapshots > 0;
     let mut report = match generated {
         Ok(Ok(raw)) => final_report(
             Some(&raw),
@@ -865,7 +869,7 @@ fn report_value(
             boot.problem,
             crate::agent::ReportRounds::of(state),
             boot.interview_mode,
-            boot.example_drawing_enabled && state.board_snapshots > 0,
+            drawing_received,
         ),
         Ok(Err(error)) => final_report(
             None,
@@ -880,7 +884,7 @@ fn report_value(
             boot.problem,
             crate::agent::ReportRounds::of(state),
             boot.interview_mode,
-            boot.example_drawing_enabled && state.board_snapshots > 0,
+            drawing_received,
         ),
 
         // `Elapsed` Displays as "deadline has elapsed", which does not say
@@ -906,7 +910,7 @@ fn report_value(
             boot.problem,
             crate::agent::ReportRounds::of(state),
             boot.interview_mode,
-            boot.example_drawing_enabled && state.board_snapshots > 0,
+            drawing_received,
         ),
     };
     stamp_report_debrief(&mut report, boot, state);

@@ -459,11 +459,17 @@ pub struct ReportRounds {
     pub behavioral_opened: bool,
     pub follow_ups_released: bool,
     /// Trusted server-side count of candidate transcript turns. Zero means
-    /// there is no communication evidence to score.
+    /// there is no communication evidence to score. A nonzero count only
+    /// makes communication assessment eligible; it does not claim that a turn
+    /// was substantial, correct, or sufficient for any particular feedback.
     pub candidate_turns: u32,
 }
 
 impl ReportRounds {
+    pub fn communication_assessed(self) -> bool {
+        self.candidate_turns > 0
+    }
+
     pub fn of(state: &super::RuntimeState) -> Self {
         Self {
             behavioral_opened: super::BehavioralRound::of(state).opened(),
@@ -500,7 +506,7 @@ pub fn validate_report_for_round(
     } else {
         0
     };
-    let report = validate_report_judging(raw, problem, judged, rounds.candidate_turns > 0)
+    let report = validate_report_judging(raw, problem, judged, rounds.communication_assessed())
         .and_then(|report| {
             let errors = example_drawing_judgments(&report, problem, mode, drawing_received);
             if errors.is_empty() {

@@ -1649,7 +1649,12 @@ mod runner {
                         keys,
                         url: url.into(),
                         material: crate::gemini::tests::EDITOR,
-                        communication_assessed: turn_count > 0,
+                        communication_assessed: crate::agent::ReportRounds {
+                            behavioral_opened: input["behavioral_opened"].as_bool().unwrap(),
+                            follow_ups_released: input["follow_ups_released"].as_bool().unwrap(),
+                            candidate_turns: turn_count,
+                        }
+                        .communication_assessed(),
                         budget: ReportCallBudget::new(),
                         backoff: REPORT_RETRY_BACKOFF,
                         run: ReportRun {

@@ -676,7 +676,6 @@ test("the report card this page renders names no finding either", () => {
       "37",
       "4",
       "4.",
-      "41",
       "42",
       "5.",
       "6.",

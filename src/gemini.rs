@@ -778,7 +778,7 @@ pub(crate) async fn generate_report_with_keys(
             keys,
             url: gemini_generate_content_url(model),
             material,
-            communication_assessed: rounds.candidate_turns > 0,
+            communication_assessed: rounds.communication_assessed(),
             budget: ReportCallBudget::new(),
             backoff: REPORT_RETRY_BACKOFF,
             observer: None,

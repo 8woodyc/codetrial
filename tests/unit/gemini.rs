@@ -975,6 +975,73 @@ fn report_requests_are_session_local_and_never_reuse_personalized_output() {
     assert!(!second.to_string().contains("session-a private evidence"));
 }
 
+/// A zero-turn session must send the nullable communication schema to the
+/// provider. This runs the real report request path so the round-to-schema
+/// wiring cannot silently fall back to the ordinary scored schema.
+#[tokio::test]
+async fn zero_candidate_turns_send_the_unassessed_schema() {
+    let mut answer = valid_report();
+    answer["communicationScore"] = Value::Null;
+    answer["communicationFeedback"]["strengths"] = json!([]);
+    answer["communicationFeedback"]["improvements"] = json!([]);
+    answer["improvementPlan"]
+        .as_array_mut()
+        .expect("fixture plan is an array")
+        .truncate(2);
+
+    let bodies = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::clone(&bodies);
+    let app = axum::Router::new().route(
+        "/",
+        axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+            let seen = Arc::clone(&seen);
+            let answer = answer.clone();
+            async move {
+                seen.lock().unwrap().push(body);
+                axum::Json(json!({
+                    "candidates": [{"content": {"parts": [{"text": answer.to_string()}]}}]
+                }))
+            }
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let keys = GeminiKeys::single("silent-schema-key");
+    let refused = std::sync::atomic::AtomicBool::new(false);
+    let rounds = crate::agent::ReportRounds {
+        behavioral_opened: true,
+        follow_ups_released: false,
+        candidate_turns: 0,
+    };
+    let calls = ReportCalls {
+        keys: &keys,
+        url,
+        material: EDITOR,
+        communication_assessed: rounds.communication_assessed(),
+        budget: ReportCallBudget::new(),
+        backoff: Duration::ZERO,
+        run: ReportRun {
+            scope: "silent-schema",
+            seed: GENERATION_SEED,
+            refused: &refused,
+        },
+        observer: None,
+    };
+
+    generate_report_with_keys_at(calls, "score this", report_problem(), rounds)
+        .await
+        .expect("the silent report should validate");
+    server.abort();
+
+    let bodies = bodies.lock().unwrap();
+    assert_eq!(bodies.len(), 1);
+    assert_eq!(
+        bodies[0]["generationConfig"]["responseSchema"],
+        crate::agent::report_response_schema(false)
+    );
+}
+
 type ReportResult = Result<Value, Box<dyn std::error::Error + Send + Sync>>;
 
 /// The whole report path against a local server, for other modules' tests.
