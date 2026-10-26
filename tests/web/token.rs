@@ -1427,6 +1427,77 @@ async fn token_requires_github_login_when_recording_is_enabled() {
     remove_database(path).await;
 }
 
+// With recording on, a typed account is refused before any room is claimed, and
+// anonymous callers get 401 because guest mode is off.
+#[tokio::test]
+async fn recorded_typed_and_guest_starts_cannot_claim_a_room() {
+    let (mut config, _, path) = signed_in_web_config("recording-typed-consent");
+    config.recording = Some(recording_config());
+    let dispatcher = std::sync::Arc::new(RecordingDispatcher::default());
+    let (base, server) =
+        spawn_web_server_with_dispatcher(config, std::sync::Arc::clone(&dispatcher)).await;
+    let client = http_client();
+    let cookie = record_login(&client, &base, "fixture-typed").await;
+    let cookie = cookie.as_str();
+    let session: Value = client
+        .get(format!("{base}/api/session"))
+        .header("cookie", cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(session["signedIn"], true);
+    assert_eq!(session["identityVerified"], false);
+    let pending = start_interview(&client, &base, cookie).await;
+    for selection in ["practice", "strict"] {
+        let refused = client
+            .post(format!("{base}/api/token"))
+            .header("cookie", cookie)
+            .json(&json!({"selectionMode": selection, "interviewId": pending}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(refused.status(), 403);
+        assert_eq!(
+            refused.json::<Value>().await.unwrap()["code"],
+            "recording_requires_verified_identity"
+        );
+    }
+    let room: Option<String> = rusqlite::Connection::open(&path)
+        .unwrap()
+        .query_row(
+            "SELECT room_name FROM interviews WHERE id = ?1",
+            [&pending],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(room, None);
+    assert_eq!(start_interview(&client, &base, cookie).await, pending);
+    let anonymous: Value = client
+        .get(format!("{base}/api/session"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(anonymous["guestModeAvailable"], false);
+    for endpoint in ["token", "interviews"] {
+        let refused = client
+            .post(format!("{base}/api/{endpoint}"))
+            .json(&json!({}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(refused.status(), 401);
+    }
+    assert!(dispatcher.rooms().is_empty());
+    server.shutdown().await;
+    remove_database(path).await;
+}
+
 /// A recording is delivered to a person, and a typed handle is not one.
 ///
 /// The refusal lives on `/api/token` rather than on the delivery step because
