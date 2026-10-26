@@ -3021,3 +3021,264 @@ fn a_continuation_after_a_recovery_behind_a_turn_keeps_the_configured_deadline()
         Some(short)
     );
 }
+
+/// The watch is handed back once, with both anchors a first-audio line is
+/// timed against. A second reply on the same socket is not a rotation.
+#[test]
+fn a_replacement_watch_is_taken_once() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    assert!(
+        activity.take_rotation_watch().is_none(),
+        "a socket that was never replaced has nothing to report"
+    );
+
+    let connected = start + Duration::from_millis(1_800);
+    activity.begin_rotation_watch(
+        true,
+        RotationWatch {
+            started: start,
+            connected,
+            resumed: true,
+            candidate_spoke_at: None,
+        },
+    );
+    let watch = activity.take_rotation_watch().expect("the watch is taken");
+    assert!(watch.resumed);
+    assert_eq!(watch.started, start);
+    assert_eq!(watch.connected, connected);
+    assert!(
+        activity.take_rotation_watch().is_none(),
+        "only the first audio counts"
+    );
+}
+
+/// A replacement that itself gets replaced before it was heard is timed from
+/// the later one, so the reported gap is never the sum of two attempts.
+#[test]
+fn a_second_replacement_before_any_audio_restarts_the_timing() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.begin_rotation_watch(
+        true,
+        RotationWatch {
+            started: start,
+            connected: start + Duration::from_millis(500),
+            resumed: true,
+            candidate_spoke_at: None,
+        },
+    );
+    let second = start + Duration::from_secs(3);
+    activity.begin_rotation_watch(
+        true,
+        RotationWatch {
+            started: second,
+            connected: second + Duration::from_millis(900),
+            resumed: false,
+            candidate_spoke_at: None,
+        },
+    );
+    let watch = activity.take_rotation_watch().expect("reported");
+    assert!(!watch.resumed);
+    assert_eq!(watch.started, second);
+}
+
+/// A replacement whose briefing was answered with silence is not waited on any
+/// longer: the audio that arrives minutes later is an ordinary reply.
+#[test]
+fn a_turn_that_ends_without_audio_disarms_the_replacement_watch() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.begin_rotation_watch(
+        true,
+        RotationWatch {
+            started: start,
+            connected: start + Duration::from_millis(600),
+            resumed: false,
+            candidate_spoke_at: None,
+        },
+    );
+    activity.settle_completed_turn(false);
+    assert!(activity.take_rotation_watch().is_none());
+}
+
+/// Candidate speech after a replacement is noted on the watch and does not
+/// disarm it: the slow replacements are the ones spoken over, and they have to
+/// stay in the log, marked.
+#[test]
+fn candidate_speech_marks_the_replacement_watch_without_disarming_it() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.begin_rotation_watch(
+        true,
+        RotationWatch {
+            started: start,
+            connected: start + Duration::from_millis(600),
+            resumed: true,
+            candidate_spoke_at: None,
+        },
+    );
+    activity.note_candidate_voice_activity(false, start + Duration::from_secs(1));
+    let quiet = activity
+        .take_rotation_watch()
+        .expect("silence is not speech");
+    assert!(quiet.candidate_spoke_at.is_none());
+
+    activity.begin_rotation_watch(
+        true,
+        RotationWatch {
+            started: start,
+            connected: start + Duration::from_millis(600),
+            resumed: true,
+            candidate_spoke_at: None,
+        },
+    );
+    let first = start + Duration::from_secs(2);
+    activity.note_candidate_voice_activity(true, first);
+    activity.note_candidate_voice_activity(true, start + Duration::from_secs(4));
+    let spoken_over = activity
+        .take_rotation_watch()
+        .expect("speech keeps the watch armed");
+    assert_eq!(spoken_over.candidate_spoke_at, Some(first));
+}
+
+/// A watch armed by one replacement is gone when the next socket takes over,
+/// whether or not that socket asks for a reply of its own.
+#[test]
+fn a_new_socket_drops_the_previous_replacement_watch() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.begin_rotation_watch(
+        true,
+        RotationWatch {
+            started: start,
+            connected: start + Duration::from_millis(600),
+            resumed: true,
+            candidate_spoke_at: None,
+        },
+    );
+    activity.reset_context_observations(true);
+    assert!(activity.take_rotation_watch().is_none());
+}
+
+/// A watch is armed only when the caller says the briefing asked for a reply,
+/// and a call that says it did not leaves nothing armed, not even a watch an
+/// earlier replacement left. Which replacements ask for one is decided by the
+/// caller, which no unit test reaches.
+#[test]
+fn a_replacement_that_asked_for_no_reply_arms_no_watch() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    let watch = || RotationWatch {
+        started: start,
+        connected: start + Duration::from_millis(600),
+        resumed: true,
+        candidate_spoke_at: None,
+    };
+
+    // A watch left armed by an earlier replacement is replaced by nothing too,
+    // not carried over.
+    activity.begin_rotation_watch(true, watch());
+    activity.begin_rotation_watch(false, watch());
+    assert!(activity.take_rotation_watch().is_none());
+}
+
+/// The provider may send no speech start, so voiced microphone frames mark the
+/// watch as well, and the first mark is the one kept.
+#[test]
+fn voiced_microphone_frames_mark_the_replacement_watch() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.begin_rotation_watch(
+        true,
+        RotationWatch {
+            started: start,
+            connected: start + Duration::from_millis(600),
+            resumed: true,
+            candidate_spoke_at: None,
+        },
+    );
+    let first = start + Duration::from_secs(2);
+    activity.note_candidate_voice(first);
+    activity.note_candidate_voice(start + Duration::from_secs(3));
+    let watch = activity.take_rotation_watch().expect("still armed");
+    assert_eq!(watch.candidate_spoke_at, Some(first));
+}
+
+/// A prompt sent after the briefing, a nudge or the farewell, is what the next
+/// audio answers, so it disarms the watch. The briefing's own prompt does not.
+#[test]
+fn a_later_prompt_disarms_the_replacement_watch() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    let watch = || RotationWatch {
+        started: start,
+        connected: start + Duration::from_millis(600),
+        resumed: true,
+        candidate_spoke_at: None,
+    };
+    activity.mark_recovery_prompted(start, None);
+    activity.begin_rotation_watch(true, watch());
+    assert!(
+        activity.take_rotation_watch().is_some(),
+        "the briefing arms its own watch"
+    );
+
+    activity.begin_rotation_watch(true, watch());
+    activity.mark_prompted(start + Duration::from_secs(5), Some("farewell"), false);
+    assert!(activity.take_rotation_watch().is_none());
+}
+
+/// Operators read this line, so its fields and their order are pinned: the
+/// time since the old socket was given up, since the new one was ready, and
+/// since the candidate first spoke, `none` when they did not.
+#[test]
+fn the_first_audio_line_names_each_wait_and_whether_the_candidate_spoke() {
+    let start = Instant::now();
+    let mut watch = RotationWatch {
+        started: start,
+        connected: start + Duration::from_millis(600),
+        resumed: true,
+        candidate_spoke_at: None,
+    };
+    let heard = start + Duration::from_millis(2_500);
+    assert_eq!(
+        watch
+            .first_audio_line("9:13.761", heard, 3, "room-a")
+            .as_deref(),
+        Some(
+            "replacement first audio: at=9:13.761 resumed=true since_start_ms=2500 \
+         since_connected_ms=1900 candidate_spoke_ms=none socket=3 room=room-a"
+        )
+    );
+
+    watch.candidate_spoke_at = Some(start + Duration::from_millis(1_200));
+    watch.resumed = false;
+    assert_eq!(
+        watch
+            .first_audio_line("0:25.625", heard, 2, "room-b")
+            .as_deref(),
+        Some(
+            "replacement first audio: at=0:25.625 resumed=false since_start_ms=2500 \
+         since_connected_ms=1900 candidate_spoke_ms=1200 socket=2 room=room-b"
+        )
+    );
+}
+
+/// Audio that arrives after the longest wait the reply watchdog allows was
+/// drawn by something other than the briefing, so no line is written for it.
+#[test]
+fn audio_after_the_longest_honest_wait_is_not_timed_as_the_replacement() {
+    let start = Instant::now();
+    let watch = RotationWatch {
+        started: start,
+        connected: start + Duration::from_millis(600),
+        resumed: true,
+        candidate_spoke_at: None,
+    };
+    let at_limit =
+        watch.connected + Duration::from_secs(u64::from(crate::config::MAX_GEMINI_REPLY_TIMEOUT_S));
+    assert!(watch.first_audio_line("c", at_limit, 2, "r").is_some());
+    let past = at_limit + Duration::from_millis(1);
+    assert!(watch.first_audio_line("c", past, 2, "r").is_none());
+}

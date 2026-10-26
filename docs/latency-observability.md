@@ -161,6 +161,52 @@ The intervals resample replies one by one and so ignore what replies in one
 session share; interleave the two arms' sessions so that provider drift falls
 on both alike.
 
+## Socket replacement lines
+
+A Gemini Live connection is closed by the server after about ten minutes, and
+the room loop replaces the socket then or earlier. Two plain log lines, not
+latency records, say how long that took. Both carry `room=`.
+
+`replacement:` is printed once per replacement, when the new socket has been
+set up. `rotation_gap_ms` is the time from handling the close to the new
+socket finishing setup, so it includes the budget checks, a resume attempt
+that was refused, and a cold open that followed it. It ends before the
+briefing goes out. It is named apart from the `gap_ms` of the floor lines,
+which measures something else. `resumed` says whether the
+conversation continued from a resumption handle or was rebuilt from the local
+transcript, editor and interview state.
+
+`replacement first audio:` is printed once, when the replacement's first reply
+audio is queued, and only for a replacement whose briefing asked for a
+reply: a speech handoff or silent context asks for none, and the audio that
+follows answers the candidate. `since_start_ms` counts from the same start as
+`rotation_gap_ms`, so it includes the briefing, any board resend and the
+model's reply; `since_connected_ms` counts from setup. `candidate_spoke_ms` is
+when the candidate was first heard after the replacement began, measured from
+that start, or `none`. A value there means the audio may have answered the
+candidate and not the briefing, and speech buffered during the gap is
+timed from when it was processed, just after setup.
+
+Next to those, one line says how the replacement was brought up. `Gemini
+session resumed` means the conversation continued from a resumption handle.
+`Gemini session restart rebuilt locally` means the candidate was speaking and
+no checkpoint post-dated their speech, so the socket was rebuilt from the local
+transcript, editor and interview state on purpose, since resuming from an older
+checkpoint can replay a reply that was cancelled. `Gemini session restart
+degraded` means it was rebuilt without that reason: no handle, a refused
+handle, or resumption suppressed after repeated failures. The browser-check soak
+matches these texts literally, accepting the first two as a handover and failing
+on the third. Each carries ` room=` after the text, so two rooms rotating at
+once stay apart.
+
+The line is left out when the wait outlived the longest reply timeout. Audio
+that late may have been drawn by something other than the briefing, and the
+cutoff is conservative: a briefing reply held up by long tool rounds is left
+out as well. It is dropped too when a turn ends without audio, a thinking hold
+takes the floor, another prompt goes out, or a newer replacement takes over.
+A replacement that never reaches the line therefore says nothing about its
+latency, and the absence is not a measurement.
+
 ## What is not measured
 
 Gemini Live is one combined audio and model pipeline. These records cannot

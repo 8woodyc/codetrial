@@ -436,7 +436,12 @@ const RESUME_GRACE_MS = 45_000;
 const HANDOVER_SIGNALS = {
   goAway: "Gemini requested a transport restart in",
   resumed: "Gemini session resumed; the interview continues where it left off",
-  degraded: "Gemini session restart degraded",
+  // The candidate was speaking at the GoAway and no checkpoint post-dated it,
+  // so the socket was rebuilt from local state on purpose: a handover, not a
+  // lost conversation.
+  coldHandoff: "Gemini session restart rebuilt locally",
+  degraded:
+    "Gemini session restart degraded; resumption was not used and the interviewer is rebuilding",
   expired: "goaway expired:",
 };
 
@@ -636,6 +641,7 @@ async function soakInterview(page, roomName, agentIdentity, agentOutput) {
   const seen = {
     goAway: false,
     resumed: false,
+    coldHandoff: false,
     degraded: false,
     expired: false,
   };
@@ -676,7 +682,7 @@ async function soakInterview(page, roomName, agentIdentity, agentOutput) {
     // growth on the new socket. Sampling at the GoAway counted what the old
     // socket said while the advisory was held, which proves nothing about
     // the replacement.
-    if (seen.resumed && turnsAtHandover === null) {
+    if ((seen.resumed || seen.coldHandoff) && turnsAtHandover === null) {
       turnsAtHandover = await transcriptTurns(page);
     }
   }
@@ -689,8 +695,8 @@ async function soakInterview(page, roomName, agentIdentity, agentOutput) {
       `no transport restart was requested during ${soakSeconds}s soak`,
     );
   }
-  if (!seen.resumed) {
-    throw new Error(`Gemini did not resume during ${soakSeconds}s soak`);
+  if (!seen.resumed && !seen.coldHandoff) {
+    throw new Error(`Gemini did not hand over during ${soakSeconds}s soak`);
   }
 
   // A resumption that nothing was said across is not one anybody would notice

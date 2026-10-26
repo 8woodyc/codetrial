@@ -1567,6 +1567,16 @@ async fn on_generated_audio(
             .interviewer_delivery
             .audio(context.output_audio.playout_deadline);
         context.activity.note_reply_audible();
+        if let Some(line) = context.activity.take_rotation_watch().and_then(|watch| {
+            watch.first_audio_line(
+                &log_clock(context.state),
+                enqueued_at,
+                context.activity.live_socket,
+                room.name(),
+            )
+        }) {
+            eprintln!("{line}");
+        }
 
         // Speech is queued, not played: the floor stays busy until the buffered
         // audio actually finishes.
@@ -2722,6 +2732,7 @@ pub(super) fn cut_off_for_hold(
     activity.socket.discarding_output |= hold_leaves_output_in_flight(activity, now);
     activity.socket.stale_turn_pending |= activity.generating && !activity.socket.discarding_output;
     cut_off_turn(state, activity, output_audio);
+    activity.drop_rotation_watch();
     activity.latency.close(Boundary::Held, now);
 }
 
