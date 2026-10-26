@@ -665,6 +665,7 @@ class ExperienceTests(fixtures.MemoryCase):
         publisher = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(publisher)
         self.addCleanup(publisher.memory.METER.stop)
+        fixtures.support.quiet_meter(publisher.memory)
         checkpoint = self.dir / "checkpoint"
         with publisher.memory.connect(str(self.dir / "memory.db")) as db:
             publisher.write_checkpoint(
