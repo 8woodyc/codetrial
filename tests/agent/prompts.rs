@@ -240,8 +240,8 @@ fn prompt_golden_digest_matches_versions() {
     // its hash is a string nothing checks. The pair is still asserted, because
     // the failure worth catching is a version bumped with the golden left
     // alone, which a digest comparison on its own reads as fine.
-    let recorded_versions = (33, 24);
-    let recorded_digest = "2b6c2d3548b12f058d73a718511916bda98271c3d92b0faf466aec2b797e21fc";
+    let recorded_versions = (33, 25);
+    let recorded_digest = "944a971ded3f6851a0dce68f54d71853f90d703a1419c173d8f77c6f9f4f0ebb";
 
     assert_eq!(
         (LIVE_PROMPT_VERSION, REPORT_PROMPT_VERSION),
@@ -497,6 +497,78 @@ fn report_prompt_names_the_practice_level() {
     });
     assert!(absent.contains("PRACTICE LEVEL: Not specified"));
     assert!(absent.contains("Do not invent or mention a practice level"));
+}
+
+/// The brief hands the reviewer the reference complexity, so a candidate who
+/// stated only the time half of it was credited with the space half too. The
+/// rule that keeps the solution apart from the candidate's reasoning has to
+/// reach every surface's reviewer beside that reference. It lowers the chance
+/// of unsupported credit; only a model can show it is heeded.
+#[test]
+fn reference_complexity_is_not_credited_as_candidate_reasoning() {
+    let prompt = report_prompt(ReportPromptInput {
+        problem: get_problem(Some("search-insert-position")),
+        interview_mode: InterviewMode::Coding,
+        board_attached: false,
+        transcript: "Interviewer: What are the time and space complexity of this approach?\n\
+                     Candidate: It is O(log n) time, because each step halves the range.",
+        rolling_assessment: "",
+        final_code: "int searchInsert(int* nums, int numsSize, int target) {\n\
+                     int l = 0, r = numsSize - 1;\n\
+                     while (l <= r) {\n\
+                     int mid = l + (r - l) / 2;\n\
+                     if (nums[mid] == target) return mid;\n\
+                     if (nums[mid] < target) l = mid + 1; else r = mid - 1;\n\
+                     }\n\
+                     return l;\n\
+                     }",
+        language: "c",
+        hints_used: 0,
+        hint_rung: 0,
+        volunteered_hints: 0,
+        duration_min: 45,
+        elapsed_min: 30.0,
+        test_summary: "",
+        practice_level: None,
+        evidence: "",
+        behavioral_round: BehavioralRound::Opened,
+        follow_ups_released: false,
+        candidate_turns: 1,
+    });
+    assert!(prompt.contains("O(log n) time, O(1) space"));
+    assert!(prompt.contains("Candidate: It is O(log n) time"));
+
+    // The interim notes ground themselves in what the candidate "said, wrote,
+    // or ran", so a note can read a complexity off the code, and a silent
+    // candidate's comment is never something they said. Both routes are closed
+    // by name, while a complexity written out after a recognition gap is among
+    // the accepted sources, and neither a declined STAR probe nor a silent
+    // session is a technical gap.
+    for (mode, material, cited_in) in [
+        (InterviewMode::Coding, "the code", "in the code"),
+        (InterviewMode::Whiteboard, "the board", "on the board"),
+    ] {
+        let rules = report_system_instruction(mode)
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        for rule in [
+            "The optimal approach and pitfalls in the brief describe the reference solution"
+                .to_owned(),
+            format!(
+                "{material} itself shows what was built; neither is reasoning the candidate stated"
+            ),
+            format!(
+                "Credit a complexity as stated only when the transcript shows the candidate saying it, a rolling-assessment note records them saying or writing it, or they wrote it out {cited_in}"
+            ),
+            format!("never when it is inferred from {material} itself"),
+            "A complexity they wrote is credited as written, not said".to_owned(),
+            "when the brief records zero candidate turns it stays coding evidence only".to_owned(),
+            "When the brief records candidate turns, a part of a technical question they clearly left unanswered, rather than lost to recognition, is a gap, not a strength".to_owned(),
+        ] {
+            assert!(rules.contains(&rule), "{mode:?} rules miss {rule}");
+        }
+    }
 }
 
 #[test]
@@ -1460,17 +1532,17 @@ fn interview_contract_versions_are_one_closed_bundle() {
         "the bundle table has no row for {INTERVIEW_CONTRACT_BUNDLE_VERSION}"
     );
 
-    assert_eq!(INTERVIEW_CONTRACT_BUNDLE_VERSION, 43);
+    assert_eq!(INTERVIEW_CONTRACT_BUNDLE_VERSION, 44);
     assert_eq!(LIVE_PROMPT_VERSION, 33);
-    assert_eq!(REPORT_PROMPT_VERSION, 24);
+    assert_eq!(REPORT_PROMPT_VERSION, 25);
     assert_eq!(RUBRIC_VERSION, 1);
     assert_eq!(REPORT_SCHEMA_VERSION, 4);
     assert_eq!(
         interview_contract_json(),
         json!({
-            "bundleVersion": 43,
+            "bundleVersion": 44,
             "livePromptVersion": 33,
-            "reportPromptVersion": 24,
+            "reportPromptVersion": 25,
             "rubricVersion": 1,
             "reportSchemaVersion": 4,
         })

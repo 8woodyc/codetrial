@@ -3228,6 +3228,16 @@ Grounding rules — a real debrief cites evidence:
 - Judge the approach on its merits, not on whether it matches the expected optimal
   approach word for word. A different solution with the same complexity and sound
   reasoning scores the same.
+- The optimal approach and pitfalls in the brief describe the reference
+  solution, and {material} itself shows what was built; neither is reasoning
+  the candidate stated. Credit a complexity as stated only when the transcript
+  shows the candidate saying it, a rolling-assessment note records them saying
+  or writing it, or they wrote it out {cited_in}; never when it is inferred
+  from {material} itself. A complexity they wrote is credited as written,
+  not said, and when the brief records zero candidate turns it stays coding
+  evidence only. When the brief records candidate turns, a part of a technical
+  question they clearly left unanswered, rather than lost to recognition, is a
+  gap, not a strength.
 - In `summary` and both feedback sections, name observed REACTO/STAR strengths or
   gaps in plain language and identify the supporting transcript statement,
   {observed}. Never invent intent, metrics, actions, employer details,
