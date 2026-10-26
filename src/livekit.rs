@@ -3380,7 +3380,7 @@ fn candidate_bootstrap<'a>(
     metadata: Option<&str>,
 ) -> RuntimeBootstrap<'a> {
     let candidate = parse_participant_metadata(metadata);
-    crate::runtime::bootstrap_with_rounds(
+    let mut boot = crate::runtime::bootstrap_with_rounds(
         config,
         room_name,
         Some(candidate.problem.id),
@@ -3398,7 +3398,16 @@ fn candidate_bootstrap<'a>(
             code_execution_disabled: candidate.code_execution_disabled
                 && !candidate.interview_mode.is_whiteboard(),
         },
-    )
+    );
+    if let Some(spoken) = candidate
+        .language
+        .as_deref()
+        .and_then(crate::agent::spoken_language)
+    {
+        boot.greeting = crate::agent::greeting_with_language(spoken);
+        boot.language = candidate.language;
+    }
+    boot
 }
 
 /// The immutable side of a running interview: fixed once the candidate joins,
@@ -3453,6 +3462,13 @@ fn initial_runtime_state(boot: &RuntimeBootstrap<'_>, started_at: Instant) -> Ru
         context_compression: boot.context_compression,
         ..RuntimeState::for_problem(boot.problem)
     };
+
+    // Chosen before joining, so the browser's first packet in this language is
+    // not a switch and no briefing asks for a language again.
+    if let Some(language) = &boot.language {
+        state.language = language.clone();
+        state.language_chosen = true;
+    }
     if boot.interview_loop == crate::agent::InterviewLoop::CodingBehavioral {
         state.evidence_ledger.set_uncovered_coverage(
             crate::agent::REACTO_PHASE_IDS

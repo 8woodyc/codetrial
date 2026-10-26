@@ -100,6 +100,7 @@ import {
   roomInterviewer,
   sanitizeReport,
   sessionReport,
+  LANGUAGE_KEY,
   SHOW_SOURCES_KEY,
   testPayload,
   timeWarningPayload,
@@ -254,6 +255,9 @@ const CODE_PUBLISH_DEBOUNCE_MS = 300;
 // Bounds startup through the response headers. The server may finish claim and
 // dispatch after the browser has fallen back to offline practice.
 const TOKEN_REQUEST_TIMEOUT_MS = 20_000;
+// How long Start waits for a pending judge, which only C needs, before the
+// token names the language. A slow judge must not hold the interview back.
+const JUDGE_LANGUAGE_WAIT_MS = 5_000;
 /// Long enough to read twice, short enough that it is gone before the answer
 /// it is about. Measured against the hint text, not chosen round.
 const FRAMEWORK_HINT_MS = 12000;
@@ -344,6 +348,11 @@ const interviewLoop = codingLoop(params.get("loop"));
 /// an interview that has neither.
 const whiteboard = modeIsWhiteboard(params.get("mode"));
 const requestedLanguage = whiteboard ? null : params.get("language");
+/// The tab the interview opens on, when the problem can run it: what the URL
+/// asked for, as Try again does, else the language the candidate last started
+/// an interview in.
+const preferredLanguage =
+  requestedLanguage ?? (whiteboard ? null : readStored(LANGUAGE_KEY));
 /// The same answer as the wire spelling, which the token request and the
 /// checklist both need. Derived from the boolean rather than from the URL a
 /// second time, so an unrecognized value cannot reach the server as itself.
@@ -590,6 +599,7 @@ const nodes = {
   recordingState: document.querySelector("#recording-state"),
   editor: document.querySelector("#editor"),
   languageSelect: document.querySelector("#language-select"),
+  preflightLanguage: document.querySelector("#preflight-language"),
   editorHighlight: document.querySelector("#editor-highlight"),
   editorLines: document.querySelector("#editor-lines"),
   editorStack: document.querySelector(".editor-stack"),
@@ -784,8 +794,15 @@ async function init() {
     nodes.editor.disabled = true;
     nodes.run.disabled = true;
     nodes.end.disabled = true;
+    // The problem arrives with the token, so the token's language is chosen
+    // from what any problem runs. Only C needs a judge, and it is withheld.
+    applyLanguages(null);
+    state.language = startingLanguage();
+    nodes.languageSelect.value = state.language;
+    nodes.preflightLanguage.value = state.language;
   }
   bindEvents();
+  document.querySelector("#audio-step-language").hidden = whiteboard;
   if (whiteboard) initWhiteboard();
   else {
     document.querySelector("#example-board").hidden = !exampleDrawingEnabled;
@@ -1176,11 +1193,13 @@ function bindEvents() {
       nodes.hidePassedTests.checked,
     ).body;
   });
-  nodes.languageSelect.addEventListener("change", () => {
-    languageChoiceCommitted = true;
-    setLanguage(nodes.languageSelect.value);
-    nodes.languageSelect.value = state.language;
-  });
+  nodes.languageSelect.addEventListener("change", () =>
+    chooseLanguage(nodes.languageSelect.value),
+  );
+  // The editor tab chosen before joining, so the interview opens in it.
+  nodes.preflightLanguage.addEventListener("change", () =>
+    chooseLanguage(nodes.preflightLanguage.value),
+  );
   for (const [button, step] of [
     [nodes.editorFontSmaller, -1],
     [nodes.editorFontLarger, 1],
@@ -1981,6 +2000,22 @@ async function connect(preflight, presenting = false) {
     const previous = strict ? previousAssignment(tabStorage) : null;
     const interviewId = await recordConsent();
     state.interviewId = interviewId;
+    // The token names the language the interview starts in. Only C waits for
+    // the judge, so a preferred C still loading gets a bounded turn first;
+    // every other start goes straight on. Afterwards only the candidate
+    // switches, so a judge arriving later cannot move the interview off the
+    // language the token named.
+    if (!whiteboard && preferredLanguage === "c" && !languageChoiceCommitted) {
+      let timer;
+      await Promise.race([
+        judgePromise,
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, JUDGE_LANGUAGE_WAIT_MS);
+        }),
+      ]);
+      clearTimeout(timer);
+    }
+    languageChoiceCommitted = true;
     // `hideExamples` goes only when ticked, so Jim is not told the examples are
     // on a screen that does not show them. The preflight holding the box is
     // closed for good by now, so this is the choice the page renders.
@@ -2002,6 +2037,7 @@ async function connect(preflight, presenting = false) {
         interviewId,
         interviewLoop,
         interviewMode: mode,
+        ...(!whiteboard ? { language: state.language } : {}),
         interviewProfile,
         ...(interviewGrounding ? { interviewGrounding } : {}),
         ...(nodes.interviewerAccent.value
@@ -2027,6 +2063,8 @@ async function connect(preflight, presenting = false) {
     }
     const connection = await response.json();
     state.isGuest = connection.guest === true;
+    // The language this interview started in, which the next one preselects.
+    if (!whiteboard) writeStored(LANGUAGE_KEY, state.language);
     if (strict) {
       // Save before revealing the problem or joining. A later load or join
       // failure must still exclude this assignment on the next attempt.
@@ -2042,7 +2080,8 @@ async function connect(preflight, presenting = false) {
       judgePromise = loadJudge(problem.page).catch(() => null);
       state.codeByLanguage = { ...problem.starterCode };
       renderProblem();
-      initializeLanguages();
+      // The language the token named, so the agent and the editor agree.
+      initializeLanguages(state.language);
       void initializeCandidateCases();
     }
     // Before the room, and before anything that reads the length: the replay's
@@ -2865,26 +2904,40 @@ function selectTab(tab) {
   nodes.transcriptTab.classList.toggle("selected", transcript);
 }
 
-function initializeLanguages() {
+/// The tab an interview opens on: the preferred language when this problem
+/// can run it, else Python, which runs in the browser on every server.
+function startingLanguage() {
+  return preferredLanguage && languages.includes(preferredLanguage)
+    ? preferredLanguage
+    : "python";
+}
+
+/// A pick from either language menu. Before a Strict assignment there is no
+/// buffer to switch, only the language the token will name.
+function chooseLanguage(language) {
+  languageChoiceCommitted = true;
+  if (problem) setLanguage(language);
+  else if (languages.includes(language)) state.language = language;
+  nodes.languageSelect.value = state.language;
+  nodes.preflightLanguage.value = state.language;
+}
+
+function initializeLanguages(language) {
   applyLanguages(null);
-  setLanguage(
-    requestedLanguage && languages.includes(requestedLanguage)
-      ? requestedLanguage
-      : "python",
-  );
+  // Resolved only now: before `applyLanguages` no language is available, so a
+  // default argument would always have been Python.
+  setLanguage(language ?? startingLanguage());
   // Setup and event binding finish synchronously before this callback runs.
-  // A late judge may enable the requested language, but cannot replace a
+  // A late judge may enable the preferred language, but cannot replace a
   // language or buffer the candidate has already committed to.
   void judgePromise.then((spec) => {
     applyLanguages(spec);
     if (
       state.phase === "live" &&
       !languageChoiceCommitted &&
-      requestedLanguage &&
-      state.language !== requestedLanguage &&
-      languages.includes(requestedLanguage)
+      state.language !== startingLanguage()
     )
-      setLanguage(requestedLanguage);
+      setLanguage(startingLanguage());
   });
 }
 
@@ -2894,7 +2947,10 @@ function initializeLanguages() {
 /// final submission with a starter buffer when the judge response arrives late.
 function applyLanguages(spec) {
   languages = languagesFor(spec, editorOptions.execution);
-  for (const option of nodes.languageSelect.options) {
+  for (const option of [
+    ...nodes.languageSelect.options,
+    ...nodes.preflightLanguage.options,
+  ]) {
     const label = option.dataset.label ?? option.textContent;
     const availability = harnessAvailability(
       option.dataset.language,
@@ -2962,6 +3018,7 @@ function setLanguage(language) {
   paintEditor();
   editorInitialized = true;
   nodes.languageSelect.value = language;
+  nodes.preflightLanguage.value = language;
   updateRunAvailability();
   // Debounced like a keystroke, and for the same reason. Publishing on every
   // click meant a candidate trying three tabs in a row produced three language

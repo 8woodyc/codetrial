@@ -10,6 +10,9 @@ const HTML_ESCAPES = {
 };
 
 export const SHOW_SOURCES_KEY = "codetrial.showProblemSources";
+/// The language the candidate last started an interview in, which the next
+/// interview preselects.
+export const LANGUAGE_KEY = "codetrial.language";
 
 export function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (char) => HTML_ESCAPES[char]);
@@ -821,8 +824,8 @@ const textEncoder = new TextEncoder();
 /// function-local, moving it left the whole suite green with the supported-card
 /// branch no longer rendering, which is the defect a local constant invites.
 export const ACTIVE_CONTRACT = {
-  bundleVersion: 42,
-  livePromptVersion: 32,
+  bundleVersion: 43,
+  livePromptVersion: 33,
   reportPromptVersion: 24,
   reportSchemaVersion: 4,
   rubricVersion: 1,
