@@ -722,7 +722,17 @@ can resume this handoff, and a resumed socket receives the listening note
 alone and keeps its context baseline, since the provider still holds that
 context; otherwise the replacement gets the full cold briefing in front of it. A
 platform request the replaced socket still owed is named in the note and stays
-owed. Provider events the replaced socket emits while the prefix is finalized
+owed. The note requests no reply, so a candidate who has already finished
+speaking leaves the replacement nothing to answer. Once neither the provider
+nor the microphone has heard the candidate for the silence window plus 2.5
+seconds, counted from the latest of the handoff and their last speech, and the
+replacement has produced no output, it is asked once for the reply. That
+restarts its first-output deadline at the recovery minimum and keeps whatever
+platform request it still owed. It is one extra request per speech handoff
+whose replacement stayed silent through the wait, instead of waiting out the
+reply timeout and being replaced again; a replacement that answers earlier
+costs none. With a silence window past about seven seconds the reply timeout
+comes first and the request never lands. Provider events the replaced socket emits while the prefix is finalized
 are discarded, and their count is logged. A failed
 briefing leaves the local cold briefing due rather than ending the interview.
 Microphone ingress buffers up to 40 seconds while the room loop reconnects,

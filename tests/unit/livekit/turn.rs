@@ -3282,3 +3282,120 @@ fn audio_after_the_longest_honest_wait_is_not_timed_as_the_replacement() {
     let past = at_limit + Duration::from_millis(1);
     assert!(watch.first_audio_line("c", past, 2, "r").is_none());
 }
+
+const SILENCE: Duration = Duration::from_millis(1_500);
+
+/// The listening note requests no reply, so a handoff socket whose candidate
+/// has already finished has nothing to answer. It is asked once the silence
+/// window and the margin have both passed, and not before.
+#[test]
+fn a_handoff_socket_is_asked_for_its_reply_after_the_window_and_margin() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    assert!(!activity.handoff_reply_due(start + Duration::from_secs(60), SILENCE, false));
+
+    activity.arm_handoff_reply(start);
+
+    // The margin is a real allowance for the model to start a turn on its own
+    // after the window closes, not just the window.
+    assert!(!activity.handoff_reply_due(start + SILENCE + Duration::from_secs(2), SILENCE, false));
+    let due = SILENCE + HANDOFF_REPLY_MARGIN;
+    assert!(!activity.handoff_reply_due(start + due - Duration::from_millis(1), SILENCE, false));
+    assert!(activity.handoff_reply_due(start + due, SILENCE, false));
+}
+
+/// Counted from the later of the handoff and the candidate stopping, so a
+/// candidate who goes on speaking after it is not answered over.
+#[test]
+fn the_handoff_reply_wait_restarts_when_the_candidate_stops_speaking() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.arm_handoff_reply(start);
+    activity.note_candidate_voice_activity(true, start + Duration::from_secs(1));
+    let stopped = start + Duration::from_secs(6);
+    activity.note_candidate_voice_activity(false, stopped);
+
+    let due = SILENCE + HANDOFF_REPLY_MARGIN;
+    assert!(!activity.handoff_reply_due(start + due, SILENCE, false));
+    assert!(!activity.handoff_reply_due(stopped + due - Duration::from_millis(1), SILENCE, false));
+    assert!(activity.handoff_reply_due(stopped + due, SILENCE, false));
+}
+
+/// Not while the interviewer's own audio is playing, while the provider says
+/// the candidate is speaking, or while the microphone is carrying their voice.
+#[test]
+fn the_handoff_reply_is_not_requested_over_audio_or_live_speech() {
+    let start = Instant::now();
+    let late = start + Duration::from_secs(30);
+
+    let mut activity = RuntimeActivity::new(start);
+    activity.arm_handoff_reply(start);
+    assert!(!activity.handoff_reply_due(late, SILENCE, true));
+
+    // The provider's edge says speaking and its end has not come, however long
+    // the microphone has been quiet: the model is still inside its window.
+    activity.note_candidate_voice_activity(true, start + Duration::from_secs(1));
+    assert!(!activity.handoff_reply_due(late, SILENCE, false));
+
+    // Voiced audio just now, whatever the provider has said.
+    let mut activity = RuntimeActivity::new(start);
+    activity.arm_handoff_reply(start);
+    activity.note_candidate_voice(late);
+    assert!(!activity.handoff_reply_due(late, SILENCE, false));
+}
+
+/// Speech that only the microphone shows, because the new socket has not yet
+/// sent its own speech edge, still counts as the candidate's last word.
+#[test]
+fn the_handoff_reply_waits_out_the_quiet_after_microphone_only_speech() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.arm_handoff_reply(start);
+    let last_voiced = start + Duration::from_secs(10);
+    activity.note_candidate_voice(last_voiced);
+
+    let due = SILENCE + HANDOFF_REPLY_MARGIN;
+    assert!(!activity.handoff_reply_due(start + due, SILENCE, false));
+    assert!(!activity.handoff_reply_due(
+        last_voiced + due - Duration::from_millis(1),
+        SILENCE,
+        false
+    ));
+    assert!(activity.handoff_reply_due(last_voiced + due, SILENCE, false));
+}
+
+/// Asking for the reply keeps the request the socket still owed and holds the
+/// new deadline to the recovery minimum, like a replacement's briefing.
+#[test]
+fn asking_a_handoff_socket_for_its_reply_keeps_what_it_owed() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.owe_prompt(start, Some("[SYSTEM EVENT] Review the editor.".to_string()));
+    activity.arm_handoff_reply(start);
+    activity.renew_handoff_prompt(start + Duration::from_secs(5));
+    assert!(activity.owes_prompt());
+    assert!(activity.recovery_prompt);
+    assert_eq!(
+        activity.prompt_text.as_deref(),
+        Some("[SYSTEM EVENT] Review the editor.")
+    );
+}
+
+/// Anything that answers the listening note, or makes it stale, ends the wait:
+/// output, a later prompt, the end of a turn, or a newer socket.
+#[test]
+fn the_handoff_reply_wait_ends_when_the_socket_speaks_is_prompted_or_replaced() {
+    let start = Instant::now();
+    let late = start + Duration::from_secs(60);
+    for case in ["output", "prompt", "turn", "socket"] {
+        let mut activity = RuntimeActivity::new(start);
+        activity.arm_handoff_reply(start);
+        match case {
+            "output" => activity.note_output(start + Duration::from_secs(1)),
+            "prompt" => activity.mark_prompted(start + Duration::from_secs(1), None, false),
+            "turn" => activity.settle_completed_turn(false),
+            _ => activity.reset_context_observations(true),
+        }
+        assert!(!activity.handoff_reply_due(late, SILENCE, false), "{case}");
+    }
+}

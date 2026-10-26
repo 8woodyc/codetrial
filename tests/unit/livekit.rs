@@ -6816,6 +6816,38 @@ fn candidate_accent_preserves_original_instructions_and_voice() {
     }
 }
 
+/// A thinking hold takes the floor, so the wait for the handoff reply ends with
+/// it.
+#[test]
+fn a_hold_ends_the_wait_for_the_handoff_reply() {
+    let start = Instant::now();
+    let (mut audio, _frames) = test_output_audio();
+    let mut activity = RuntimeActivity::new(start);
+    activity.arm_handoff_reply(start);
+    session::cut_off_for_hold(&mut RuntimeState::default(), &mut activity, &mut audio);
+    assert!(!activity.handoff_reply_due(
+        start + Duration::from_secs(60),
+        Duration::from_millis(1_500),
+        false
+    ));
+}
+
+/// The reply request is the only message the handoff path sends that asks for
+/// output: the note requested none, and the platform records what it sent.
+#[tokio::test]
+async fn the_handoff_reply_request_asks_for_a_turn_and_is_recorded() {
+    let (mut gemini, server) = fake_recording_socket(None, 1).await;
+    let mut state = RuntimeState::default();
+    session::request_handoff_reply(&mut gemini, &mut state)
+        .await
+        .unwrap();
+    let messages = server.await.unwrap();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["clientContent"]["turnComplete"], true);
+    assert!(sent_text(&messages[0]).contains("has finished speaking"));
+    assert_eq!(state.evidence_ledger.metrics.turn_prompt_count, 1);
+}
+
 /// A thinking hold throws the briefing's reply away without any turn
 /// completion reaching the settle, so the hold itself disarms the watch;
 /// otherwise the reply its release asks for, minutes later, is timed as the

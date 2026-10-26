@@ -228,6 +228,14 @@ pub(super) struct RotationWatch {
     pub(super) candidate_spoke_at: Option<Instant>,
 }
 
+/// How long past the room's silence window a speech-handoff socket is given to
+/// start a turn on the audio that follows, before it is asked for the reply.
+/// The handoff note adds to the conversation without requesting output, so a
+/// candidate who has already finished speaking sends the new socket nothing it
+/// would answer, and it stays silent until the reply watchdog replaces it. The
+/// margin covers the model's own start of a turn after the window closes.
+pub(super) const HANDOFF_REPLY_MARGIN: Duration = Duration::from_millis(2_500);
+
 /// The longest wait still reported as the replacement's. Something other than
 /// the briefing, a chat message or a test result among them, can draw the
 /// first audio after a replacement, and nothing else disarms the watch for it;
@@ -545,6 +553,9 @@ pub(super) struct RuntimeActivity {
     /// The latest socket replacement whose first reply audio has not been
     /// heard yet; see [`RotationWatch`].
     rotation: Option<RotationWatch>,
+    /// When a speech-handoff socket was told to keep listening, until it speaks
+    /// or is asked for the reply; see [`HANDOFF_REPLY_MARGIN`].
+    handoff_listening_since: Option<Instant>,
     /// The epoch second this room loop started. On every usage line, so two
     /// runs that shared a room name are not summed as one.
     pub(super) live_session_id: u64,
@@ -728,6 +739,7 @@ impl RuntimeActivity {
         // gone; the new one arms its own only when its briefing asks for a
         // reply.
         self.drop_rotation_watch();
+        self.drop_handoff_reply();
         self.clear_candidate_voice_activity();
     }
 
@@ -879,6 +891,7 @@ impl RuntimeActivity {
             live_usage: crate::gemini::TokenUsage::default(),
             live_socket: 1,
             rotation: None,
+            handoff_listening_since: None,
             live_session_id: 0,
             latency: super::latency::ReplyLatency::default(),
             live_exit: super::LiveOutcome::Ok,
@@ -936,6 +949,7 @@ impl RuntimeActivity {
         // Any prompt after the replacement's briefing, a nudge or the farewell
         // among them, is what the next audio answers.
         self.drop_rotation_watch();
+        self.drop_handoff_reply();
         self.latency.prompt(now);
         self.mark_prompted_state(now, text, allows_silence, false);
     }
@@ -1027,6 +1041,7 @@ impl RuntimeActivity {
     /// begun, and releasing it mid-turn would let a pending close start the
     /// wrap-up before the continuation finishes.
     pub(super) fn note_output(&mut self, now: Instant) {
+        self.drop_handoff_reply();
         self.generating = true;
         self.socket.thinking_reply_fallback = None;
         self.last_output_at = Some(now);
@@ -1384,6 +1399,62 @@ impl RuntimeActivity {
         }
     }
 
+    /// A speech handoff has told the new socket to keep listening, so its reply
+    /// waits on audio that may never come.
+    pub(super) fn arm_handoff_reply(&mut self, now: Instant) {
+        self.handoff_listening_since = Some(now);
+    }
+
+    /// The socket spoke, was prompted, was replaced or was held, so the wait
+    /// for
+    /// the audio it was told to listen for is over.
+    pub(super) fn drop_handoff_reply(&mut self) {
+        self.handoff_listening_since = None;
+    }
+
+    /// Whether a speech-handoff socket has heard nothing to answer for longer
+    /// than the silence window plus [`HANDOFF_REPLY_MARGIN`], counted from the
+    /// latest of when it was told to listen, the candidate's last voiced audio
+    /// and the provider's end-of-speech edge. Never while the provider or the
+    /// microphone says the candidate is speaking, or the interviewer's own
+    /// audio is playing.
+    pub(super) fn handoff_reply_due(
+        &self,
+        now: Instant,
+        silence: Duration,
+        audio_playing: bool,
+    ) -> bool {
+        let Some(armed) = self.handoff_listening_since else {
+            return false;
+        };
+
+        // The provider's own speech edge counts as well as the microphone: it
+        // may still be inside its silence window when the microphone has been
+        // quiet for a while, and a reply requested then cuts the candidate off.
+        if audio_playing || self.candidate_voice_active || self.incoming_speech_active(now) {
+            return false;
+        }
+        let quiet_since = [
+            Some(armed),
+            self.candidate_voice_ended_at,
+            self.voiced_pcm_at,
+        ]
+        .into_iter()
+        .flatten()
+        .max()
+        .unwrap_or(armed);
+        now.saturating_duration_since(quiet_since) >= silence + HANDOFF_REPLY_MARGIN
+    }
+
+    /// The reply the handoff socket owes is now being asked for directly. Its
+    /// first-output deadline restarts, held to the recovery minimum like a
+    /// replacement's briefing, and whatever platform request it still owed is
+    /// kept.
+    pub(super) fn renew_handoff_prompt(&mut self, now: Instant) {
+        let text = self.prompt_text.clone();
+        self.mark_recovery_prompted(now, text.as_deref());
+    }
+
     /// Gives up the wait for a replacement's first audio, because whatever
     /// comes next answers something else: a hold took the floor, another
     /// prompt went out, the turn ended, or a newer socket took over.
@@ -1407,6 +1478,7 @@ impl RuntimeActivity {
         // real answer, or that an interruption caused, also stops it, so such a
         // replacement goes unlogged rather than misreported.
         self.drop_rotation_watch();
+        self.drop_handoff_reply();
         self.socket.tool_response_outstanding = false;
         self.floor = Floor::AwaitingPlayout;
         if !audio_playing {

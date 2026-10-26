@@ -861,7 +861,7 @@ async fn replace_gemini_session(
     publish_control(room, &interviewer_state(false), "the reconnected notice").await;
     eprintln!("{}", replacement_notice_line(handover, room.name()));
     let spoke = if let Some(handoff) = speech_handoff {
-        match session::send_listening_handoff(
+        let listening = match session::send_listening_handoff(
             context.gemini,
             context.state,
             &handoff,
@@ -870,14 +870,18 @@ async fn replace_gemini_session(
         )
         .await
         {
-            Ok(()) => context.activity.commit_silent_editor(context.state),
+            Ok(()) => {
+                context.activity.commit_silent_editor(context.state);
+                true
+            }
             Err(error) => {
                 context.state.needs_cold_brief = true;
                 eprintln!(
                     "speech-handoff briefing failed ({error}); waiting for the close to be reported"
                 );
+                false
             }
-        }
+        };
 
         // Still owed after the handoff: the next output clears it, and a socket
         // that drops first names it in its own briefing. A reply owed to
@@ -886,6 +890,13 @@ async fn replace_gemini_session(
             context
                 .activity
                 .owe_prompt(Instant::now(), owed_prompt.clone());
+
+            // Only a socket that was told to keep listening, and owes a reply
+            // to what it was listening to: one that never got the note has no
+            // prefix to answer, and one owing nothing has no reply to ask for.
+            if listening {
+                context.activity.arm_handoff_reply(Instant::now());
+            }
         }
         false
     } else {
@@ -2053,6 +2064,30 @@ async fn on_watch_tick(
         )
         .await?;
         return Ok(ControlFlow::Break(()));
+    }
+    if !context.state.interviewer_silenced()
+        && !context.state.end_requested
+        && context.activity.handoff_reply_due(
+            tick_at,
+            Duration::from_millis(u64::from(interview.boot.silence_ms)),
+            context.output_audio.is_playing(),
+        )
+    {
+        context.activity.drop_handoff_reply();
+        match session::request_handoff_reply(context.gemini, context.state).await {
+            Ok(()) => {
+                context.activity.renew_handoff_prompt(tick_at);
+                eprintln!(
+                    "handoff reply requested: the candidate went quiet after the handoff at={} room={}",
+                    log_clock(context.state),
+                    interview.boot.room_name
+                );
+            }
+            Err(error) => eprintln!(
+                "handoff reply request failed ({error}); waiting for the reply timeout room={}",
+                interview.boot.room_name
+            ),
+        }
     }
     if reply_watch(
         context.state,
