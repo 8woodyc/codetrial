@@ -614,6 +614,20 @@ function readServerLog() {
   return redact(fs.readFileSync(process.env.SERVER_LOG, "utf8"));
 }
 
+/// Prints each timing line a socket replacement logged, once, as the soak sees
+/// it. A pass otherwise leaves nothing to read them from, and the agent's
+/// output is a rolling window, so they are taken on the way past. The first
+/// audio line is not required: it is left out on purpose when the briefing
+/// asked for no reply, or its wait is no longer the replacement's.
+function reportRotationLines(log, reported) {
+  for (const line of log.split("\n")) {
+    if (!/^replacement( first audio)?: /.test(line) || reported.has(line))
+      continue;
+    reported.add(line);
+    console.log(line);
+  }
+}
+
 /// How many turns the transcript panel is showing. The page accumulates these
 /// client-side, so it keeps counting across a handover the browser never sees.
 function transcriptTurns(page) {
@@ -646,6 +660,7 @@ async function soakInterview(page, roomName, agentIdentity, agentOutput) {
     expired: false,
   };
   let turnsAtHandover = null;
+  const reported = new Set();
 
   while (Date.now() < deadline) {
     await sleep(Math.min(15_000, deadline - Date.now()));
@@ -660,6 +675,7 @@ async function soakInterview(page, roomName, agentIdentity, agentOutput) {
     for (const [name, needle] of Object.entries(HANDOVER_SIGNALS)) {
       seen[name] ||= log.includes(needle);
     }
+    reportRotationLines(log, reported);
 
     // The failure this whole path exists to avoid, and it is worth reporting
     // where it happened rather than as a missing resume at the end.
