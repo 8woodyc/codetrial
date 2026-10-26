@@ -2068,3 +2068,38 @@ fn an_invalid_config_line_is_named_by_number_and_never_quoted() {
     );
     assert!(!error.contains("not a setting"), "{error}");
 }
+
+/// Notepad and VS Code can save UTF-8 with a byte order mark. One at the start
+/// of the file is not part of the first key or comment, so the file reads as
+/// it would without it, and a malformed line keeps its number.
+#[test]
+fn a_leading_byte_order_mark_is_not_part_of_the_first_line() {
+    let read = |label: &str, text: &str| {
+        let path =
+            std::env::temp_dir().join(format!("codetrial-bom-{label}-{}.env", std::process::id()));
+        std::fs::write(&path, text).unwrap();
+        let result = codetrial::config::read_config_file(&path);
+        let _ = std::fs::remove_file(&path);
+        result.map_err(|error| error.replace(&path.display().to_string(), "<file>"))
+    };
+
+    for (label, text) in [
+        ("key", "LIVEKIT_URL=wss://a\r\nLIVEKIT_API_KEY=key\r\n"),
+        (
+            "comment",
+            "# Local configuration\r\nLIVEKIT_URL=wss://a\r\n",
+        ),
+        ("empty", ""),
+        ("malformed", "LIVEKIT_URL=wss://a\nnot a setting\n"),
+    ] {
+        assert_eq!(
+            read(&format!("{label}-marked"), &format!("\u{feff}{text}")),
+            read(&format!("{label}-plain"), text),
+            "{label}"
+        );
+    }
+    assert_eq!(
+        read("first-key", "\u{feff}LIVEKIT_URL=wss://a\n").unwrap(),
+        [("LIVEKIT_URL".to_string(), "wss://a".to_string())]
+    );
+}

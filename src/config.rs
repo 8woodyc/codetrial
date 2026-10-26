@@ -495,6 +495,9 @@ pub fn read_config_file(path: &Path) -> Result<Vec<(String, String)>, String> {
 /// is not `KEY=value`. Apart from `read_config_file` for a caller that has to
 /// say which line without repeating it: the line can hold a secret.
 pub(crate) fn parse_config(text: &str) -> Result<Vec<(String, String)>, usize> {
+    // A byte order mark from an editor that saves UTF-8 with one. `trim` does
+    // not remove it, so left in place it joins the first key or hides a `#`.
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let mut values = Vec::new();
     for (index, line) in text.lines().enumerate() {
         let trimmed = line.trim();
