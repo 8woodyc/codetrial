@@ -1432,3 +1432,183 @@ fn interview_lookup_is_scoped_to_its_account() {
         })
     );
 }
+
+fn seed_claimed_interviews(accounts: &Accounts, user: i64, count: i64) {
+    accounts
+        .with(|connection| {
+            connection.execute(
+                "WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i + 1 FROM n WHERE i < ?1)
+             INSERT INTO interviews (id, account_id, consent_version, consent_at, room_name)
+             SELECT 'claimed-' || i, ?2, 'v1', 1, 'room-' || i FROM n",
+                (count, user),
+            )?;
+            Ok(())
+        })
+        .unwrap();
+}
+
+fn race_account_writes<T: Send>(
+    path: &Path,
+    write: impl Fn(&Accounts, usize) -> T + Sync,
+) -> Vec<T> {
+    let writers: Vec<_> = (0..8).map(|_| accounts_at(path)).collect();
+    let barrier = std::sync::Barrier::new(writers.len());
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = writers
+            .iter()
+            .enumerate()
+            .map(|(index, writer)| {
+                let barrier = &barrier;
+                let write = &write;
+                scope.spawn(move || {
+                    barrier.wait();
+                    write(writer, index)
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect()
+    })
+}
+
+#[test]
+fn concurrent_report_saves_cannot_overshoot_the_account_quota() {
+    let path = scratch("concurrent-report-quota");
+    initialize_account_database(&path).unwrap();
+    let accounts = accounts_at(&path);
+    let user = user_id_for(&accounts, &sign_in(&path, "candidate"));
+    accounts
+        .with(|connection| {
+            connection.execute(
+                "WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i + 1 FROM n WHERE i < ?1)
+             INSERT INTO reports (id, user_id, problem_id, payload, created_at, updated_at)
+             SELECT 'r' || i, ?2, 'two-sum', '{}', 1, 1 FROM n",
+                (MAX_REPORTS_PER_USER - 1, user),
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    let outcomes = race_account_writes(&path, |writer, index| {
+        save_report(
+            writer,
+            user,
+            &format!("concurrent-{index}"),
+            "two-sum",
+            &json!({}),
+        )
+        .unwrap()
+    });
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|outcome| **outcome == ReportSave::Saved)
+            .count(),
+        1
+    );
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|outcome| **outcome == ReportSave::AtCapacity)
+            .count(),
+        7
+    );
+    assert_eq!(
+        list_reports(&accounts, user).unwrap().len() as i64,
+        MAX_REPORTS_PER_USER
+    );
+}
+
+#[test]
+fn account_transactions_reserve_the_writer_and_rollback_on_error() {
+    let path = scratch("transaction");
+    initialize_account_database(&path).unwrap();
+    let accounts = accounts_at(&path);
+    let other = rusqlite::Connection::open(&path).unwrap();
+    other.busy_timeout(std::time::Duration::ZERO).unwrap();
+    let insert = "INSERT INTO users (github_id, login, created_at, updated_at)
+                  VALUES (42, 'candidate', 1, 1)";
+    let result: rusqlite::Result<()> = accounts.transaction(|connection| {
+        let error = other.execute(insert, []).unwrap_err();
+        assert_eq!(
+            error.sqlite_error_code(),
+            Some(rusqlite::ErrorCode::DatabaseBusy)
+        );
+        connection.execute(insert, [])?;
+        Err(rusqlite::Error::InvalidQuery)
+    });
+    assert!(matches!(result, Err(rusqlite::Error::InvalidQuery)));
+    assert_eq!(
+        other
+            .query_row("SELECT COUNT(*) FROM users", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    accounts
+        .transaction(|connection| connection.execute(insert, []))
+        .unwrap();
+    assert_eq!(
+        other
+            .query_row("SELECT COUNT(*) FROM users", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+}
+
+#[test]
+fn concurrent_interview_creation_reuses_the_original_consent() {
+    let path = scratch("concurrent-interview");
+    initialize_account_database(&path).unwrap();
+    let accounts = accounts_at(&path);
+    let user = user_id_for(&accounts, &sign_in(&path, "candidate"));
+    let interviews = race_account_writes(&path, |writer, index| {
+        create_interview(writer, &format!("int-{index}"), user, "v1", index as i64)
+            .unwrap()
+            .unwrap()
+    });
+    assert_eq!(interviews.len(), 8);
+    assert!(
+        interviews
+            .iter()
+            .all(|interview| interview == &interviews[0])
+    );
+    assert_eq!(
+        interview_for_account(&accounts, &interviews[0].id, user)
+            .unwrap()
+            .as_ref(),
+        Some(&interviews[0])
+    );
+    seed_claimed_interviews(&accounts, user, MAX_INTERVIEWS_PER_USER - 1);
+    assert_eq!(
+        create_interview(&accounts, "unused", user, "v1", 99).unwrap(),
+        Some(interviews[0].clone())
+    );
+    assert_eq!(
+        create_interview(&accounts, "refused", user, "v2", 99).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn concurrent_interview_creation_cannot_overshoot_the_account_quota() {
+    let path = scratch("concurrent-interview-quota");
+    initialize_account_database(&path).unwrap();
+    let accounts = accounts_at(&path);
+    let user = user_id_for(&accounts, &sign_in(&path, "candidate"));
+    seed_claimed_interviews(&accounts, user, MAX_INTERVIEWS_PER_USER - 1);
+    let outcomes = race_account_writes(&path, |writer, index| {
+        create_interview(
+            writer,
+            &format!("int-{index}"),
+            user,
+            &format!("racing-{index}"),
+            99,
+        )
+        .unwrap()
+    });
+    assert_eq!(
+        outcomes.iter().filter(|outcome| outcome.is_some()).count(),
+        1
+    );
+}

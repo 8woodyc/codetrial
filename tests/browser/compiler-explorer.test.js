@@ -310,22 +310,9 @@ test("a candidate case without an expected value builds the C++ and Java class h
   }
 });
 
-// A promisified execFile, and one cached probe per tool.
-//
-// Do not "simplify" the seven tests below back to `execFileSync`. They compile
-// and run real C, C++ and Java, which costs 1-3 seconds each, and they are the
-// only slow thing in the browser lane. Two facts decide the shape:
-//
-//   * `node:test` runs top-level `test()` calls one after another even when
-//     they are async, so the seven have to be `it()` children of a suite
-//     declared `{ concurrency: true }` to be scheduled together at all.
-//   * A concurrent scheduler cannot overlap anything that blocks the event
-//     loop. `execFileSync` does exactly that, so with it the seven would still
-//     run end to end no matter how the suite is declared.
-//
-// Both changes are needed; either one alone buys nothing. Each test compiles
-// into its own `mkdtempSync` directory and removes it in a `finally`, so they
-// share no path and can overlap safely.
+// Async subprocesses keep independent fixtures concurrent; a blocking
+// `execFileSync` would serialize them. The suite bounds compiler jobs so
+// candidates can finish before their execution timeout.
 const run = promisify(execFile);
 
 /// Whether a tool answers at all. Probed once per tool rather than once per
@@ -353,7 +340,7 @@ const noJava =
     ? false
     : "javac/java are not available";
 
-describe("toolchain harnesses", { concurrency: true }, () => {
+describe("toolchain harnesses", { concurrency: 4 }, () => {
   for (const value of ["INFINITY", "-INFINITY", "NAN"]) {
     it(
       `C double harness preserves all cases when returning ${value}`,

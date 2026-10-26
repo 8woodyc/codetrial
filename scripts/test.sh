@@ -527,9 +527,8 @@ gate --lane rust desktop desktop_gate
 gate gen-problems "$PYTHON" "$ROOT/scripts/gen-problems.py" --check
 
 # Each unittest suite runs its cases across a thread pool.
-# `scripts/run-python-tests.py` carries the measurement and the isolation a
-# suite has to meet before it is added here; the numbers live there rather than
-# in a copy that drifts. Still one gate per suite, so a failure names which one.
+# `scripts/run-python-tests.py` states the isolation a suite has to meet before
+# it is added here. Still one gate per suite, so a failure names which one.
 unittest_gate()
 {
     with_reported_skips "python tests" 's/^SKIP: //p' \

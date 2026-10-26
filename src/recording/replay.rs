@@ -458,29 +458,24 @@ pub fn append_replay_events(
     if events.is_empty() {
         return Ok(Ingest::Empty);
     }
-    accounts.with(|connection| {
-        // Read first, and only then take the write lock. `BEGIN IMMEDIATE`
-        // takes SQLite's database-wide writer lock, so checking ownership
-        // inside it would let any signed-in caller serialize every other writer
-        // by posting batches for interview ids they guessed. The check inside
-        // the transaction below is still the authority; this one only keeps a
-        // stranger out of the lock queue.
-        if !replay_open(connection, interview_id, account_id)? {
-            return Ok(Ingest::NoInterview);
-        }
 
-        // One IMMEDIATE transaction around the whole batch, so a batch is all
-        // of its events or none of them, and so the sequence it allocates is
-        // contiguous. The mutex around this connection serializes this process;
-        // IMMEDIATE is what a second `codetrial web` on the same database has
-        // to wait on, and it takes the write lock before the quota read rather
-        // than upgrading afterwards, which is where a deferred reader would
-        // find its snapshot stale.
-        let transaction = rusqlite::Transaction::new_unchecked(
-            connection,
-            rusqlite::TransactionBehavior::Immediate,
-        )?;
-        if !replay_open(&transaction, interview_id, account_id)? {
+    // Read first, and only then take the write lock. `BEGIN IMMEDIATE` takes
+    // SQLite's database-wide writer lock, so checking ownership inside it would
+    // let any signed-in caller serialize every other writer by posting batches
+    // for interview ids they guessed. The check inside the transaction below is
+    // still the authority; this one only keeps a stranger out of the lock
+    // queue.
+    if !accounts.with(|connection| replay_open(connection, interview_id, account_id))? {
+        return Ok(Ingest::NoInterview);
+    }
+
+    // One IMMEDIATE transaction around the whole batch, so a batch is all of
+    // its events or none of them, and so the sequence it allocates is
+    // contiguous. It takes the write lock before the quota read rather than
+    // upgrading afterwards, which is where a deferred reader would find its
+    // snapshot stale.
+    accounts.transaction(|transaction| {
+        if !replay_open(transaction, interview_id, account_id)? {
             return Ok(Ingest::NoInterview);
         }
 
@@ -508,7 +503,6 @@ pub fn append_replay_events(
                 "UPDATE recordings SET quota_exceeded = 1 WHERE interview_id = ?1",
                 [interview_id],
             )?;
-            transaction.commit()?;
             return Ok(Ingest::QuotaExceeded);
         }
 
@@ -543,7 +537,6 @@ pub fn append_replay_events(
             first.get_or_insert(seq);
             last = seq;
         }
-        transaction.commit()?;
 
         // `first` is set on the first pass, because an empty batch returned
         // above.

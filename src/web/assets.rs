@@ -13,25 +13,10 @@ use rust_embed::RustEmbed;
 use super::AppState;
 use super::policy::COMPILER_EXPLORER_ORIGIN;
 
-/// The release binary carries the complete browser application. Disk assets
-/// still take precedence per file, so editing `web/` remains the local
-/// development workflow, and a tree that is merely incomplete is filled in
-/// rather than being all-or-nothing: running the binary beside a checkout that
-/// never fetched `web/vendor` serves the vendored megabytes from inside the
-/// executable instead of answering 404 with a good copy in hand.
-///
-/// Dotfiles are excluded because the resolver below refuses to serve any path
-/// segment starting with `.`, so embedding them is weight nobody can fetch. A
-/// killed `scripts/fetch-vendor.sh` leaves multi-megabyte `.part` files, and
-/// without this they land in `.rodata`.
-///
-/// Models are excluded for the same reason and one more. Nothing fetches one
-/// into this tree any more, and no page requests one: the browser gets the
-/// avatar from the pinned upstream URL in `web/avatar/model.js`. The rule stays
-/// anyway, because it is what makes the binary's size independent of whoever
-/// still has a 10.9 MB copy left over from before the change. Keyed by
-/// extension rather than by that one filename, so it states the property
-/// `no_model_is_embedded_in_the_binary` actually asserts.
+/// Embeds browser assets, with disk overrides resolved per file.
+/// Dotfiles are unservable and may contain partial downloads. VRM models are
+/// fetched from a pinned upstream URL, so stale local copies must not bloat
+/// releases.
 #[derive(RustEmbed)]
 #[folder = "web/"]
 #[exclude = ".*"]
@@ -39,22 +24,10 @@ use super::policy::COMPILER_EXPLORER_ORIGIN;
 #[exclude = "**/*.vrm"]
 struct EmbeddedWeb;
 
-/// Says out loud at startup which vendored assets were never downloaded.
-///
-/// The megabytes under `web/vendor` are pinned but not committed:
-/// `scripts/fetch-vendor.sh` downloads them, and `make build` and `make web`
-/// run it first. `cargo run -- web` does not, and neither does a deployment
-/// that copies the tree without running the fetch. The failure
-/// then lands on a candidate as a Python runtime that will not start or a face
-/// detector that never loads, which is a long way from the cause.
-///
-/// A warning rather than a refusal: an interview without the browser Python
-/// runner is degraded, not broken, and a server that will not start is worse
-/// than one that says what is missing.
-///
-/// Silent when a vendor directory has no `SHA256SUMS`, which is what makes this
-/// quiet for the temporary web roots the tests stand up. The actionable state
-/// is a manifest present with its files absent.
+/// Warns about manifest-listed vendor files missing from the local tree.
+/// A missing runtime degrades its feature rather than preventing server
+/// startup.
+/// Temporary web roots without checksum manifests remain silent.
 pub(crate) fn warn_about_unfetched_vendor(web_dir: &Path) {
     let vendor = web_dir.join("vendor");
     let Ok(entries) = std::fs::read_dir(&vendor) else {
@@ -96,27 +69,13 @@ pub(crate) fn warn_about_unfetched_vendor(web_dir: &Path) {
     }
 }
 
-/// The first candidate that exists on disk, with the `stat` that found it.
-///
-/// The handler resolves one candidate at a time now, because candidate order
-/// has to beat store order, so nothing on the request path walks the whole list
-/// against a single store any more. What is left is the shape the resolution
-/// tests want: a question about which file a URL names, answered without a
-/// server. It shares `static_candidates` with the handler, so the rule that
-/// decides what a URL may name still has one owner and these tests still ask
-/// the real one.
+/// Resolves the first disk candidate with its metadata for resolver fixtures.
+/// Shares URL normalization and refusal rules with the serving path.
 pub async fn static_file_meta(
     root: &Path,
     path: &str,
 ) -> Option<(String, PathBuf, std::fs::Metadata)> {
-    // Sequential rather than joined: the first candidate answers almost every
-    // request, and probing four paths in parallel to save a hit that rarely
-    // happens costs three wasted stats on the one that usually does.
-    //
-    // The candidate is handed back beside the path it resolved to. It is what
-    // decides the caching policy, and reconstructing it afterwards with
-    // `strip_prefix(root)` was the second spelling of a rule this file already
-    // argues must have only one.
+    // Probe in order: most requests match the first candidate.
     for candidate in static_candidates(path)? {
         let path = root.join(&candidate);
         if let Some(metadata) = file_metadata(&path).await {
@@ -126,30 +85,10 @@ pub async fn static_file_meta(
     None
 }
 
-/// Whether a single path segment is one this server refuses to resolve.
-///
-/// An allowlist. Enumerating the spellings that escape is open ended, because
-/// the escapes are whatever URL syntax permits, and the two that matter here
-/// are neither `..` nor dot-prefixed: a backslash is a directory separator to
-/// Windows and an ordinary path byte to the URI parser, and a colon makes a
-/// segment drive-qualified, which `PathBuf::push` honors by discarding the
-/// root it was joined onto. `/x\..\..\Cargo.toml` and `/C:/Windows/win.ini`
-/// both walk out of the web root there.
-///
-/// Enumerating what the asset tree contains is not open ended. Every one of
-/// the 367 names under `web/` is alphanumerics with a dot, underscore, or
-/// dash, so the rule is that a segment must be an ordinary filename on every
-/// platform this can be built for, and the allowlist costs no asset. It also
-/// refuses the trailing dot and trailing space that Win32 strips, which would
-/// otherwise name one file to the resolver and a different one to the disk.
-///
-/// Load-bearing rather than theoretical since the release job below started
-/// publishing a Windows binary. On Unix a backslash is an ordinary filename
-/// character and these answer 404 for want of a file; on Windows they would
-/// resolve.
-///
-/// A leading dot covers `..` on its own, so there is no separate clause for
-/// it. An empty segment is permitted because it cannot name anything.
+/// Refuses dotfiles and syntax that can escape or change names on Windows.
+/// ASCII filenames exclude drive prefixes, backslashes, and trailing spaces;
+/// trailing dots are refused because Win32 strips them. Empty segments are
+/// harmless.
 fn is_refused_segment(part: &str) -> bool {
     part.starts_with('.')
         || part.ends_with('.')
@@ -158,26 +97,8 @@ fn is_refused_segment(part: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
-/// The relative paths a URL may resolve to, in the order to try them, or `None`
-/// for a URL the server refuses to resolve at all.
-///
-/// One list for both stores. They spelled these rules out separately until the
-/// trailing slash proved why that does not hold: the disk side normalizes
-/// `foo//index.html` through `PathBuf::join` and the embedded side matched no
-/// key, so the same URL answered differently depending on which store happened
-/// to hold the file. A rule written twice is a rule that drifts, and the drift
-/// is invisible until someone requests the one URL that separates them.
-///
-/// Refusing rather than sanitizing: `..` and a leading `.` on any segment have
-/// no reading this server wants to serve, and a resolver that quietly rewrites
-/// a path into a legal one is a resolver nobody can predict from the URL.
-///
-/// A backslash is refused with them, because on Windows it is a directory
-/// separator and here it is not: `http` accepts `\` as an ordinary path byte,
-/// so `/x\..\..\Cargo.toml` arrives as one segment that is neither `..` nor
-/// dot-prefixed, and `Path::join` then walks it straight out of the web root.
-/// The released Windows executable is what makes that reachable. No vendored
-/// filename contains one, so refusing costs nothing.
+/// Ordered relative keys shared by disk and embedded stores.
+/// Refused segments are rejected rather than sanitized into a different URL.
 fn static_candidates(path: &str) -> Option<Vec<String>> {
     let clean = path.trim_start_matches('/');
     if clean.split('/').any(is_refused_segment) {
@@ -213,9 +134,7 @@ fn static_candidates(path: &str) -> Option<Vec<String>> {
     ])
 }
 
-/// `Path::is_file` is a blocking `stat`, and a route with no extension probes
-/// up to four candidates. Four blocking syscalls on a runtime worker is four
-/// too many when the async form is already used ten lines further down.
+/// Keeps filesystem metadata probes off the async runtime's worker threads.
 pub(crate) async fn file_metadata(path: &Path) -> Option<std::fs::Metadata> {
     tokio::fs::metadata(path)
         .await
@@ -229,43 +148,27 @@ pub(crate) async fn web_static_handler(
     OriginalUri(uri): OriginalUri,
     headers: header::HeaderMap,
 ) -> Response {
-    let if_none_match = headers.get(header::IF_NONE_MATCH);
     let head_only = method == Method::HEAD;
+    // Preconditions only short-circuit GET and HEAD (RFC 9110, 13.1.2).
+    let headers = if matches!(method, Method::GET | Method::HEAD) {
+        headers
+    } else {
+        header::HeaderMap::new()
+    };
 
-    // Per file rather than per tree. Asking `web_dir.is_dir()` here was the
-    // all-or-nothing form, and it is true for anyone running the binary from a
-    // directory that merely happens to contain a `web/`, so a half-populated
-    // tree answered 404 for assets the executable was carrying.
-    //
-    // The question is still asked once, at startup, because the alternative is
-    // a `tokio::fs::metadata` hop to the blocking pool on every request that a
-    // released install is guaranteed to lose: it has no `web/`, so the disk
-    // store never answers and the probe is pure waste. Once at startup keeps
-    // the per-file fallback wherever the directory does exist. The cost is that
-    // creating `web/` under a running server needs a restart to take, which is
-    // the more predictable behavior anyway. Candidate order beats store order.
-    // Exhausting the disk tree first let its single-page fallback,
-    // `index.html`, answer for a candidate the embed could have matched
-    // exactly: a directory holding one stale `index.html` served it for
-    // `/interview` with a 200, because the disk's fourth candidate was tried
-    // before the embed's third. That is the wrong page rather than a missing
-    // one, which is the failure this resolver argues everywhere else that it
-    // exists to avoid.
-    //
-    // Nothing changes for the two shapes that are not half-populated. A
-    // checkout answers from disk on the same candidate it always did, and a
-    // released binary has no `web/` at all, so the disk store is never asked.
+    // Candidate order outranks store order: an exact embedded match must beat
+    // the disk index fallback. Disk-root existence is cached until restart.
     let Some(candidates) = static_candidates(uri.path()) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     for candidate in candidates {
         if state.web_dir_exists
             && let Some(response) =
-                disk_candidate(&state.config.web_dir, &candidate, if_none_match, head_only).await
+                disk_candidate(&state.config.web_dir, &candidate, &headers, head_only).await
         {
             return response;
         }
-        if let Some(response) = embedded_candidate(&candidate, if_none_match, head_only) {
+        if let Some(response) = embedded_candidate(&candidate, &headers, head_only) {
             return response;
         }
     }
@@ -306,24 +209,16 @@ pub(crate) async fn runtime_config_handler(State(state): State<AppState>) -> Res
         .into_response()
 }
 
-/// `no-store` on the whole asset tree was a correct instinct about
-/// `/api/session` applied one level too wide: it forbids caching 12 MB of
-/// pinned wasm, so a reload mid-interview re-downloads all of it. `no-cache`
-/// still revalidates on every request, and the validator below turns that
-/// revalidation into a 304 rather than a resend.
+/// Revalidate ordinary assets without retransmitting unchanged bodies.
 pub(crate) const STATIC_CACHE_CONTROL: HeaderValue = HeaderValue::from_static("no-cache");
 
-/// Vendored MediaPipe is 11.8 MB the candidate pays for before the timer is
-/// useful to them, and a day of it skips the revalidation round trips. Not
-/// `immutable` for a year: `web/vendor/face-detection/README.md` tells
-/// maintainers to overwrite these files in place, under the same names, so a
-/// year-long promise is one the upgrade instructions cannot keep.
+/// Vendor upgrades keep filenames, so cache for a day rather than indefinitely.
 pub(crate) const VENDOR_CACHE_CONTROL: HeaderValue =
     HeaderValue::from_static("public, max-age=86400");
 
-/// Modification time and length together change on any edit that matters, and
-/// neither costs the file read or a digest of 5.5 MB of wasm per request. Weak
-/// because it is a heuristic about the file rather than a hash of its bytes.
+/// A cheap weak validator from nanosecond modification time and length.
+/// It avoids hashing large assets per request but can miss edits preserving
+/// both.
 pub(crate) fn file_etag(metadata: &std::fs::Metadata) -> Option<HeaderValue> {
     let modified = metadata
         .modified()
@@ -333,15 +228,8 @@ pub(crate) fn file_etag(metadata: &std::fs::Metadata) -> Option<HeaderValue> {
     HeaderValue::from_str(&format!("W/\"{}-{}\"", modified.as_nanos(), metadata.len())).ok()
 }
 
-/// Everything about an asset response that does not depend on which store the
-/// bytes came from: the caching policy, the validator, and the content type.
-///
-/// Built once from the relative key both stores resolve to. Before this the
-/// disk and embedded paths each spelled out the whole contract, and they had
-/// already drifted: the vendor rule was a component-wise `Path::starts_with`
-/// on one side and a string prefix on the other, and only one of the two set
-/// `Content-Length` on a body response. `static_candidates` exists because a
-/// rule written twice drifts; this is the other half of that argument.
+/// Shared cache and content headers keep disk and embedded responses
+/// consistent.
 struct AssetHeaders {
     cache_control: HeaderValue,
     content_type: Option<HeaderValue>,
@@ -350,10 +238,8 @@ struct AssetHeaders {
 }
 
 impl AssetHeaders {
-    /// `key` is relative to the tree root, so the vendor test is anchored
-    /// there by construction. Matching anywhere in an absolute path would let
-    /// an operator-supplied `CODETRIAL_WEB_DIR` that happens to contain the
-    /// word cache the whole tree.
+    /// Relative keys keep the vendor rule independent of the configured disk
+    /// path.
     fn new(key: &str, etag: Option<HeaderValue>, length: u64) -> Self {
         Self {
             cache_control: if key.starts_with("vendor/") {
@@ -367,38 +253,59 @@ impl AssetHeaders {
         }
     }
 
-    /// A 304 when the client already holds this exact copy.
-    ///
-    /// Decided before the body is fetched, and before the HEAD branch: a
-    /// conditional HEAD is a revalidation like any other, and answering it 200
-    /// tells the browser its cached copy was replaced when nothing changed.
-    ///
-    /// A 304 replaces the stored headers, so it has to repeat both the
-    /// validator and the `Vary` the 200 would have sent. Without the validator
-    /// a cache cannot tell which version it just confirmed, and without `Vary`
-    /// a shared cache forgets the stored body is one specific encoding and can
-    /// hand gzip to a client that never asked for it. Repeating
-    /// `cache_control` matters for the same reason: answering a vendor
-    /// revalidation with `no-cache` would undo the day the browser was given.
-    fn not_modified(&self, if_none_match: Option<&HeaderValue>) -> Option<Response> {
-        let etag = self.etag.as_ref()?;
-        (Some(etag) == if_none_match).then(|| {
-            (
+    /// Evaluates conditional GET/HEAD using weak comparison (RFC 9110, 13.1.2).
+    /// Repeat cache policy, validator, and Vary so revalidation preserves them.
+    fn not_modified(&self, request_headers: &header::HeaderMap) -> Option<Response> {
+        // Bytes, not str: entity tags may carry obs-text, which `to_str`
+        // rejects.
+        let expected = self
+            .etag
+            .as_ref()
+            .map(|tag| tag.as_bytes().strip_prefix(b"W/").unwrap_or(tag.as_bytes()));
+        let matches = request_headers
+            .get_all(header::IF_NONE_MATCH)
+            .iter()
+            .any(|value| {
+                let value = value.as_bytes().trim_ascii();
+                if value == b"*" {
+                    return true;
+                }
+                let Some(expected) = expected else {
+                    return false;
+                };
+
+                // Commas inside the opaque quoted value are not list
+                // separators.
+                let mut quoted = false;
+                value
+                    .split(|&byte| {
+                        if byte == b'"' {
+                            quoted = !quoted;
+                        }
+                        byte == b',' && !quoted
+                    })
+                    .any(|tag| {
+                        let tag = tag.trim_ascii();
+                        tag.strip_prefix(b"W/").unwrap_or(tag) == expected
+                    })
+            });
+        matches.then(|| {
+            let mut response = (
                 StatusCode::NOT_MODIFIED,
                 [
                     (header::CACHE_CONTROL, self.cache_control.clone()),
-                    (header::ETAG, etag.clone()),
                     (header::VARY, HeaderValue::from_static("accept-encoding")),
                 ],
             )
-                .into_response()
+                .into_response();
+            if let Some(etag) = &self.etag {
+                response.headers_mut().insert(header::ETAG, etag.clone());
+            }
+            response
         })
     }
 
-    /// `None` is a HEAD, answered from the recorded length and never from the
-    /// body. Axum routes HEAD to the same handler, so the avatar's "is a model
-    /// published" probe would otherwise read a 15 MB file into memory once per
-    /// session and throw it away.
+    /// HEAD uses the recorded length without reading a body.
     fn respond(self, body: Option<Body>) -> Response {
         let mut response = match body {
             Some(body) => body.into_response(),
@@ -418,22 +325,18 @@ impl AssetHeaders {
         response
     }
 }
-/// One already-resolved candidate against the disk tree.
-///
-/// The candidate arrives resolved because `static_candidates` runs once for
-/// both stores: expanding it again here would be a second copy of the rule that
-/// decides what a URL may name, which is the one rule in this file that must
-/// not have two.
+/// Tries one resolved key against disk before the caller falls back to
+/// embedding.
 async fn disk_candidate(
     root: &Path,
     candidate: &str,
-    if_none_match: Option<&HeaderValue>,
+    request_headers: &header::HeaderMap,
     head_only: bool,
 ) -> Option<Response> {
     let path = root.join(candidate);
     let metadata = file_metadata(&path).await?;
     let headers = AssetHeaders::new(candidate, file_etag(&metadata), metadata.len());
-    if let Some(not_modified) = headers.not_modified(if_none_match) {
+    if let Some(not_modified) = headers.not_modified(request_headers) {
         return Some(not_modified);
     }
     if head_only {
@@ -447,7 +350,7 @@ async fn disk_candidate(
 /// One already-resolved candidate against the embedded tree.
 fn embedded_candidate(
     candidate: &str,
-    if_none_match: Option<&HeaderValue>,
+    request_headers: &header::HeaderMap,
     head_only: bool,
 ) -> Option<Response> {
     let file = EmbeddedWeb::get(candidate)?;
@@ -460,7 +363,7 @@ fn embedded_candidate(
         Some(embedded_etag(&file)),
         file.data.len() as u64,
     );
-    if let Some(not_modified) = headers.not_modified(if_none_match) {
+    if let Some(not_modified) = headers.not_modified(request_headers) {
         return Some(not_modified);
     }
     if head_only {
@@ -469,17 +372,7 @@ fn embedded_candidate(
     Some(headers.respond(Some(Body::from(file.data))))
 }
 
-/// Sixteen bytes of the digest rather than all thirty-two: this is a cache
-/// validator, not a signature, and a collision costs one stale asset that a
-/// rebuild fixes.
-///
-/// Formatted as one big-endian integer rather than byte by byte. A hand-rolled
-/// loop over shifts and masks says the same thing in more places that can be
-/// wrong, and it hands the mutation gate four operators to flip where this
-/// leaves none.
-///
-/// Infallible, so callers do not branch on a None that cannot happen: hex
-/// digits between quotes are always a valid header value.
+/// Uses half the embedded SHA-256 as a cache validator, not an integrity proof.
 fn embedded_etag(file: &rust_embed::EmbeddedFile) -> HeaderValue {
     let digest = u128::from_be_bytes(
         file.metadata.sha256_hash()[..16]

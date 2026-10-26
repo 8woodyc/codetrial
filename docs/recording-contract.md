@@ -1441,7 +1441,10 @@ already points at costs more than a hole no code path reaches.
 
 A partial unique index on `(account_id, consent_version)` over rows with no room
 and no withdrawal keeps one pending interview per account and wording, so a
-reload reuses it rather than inserting another.
+reload reuses it rather than inserting another. Creation reads pending consent
+and checks the per-account quota inside an immediate transaction, so another
+connection cannot claim that row or spend the remaining quota between the read
+and the insert.
 
 ## Fixtures
 

@@ -1,10 +1,4 @@
-//! The shape of the account database and the migrations that reach it.
-//!
-//! Split out of [`super`] because it is the half that is read rather than
-//! called: seventeen SQL constants and the three functions that apply them, in
-//! front of the queries that use them. `ACCOUNT_MIGRATIONS` is append-only, so
-//! this file only ever grows at the bottom, and keeping it apart means that
-//! growth stops pushing the query code further from the top of a file.
+//! Append-only account database migrations, applied in version order.
 
 use std::path::Path;
 

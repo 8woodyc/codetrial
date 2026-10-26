@@ -187,3 +187,69 @@ fn a_bare_route_falls_back_to_the_index() {
         ]
     );
 }
+
+#[test]
+fn conditional_assets_accept_lists_wildcards_and_weak_comparison() {
+    use axum::http::{HeaderValue, StatusCode};
+
+    for stored in ["\"current\"", "W/\"current\""] {
+        let headers =
+            super::AssetHeaders::new("app.js", Some(HeaderValue::from_str(stored).unwrap()), 1);
+        for (condition, matches) in [
+            ("\"current\"", true),
+            ("W/\"current\"", true),
+            ("\"old\", W/\"current\"", true),
+            ("W/\"current\", \"old\"", true),
+            (" \"old\" ,\t\"current\" ", true),
+            ("*", true),
+            ("\"old\"", false),
+            ("\"current-extra\"", false),
+            ("\"prefix,current\"", false),
+            ("\"*\"", false),
+            ("current", false),
+        ] {
+            let value = HeaderValue::from_str(condition).unwrap();
+            let mut request = axum::http::HeaderMap::new();
+            request.insert("if-none-match", value);
+            let response = headers.not_modified(&request);
+            assert_eq!(response.is_some(), matches, "{stored}: {condition}");
+            if let Some(response) = response {
+                assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
+                assert_eq!(response.headers()["etag"], stored);
+                assert_eq!(response.headers()["cache-control"], "no-cache");
+                assert_eq!(response.headers()["vary"], "accept-encoding");
+            }
+        }
+        assert!(
+            headers
+                .not_modified(&axum::http::HeaderMap::new())
+                .is_none()
+        );
+        let mut repeated = axum::http::HeaderMap::new();
+        repeated.append("if-none-match", HeaderValue::from_static("\"old\""));
+        repeated.append("if-none-match", HeaderValue::from_static("W/\"current\""));
+        assert!(headers.not_modified(&repeated).is_some());
+    }
+}
+
+#[test]
+fn conditional_assets_preserve_opaque_commas_and_match_existing_unversioned_assets() {
+    use axum::http::{HeaderMap, HeaderValue};
+    let headers = super::AssetHeaders::new(
+        "app.js",
+        Some(HeaderValue::from_static("\"with,comma\"")),
+        1,
+    );
+    let mut request = HeaderMap::new();
+    request.insert(
+        "if-none-match",
+        HeaderValue::from_static("\"old\", W/\"with,comma\""),
+    );
+    assert!(headers.not_modified(&request).is_some());
+    let unversioned = super::AssetHeaders::new("app.js", None, 1);
+    assert!(unversioned.not_modified(&request).is_none());
+    request.insert("if-none-match", HeaderValue::from_static("*"));
+    let response = unversioned.not_modified(&request).unwrap();
+    assert_eq!(response.status(), 304);
+    assert!(!response.headers().contains_key("etag"));
+}

@@ -1,3 +1,4 @@
+/* global modifierKey */
 import { after, before, test as nodeTest } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -43,6 +44,11 @@ async function editorPage(t, platform) {
   }
   const page = await browser.newPage();
   t.after(() => page.close());
+  // Shortcut modifier the page's own platform sniff expects.
+  await page.addInitScript(() => {
+    window.modifierKey = () =>
+      /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "metaKey" : "ctrlKey";
+  });
   if (platform) {
     await page.addInitScript((platform) => {
       Object.defineProperty(navigator, "platform", { value: platform });
@@ -67,14 +73,19 @@ async function editorPage(t, platform) {
   };
   const append = async (value) => {
     await editor.focus();
-    await page.keyboard.press("ControlOrMeta+End");
+    await editor.evaluate((node) =>
+      node.setSelectionRange(node.value.length, node.value.length),
+    );
     await page.keyboard.insertText(value);
   };
   const deleteLast = async () => {
     await editor.focus();
-    await page.keyboard.press("ControlOrMeta+End");
-    await page.keyboard.press("Home");
-    await page.keyboard.press("Shift+End");
+    await editor.evaluate((node) =>
+      node.setSelectionRange(
+        node.value.lastIndexOf("\n") + 1,
+        node.value.length,
+      ),
+    );
     await page.keyboard.press("Backspace");
   };
   const undo = async (chord = "ControlOrMeta+Z") => {
@@ -665,6 +676,8 @@ for (const { name, before, expected, source, target } of [
     });
     await page.mouse.move(points.x, points.sourceY);
     await page.mouse.down();
+    // macOS needs a press-and-hold before selected text becomes a native drag.
+    await page.waitForTimeout(200);
     await page.mouse.move(points.x + 5, points.sourceY, { steps: 5 });
     await page.mouse.move(points.x, points.targetY, { steps: 20 });
     await page.mouse.up();
@@ -699,7 +712,7 @@ test("history shortcuts support non-Latin keys without stealing printable layout
         const event = new KeyboardEvent("keydown", {
           bubbles: true,
           cancelable: true,
-          ctrlKey: true,
+          [modifierKey()]: true,
           ...args,
         });
         node.dispatchEvent(event);
@@ -731,7 +744,7 @@ test("history shortcuts and menu events leave disabled and read-only buffers alo
         node.dispatchEvent(
           new KeyboardEvent("keydown", {
             key: "z",
-            ctrlKey: true,
+            [modifierKey()]: true,
             shiftKey: inputType === "historyRedo",
             bubbles: true,
             cancelable: true,
@@ -780,7 +793,7 @@ test("undo and redo at a language's history boundaries never fall through", asyn
     for (const shiftKey of [false, true]) {
       const event = new KeyboardEvent("keydown", {
         key: "z",
-        ctrlKey: true,
+        [modifierKey()]: true,
         shiftKey,
         bubbles: true,
         cancelable: true,
