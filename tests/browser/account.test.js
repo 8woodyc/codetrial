@@ -119,6 +119,13 @@ test("only a report copy available to Past attempts counts as persisted", () => 
   assert.equal(reportIsPersisted(null), false);
 });
 
+test("Past attempts reuse the shared report renderers", () => {
+  const app = read("app.js");
+
+  assert.match(functionBody(app, "renderAttemptHistory"), /reportMarkup\(/);
+  assert.match(functionBody(app, "downloadSavedReport"), /reportMarkdown\(/);
+});
+
 test("a completed test run keeps the round lock", () => {
   const interview = read("interview.js");
 
