@@ -18,6 +18,11 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
     "review_memory_publish", ROOT / ".claude/skills/codetrial-review/publish-memory.py"
 )
+SUPPORT = importlib.util.spec_from_file_location(
+    "support", Path(__file__).with_name("support.py")
+)
+support = importlib.util.module_from_spec(SUPPORT)
+SUPPORT.loader.exec_module(support)
 
 
 class PublisherTests(unittest.TestCase):
@@ -25,6 +30,12 @@ class PublisherTests(unittest.TestCase):
         self.publisher = importlib.util.module_from_spec(SPEC)
         SPEC.loader.exec_module(self.publisher)
         self.memory = self.publisher.memory
+        support.quiet_meter(self.memory)
+        # A ::warning:: printed here would also surface as a real annotation.
+        real_print = print
+        self.publisher.print = lambda *args, file=None, **kwargs: (
+            None if file is sys.stderr else real_print(*args, file=file, **kwargs)
+        )
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.base = Path(self.tmp.name)

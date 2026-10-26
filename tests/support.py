@@ -5,6 +5,7 @@ test, because `tests/` is not a package and `scripts/run-python-tests.py`
 imports each suite from its own path.
 """
 
+import io
 import re
 import subprocess
 from pathlib import Path
@@ -25,6 +26,16 @@ def write_executable(path, text):
     source.write_text(text)
     subprocess.run(["cp", str(source), str(path)], check=True)
     path.chmod(0o755)
+
+
+def quiet_meter(memory):
+    """Keep a loaded memory.py's progress and summary lines out of the gate log.
+
+    They are the tool's output, not the suite's. A module loaded per case owns
+    its METER, so the cases the runner runs at once do not share the sink.
+    """
+    memory.METER.stream = io.StringIO()
+    memory.METER.say = lambda text, err=False: print(text, file=memory.METER.out())
 
 
 # The workflow is read as text, because the gate's Python has no YAML library.

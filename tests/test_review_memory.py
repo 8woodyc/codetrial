@@ -331,6 +331,7 @@ class MemoryCase(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("review_memory", MEMORY)
         memory = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(memory)
+        support.quiet_meter(memory)
         return memory
 
     def calls(self):

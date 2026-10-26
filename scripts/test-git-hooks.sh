@@ -263,7 +263,7 @@ expect 1 "a hook that cannot find its checkout" \
 # A merge being concluded runs no script of ours: the tree is already the
 # incoming one. A message the rules refuse shows the script did not run.
 merge_head=$(git rev-parse --git-path MERGE_HEAD)
-git rev-parse HEAD > "$merge_head"
+: > "$merge_head"
 printf 'bad subject\n' > "$work/merge.msg"
 expect 0 "a merge runs no script of ours" "$hooks/commit-msg" "$work/merge.msg"
 rm -f "$merge_head"
