@@ -210,12 +210,8 @@ async fn fail_cleanup(
     matches!(moved, Ok(Some((_, true))))
 }
 
-/// Records the deletion and gives up everything that described what was
-/// deleted.
-///
-/// One statement, because the schema's own `CHECK` refuses a half-tombstone: a
-/// row with `deleted_at` set and a recipient address still in it is not a state
-/// this table has.
+/// Clears identifying fields and replay events in the same transaction.
+/// The schema's CHECK also refuses a tombstone retaining a recipient address.
 fn tombstone(
     accounts: &Accounts,
     clock: &dyn Clock,
@@ -223,11 +219,7 @@ fn tombstone(
     deleted_by: &str,
 ) -> rusqlite::Result<bool> {
     let now = clock.now();
-    accounts.with(|connection| {
-        let transaction = rusqlite::Transaction::new_unchecked(
-            connection,
-            rusqlite::TransactionBehavior::Immediate,
-        )?;
+    accounts.transaction(|transaction| {
         let changed = transaction.execute(
             "
         UPDATE recordings
@@ -258,7 +250,6 @@ fn tombstone(
                 [recording_id],
             )?;
         }
-        transaction.commit()?;
         Ok(changed > 0)
     })
 }

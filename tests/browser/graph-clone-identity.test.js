@@ -148,7 +148,7 @@ for (const language of ["javascript", "python"]) {
 }
 
 const run = promisify(execFile);
-describe("graph clone toolchain harnesses", { concurrency: true }, () => {
+describe("graph clone toolchain harnesses", { concurrency: 4 }, () => {
   for (const [language, compiler, flags, extension] of [
     ["c", "cc", ["-std=c17"], "c"],
     ["cpp", "g++", ["-std=c++20"], "cpp"],

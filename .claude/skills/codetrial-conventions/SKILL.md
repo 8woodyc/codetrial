@@ -199,8 +199,8 @@ tests/common/   What the integration tests share
 
 `src/` holds implementation. A file there may declare a test module, and may
 carry a `#[cfg(test)]` item that a test needs to reach, but must not contain a
-test body. No gate lane enforces that, so `grep -rn '#\[test\]' src/` is the
-check, and it returns nothing today.
+test body. The `src-test-bodies` gate in `scripts/test.sh` rejects test attributes
+and inline test modules under `src/`; test-only helpers remain allowed.
 
 ```rust
 #[cfg(test)]

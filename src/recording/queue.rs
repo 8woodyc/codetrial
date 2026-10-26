@@ -62,12 +62,7 @@ pub fn claim_delivery(
     accounts: &Accounts,
     now: i64,
 ) -> rusqlite::Result<Option<(Recording, String)>> {
-    accounts.with(|connection| {
-        let transaction = rusqlite::Transaction::new_unchecked(
-            connection,
-            rusqlite::TransactionBehavior::Immediate,
-        )?;
-
+    accounts.transaction(|transaction| {
         // The claim is a fresh token every time, so a worker whose claim
         // expired cannot finish or reschedule the row its replacement now
         // holds: its writes name a claim the row no longer has. A failure here
@@ -95,7 +90,6 @@ pub fn claim_delivery(
             )
             .optional()?;
         let Some(recording_id) = claimed else {
-            transaction.commit()?;
             return Ok(None);
         };
         let recording = transaction
@@ -105,7 +99,6 @@ pub fn claim_delivery(
                 row_to_recording,
             )
             .optional()?;
-        transaction.commit()?;
         Ok(recording.map(|recording| (recording, claim)))
     })
 }
@@ -155,14 +148,10 @@ pub fn reschedule_delivery(
     error: &str,
     now: i64,
 ) -> rusqlite::Result<Reschedule> {
-    accounts.with(|connection| {
+    accounts.transaction(|transaction| {
         // One transaction, because the read and the write are one decision: a
         // row reclaimed between them would be read as this worker's and written
         // as somebody else's.
-        let transaction = rusqlite::Transaction::new_unchecked(
-            connection,
-            rusqlite::TransactionBehavior::Immediate,
-        )?;
 
         // Under this claim, or not at all. A row that has been reclaimed is
         // somebody else's work now, and rescheduling it would push their
@@ -189,7 +178,6 @@ pub fn reschedule_delivery(
             // it would queue the row again and the next claim would reopen it,
             // turning an operator-only retry into an automatic one. The caller
             // deletes it after the failure is written down.
-            transaction.commit()?;
             return Ok(Reschedule::Exhausted);
         };
         transaction.execute(
@@ -200,7 +188,6 @@ pub fn reschedule_delivery(
         ",
             (recording_id, now + backoff, error, now, claim),
         )?;
-        transaction.commit()?;
         Ok(Reschedule::Again)
     })
 }

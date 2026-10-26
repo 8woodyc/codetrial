@@ -1,15 +1,6 @@
-//! Account storage and session lifecycle: the SQLite side of signing in, kept
-//! apart from the HTTP handlers in [`crate::web`] that call it. Nothing here
-//! knows about axum, so the schema and the queries can be read and tested
-//! without a router in the way.
-//!
-//! What stays in this file is what every submodule needs: the configuration
-//! types, the one connection they share, and the two helpers that decide
-//! whether a GitHub login is one at all. The rest is grouped by what it is
-//! about -- [`schema`] for the database's shape, and [`sessions`],
-//! [`interviews`] and [`reports`] for the queries against it -- and re-exported
-//! here, so a caller still writes `accounts::create_session` and does not have
-//! to know which file it landed in.
+//! SQLite account storage, independent of HTTP handlers.
+//! Re-exports keep callers independent of the session, interview, and report
+//! modules.
 
 pub mod interviews;
 pub mod reports;
@@ -33,9 +24,7 @@ use rusqlite::OptionalExtension;
 
 use serde_json::{Value, json};
 
-/// No `Debug`: `session_secret` signs the session cookie, so a copy in a log
-/// is not a credential to steal but the ability to mint any user's session,
-/// and `oauth` carries the client secret beneath it.
+/// No Debug: signing secrets and OAuth credentials must stay out of logs.
 #[derive(Clone, PartialEq, Eq)]
 pub struct GitHubLoginConfig {
     /// Absent unless an OAuth app is configured. The two credentials are only
@@ -48,8 +37,7 @@ pub struct GitHubLoginConfig {
     pub api_base_url: String,
 }
 
-/// Same reason. The pair is only ever useful together, so the secret is never
-/// more than one field away from anything that prints the id.
+/// No Debug: printing the client id must not expose its adjacent secret.
 #[derive(Clone, PartialEq, Eq)]
 pub struct GitHubOauth {
     pub client_id: String,
@@ -69,8 +57,8 @@ pub struct SignedInUser {
     pub verified_email: Option<String>,
 }
 
-/// What GitHub told us. Its `github_id` is not the local `users.id`, which is
-/// why this is a separate type rather than a reused [`SignedInUser`].
+/// Login data: positive ids come from OAuth; negative ids are self-declared.
+/// `github_id` is distinct from the local `users.id`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitHubProfile {
     pub github_id: i64,
@@ -82,19 +70,8 @@ pub struct GitHubProfile {
     pub verified_email: Option<String>,
 }
 
-/// The account database and the settings that reach it, resolved once at
-/// startup. Both used to be rebuilt per request: `login_config` allocated five
-/// strings to answer questions about immutable config, and every query opened a
-/// fresh SQLite handle, paying a file open and a schema read before doing any
-/// work. One connection also means `PRAGMA foreign_keys` is actually in force,
-/// which per-request handles never had, so `ON DELETE CASCADE` now applies.
-///
-/// The ceiling that buys: one connection behind a mutex serializes every
-/// account query, on the blocking pool rather than on an async worker. An
-/// interview is a handful of queries at its edges, so the queue is never the
-/// thing anyone waits for; a deployment running many concurrent interviews
-/// would want a pool here, and would find out by measuring rather than by
-/// reading this.
+/// One connection per server, with foreign keys enabled on every query.
+/// Queries run on the blocking pool and serialize through this connection.
 pub struct Accounts {
     config: GitHubLoginConfig,
     connection: Mutex<rusqlite::Connection>,
@@ -125,16 +102,7 @@ impl Accounts {
         schema::initialize_connection(&mut connection)
     }
 
-    /// Writes are rare and single-writer here, so one guarded connection beats
-    /// a pool. Callers already run on the blocking pool, so holding the lock
-    /// across the query parks no async worker.
-    ///
-    /// The ceiling, so the next person does not have to rediscover it: every
-    /// query in the process queues behind every other. These are indexed
-    /// point lookups on a small database, so they retire in tens of
-    /// microseconds, and it stops being enough when concurrent interviews
-    /// times queries per interview approaches that rate. A connection pool is
-    /// the answer at that point, not a second mutex.
+    /// Serializes this process's queries; callers use the blocking pool.
     pub(crate) fn with<T>(
         &self,
         task: impl FnOnce(&rusqlite::Connection) -> rusqlite::Result<T>,
@@ -144,6 +112,23 @@ impl Accounts {
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         task(&connection)
+    }
+
+    /// Reserves the writer before reads that control a write, across server
+    /// processes.
+    pub(crate) fn transaction<T>(
+        &self,
+        task: impl FnOnce(&rusqlite::Connection) -> rusqlite::Result<T>,
+    ) -> rusqlite::Result<T> {
+        self.with(|connection| {
+            let transaction = rusqlite::Transaction::new_unchecked(
+                connection,
+                rusqlite::TransactionBehavior::Immediate,
+            )?;
+            let result = task(&transaction)?;
+            transaction.commit()?;
+            Ok(result)
+        })
     }
 }
 

@@ -1,9 +1,4 @@
-//! The reports an account holds, and the quota that bounds them.
-//!
-//! Split out of [`super`] because the quota is the whole story: a full account
-//! refuses a new report and still rewrites its own, which is one rule spread
-//! across two queries and an enum, and it read as unrelated to the session and
-//! interview code it used to sit between.
+//! Saved reports, ownership checks, and per-account quotas.
 
 use super::*;
 
@@ -123,7 +118,7 @@ pub fn save_report(
     if payload.get("problemId").is_some() {
         payload["problemId"] = problem_id.as_str().into();
     }
-    accounts.with(|connection| {
+    accounts.transaction(|connection| {
         let now = crate::current_epoch_seconds_i64();
 
         // Who holds the id, and how full the account is, in one round trip.

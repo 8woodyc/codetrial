@@ -1,44 +1,12 @@
 #!/usr/bin/env python3
 
-"""Run a unittest file's cases across a thread pool.
+"""Run independent unittest cases concurrently and report failures by test id.
 
-`python3 -m unittest tests/test_recording_provision_check.py` took 54 seconds of
-the gate, which was more than the Rust and browser lanes together. Each of its
-80 cases spawns `scripts/recording-provision-check.sh`, which spawns a dozen or
-more fake `gcloud` and `curl` binaries, several of which shell back out to
-`python3` to parse JSON.
-
-Threads work here, but not for the reason it is tempting to write down. This
-parent is not idling: one case measures 0.56s wall against 0.56s of user plus
-system time, so the tree below it is pegging a core the whole way, and the
-suite costs about 77 CPU-seconds however it is run. What the pool buys is that
-those children are separate processes, and the GIL is released around
-`subprocess`, so they land on other cores instead of queueing behind one. That
-is a real saving on a machine with cores to spare and close to none on a
-two-core runner, which is the honest shape of it.
-
-The cost is therefore not removed, only spread, and the deeper fix is a level
-down: `recording-provision-check.sh` invokes `python3` at eight sites to read
-JSON, so a run boots the interpreter hundreds of times to assert on the
-script's refusal messages. Extracting that JSON handling into a module the
-script calls once, and the suite imports directly, would take this suite under
-a second serially and delete the need for this file.
-
-This assumes what those suites already do, and it is the condition to check
-before adding a file to the gate through here: a case must own everything it
-touches. All four suites build their sandbox with `tempfile.TemporaryDirectory`
-and hand `subprocess` a *copied* environment (`os.environ | {...}`), so no case
-can observe another's. A suite that mutated `os.environ`, called `os.chdir`, or
-shared a fixture directory between cases would race here and must keep running
-under plain `unittest` instead. A case that writes a stub and then runs it must
-not write it from this process: another thread's fork inherits the open file
-until it execs, and running the stub then fails with "Text file busy". The
-suites write stubs through `write_executable` in `tests/support.py`, which
-copies them into place with `cp`.
-
-Failures are reported after the run rather than as they happen, sorted by test
-id, because the pool finishes in whatever order the kernel schedules and a
-report that changes order between runs is one nobody can diff.
+Cases must own their fixtures and use copied environments. Tests that mutate
+process-wide state such as os.environ or the working directory must run serially.
+Child processes release the GIL while they run, so threads can overlap them.
+Executable stubs should use tests/support.py's write_executable to avoid an
+inherited writable descriptor causing "Text file busy" in another test's fork.
 """
 
 import argparse

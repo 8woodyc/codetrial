@@ -7,6 +7,60 @@
 
 use super::*;
 
+async fn assert_asset_validator_forms(
+    client: &reqwest::Client,
+    url: &str,
+    etag: &reqwest::header::HeaderValue,
+) {
+    let tag = etag.to_str().unwrap();
+    let opaque = tag.strip_prefix("W/").unwrap_or(tag);
+    for method in [reqwest::Method::GET, reqwest::Method::HEAD] {
+        for value in [
+            "*".to_string(),
+            opaque.to_string(),
+            format!("W/{opaque}"),
+            format!("\"old\", {tag}"),
+        ] {
+            let response = client
+                .request(method.clone(), url)
+                .header("if-none-match", value)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 304);
+            assert_eq!(response.headers()["etag"], *etag);
+            assert!(response.bytes().await.unwrap().is_empty());
+        }
+        let response = client
+            .request(method, url)
+            .header("if-none-match", "\"old\"")
+            .header("if-none-match", tag)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 304);
+    }
+    // obs-text in an unrelated tag must not discard the whole list.
+    let mut list = b"\"old-\x80\", ".to_vec();
+    list.extend_from_slice(tag.as_bytes());
+    let list = reqwest::header::HeaderValue::from_bytes(&list).unwrap();
+    let response = client
+        .get(url)
+        .header("if-none-match", list)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 304);
+    // Wildcard validation applies to GET and HEAD only.
+    let response = client
+        .post(url)
+        .header("if-none-match", "*")
+        .send()
+        .await
+        .unwrap();
+    assert_ne!(response.status(), 304);
+}
+
 /// Every refused name is a file that is really there.
 ///
 /// This asked `src/web` for `/.env.local` and `/../agent/.env`, neither of
@@ -111,6 +165,7 @@ async fn embedded_web_assets_serve_without_a_web_directory() {
     let etag = response.headers().get("etag").unwrap().clone();
 
     let client = http_client();
+    assert_asset_validator_forms(&client, &vendor, &etag).await;
     let revalidated = client
         .get(&vendor)
         .header("if-none-match", etag.clone())
@@ -357,6 +412,7 @@ async fn static_server_serves_health_fixture_and_missing_asset() {
         "the validator is weak, so it still matches once responses are compressed"
     );
     assert_eq!(asset.text().await.unwrap(), "globalThis.loaded = true;");
+    assert_asset_validator_forms(&client, &format!("{base}/app.js"), &etag).await;
 
     // `web/` is 13 MB, so revalidation has to cost a 304 rather than a resend.
     let revalidated = client

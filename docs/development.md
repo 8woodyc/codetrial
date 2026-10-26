@@ -10,6 +10,30 @@ Selection admission and refresh behavior are specified in
 the existing real media preflight with a fake media grant and room transport;
 they do not exercise paid LiveKit, Gemini or Egress services.
 
+## Account database writes
+
+Each server keeps one SQLite connection behind a mutex and runs account queries
+on the blocking pool. The mutex serializes that server's queries; it does not
+protect against another server using the same database.
+
+Read-then-write account operations use `Accounts::transaction`, which reserves
+SQLite's writer with `BEGIN IMMEDIATE` before reading. Report saves enforce the
+`MAX_REPORTS_PER_USER` quota and ownership check in the same transaction as the upsert.
+Interview creation reuses pending consent before applying the `MAX_INTERVIEWS_PER_USER`
+quota, with no interleaving claim or insert from another connection. Session
+creation, expired-account sweeps, delivery claims and retry scheduling, and
+recording tombstones use the same commit-or-rollback helper. Single-statement
+room claims, releases and deletes remain atomic without it.
+
+Replay ingestion keeps its ownership precheck outside the writer transaction;
+replay snapshots use a deferred read transaction so they do not reserve the
+writer.
+
+A competing writer waits up to the connection's five-second busy timeout, then
+returns a database error. These transactions contain only local database work;
+network calls must stay outside them. No schema migration is required.
+Regression checks live in `tests/unit/accounts/schema.migration_tests.rs`.
+
 ## Dependency security checks
 
 A new RustSec advisory must reach maintainers without making an unrelated
@@ -91,6 +115,13 @@ timeout: 45 minutes for Rust, 20 for the others. The Rust and browser lanes
 clone only `HEAD`; the portable lane keeps full history for the commit-message
 check. The Rust lane deletes the runner's unused toolchains only when less than
 40 GB is free. Running `./scripts/test.sh` locally still runs every gate.
+
+On a busy local host, `RUST_TEST_THREADS=4 ./scripts/test.sh rust` limits
+concurrent server launches in the Rust suites. The browser compiler fixtures
+also bound their concurrent jobs so candidate programs get CPU before their
+execution deadlines. Editor-history fixtures set selections directly and use
+the browser's platform modifier; native dragging includes a press-and-hold
+before moving selected text.
 
 `check` is the only status a branch rule for main should require. It needs every
 lane and the independent security audit to succeed, and on a pull request the
@@ -392,6 +423,13 @@ web tree is filled in from the built-in copy rather than 404ing. Assets on disk
 win where they exist. That root is `web/` relative to the working directory
 unless `CODETRIAL_WEB_DIR` names another, so running the binary from a checkout
 picks up edits with no environment variable set.
+
+Static assets use ETags for revalidation. Ordinary files require revalidation
+with `no-cache`; vendored assets may be cached for one day. Conditional GET and
+HEAD accept `If-None-Match: *`, tag lists, repeated header fields, and weak or
+strong spellings of the same tag. A matching asset returns a bodyless 304 with
+its cache policy, ETag when available, and `Vary: accept-encoding`. Unknown or
+stale tags return the current representation.
 
 ## Review memory and the review skill
 

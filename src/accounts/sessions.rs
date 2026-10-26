@@ -1,10 +1,4 @@
-//! Signing in, staying signed in, and being swept when neither is true.
-//!
-//! The session id in the cookie is never what the database holds:
-//! [`session_key`]
-//! hashes it on the way in, so a copy of the file is not a set of live
-//! sessions. Split out of [`super`] so that rule sits beside the four queries
-//! that depend on it rather than in the middle of the account schema.
+//! Hashed session tokens and expiry of unused throwaway accounts.
 
 use super::*;
 
@@ -12,30 +6,17 @@ use super::*;
 /// still signed in when they arrive.
 pub const SESSION_TTL_SECONDS: i64 = 60 * 60 * 24 * 30;
 
-/// Signs someone in, minting the session token the cookie carries.
-///
-/// `pub(crate)` deliberately. It was raised in review that a public
-/// `create_session` plus a public `GitHubProfile` lets any in-process caller
-/// mint an account marked verified, since `github_id > 0` proves only a
-/// number's sign and not that GitHub said anything. Visibility is not a defence
-/// against code in the same process, which can write the row directly, but this
-/// function has exactly two callers and neither is outside this crate, so the
-/// narrower spelling costs nothing and stops the shape from spreading.
-///
-/// The real invariant lives at those two callers: the OAuth callback is the
-/// only one that supplies a positive id, and `record_login_handler` always
-/// takes its id from `recorded_account_id`, which is negative by construction.
+/// Creates the account and session atomically.
+/// Only the OAuth callback may supply a positive GitHub id; self-declared
+/// logins use fresh negative ids from `recorded_account_id`. Crate visibility
+/// limits accidental use but does not authenticate an in-process caller.
 pub(crate) fn create_session(
     accounts: &Accounts,
     profile: &GitHubProfile,
 ) -> rusqlite::Result<String> {
-    accounts.with(|connection| {
+    accounts.transaction(|transaction| {
         let now = crate::current_epoch_seconds_i64();
         let session_id = random_token(32).map_err(|_| rusqlite::Error::InvalidQuery)?;
-
-        // A failed session insert must not leave a new account or change the
-        // verified delivery address on an existing one.
-        let transaction = connection.unchecked_transaction()?;
 
         // A positive id came from GitHub and names a returning person, so it
         // updates the row it already owns. A negative one is a freshly minted
@@ -102,7 +83,6 @@ pub(crate) fn create_session(
                 now,
             ),
         )?;
-        transaction.commit()?;
         Ok(session_id)
     })
 }
@@ -172,13 +152,12 @@ pub fn delete_session(accounts: &Accounts, session_id: &str) -> rusqlite::Result
 /// Returns the rows removed, so the caller can say so rather than sweeping
 /// silently.
 pub fn sweep_expired_sessions(accounts: &Accounts, now: i64) -> rusqlite::Result<(usize, usize)> {
-    accounts.with(|connection| {
+    accounts.transaction(|transaction| {
         // One transaction, because the two statements are one decision. The
         // mutex around this connection serializes this process and says nothing
         // about a second `codetrial web` on the same database: a recording
         // inserted between them makes the account delete fail under RESTRICT,
         // after the sessions have already gone.
-        let transaction = connection.unchecked_transaction()?;
         let sessions = transaction.execute("DELETE FROM sessions WHERE expires_at <= ?1", [now])?;
         let users = transaction.execute(
             "
@@ -190,7 +169,6 @@ pub fn sweep_expired_sessions(accounts: &Accounts, now: i64) -> rusqlite::Result
             ",
             [],
         )?;
-        transaction.commit()?;
         Ok((sessions, users))
     })
 }

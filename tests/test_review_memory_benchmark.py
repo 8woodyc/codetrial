@@ -217,8 +217,10 @@ class BenchmarkTests(fixtures.MemoryCase):
             fallback / "gh",
             "#!/bin/sh\nprintf fallback > " + shlex.quote(str(marker)) + "\nexit 77\n",
         )
+        # Framework Python may resolve the launch symlink; pin the spaced path.
         script = """import importlib.util,json,sys
 from pathlib import Path
+sys.executable=sys.argv[4]
 spec=importlib.util.spec_from_file_location('b',sys.argv[1]);b=importlib.util.module_from_spec(spec);spec.loader.exec_module(b)
 with b.fixture_environment(Path(sys.argv[2]),Path(sys.argv[3])):
     value=b.memory.gh('repos/sysprog21/codetrial/pulls/2/files?per_page=100',paginate=True)
@@ -233,6 +235,7 @@ print(json.dumps({'spaced_interpreter':' ' in sys.executable,'files':len(value)}
                 str(BENCHMARK),
                 str(self.fixture),
                 str(log),
+                str(executable),
             ],
             env=dict(os.environ, PATH=str(fallback) + ":" + os.environ["PATH"]),
             capture_output=True,
