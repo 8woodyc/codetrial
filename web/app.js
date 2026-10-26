@@ -27,11 +27,16 @@ import {
   pickerEntry,
   progressModelFrom,
 } from "./progress.js";
-import { reportMarkdown, reportMarkup } from "./render.js";
+import {
+  categoryComparisonMarkup,
+  reportMarkdown,
+  reportMarkup,
+} from "./render.js";
 import { downloadMarkdown, reportFilename } from "./download.js";
-import { loadPageMap, loadTopicMap } from "./problem-data.js";
+import { loadCategoryMap, loadPageMap, loadTopicMap } from "./problem-data.js";
 import {
   availableTopics,
+  compareCategoryAttempt,
   filterProblems,
   recentPerformance,
 } from "./practice-insights.js";
@@ -67,6 +72,7 @@ let mode = "coding";
 /// The saved language attached to a problem selected through Try again.
 let retryLanguage = null;
 let reports = [];
+let historyCategories = null;
 /// The practice focus the share box currently refers to.
 let sharedFocus = null;
 let manualProblem = false;
@@ -533,6 +539,7 @@ let progressSuffix = "saved";
 const unselectedAttempts = new Set();
 /// What the attempt list draws now: the only reports a batch download takes.
 let shownAttempts = [];
+let downloadingSelectedAttempts = false;
 const selectedProgressPhases = new Map();
 /// Whether the history on screen came from an account: null until /api/session
 /// answers, and never assumed false, because a browser that cannot ask is not a
@@ -564,8 +571,11 @@ nodes.attemptSelectAll.addEventListener("click", () => {
 // click with no filter could drop that many files into Downloads. Past a
 // handful, the count is said and confirmed before anything is saved.
 const MAX_UNCONFIRMED_DOWNLOADS = 5;
-nodes.attemptDownloadSelected.addEventListener("click", () => {
+nodes.attemptDownloadSelected.addEventListener("click", async () => {
+  if (downloadingSelectedAttempts || nodes.attemptDownloadSelected.disabled)
+    return;
   const selected = selectedAttempts();
+  const history = progressNormalized;
   if (
     selected.length > MAX_UNCONFIRMED_DOWNLOADS &&
     !window.confirm(
@@ -573,14 +583,32 @@ nodes.attemptDownloadSelected.addEventListener("click", () => {
     )
   )
     return;
-  for (const attempt of selected) downloadSavedReport(attempt);
-  // Chrome saves the first file of one click and asks before the rest, or
-  // drops them silently once the site is blocked. Neither reaches the page, so
-  // the note says how to recover rather than what happened.
-  nodes.attemptDownloadNote.textContent =
-    selected.length > 1
-      ? "Your browser may ask to allow multiple downloads from this page. If only the first file arrived, allow automatic downloads for this site in the browser's site settings and try again."
-      : "";
+  downloadingSelectedAttempts = true;
+  nodes.attemptDownloadSelected.disabled = true;
+  try {
+    if (
+      !historyCategories &&
+      selected.some((attempt) => canCompareAttempt(attempt, history))
+    ) {
+      historyCategories = await loadHistoryCategoryMap();
+    }
+    for (const attempt of selected) {
+      downloadSavedReport(
+        attempt,
+        compareCategoryAttempt(history, attempt, historyCategories),
+      );
+    }
+    // Chrome saves the first file of one click and asks before the rest, or
+    // drops them silently once the site is blocked. Neither reaches the page, so
+    // the note says how to recover rather than what happened.
+    nodes.attemptDownloadNote.textContent =
+      selected.length > 1
+        ? "Your browser may ask to allow multiple downloads from this page. If only the first file arrived, allow automatic downloads for this site in the browser's site settings and try again."
+        : "";
+  } finally {
+    downloadingSelectedAttempts = false;
+    nodes.attemptDownloadSelected.disabled = selectedAttempts().length === 0;
+  }
 });
 
 const durations = [...document.querySelectorAll("[data-duration]")];
@@ -1148,6 +1176,56 @@ async function renderLocalHistory(generation = historyLoad) {
   } catch {
     if (generation !== historyLoad) return;
     showProgressError("Could not load progress saved on this device.");
+  }
+}
+
+function canCompareAttempt(attempt, history = progressNormalized) {
+  return (
+    !attempt.report.incomplete &&
+    attempt.recordedDecision !== null &&
+    history.some(
+      (entry) =>
+        entry !== attempt &&
+        !(attempt.id && entry.id && entry.id === attempt.id) &&
+        entry.at !== null &&
+        attempt.at !== null &&
+        entry.at < attempt.at &&
+        !entry.report.incomplete &&
+        entry.recordedDecision !== null &&
+        entry.interviewMode === attempt.interviewMode,
+    )
+  );
+}
+
+async function attemptCategoryComparison(attempt) {
+  const history = progressNormalized;
+  if (!canCompareAttempt(attempt, history)) return null;
+  historyCategories ??= await loadHistoryCategoryMap();
+  return compareCategoryAttempt(history, attempt, historyCategories);
+}
+
+async function openAttemptCategoryComparison(report, attempt) {
+  if (report.querySelector(".category-comparison")) return;
+  const comparison = await attemptCategoryComparison(attempt);
+  const markup = categoryComparisonMarkup(attempt.report, comparison);
+  if (!markup || report.querySelector(".category-comparison")) return;
+  const card = report.querySelector(".report-card");
+  const anchor = card?.querySelector(".report-debrief");
+  if (anchor) anchor.insertAdjacentHTML("beforebegin", markup);
+  else card?.insertAdjacentHTML("beforeend", markup);
+}
+
+async function loadHistoryCategoryMap() {
+  let timer;
+  try {
+    return await Promise.race([
+      loadCategoryMap().catch(() => null),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(null), requestTimeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -1884,7 +1962,10 @@ function renderAttemptHistory(attempts) {
       "aria-label",
       `Download report (.md) for ${attempt.problemTitle}, ${when}`,
     );
-    download.addEventListener("click", () => downloadSavedReport(attempt));
+    download.addEventListener(
+      "click",
+      () => void exportSavedReport(attempt, download),
+    );
     const retry = document.createElement("button");
     retry.type = "button";
     retry.textContent = "Try again";
@@ -1906,6 +1987,7 @@ function renderAttemptHistory(attempts) {
       }
       report.hidden = false;
       open.textContent = "Collapse report";
+      void openAttemptCategoryComparison(report, attempt);
     });
     retry.addEventListener("click", () => {
       if (starting) return;
@@ -1991,10 +2073,29 @@ function syncAttemptSelection() {
     ? "Deselect all"
     : "Select all";
   nodes.attemptDownloadSelected.textContent = `Download selected (${selected})`;
-  nodes.attemptDownloadSelected.disabled = selected === 0;
+  nodes.attemptDownloadSelected.disabled =
+    downloadingSelectedAttempts || selected === 0;
 }
 
-function downloadSavedReport(attempt) {
+async function exportSavedReport(attempt, button) {
+  if (button?.disabled) return;
+  if (button) button.disabled = true;
+  try {
+    const categoryComparison = await attemptCategoryComparison(attempt);
+    downloadSavedReport(attempt, categoryComparison);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function downloadSavedReport(
+  attempt,
+  categoryComparison = compareCategoryAttempt(
+    progressNormalized,
+    attempt,
+    historyCategories,
+  ),
+) {
   const markdown = reportMarkdown({
     report: {
       ...attempt.report,
@@ -2007,6 +2108,7 @@ function downloadSavedReport(attempt) {
     transcript: null,
     at: new Date(attempt.at).toLocaleString(),
     unclearLines: attempt.unclearLines,
+    categoryComparison,
   });
   downloadMarkdown(
     markdown,

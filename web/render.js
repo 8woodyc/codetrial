@@ -275,6 +275,249 @@ function interviewerStyle(report) {
     .join("; ");
 }
 
+function signedDelta(value) {
+  if (value === null || value === undefined || typeof value === "boolean")
+    return "n/a";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "n/a";
+  if (number === 0) return "0";
+  return number > 0 ? `+${number}` : `${number}`;
+}
+
+function finiteOrNull(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function metricText(value) {
+  return value == null ? "n/a" : value;
+}
+
+function deltaText(explicitDelta, previous, current) {
+  if (explicitDelta !== undefined) return signedDelta(explicitDelta);
+  return previous !== null && current !== null
+    ? signedDelta(current - previous)
+    : "n/a";
+}
+
+function localDateString(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function comparisonDate(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return localDateString(new Date(value));
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = new Date(value);
+    return Number.isFinite(parsed.getTime())
+      ? localDateString(parsed)
+      : value.trim();
+  }
+  return "";
+}
+
+function hasRubricVersionMismatch(categoryComparison) {
+  return (
+    categoryComparison.rubricComparable === false &&
+    categoryComparison.prevRubricVersion != null &&
+    categoryComparison.currRubricVersion != null &&
+    categoryComparison.prevRubricVersion !==
+      categoryComparison.currRubricVersion
+  );
+}
+
+function categoryComparisonView(report, categoryComparison, atBoard) {
+  if (report.incomplete || !categoryComparison?.previous) return null;
+  const workTitle = atBoard ? "Board work" : "Coding";
+  const { previous, current } = categoryComparison;
+  const previousDecision = previous.decision === "HIRE" ? "HIRE" : "NO HIRE";
+  const previousDate = comparisonDate(previous.at);
+  const scopeNote = categoryComparison.sameProblem
+    ? "repeat of this problem"
+    : "previous problem in this category";
+  const prevCoding = finiteOrNull(previous.codingScore);
+  const currCoding = finiteOrNull(
+    current ? current.codingScore : report.codingScore,
+  );
+  const codingDelta = deltaText(
+    categoryComparison.codingScoreDelta,
+    prevCoding,
+    currCoding,
+  );
+  const prevComm = finiteOrNull(previous.communicationScore);
+  const currComm = finiteOrNull(
+    current ? current.communicationScore : report.communicationScore,
+  );
+  const commDelta = deltaText(
+    categoryComparison.communicationScoreDelta,
+    prevComm,
+    currComm,
+  );
+  const prevHints = finiteOrNull(previous.hintsUsed);
+  const currHints = finiteOrNull(
+    current ? current.hintsUsed : report.hintsUsed,
+  );
+  const hintsDelta = deltaText(
+    categoryComparison.hintsUsedDelta,
+    prevHints,
+    currHints,
+  );
+  const rubricMismatch = hasRubricVersionMismatch(categoryComparison);
+  const phaseDeltas =
+    !rubricMismatch &&
+    categoryComparison.rubricComparable !== false &&
+    categoryComparison.phaseDeltas?.length
+      ? categoryComparison.phaseDeltas.map((row) => ({
+          label: phaseName(row.phase, atBoard),
+          previousScore: row.previousScore,
+          currentScore: row.currentScore,
+          delta: signedDelta(row.delta),
+        }))
+      : [];
+  const priorPhases = (categoryComparison.phaseComparisons || []).map(
+    (item) => {
+      const resolved =
+        item.status === "no_longer_flagged" || !item.currentItems?.length;
+      return {
+        label: phaseName(item.phase, atBoard),
+        resolved,
+        badgeText: resolved
+          ? "No improvement item flagged in this phase"
+          : "Flagged in both attempts",
+        previousItems: item.previousItems ?? [],
+        currentItems: item.currentItems ?? [],
+      };
+    },
+  );
+
+  return {
+    category: categoryComparison.category,
+    workTitle,
+    previousTitle: previous.problemTitle,
+    previousDate,
+    previousDecision,
+    scopeNote,
+    prevCoding: metricText(prevCoding),
+    currCoding: metricText(currCoding),
+    codingDelta,
+    prevComm: metricText(prevComm),
+    currComm: metricText(currComm),
+    commDelta,
+    prevHints: metricText(prevHints),
+    currHints: metricText(currHints),
+    hintsDelta,
+    rubricMismatch,
+    prevRubricVersion: categoryComparison.prevRubricVersion,
+    currRubricVersion: categoryComparison.currRubricVersion,
+    phaseDeltas,
+    priorPhases,
+  };
+}
+
+export function categoryComparisonMarkup(
+  report,
+  categoryComparison,
+  atBoard = heldAtBoard(report),
+) {
+  const view = categoryComparisonView(report, categoryComparison, atBoard);
+  if (!view) return "";
+
+  const stepScores = view.rubricMismatch
+    ? `<p class="muted small">Step score changes omitted: previous attempt used rubric v${escapeHtml(view.prevRubricVersion)}, current uses v${escapeHtml(view.currRubricVersion)}.</p>`
+    : view.phaseDeltas.length
+      ? `<table class="phase-scores category-phase-scores"><thead><tr><th scope="col">Step</th><th scope="col">Previous</th><th scope="col">Current</th><th scope="col">Change</th></tr></thead><tbody>${view.phaseDeltas
+          .map(
+            (row) =>
+              `<tr><th scope="row">${escapeHtml(row.label)}</th><td>${escapeHtml(row.previousScore)}</td><td>${escapeHtml(row.currentScore)}</td><td>${escapeHtml(row.delta)}</td></tr>`,
+          )
+          .join("")}</tbody></table>`
+      : "";
+
+  const renderPlanItems = (items) =>
+    items
+      .map(
+        (item) =>
+          `<p>${escapeHtml(item.weakness)}</p><p class="muted small"><strong>Drill:</strong> ${escapeHtml(item.drill)}</p>`,
+      )
+      .join("");
+  const phaseFeedback = view.priorPhases.length
+    ? `<div class="category-phase-list">${view.priorPhases
+        .map((item) => {
+          const badgeClass = item.resolved ? "good" : "muted";
+          const currentBody = item.currentItems.length
+            ? renderPlanItems(item.currentItems)
+            : `<p class="muted small">No improvement item flagged in this phase.</p>`;
+          return `<div class="category-phase-item"><p class="category-phase-head"><strong>${escapeHtml(item.label)}</strong> <span class="${badgeClass} small">${item.badgeText}</span></p><div class="category-phase-compare"><div><h4>Previous attempt</h4>${renderPlanItems(item.previousItems)}</div><div><h4>This attempt</h4>${currentBody}</div></div></div>`;
+        })
+        .join("")}</div>`
+    : "";
+
+  return `<section class="category-comparison"><h3>Category progress · ${escapeHtml(view.category)}</h3><p class="muted small">Compared with ${escapeHtml(view.previousTitle)}${view.previousDate ? ` · ${escapeHtml(view.previousDate)}` : ""} · ${view.previousDecision} (${view.scopeNote})</p><ul class="category-deltas"><li><strong>${view.workTitle}:</strong> ${escapeHtml(view.prevCoding)} -> ${escapeHtml(view.currCoding)} (${escapeHtml(view.codingDelta)})</li><li><strong>Interviewer communication:</strong> ${escapeHtml(view.prevComm)} -> ${escapeHtml(view.currComm)} (${escapeHtml(view.commDelta)})</li><li><strong>Hints used:</strong> ${escapeHtml(view.prevHints)} -> ${escapeHtml(view.currHints)} (${escapeHtml(view.hintsDelta)})</li></ul>${stepScores}${phaseFeedback}</section>`;
+}
+
+function categoryComparisonMarkdown(
+  report,
+  categoryComparison,
+  atBoard,
+  mdText,
+) {
+  const view = categoryComparisonView(report, categoryComparison, atBoard);
+  if (!view) return [];
+
+  const stepScores = view.rubricMismatch
+    ? [
+        `Step score changes omitted: previous attempt used rubric v${mdText(view.prevRubricVersion)}, current uses v${mdText(view.currRubricVersion)}.`,
+        "",
+      ]
+    : view.phaseDeltas.length
+      ? [
+          "| Step | Previous | Current | Change |",
+          "|---|---|---|---|",
+          ...view.phaseDeltas.map(
+            (row) =>
+              `| ${mdText(row.label)} | ${mdText(row.previousScore)} | ${mdText(row.currentScore)} | ${row.delta} |`,
+          ),
+          "",
+        ]
+      : [];
+
+  const formatPlanItems = (items) =>
+    items
+      .map((item) => `${mdText(item.weakness)} (Drill: ${mdText(item.drill)})`)
+      .join("; ");
+  const phaseFeedback = view.priorPhases.length
+    ? [
+        ...view.priorPhases.flatMap((item) => {
+          const currentBody = item.currentItems.length
+            ? formatPlanItems(item.currentItems)
+            : "No improvement item flagged in this phase.";
+          return [
+            `- **${mdText(item.label)}** (${item.badgeText})`,
+            `  - Previous attempt: ${formatPlanItems(item.previousItems)}`,
+            `  - This attempt: ${currentBody}`,
+          ];
+        }),
+        "",
+      ]
+    : [];
+
+  return [
+    `## Category progress · ${mdText(view.category)}`,
+    "",
+    `Compared with ${mdText(view.previousTitle)}${view.previousDate ? ` · ${mdText(view.previousDate)}` : ""} · ${view.previousDecision} (${view.scopeNote})`,
+    "",
+    `- **${view.workTitle}:** ${mdText(view.prevCoding)} -> ${mdText(view.currCoding)} (${view.codingDelta})`,
+    `- **Interviewer communication:** ${mdText(view.prevComm)} -> ${mdText(view.currComm)} (${view.commDelta})`,
+    `- **Hints used:** ${mdText(view.prevHints)} -> ${mdText(view.currHints)} (${view.hintsDelta})`,
+    "",
+    ...stepScores,
+    ...phaseFeedback,
+  ];
+}
+
 /// Only the verdict and the scores differ between an evaluated session and one
 /// that produced nothing. Forking the whole card duplicated the header, the
 /// evidence section, the code block and the actions row, including the
@@ -292,6 +535,7 @@ export function reportMarkup({
   exampleDrawing,
   saveResult,
   unclearLines = [],
+  categoryComparison,
 }) {
   const atBoard = heldAtBoard(report, board);
   // At a board the coding score is for the drawing, the trace and the cases
@@ -342,6 +586,11 @@ export function reportMarkup({
         .map((line) => `<li>${escapeHtml(line)}</li>`)
         .join("")}</ol></section>`
     : "";
+  const categoryProgress = categoryComparisonMarkup(
+    report,
+    categoryComparison,
+    atBoard,
+  );
   const debrief = report.debrief
     ? `<details class="report-debrief"><summary>What the interviewer held back</summary>
       <p>Spaced review will bring this problem back, so your next attempt tests recall.</p>
@@ -404,6 +653,7 @@ export function reportMarkup({
       ${feedback}
       ${practiceNext}
       ${unclear}
+      ${categoryProgress}
       ${debrief}
       ${rounds}${executionNote}
       ${phaseScores}
@@ -510,6 +760,7 @@ export function reportMarkdown({
   testHistory = [],
   unclearLines = [],
   unclearIds = [],
+  categoryComparison,
 }) {
   const atBoard = heldAtBoard(report, board);
   const workTitle = atBoard ? "Board work" : "Coding";
@@ -595,6 +846,12 @@ export function reportMarkdown({
         "",
       ]
     : [];
+  const categoryProgress = categoryComparisonMarkdown(
+    report,
+    categoryComparison,
+    atBoard,
+    mdText,
+  );
   const debrief = report.debrief
     ? [
         "## What the interviewer held back",
@@ -824,6 +1081,7 @@ export function reportMarkdown({
     ...phaseScores,
     ...practiceNext,
     ...unclear,
+    ...categoryProgress,
     ...debrief,
     ...frameworkTimeline,
     // A session with no evaluation can still be one that ended because the

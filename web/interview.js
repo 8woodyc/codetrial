@@ -12,9 +12,16 @@ import {
   reconnectCodingInterview,
 } from "./example-board.js";
 import { mountInterviewDrawer } from "./interview-drawer.js";
-import { loadJudge, loadProblem } from "./problem-data.js";
+import {
+  loadCategoryMap,
+  loadJudge,
+  loadPageMap,
+  loadProblem,
+} from "./problem-data.js";
 import { downloadMarkdown, reportFilename } from "./download.js";
 import { consumeSharedFocus } from "./problem-picker.js";
+import { normalizeProgressEntries } from "./progress.js";
+import { compareCategoryAttempt } from "./practice-insights.js";
 import {
   deviceErrorKind,
   outputUsable,
@@ -57,6 +64,7 @@ import { createFaceCheck } from "./face-check.js";
 import { attachSelfView } from "./self-view.js";
 import { createMicMeter, startMediaMeter } from "./mic-meter.js";
 import {
+  categoryComparisonMarkup,
   createTranscriptView,
   finalRunnerStatus,
   problemMarkup,
@@ -163,6 +171,7 @@ import {
 } from "./recording-state.js";
 import {
   assignedId as randomId,
+  readDeviceHistory,
   reportIsPersisted,
   saveReportHistory,
 } from "./history.js";
@@ -478,6 +487,10 @@ const state = {
   /// worked examples are hidden: it is a worked case in its own right.
   candidateCaseHint: "",
   report: null,
+  recordedDecision: null,
+  categoryComparison: null,
+  categoryComparisonReady: Promise.resolve(),
+  downloadingReport: false,
   reportReceiving: false,
   /// Set when the interviewer's report reached this page and could not be
   /// rendered. The offline summary that follows is written from what this page
@@ -1488,7 +1501,7 @@ function bindEvents() {
   });
   nodes.report.addEventListener("click", (event) => {
     if (event.target.closest("#done")) leaveRoom();
-    if (event.target.closest("#download-report")) downloadReport();
+    if (event.target.closest("#download-report")) void downloadReport();
   });
   // Below the report listener on purpose: captions.test.js evaluates the source
   // from the first `nodes.editor` input listener to that one on its own, so a
@@ -2590,6 +2603,9 @@ async function receiveReport(room, payload, flushed = Promise.resolve()) {
     }
     reportRecovery.stop();
     restoreEndingOverlay();
+    state.recordedDecision = ["HIRE", "NO_HIRE"].includes(raw?.decision)
+      ? raw.decision
+      : null;
     state.report = sanitizeReport(raw);
     if (state.report.incomplete) {
       setBanner("session", providerUiState("incomplete_report").message);
@@ -3862,6 +3878,7 @@ async function showReport() {
   // present is a different fact from whether the connection survived, and only
   // the first one decides if this browser may score anybody. The rule and the
   // failure it came from live in `sessionReport`.
+  state.recordedDecision = null;
   state.report = {
     ...sessionReport({
       joinedRoom: state.joinedRoom,
@@ -3944,6 +3961,7 @@ function renderReport() {
   audioPlayback.setRoom(null);
   stopEndingClock();
   clearCandidateCases();
+  state.categoryComparison = null;
   nodes.ending.hidden = true;
   nodes.report.hidden = false;
   nodes.report.innerHTML = reportMarkup({
@@ -3956,8 +3974,91 @@ function renderReport() {
     boardPhases: [...board.snapshots],
     saveResult: null,
     unclearLines: unclearLines(),
+    categoryComparison: state.categoryComparison,
   });
   mountBehavioralReview(nodes.report, state.transcript.values());
+  state.categoryComparisonReady = updateCategoryComparison(state.report);
+}
+
+const requestTimeoutMs = 10_000;
+
+async function loadReportHistory(categories) {
+  const session = await sessionPromise;
+  if (session?.signedIn) {
+    try {
+      const response = await fetch("/api/reports", {
+        signal: AbortSignal.timeout(requestTimeoutMs),
+      });
+      if (response.ok) {
+        const body = await response.json();
+        if (Array.isArray(body?.reports)) {
+          return normalizeProgressEntries(body.reports);
+        }
+      }
+    } catch {
+      // Omit the comparison when account history is unavailable.
+    }
+    return [];
+  }
+  let entries = readDeviceHistory();
+  if (
+    categories &&
+    entries.some(
+      (entry) =>
+        typeof entry?.problemId === "string" &&
+        !Object.hasOwn(categories, entry.problemId) &&
+        entry.pageMapChecked !== true,
+    )
+  ) {
+    const pages = await loadPageMap().catch(() => null);
+    if (pages) {
+      entries = entries.map((entry) =>
+        typeof entry?.problemId === "string" &&
+        Object.hasOwn(pages, entry.problemId)
+          ? { ...entry, problemId: pages[entry.problemId].page }
+          : entry,
+      );
+    }
+  }
+  return normalizeProgressEntries(entries);
+}
+
+async function updateCategoryComparison(
+  report = state.report,
+  at = Date.now(),
+) {
+  if (
+    !report ||
+    report.incomplete ||
+    state.recordedDecision === null ||
+    !["HIRE", "NO_HIRE"].includes(report.decision)
+  )
+    return;
+  const categories = await loadCategoryMap().catch(() => null);
+  if (!categories) return;
+  const history = await loadReportHistory(categories);
+  if (state.phase !== "report" || state.report !== report) return;
+  const comparison = compareCategoryAttempt(
+    history,
+    {
+      id: state.reportId,
+      at,
+      problemId: problem.page,
+      problemTitle: problem.title,
+      interviewMode: mode,
+      recordedDecision: state.recordedDecision,
+      report,
+    },
+    categories,
+  );
+  const markup = categoryComparisonMarkup(state.report, comparison, whiteboard);
+  if (!markup) return;
+  state.categoryComparison = comparison;
+  nodes.report.querySelector(".category-comparison")?.remove();
+  const anchor =
+    nodes.report.querySelector(".report-debrief") ??
+    nodes.report.querySelector(".report-actions");
+  anchor?.insertAdjacentHTML("beforebegin", markup);
 }
 
 function renderReportSaveStatus(result) {
@@ -4036,9 +4137,26 @@ async function saveHistory(report = state.report) {
   return result;
 }
 
-function downloadReport() {
-  const at = new Date();
-  downloadMarkdown(buildMarkdown(at), reportFilename(problem.page, at));
+async function downloadReport() {
+  const button = nodes.report.querySelector?.("#download-report");
+  if (state.downloadingReport || button?.disabled) return;
+  state.downloadingReport = true;
+  if (button) button.disabled = true;
+  let timer;
+  try {
+    await Promise.race([
+      state.categoryComparisonReady.catch(() => {}),
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, requestTimeoutMs);
+      }),
+    ]);
+    const at = new Date();
+    downloadMarkdown(buildMarkdown(at), reportFilename(problem.page, at));
+  } finally {
+    clearTimeout(timer);
+    state.downloadingReport = false;
+    if (button) button.disabled = false;
+  }
 }
 
 function buildMarkdown(at) {
@@ -4053,6 +4171,7 @@ function buildMarkdown(at) {
     testHistory: state.testHistory,
     unclearLines: unclearLines(),
     unclearIds: unclearLineIds(),
+    categoryComparison: state.categoryComparison,
   });
 }
 

@@ -4313,8 +4313,12 @@ const recordDownloadNames = (page) =>
       return click.call(this);
     };
   });
-const takeDownloadNames = (page) =>
-  page.evaluate(() => window.downloadNames.splice(0).sort());
+const takeDownloadNames = async (page) => {
+  await page.waitForFunction(
+    () => !document.querySelector("#attempt-download-selected")?.disabled,
+  );
+  return page.evaluate(() => window.downloadNames.splice(0).sort());
+};
 
 for (const storage of ["account", "device"]) {
   lobbyTest(
@@ -4721,7 +4725,9 @@ for (const storage of ["device", "account"]) {
           "## Final code (Python)\n(final code was not saved)\n",
         ],
       ]) {
-        const row = history.locator("li").filter({ hasText: title });
+        const row = history
+          .locator("> li")
+          .filter({ has: page.locator("> p", { hasText: title }) });
         await row.getByRole("button", { name: "Open report" }).click();
         const finalCode = row
           .locator(".report-card details")
@@ -9129,4 +9135,86 @@ lobbyTest(
       }
     }
   },
+);
+
+lobbyTest(
+  "saved reports in the same category render and export category progress",
+  async (page) => {
+    const firstPage = pageOf("climbing-stairs");
+    const secondPage = pageOf("house-robber");
+    const requests = [];
+    page.on("request", (request) =>
+      requests.push(new URL(request.url()).pathname),
+    );
+    reports = [
+      {
+        id: "dp-1",
+        problemId: firstPage,
+        payload: {
+          id: "dp-1",
+          problemId: firstPage,
+          problemTitle: "Step Ways",
+          date: "2026-01-01T10:00:00Z",
+          language: "python",
+          report: {
+            codingScore: 60,
+            communicationScore: 70,
+            decision: "NO_HIRE",
+            hintsUsed: 2,
+            summary: "First 1D DP attempt.",
+          },
+        },
+      },
+      {
+        id: "dp-2",
+        problemId: secondPage,
+        payload: {
+          id: "dp-2",
+          problemId: secondPage,
+          problemTitle: "Vault Sweep",
+          date: "2026-01-02T10:00:00Z",
+          language: "python",
+          report: {
+            codingScore: 84,
+            communicationScore: 80,
+            decision: "HIRE",
+            hintsUsed: 0,
+            summary: "Second 1D DP attempt.",
+          },
+        },
+      },
+    ];
+    await lobby(page);
+    assert.equal(
+      requests.includes("/problem-categories.json"),
+      false,
+      "the lobby must not fetch problem-categories.json before a report is opened or exported",
+    );
+    const rows = page.locator("#attempt-history > li");
+    const newest = rows.nth(0);
+    await newest.getByRole("button", { name: "Open report" }).click();
+    assert.match(
+      await newest.locator(".category-comparison").textContent(),
+      /Category progress · 1D DP[\s\S]*Compared with Step Ways · 2026-01-01 · NO HIRE/,
+    );
+    assert.equal(requests.includes("/problem-categories.json"), true);
+
+    const downloading = page.waitForEvent("download");
+    await newest.getByRole("button", { name: /^Download report/ }).click();
+    const chunks = [];
+    for await (const chunk of await (await downloading).createReadStream())
+      chunks.push(chunk);
+    assert.match(
+      Buffer.concat(chunks).toString("utf8"),
+      /## Category progress · 1D DP[\s\S]*Compared with Step Ways · 2026-01-01 · NO HIRE/,
+    );
+
+    const oldest = rows.nth(1);
+    await oldest.getByRole("button", { name: "Open report" }).click();
+    assert.doesNotMatch(
+      await oldest.locator(".report-card").textContent(),
+      /Category progress/,
+    );
+  },
+  { acceptDownloads: true },
 );
