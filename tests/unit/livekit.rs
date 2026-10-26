@@ -7401,31 +7401,48 @@ fn delivery_uncertainty_reaches_interim_and_phase_judge_windows() {
     );
 }
 
-/// The soak decides whether a conversation survived a handover by matching
-/// these lines in the server log, so the text it matches has to be the text
-/// printed, and a deliberate cold fallback must not read as a lost
-/// conversation. Pinned both ways: each notice is found by its own needle and
-/// by no other, and the failure needle is the start of the degraded text only.
+/// The soak judges a handover from the key=value fields of the `replacement:`
+/// line, so the spellings it parses have to be the ones printed. Each value is
+/// looked for in the judge's source, and the line carries all three keys.
 #[test]
-fn the_replacement_notices_are_the_lines_the_soak_matches() {
-    let soak = include_str!("../../scripts/browser-check.cjs");
+fn the_soak_parses_the_replacement_fields_the_agent_prints() {
+    let judge = include_str!("../../scripts/soak-judge.cjs");
+    for trigger in [Trigger::Watchdog, Trigger::Close, Trigger::GoAway] {
+        assert!(
+            judge.contains(&format!("\"{}\"", trigger.as_str())),
+            "{trigger:?}"
+        );
+    }
+    for handover in [Handover::Resumed, Handover::ColdHandoff, Handover::Degraded] {
+        assert!(
+            judge.contains(&format!("\"{}\"", handover.as_str())),
+            "{handover:?}"
+        );
+    }
+    assert_eq!(
+        replacement_fields(
+            Trigger::GoAway,
+            Handover::ColdHandoff,
+            Fallback::CheckpointBeforeHandoff
+        ),
+        "trigger=goaway handover=cold_handoff fallback=checkpoint_before_handoff"
+    );
+}
+
+/// An operator reads these, so a deliberate cold fallback must not read as a
+/// lost conversation, and no notice may contain another's distinguishing text.
+#[test]
+fn the_replacement_notices_tell_the_three_handovers_apart() {
     let resumed = replacement_notice(Handover::Resumed);
     let cold_handoff = replacement_notice(Handover::ColdHandoff);
     let degraded = replacement_notice(Handover::Degraded);
 
-    assert!(soak.contains(&format!("\"{resumed}\"")));
-    let cold_needle = "Gemini session restart rebuilt locally";
-    assert!(soak.contains(&format!("\"{cold_needle}\"")));
-    let degraded_needle = "Gemini session restart degraded; resumption was not used and the interviewer is rebuilding";
-    assert!(soak.contains(&format!("\"{degraded_needle}\"")));
-
-    assert!(cold_handoff.contains(cold_needle));
-    assert!(degraded.contains(degraded_needle));
-    assert!(
-        !cold_handoff.contains(degraded_needle) && !resumed.contains(degraded_needle),
-        "only a failure to resume may read as a lost conversation"
-    );
-    assert!(!degraded.contains(cold_needle) && !resumed.contains(cold_needle));
+    let cold_marker = "restart rebuilt locally";
+    let degraded_marker = "restart degraded";
+    assert!(cold_handoff.contains(cold_marker));
+    assert!(degraded.contains(degraded_marker));
+    assert!(!cold_handoff.contains(degraded_marker) && !resumed.contains(degraded_marker));
+    assert!(!degraded.contains(cold_marker) && !resumed.contains(cold_marker));
 }
 
 /// The room goes after the text the soak matches, so it names the room without
@@ -7443,26 +7460,36 @@ fn a_replacement_notice_names_its_room_after_the_matched_text() {
 
 /// Only the speech handoff's own checkpoint rule makes a cold start the
 /// designed fallback. Anything else that ends cold, no handle, resumption
-/// suppressed after repeated failures, a handle that was offered and refused,
-/// or no speech handoff at all, is a failure to resume and stays degraded.
+/// suppressed after a young resumed socket, a handle that was offered and
+/// refused, or no speech handoff at all, is a failure to resume and stays
+/// degraded. The reason is named, so the soak can tell a stall's rebuild from a
+/// rotation that lost its handle.
 #[test]
 fn only_the_handoff_checkpoint_rule_makes_a_cold_start_the_designed_fallback() {
+    use Fallback::{CheckpointBeforeHandoff, NoHandle, ResumeRefused, ResumeSuppressed};
     use Handover::{ColdHandoff, Degraded, Resumed};
     // resumed, speech_handoff, allow_resume, had_handle, handle_offered
-    for (case, expected) in [
-        ((true, true, true, true, true), Resumed),
-        ((true, false, true, true, true), Resumed),
-        ((false, true, true, true, false), ColdHandoff),
-        ((false, true, true, false, false), Degraded),
-        ((false, true, false, true, false), Degraded),
-        ((false, true, true, true, true), Degraded),
-        ((false, false, true, true, false), Degraded),
+    for (case, reason, expected) in [
+        ((true, true, true, true, true), Fallback::None, Resumed),
+        ((true, false, true, true, true), Fallback::None, Resumed),
+        (
+            (false, true, true, true, false),
+            CheckpointBeforeHandoff,
+            ColdHandoff,
+        ),
+        ((false, true, true, false, false), NoHandle, Degraded),
+        (
+            (false, true, false, true, false),
+            ResumeSuppressed,
+            Degraded,
+        ),
+        ((false, true, true, true, true), ResumeRefused, Degraded),
+        ((false, false, true, true, false), ResumeRefused, Degraded),
+        ((false, false, false, false, false), NoHandle, Degraded),
     ] {
         let (resumed, handoff, allow, had, offered) = case;
-        assert_eq!(
-            handover_kind(resumed, handoff, allow, had, offered),
-            expected,
-            "{case:?}"
-        );
+        let fallback = fallback_reason(resumed, handoff, allow, had, offered);
+        assert_eq!(fallback, reason, "{case:?}");
+        assert_eq!(handover_kind(fallback), expected, "{case:?}");
     }
 }

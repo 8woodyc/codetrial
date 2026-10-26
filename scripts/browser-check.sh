@@ -18,6 +18,10 @@ BROWSER_CHECK_AGENT=${BROWSER_CHECK_AGENT:-home}
 # leading silence together fall short of that never ends: the candidate seems to
 # talk for the whole run, so the interviewer never takes the floor and the soak
 # reads as a silent handover. End the clip with at least two seconds of silence.
+#
+# A soak exits 77 when Gemini sent no GoAway during the window: it learned
+# nothing about the handover, which is neither a pass nor a failure of it. Any
+# other nonzero status is a failure.
 BROWSER_CHECK_FLOW=${BROWSER_CHECK_FLOW:-voice}
 case $BROWSER_CHECK_FLOW in
     voice | report | barge | avatar | soak) ;;

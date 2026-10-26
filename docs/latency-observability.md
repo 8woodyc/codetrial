@@ -174,7 +174,15 @@ that was refused, and a cold open that followed it. It ends before the
 briefing goes out. It is named apart from the `gap_ms` of the floor lines,
 which measures something else. `resumed` says whether the
 conversation continued from a resumption handle or was rebuilt from the local
-transcript, editor and interview state.
+transcript, editor and interview state. Three more fields say why. `trigger`
+is `goaway` when an advisory was acted on, `close` when the server hung up
+first, and `watchdog` when the reply watchdog gave up on a socket that was not
+answering. `handover` is `resumed`, `cold_handoff` or `degraded`. `fallback`
+is `none` when the conversation resumed, and otherwise `no_handle` (the replaced
+socket had offered none), `resume_suppressed` (the replaced socket was itself
+a resumed one replaced young, so resumption is withheld), `resume_refused` (a
+handle was offered and the resume did not take) or `checkpoint_before_handoff`
+(see below).
 
 `replacement first audio:` is printed once, when the replacement's first reply
 audio is queued, and only for a replacement whose briefing asked for a
@@ -187,17 +195,28 @@ that start, or `none`. A value there means the audio may have answered the
 candidate and not the briefing, and speech buffered during the gap is
 timed from when it was processed, just after setup.
 
-Next to those, one line says how the replacement was brought up. `Gemini
+Next to those, one notice says how the replacement was brought up. `Gemini
 session resumed` means the conversation continued from a resumption handle.
 `Gemini session restart rebuilt locally` means the candidate was speaking and
 no checkpoint post-dated their speech, so the socket was rebuilt from the local
 transcript, editor and interview state on purpose, since resuming from an older
 checkpoint can replay a reply that was cancelled. `Gemini session restart
 degraded` means it was rebuilt without that reason: no handle, a refused
-handle, or resumption suppressed after repeated failures. The browser-check soak
-matches these texts literally, accepting the first two as a handover and failing
-on the third. Each carries ` room=` after the text, so two rooms rotating at
-once stay apart.
+handle, or resumption withheld because the replaced socket was itself a young
+resumed one. Each carries ` room=` after the text, so two rooms rotating at
+once stay apart. These are for the operator; the browser-check soak reads the
+fields of the `replacement:` line, not the notice.
+
+The soak judges the fields by `scripts/soak-judge.cjs`. A `goaway` replacement
+that resumed or took the designed cold handoff is the handover it looks for. A
+rebuild from local state on any other trigger or reason fails it, naming the
+trigger and reason. One rebuild after a reply timeout is allowed and reported
+when the replaced socket had offered no handle or was itself a young resumed
+one, since a provider that does not answer an utterance costs a replacement
+that the rotation under test did not cause; a second one fails, and so does one
+whose handle was offered and refused. A run in which
+Gemini never sends a `GoAway` tested nothing about rotation and exits 77
+instead of passing or failing.
 
 The line is left out when the wait outlived the longest reply timeout. Audio
 that late may have been drawn by something other than the briefing, and the

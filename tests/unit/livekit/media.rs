@@ -168,8 +168,10 @@ async fn a_failed_flush_is_an_error_the_caller_can_see() {
     );
 }
 
-/// Bytes a dead socket refused are still held, so the socket that replaces it
-/// is sent the candidate's words rather than only what came after the gap.
+/// Bytes a socket refused with an error are still held, and a later flush on
+/// another sink sends them. This pins the retention after a reported failure,
+/// not delivery of everything said during a gap, and nothing about a write the
+/// provider may have received before the error.
 #[tokio::test]
 async fn a_refused_flush_keeps_its_bytes_for_the_replacement_socket() {
     let mut media = CandidateMedia::new();
