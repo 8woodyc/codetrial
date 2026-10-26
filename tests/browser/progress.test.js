@@ -98,6 +98,209 @@ test("progress normalizes local and account wrappers without rewriting legacy hi
   );
 });
 
+test("problem filtering uses IDs and keeps every progress summary in sync", () => {
+  const rows = [
+    entry("last", "2026-01-03", 80, { weakness: "Explain complexity" }),
+    entry("other", "2026-01-02", 95, {
+      problemId: "two-sum-ii",
+      problemTitle: "Two Sum",
+      weakness: "Trace an example",
+    }),
+    entry("first", "2026-01-01", 55, { weakness: "Explain complexity" }),
+  ];
+  for (const row of rows) {
+    row.report.topics = [row.id === "other" ? "sorting" : "arrays"];
+    row.report.decision = "HIRE";
+  }
+  const model = buildProgressModel(rows, { problemId: "two-sum" });
+  assert.equal(model.total, 3);
+  assert.deepEqual(
+    model.attempts.map((row) => row.id),
+    ["first", "last"],
+  );
+  assert.deepEqual(
+    model.series.Algorithm[0].points.map((point) => point.score),
+    [55, 80],
+  );
+  assert.deepEqual(model.topics, [
+    { topic: "arrays", attempts: 2, passes: 2, lastAttempt: at(3) },
+  ]);
+  assert.deepEqual(model.weaknesses, [
+    {
+      phase: "Algorithm",
+      framework: "REACTO",
+      count: 2,
+      assessed: 2,
+      tags: ["Explain complexity"],
+    },
+  ]);
+});
+
+test("problem options come from all saved attempts and use the latest saved title", () => {
+  const rows = [
+    entry("old", "2026-01-01", 50, { problemTitle: "Old title" }),
+    entry("new", "2026-01-02", 60, { problemTitle: "Shared title" }),
+    entry("retired", "2026-01-03", 70, {
+      problemId: "retired-problem",
+      problemTitle: "Shared title",
+    }),
+    entry("blank-title", "2026-01-04", 80, {
+      problemId: "untitled-problem",
+      problemTitle: " ",
+    }),
+    entry("missing", "2026-01-05", 90, { problemId: undefined }),
+    entry("blank", "2026-01-06", 90, { problemId: " " }),
+  ];
+  const model = buildProgressModel(rows, { problemId: "two-sum" });
+  assert.deepEqual(model.options.problemId, [
+    { value: "retired-problem", label: "Shared title" },
+    { value: "two-sum", label: "Shared title" },
+    { value: "untitled-problem", label: "untitled-problem" },
+  ]);
+  assert.equal(model.attempts.length, 2);
+  assert.equal(
+    buildProgressModel(rows, { problemId: "all" }).attempts.length,
+    6,
+  );
+  assert.equal(buildProgressModel(rows).attempts.length, 6);
+  const empty = buildProgressModel(rows, { problemId: "unknown" });
+  assert.deepEqual(empty.attempts, []);
+  assert.deepEqual(empty.topics, []);
+  assert.deepEqual(empty.weaknesses, []);
+  assert.deepEqual(empty.series.Algorithm, []);
+});
+
+for (const account of [false, true]) {
+  test(`problem options retain the latest saved title across untitled ${account ? "account" : "device"} attempts`, () => {
+    const older = entry("older", "2026-01-01", 50, { problemTitle: "Two Sum" });
+    const missing = entry("missing", "2026-01-02", 60);
+    delete missing.problemTitle;
+    const options = (rows) =>
+      buildProgressModel(account ? rows.map((payload) => ({ payload })) : rows)
+        .options.problemId;
+    assert.deepEqual(options([missing, older]), [
+      { value: "two-sum", label: "Two Sum" },
+    ]);
+    const untitled = [missing];
+    for (const problemTitle of [" ", null, 42]) {
+      untitled.push(entry("untitled", "2026-01-03", 70, { problemTitle }));
+      assert.deepEqual(options([older, ...untitled]), [
+        { value: "two-sum", label: "Two Sum" },
+      ]);
+    }
+    const renamed = entry("renamed", "2026-01-04", 80, {
+      problemTitle: "Chargeback Pair Match",
+    });
+    assert.deepEqual(options([...untitled, renamed, older]), [
+      { value: "two-sum", label: "Chargeback Pair Match" },
+    ]);
+  });
+
+  test(`problem options distinguish absent titles from saved placeholders in ${account ? "account" : "device"} history`, () => {
+    const missing = entry("missing-title", "2026-01-01", 50, {
+      problemId: "retired-without-title",
+    });
+    delete missing.problemTitle;
+    const rows = [
+      missing,
+      entry("invalid-title", "2026-01-02", 60, {
+        problemId: "retired-invalid-title",
+        problemTitle: 42,
+      }),
+      entry("null-title", "2026-01-03", 70, {
+        problemId: "retired-null-title",
+        problemTitle: null,
+      }),
+      entry("saved-placeholder", "2026-01-04", 80, {
+        problemId: "named-problem",
+        problemTitle: "Past interview",
+      }),
+    ];
+    const history = account ? rows.map((payload) => ({ payload })) : rows;
+    const model = buildProgressModel(history);
+    const labels = new Map(
+      model.options.problemId.map(({ value, label }) => [value, label]),
+    );
+    assert.equal(labels.get("retired-without-title"), "retired-without-title");
+    assert.equal(labels.get("retired-invalid-title"), "retired-invalid-title");
+    assert.equal(labels.get("retired-null-title"), "retired-null-title");
+    assert.equal(labels.get("named-problem"), "Past interview");
+    assert.equal(model.options.problemId.length, 4);
+    assert.equal(model.attempts[0].problemTitle, "Past interview");
+  });
+}
+
+test("problem filtering combines with every existing filter for local and account history", () => {
+  const rows = [
+    entry("match", "2026-01-01", 55),
+    entry("difficulty", "2026-01-02", 60, { difficulty: "Hard" }),
+    entry("language", "2026-01-03", 65, { language: "java" }),
+    entry("duration", "2026-01-04", 70, { durationMin: 60 }),
+    entry("problem", "2026-01-05", 75, { problemId: "other" }),
+  ];
+  for (const account of [false, true]) {
+    const history = account
+      ? rows.map(({ problemId, ...payload }) => ({ problemId, payload }))
+      : rows;
+    const filters = {
+      problemId: "two-sum",
+      difficulty: "Easy",
+      language: "python",
+      durationMin: "45",
+    };
+    assert.deepEqual(
+      buildProgressModel(history, filters).attempts.map((row) => row.id),
+      ["match"],
+    );
+    assert.deepEqual(
+      buildProgressModel(history, {
+        ...filters,
+        problemId: "all",
+      }).attempts.map((row) => row.id),
+      ["match", "problem"],
+    );
+  }
+});
+
+test("problem filtering preserves unassessed gaps and rubric boundaries", () => {
+  const first = entry("first", "2026-01-01", 55);
+  const gap = entry("gap", "2026-01-02", null);
+  gap.report.frameworkAssessment.phases.find(
+    (row) => row.phase === "Coding",
+  ).score = 70;
+  const second = entry("second", "2026-01-04", 70);
+  const newer = entry("newer", "2026-01-05", 80);
+  newer.report.frameworkAssessment.rubricVersion = 2;
+  const model = buildProgressModel(
+    [
+      newer,
+      second,
+      entry("other", "2026-01-03", 99, { problemId: "other" }),
+      gap,
+      first,
+    ],
+    { problemId: "two-sum" },
+  );
+  assert.deepEqual(
+    model.series.Algorithm.map(({ rubricVersion, points }) => ({
+      rubricVersion,
+      scores: points.map((point) => point.score),
+    })),
+    [
+      { rubricVersion: 1, scores: [55] },
+      { rubricVersion: 1, scores: [70] },
+      { rubricVersion: 2, scores: [80] },
+    ],
+  );
+  assert.deepEqual(
+    phaseChartData(model.attempts, "Algorithm", [
+      "Algorithm",
+      "Coding",
+    ]).points.map((point) => point.score),
+    [55, null, 70, 80],
+  );
+});
+
 test("progress filters metadata, orders attempts, ranks tags, and keeps null as a gap", () => {
   const rows = [
     entry("later", "2026-02-01", 80, { weakness: "Explain complexity" }),

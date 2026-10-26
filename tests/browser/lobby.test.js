@@ -5431,6 +5431,195 @@ lobbyTest(
   },
 );
 
+for (const account of [true, false]) {
+  lobbyTest(
+    `the problem filter keeps ${account ? "account" : "device"} history and charts in sync`,
+    async (page) => {
+      session = { signedIn: account, user: { login: "candidate" } };
+      const saved = [55, 85, 70, 90, 80].map((score, index) => {
+        const selected = index % 2 === 0;
+        const problemId = selected ? EASY[0] : "retired-problem";
+        const { payload } = focusedAttempt(problemId, {
+          phase: "Algorithm",
+          assessed: true,
+          weaknesses: [selected ? "Explain complexity" : "Trace an example"],
+        });
+        Object.assign(payload, {
+          id: `attempt-${index}`,
+          date: `2026-01-0${index + 1}T00:00:00Z`,
+          problemTitle: selected ? "Chargeback Pair Match" : "Retired problem",
+          difficulty: "Easy",
+          language: index === 3 ? "java" : "python",
+          durationMin: 45,
+        });
+        payload.report.topics = [selected ? "arrays" : "stacks"];
+        payload.report.frameworkAssessment.phases.find(
+          (row) => row.phase === "Algorithm",
+        ).score = score;
+        return payload;
+      });
+      if (account) {
+        reports = saved.map((payload) => ({ id: payload.id, payload }));
+      } else {
+        await page.addInitScript((entries) => {
+          localStorage.setItem("codetrial_history", JSON.stringify(entries));
+        }, saved);
+      }
+      await lobby(page);
+      const problem = page.getByRole("combobox", {
+        name: "Problem",
+        exact: true,
+      });
+      const rows = page.locator("#attempt-history > li");
+      await reaches(
+        page,
+        () => document.querySelectorAll("#attempt-history > li").length === 5,
+      );
+      assert.deepEqual(await problem.locator("option").allTextContents(), [
+        "All problems",
+        "Chargeback Pair Match",
+        "Retired problem",
+      ]);
+      const recent = await page
+        .locator("#recent-performance-summary")
+        .textContent();
+      const selectedCard = await page
+        .locator(".problem-card.selected")
+        .getAttribute("data-problem");
+      await problem.selectOption(EASY[0]);
+      assert.equal(await problem.inputValue(), EASY[0]);
+
+      await problem.focus();
+      await page.keyboard.press("Tab");
+
+      assert.equal(
+        await page.evaluate(() => document.activeElement.id),
+        "progress-difficulty",
+      );
+      await reaches(
+        page,
+        () => document.querySelectorAll("#attempt-history > li").length === 3,
+      );
+      assert.match(
+        await page.locator("#progress-summary").textContent(),
+        /3 of 5 attempts shown/,
+      );
+      assert.ok(
+        (await rows.allTextContents()).every((text) =>
+          text.includes("Chargeback Pair Match"),
+        ),
+      );
+      await page
+        .locator("#progress-trends")
+        .getByRole("button", { name: "Algorithm", exact: true })
+        .click();
+      assert.equal(
+        await page
+          .locator("#progress-chart-description-reacto-algorithm")
+          .textContent(),
+        "Attempt 1: 55, Rubric v1. Attempt 2: 70, Rubric v1. Attempt 3: 80, Rubric v1.",
+      );
+      assert.match(
+        await page.locator("#progress-topics").textContent(),
+        /arrays: 3 attempts/,
+      );
+      assert.doesNotMatch(
+        await page.locator("#progress-topics").textContent(),
+        /stacks/,
+      );
+      assert.match(
+        await page.locator("#progress-weaknesses").textContent(),
+        /flagged in 3 of 3 assessed attempts/,
+      );
+      assert.doesNotMatch(
+        await page.locator("#progress-weaknesses").textContent(),
+        /Trace an example/,
+      );
+      assert.equal(
+        await page.locator("#recent-performance-summary").textContent(),
+        recent,
+      );
+      assert.equal(
+        await page
+          .locator(".problem-card.selected")
+          .getAttribute("data-problem"),
+        selectedCard,
+      );
+
+      await page.selectOption("#progress-language", "java");
+      await reaches(page, () =>
+        document
+          .querySelector("#progress-summary")
+          .textContent.startsWith("No saved attempts match"),
+      );
+      assert.equal(await rows.count(), 0);
+      assert.equal(await page.locator("#progress-trends > *").count(), 0);
+      assert.equal(await problem.inputValue(), EASY[0]);
+      await problem.selectOption("all");
+      await reaches(
+        page,
+        () => document.querySelectorAll("#attempt-history > li").length === 1,
+      );
+      assert.match(await rows.textContent(), /Retired problem/);
+      assert.equal(
+        await page.locator("#progress-language").inputValue(),
+        "java",
+      );
+      await page.selectOption("#progress-language", "all");
+      await reaches(
+        page,
+        () => document.querySelectorAll("#attempt-history > li").length === 5,
+      );
+      await problem.selectOption(EASY[0]);
+
+      for (const remaining of [2, 1, 0]) {
+        page.once("dialog", (dialog) => dialog.accept());
+        await rows.first().locator("[data-delete-report]").click();
+        await reaches(
+          page,
+          (expected) =>
+            document.querySelectorAll("#attempt-history > li").length ===
+            expected,
+          remaining || 2,
+        );
+        assert.equal(await problem.inputValue(), remaining ? EASY[0] : "all");
+      }
+      assert.deepEqual(await problem.locator("option").allTextContents(), [
+        "All problems",
+        "Retired problem",
+      ]);
+      assert.equal(
+        await page
+          .locator("#progress-chart-description-reacto-algorithm")
+          .textContent(),
+        "Attempt 1: 85, Rubric v1. Attempt 2: 90, Rubric v1.",
+      );
+      if (account)
+        assert.deepEqual(deletedIds, ["attempt-4", "attempt-2", "attempt-0"]);
+      else
+        assert.equal(
+          await page.evaluate(
+            () => JSON.parse(localStorage.getItem("codetrial_history")).length,
+          ),
+          2,
+        );
+      const bounds = await problem.boundingBox();
+      assert.ok(
+        bounds.x >= 0 && bounds.x + bounds.width <= page.viewportSize().width,
+      );
+      if (!account) {
+        const filters = await page.locator(".progress-filters").boundingBox();
+        assert.ok(Math.abs(bounds.width - filters.width) < 1);
+      }
+    },
+    {
+      viewport: account
+        ? { width: 1280, height: 900 }
+        : { width: 390, height: 844 },
+    },
+  );
+}
+
 lobbyTest(
   "a filtered attempt list deletes the report the row shows",
   async (page) => {
@@ -6587,6 +6776,12 @@ lobbyTest(
       await page.locator("#progress-summary").textContent(),
       /1 of 1 attempts shown/,
     );
+    const problem = page.getByRole("combobox", {
+      name: "Problem",
+      exact: true,
+    });
+    await problem.selectOption(EASY[0]);
+    assert.equal(await problem.locator("option").count(), 2);
     await page.check("#practice-focus-share-input");
     failing.add("/api/reports");
     await page.fill("#github-login", "candidate");
@@ -6608,6 +6803,10 @@ lobbyTest(
       await page.locator("#history").textContent(),
       /Could not load saved account progress/,
     );
+    assert.deepEqual(await problem.locator("option").allTextContents(), [
+      "All problems",
+    ]);
+    assert.equal(await problem.inputValue(), "all");
     assert.equal(await page.locator("#attempt-history").textContent(), "");
     assert.equal(await page.locator("#practice-focus").isHidden(), true);
     assert.equal(
