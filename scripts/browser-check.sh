@@ -11,6 +11,17 @@ BROWSER_CHECK_AGENT=${BROWSER_CHECK_AGENT:-home}
 # valid BROWSER_CHECK_AGENT. `soak` is the long-conversation acceptance: it
 # holds one interview past the Live API's connection cap and judges the handover
 # onto a new socket, so it is the one flow whose duration is worth naming.
+#
+# When BROWSER_CHECK_BARGE_AUDIO_FILE is the fake microphone for a flow other
+# than barge, the clip is looped, and Gemini ends an utterance only after
+# GEMINI_SILENCE_MS (1500 ms by default) of quiet. A clip whose trailing and
+# leading silence together fall short of that never ends: the candidate seems to
+# talk for the whole run, so the interviewer never takes the floor and the soak
+# reads as a silent handover. End the clip with at least two seconds of silence.
+#
+# A soak exits 77 when Gemini sent no GoAway during the window: it learned
+# nothing about the handover, which is neither a pass nor a failure of it. Any
+# other nonzero status is a failure.
 BROWSER_CHECK_FLOW=${BROWSER_CHECK_FLOW:-voice}
 case $BROWSER_CHECK_FLOW in
     voice | report | barge | avatar | soak) ;;

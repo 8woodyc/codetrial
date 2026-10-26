@@ -6816,6 +6816,60 @@ fn candidate_accent_preserves_original_instructions_and_voice() {
     }
 }
 
+/// A thinking hold takes the floor, so the wait for the handoff reply ends with
+/// it.
+#[test]
+fn a_hold_ends_the_wait_for_the_handoff_reply() {
+    let start = Instant::now();
+    let (mut audio, _frames) = test_output_audio();
+    let mut activity = RuntimeActivity::new(start);
+    activity.arm_handoff_reply(start);
+    session::cut_off_for_hold(&mut RuntimeState::default(), &mut activity, &mut audio);
+    assert!(!activity.handoff_reply_due(
+        start + Duration::from_secs(60),
+        Duration::from_millis(1_500),
+        false
+    ));
+}
+
+/// The reply request is the only message the handoff path sends that asks for
+/// output: the note requested none, and the platform records what it sent.
+#[tokio::test]
+async fn the_handoff_reply_request_asks_for_a_turn_and_is_recorded() {
+    let (mut gemini, server) = fake_recording_socket(None, 1).await;
+    let mut state = RuntimeState::default();
+    session::request_handoff_reply(&mut gemini, &mut state)
+        .await
+        .unwrap();
+    let messages = server.await.unwrap();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["clientContent"]["turnComplete"], true);
+    assert!(sent_text(&messages[0]).contains("has finished speaking"));
+    assert_eq!(state.evidence_ledger.metrics.turn_prompt_count, 1);
+}
+
+/// A thinking hold throws the briefing's reply away without any turn
+/// completion reaching the settle, so the hold itself disarms the watch;
+/// otherwise the reply its release asks for, minutes later, is timed as the
+/// replacement's.
+#[test]
+fn a_hold_disarms_the_replacement_watch() {
+    let start = Instant::now();
+    let (mut audio, _frames) = test_output_audio();
+    let mut activity = RuntimeActivity::new(start);
+    activity.begin_rotation_watch(
+        true,
+        turn::RotationWatch {
+            started: start,
+            connected: start,
+            resumed: true,
+            candidate_spoke_at: None,
+        },
+    );
+    session::cut_off_for_hold(&mut RuntimeState::default(), &mut activity, &mut audio);
+    assert!(activity.take_rotation_watch().is_none());
+}
+
 #[test]
 fn a_hold_discard_lasts_until_the_old_generation_ends() {
     let start = Instant::now();
@@ -7377,4 +7431,97 @@ fn delivery_uncertainty_reaches_interim_and_phase_judge_windows() {
         state.transcript[1],
         "Interviewer: Use the secret cancelled hint."
     );
+}
+
+/// The soak judges a handover from the key=value fields of the `replacement:`
+/// line, so the spellings it parses have to be the ones printed. Each value is
+/// looked for in the judge's source, and the line carries all three keys.
+#[test]
+fn the_soak_parses_the_replacement_fields_the_agent_prints() {
+    let judge = include_str!("../../scripts/soak-judge.cjs");
+    for trigger in [Trigger::Watchdog, Trigger::Close, Trigger::GoAway] {
+        assert!(
+            judge.contains(&format!("\"{}\"", trigger.as_str())),
+            "{trigger:?}"
+        );
+    }
+    for handover in [Handover::Resumed, Handover::ColdHandoff, Handover::Degraded] {
+        assert!(
+            judge.contains(&format!("\"{}\"", handover.as_str())),
+            "{handover:?}"
+        );
+    }
+    assert_eq!(
+        replacement_fields(
+            Trigger::GoAway,
+            Handover::ColdHandoff,
+            Fallback::CheckpointBeforeHandoff
+        ),
+        "trigger=goaway handover=cold_handoff fallback=checkpoint_before_handoff"
+    );
+}
+
+/// An operator reads these, so a deliberate cold fallback must not read as a
+/// lost conversation, and no notice may contain another's distinguishing text.
+#[test]
+fn the_replacement_notices_tell_the_three_handovers_apart() {
+    let resumed = replacement_notice(Handover::Resumed);
+    let cold_handoff = replacement_notice(Handover::ColdHandoff);
+    let degraded = replacement_notice(Handover::Degraded);
+
+    let cold_marker = "restart rebuilt locally";
+    let degraded_marker = "restart degraded";
+    assert!(cold_handoff.contains(cold_marker));
+    assert!(degraded.contains(degraded_marker));
+    assert!(!cold_handoff.contains(degraded_marker) && !resumed.contains(degraded_marker));
+    assert!(!degraded.contains(cold_marker) && !resumed.contains(cold_marker));
+}
+
+/// The room goes after the text the soak matches, so it names the room without
+/// moving the match.
+#[test]
+fn a_replacement_notice_names_its_room_after_the_matched_text() {
+    for handover in [Handover::Resumed, Handover::ColdHandoff, Handover::Degraded] {
+        let line = replacement_notice_line(handover, "room-a");
+        assert_eq!(
+            line,
+            format!("{} room=room-a", replacement_notice(handover))
+        );
+    }
+}
+
+/// Only the speech handoff's own checkpoint rule makes a cold start the
+/// designed fallback. Anything else that ends cold, no handle, resumption
+/// suppressed after a young resumed socket, a handle that was offered and
+/// refused, or no speech handoff at all, is a failure to resume and stays
+/// degraded. The reason is named, so the soak can tell a stall's rebuild from a
+/// rotation that lost its handle.
+#[test]
+fn only_the_handoff_checkpoint_rule_makes_a_cold_start_the_designed_fallback() {
+    use Fallback::{CheckpointBeforeHandoff, NoHandle, ResumeRefused, ResumeSuppressed};
+    use Handover::{ColdHandoff, Degraded, Resumed};
+    // resumed, speech_handoff, allow_resume, had_handle, handle_offered
+    for (case, reason, expected) in [
+        ((true, true, true, true, true), Fallback::None, Resumed),
+        ((true, false, true, true, true), Fallback::None, Resumed),
+        (
+            (false, true, true, true, false),
+            CheckpointBeforeHandoff,
+            ColdHandoff,
+        ),
+        ((false, true, true, false, false), NoHandle, Degraded),
+        (
+            (false, true, false, true, false),
+            ResumeSuppressed,
+            Degraded,
+        ),
+        ((false, true, true, true, true), ResumeRefused, Degraded),
+        ((false, false, true, true, false), ResumeRefused, Degraded),
+        ((false, false, false, false, false), NoHandle, Degraded),
+    ] {
+        let (resumed, handoff, allow, had, offered) = case;
+        let fallback = fallback_reason(resumed, handoff, allow, had, offered);
+        assert_eq!(fallback, reason, "{case:?}");
+        assert_eq!(handover_kind(fallback), expected, "{case:?}");
+    }
 }

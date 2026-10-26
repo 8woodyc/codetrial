@@ -269,6 +269,22 @@ pub(super) async fn send_listening_handoff(
     Ok(())
 }
 
+/// Asks a speech-handoff socket for the reply it was told to wait on audio for.
+/// The listening note requested none, so when the candidate has since gone
+/// quiet
+/// the socket has nothing to answer and would stay silent until the reply
+/// watchdog replaced it.
+pub(super) async fn request_handoff_reply(
+    gemini: &mut GeminiLiveSession,
+    state: &mut RuntimeState,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let text = "[SYSTEM EVENT] The candidate has finished speaking. Reply to the finalized prefix and to anything they said after it.";
+    state
+        .evidence_ledger
+        .record_model_input(ModelInputKind::Turn, text);
+    gemini.send_context(text, true).await
+}
+
 /// A cut is only detected after its first response. Keep the current request
 /// beside new input so that response does not depend on a later checkpoint.
 #[derive(Clone, Copy)]
@@ -1567,6 +1583,16 @@ async fn on_generated_audio(
             .interviewer_delivery
             .audio(context.output_audio.playout_deadline);
         context.activity.note_reply_audible();
+        if let Some(line) = context.activity.take_rotation_watch().and_then(|watch| {
+            watch.first_audio_line(
+                &log_clock(context.state),
+                enqueued_at,
+                context.activity.live_socket,
+                room.name(),
+            )
+        }) {
+            eprintln!("{line}");
+        }
 
         // Speech is queued, not played: the floor stays busy until the buffered
         // audio actually finishes.
@@ -2722,6 +2748,8 @@ pub(super) fn cut_off_for_hold(
     activity.socket.discarding_output |= hold_leaves_output_in_flight(activity, now);
     activity.socket.stale_turn_pending |= activity.generating && !activity.socket.discarding_output;
     cut_off_turn(state, activity, output_audio);
+    activity.drop_rotation_watch();
+    activity.drop_handoff_reply();
     activity.latency.close(Boundary::Held, now);
 }
 

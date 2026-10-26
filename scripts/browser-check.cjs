@@ -25,6 +25,13 @@ const {
   removeParticipant,
 } = require("./livekit-room-service.cjs");
 const { problemPages, judgeCaseCount } = require("./judge-case-counts.cjs");
+const {
+  completeLines,
+  isRotation,
+  judgeSoak,
+  parseReplacements,
+  roomLogged,
+} = require("./soak-judge.cjs");
 
 const floorLogPath = process.env.BROWSER_CHECK_FLOOR_LOG || null;
 
@@ -429,14 +436,13 @@ const CONNECTION_CAP_SECONDS = 600;
 /// `GoAway`'s notice plus a stalled reply's twenty seconds.
 const RESUME_GRACE_MS = 45_000;
 
-/// What the runtime says as it hands one interview between two sockets, matched
-/// literally because presence cannot tell any of these apart: the interviewer
-/// stays in the room through all of them, including the one that lost the
-/// conversation. Each is printed by src/livekit.rs and each is noted there.
+/// The two runtime lines that are not part of a replacement: the advisory and
+/// its expiry. Matched literally, printed by src/livekit.rs. What a replacement
+/// was is read from the fields of its `replacement:` line by
+/// scripts/soak-judge.cjs, since presence cannot tell a resumption from a
+/// rebuild: the interviewer stays in the room through both.
 const HANDOVER_SIGNALS = {
   goAway: "Gemini requested a transport restart in",
-  resumed: "Gemini session resumed; the interview continues where it left off",
-  degraded: "Gemini session restart degraded",
   expired: "goaway expired:",
 };
 
@@ -609,37 +615,84 @@ function readServerLog() {
   return redact(fs.readFileSync(process.env.SERVER_LOG, "utf8"));
 }
 
-/// How many turns the transcript panel is showing. The page accumulates these
-/// client-side, so it keeps counting across a handover the browser never sees.
-function transcriptTurns(page) {
-  return page
-    .locator("p")
-    .filter({ hasText: /^(Jim|You)$/ })
-    .count();
+/// Prints each timing line a socket replacement of this room logged, once, as
+/// the soak sees it. A pass otherwise leaves nothing to read them from, and the
+/// agent's output is a rolling window, so they are taken on the way past. The
+/// first audio line is not required: it is left out on purpose when the
+/// briefing asked for no reply, or its wait is no longer the replacement's.
+function reportRotationLines(log, room, reported) {
+  for (const line of completeLines(log)) {
+    if (!/^replacement( first audio)?: /.test(line) || reported.has(line))
+      continue;
+    if (!line.endsWith(` room=${room}`)) continue;
+    reported.add(line);
+    console.log(line);
+  }
 }
+
+/// How many turns the interviewer has taken, as the transcript panel shows
+/// them. The page accumulates these client-side, so it keeps counting across a
+/// handover the browser never sees. Only Jim's: the looped microphone clip adds
+/// candidate turns however silent the interviewer is, so counting them would
+/// let a handover that left Jim mute pass.
+function jimTurns(page) {
+  return page.locator(".transcript-row.alex").count();
+}
+
+/// Raised when a soak learned nothing about the handover, so a runner can tell
+/// it from a failure: the process exits with SOAK_INCONCLUSIVE_EXIT, which
+/// scripts/browser-check.sh passes on unchanged.
+const SOAK_INCONCLUSIVE_EXIT = 77;
+class InconclusiveSoak extends Error {}
 
 /// Holds a real room open without making the browser a second interviewer, and
 /// judges the handover onto a new socket. Only ever reached past the connection
 /// cap, because a shorter soak is refused before the interview starts rather
 /// than run to no purpose.
 ///
-/// Four things have to be true, and presence is only the first. The interviewer
-/// stays in the room whether the transport was replaced early, replaced late,
-/// or replaced having forgotten the conversation, so the rest is read from what
-/// the runtime says and from whether the interview went on afterwards.
+/// Presence is only the first thing that has to be true: the interviewer stays
+/// in the room whether the transport was replaced early, replaced late, or
+/// rebuilt without the conversation. What the runtime logs about each
+/// replacement (soak-judge.cjs) says which it was, and the interviewer taking
+/// new turns afterwards says whether it went on.
 async function soakInterview(page, roomName, agentIdentity, agentOutput) {
   const deadline = Date.now() + soakSeconds * 1000;
 
   // Latched on the way past rather than read at the end: agentOutput is a
   // rolling window, so whatever the agent logs over the rest of the soak can
-  // evict the line this is looking for.
-  const seen = {
-    goAway: false,
-    resumed: false,
-    degraded: false,
-    expired: false,
+  // evict the lines this is looking for.
+  const seen = { goAway: false, expired: false };
+  const replacements = [];
+  const reported = new Set();
+  let jimAtHandover = null;
+
+  // One read per call rather than one per signal: this is the whole server
+  // log, and the loop runs for minutes.
+  const refresh = () => {
+    const log = `${agentOutput.join("")}\n${readServerLog()}`;
+    for (const [name, needle] of Object.entries(HANDOVER_SIGNALS)) {
+      seen[name] ||= roomLogged(log, needle, roomName);
+    }
+    reportRotationLines(log, roomName, reported);
+    const known = new Set(replacements.map((r) => r.at));
+    for (const r of parseReplacements(log, roomName)) {
+      if (!known.has(r.at)) replacements.push(r);
+    }
   };
-  let turnsAtHandover = null;
+  // The count the handover is measured against is the last one taken before
+  // the rotation was read. Taken when the line is first read, it would count
+  // the reply to the briefing, which lands within seconds, as before the
+  // handover and ask for a second one. The cost is that a turn Jim took in the
+  // tick before the rotation counts as growth, a bound of one tick on how
+  // loose the check is.
+  let jimPrev = await jimTurns(page);
+  const sampleJim = async () => {
+    if (jimAtHandover !== null) return;
+    if (replacements.some(isRotation)) jimAtHandover = jimPrev;
+    else jimPrev = await jimTurns(page);
+  };
+  const failure = (reasons) =>
+    new Error(`${reasons.join("; ")} during ${soakSeconds}s soak`);
 
   while (Date.now() < deadline) {
     await sleep(Math.min(15_000, deadline - Date.now()));
@@ -647,67 +700,56 @@ async function soakInterview(page, roomName, agentIdentity, agentOutput) {
     if (!agentParticipantIdentities(participants).includes(agentIdentity)) {
       throw new Error(`interviewer left during ${soakSeconds}s soak`);
     }
+    refresh();
 
-    // One read per tick rather than one per signal: this is the whole server
-    // log, and the loop runs for minutes.
-    const log = agentOutput.join("") + readServerLog();
-    for (const [name, needle] of Object.entries(HANDOVER_SIGNALS)) {
-      seen[name] ||= log.includes(needle);
-    }
-
-    // The failure this whole path exists to avoid, and it is worth reporting
-    // where it happened rather than as a missing resume at the end.
-    if (seen.degraded) {
-      throw new Error(
-        `Gemini restarted cold during ${soakSeconds}s soak; the conversation was lost`,
-      );
-    }
-
-    // A held GoAway the server outran: the resume then starts from an older
-    // checkpoint than the handover would have used, which is how a test run or
-    // an answer goes missing across the swap (issue #66).
-    if (seen.expired) {
-      throw new Error(
-        `the server closed the socket before a held GoAway was spent during ${soakSeconds}s soak`,
-      );
-    }
-
-    // Sampled when the resume is first seen, so the growth asserted below is
-    // growth on the new socket. Sampling at the GoAway counted what the old
-    // socket said while the advisory was held, which proves nothing about
-    // the replacement.
-    if (seen.resumed && turnsAtHandover === null) {
-      turnsAtHandover = await transcriptTurns(page);
-    }
+    // Reported where it happened rather than as a missing handover at the end.
+    // Not yet final: a GoAway is seen up to its notice before the replacement
+    // it asks for, and a soak that has seen no GoAway has not failed.
+    const so_far = judgeSoak({ replacements, ...seen, final: false });
+    if (so_far.verdict === "fail") throw failure(so_far.reasons);
+    await sampleJim();
   }
 
-  // Gemini warns before it hangs up, and acting on that warning is the point:
-  // reaching a new socket by way of the close still resumes, so a soak that
-  // only asked "did it resume" would pass with the proactive path dead.
-  if (!seen.goAway) {
-    throw new Error(
-      `no transport restart was requested during ${soakSeconds}s soak`,
+  // A GoAway read on the last tick has not had its notice to be acted on, so
+  // its replacement gets a bounded window of its own before its absence counts.
+  const handoverBy = Date.now() + RESUME_GRACE_MS;
+  refresh();
+  while (
+    seen.goAway &&
+    !replacements.some(isRotation) &&
+    judgeSoak({ replacements, ...seen, final: false }).verdict !== "fail" &&
+    Date.now() < handoverBy
+  ) {
+    await sleep(3000);
+    refresh();
+  }
+  await sampleJim();
+  const final = judgeSoak({ replacements, ...seen, final: true });
+  if (final.verdict === "inconclusive") {
+    throw new InconclusiveSoak(final.reasons.join("; "));
+  }
+  if (final.verdict === "fail") throw failure(final.reasons);
+  if (final.watchdogRebuilds > 0) {
+    console.log(
+      `soak: ${final.watchdogRebuilds} rebuild from local state after a reply timeout, recovered`,
     );
   }
-  if (!seen.resumed) {
-    throw new Error(`Gemini did not resume during ${soakSeconds}s soak`);
-  }
 
-  // A resumption that nothing was said across is not one anybody would notice
+  // A handover that nothing was said across is not one anybody would notice
   // working. Jim nudges an idle candidate, so turns keep arriving without the
   // browser speaking.
-  // A resume first seen on the last tick has had no time to say anything, so
+  // A handover first seen on the last tick has had no time to say anything, so
   // the replacement gets a bounded window of its own before its silence
   // counts against it.
-  let turnsAtEnd = await transcriptTurns(page);
+  let jimAtEnd = await jimTurns(page);
   const graceUntil = Date.now() + RESUME_GRACE_MS;
-  while (turnsAtEnd <= turnsAtHandover && Date.now() < graceUntil) {
+  while (jimAtEnd <= jimAtHandover && Date.now() < graceUntil) {
     await sleep(3000);
-    turnsAtEnd = await transcriptTurns(page);
+    jimAtEnd = await jimTurns(page);
   }
-  if (turnsAtEnd <= turnsAtHandover) {
+  if (jimAtEnd <= jimAtHandover) {
     throw new Error(
-      `the interview said nothing after the handover: ${turnsAtHandover} turns before, ${turnsAtEnd} after`,
+      `the interviewer said nothing after the handover: ${jimAtHandover} turns before, ${jimAtEnd} after`,
     );
   }
 }
@@ -2733,7 +2775,7 @@ PatternLexicon.prototype.search = function(word) {
   // resort, so it is also the one that prints a `fetch` failure verbatim, and
   // a LiveKit URL or a bearer token in a CI log outlives the run that wrote it.
   console.error(redact(error?.stack ?? error));
-  process.exit(1);
+  process.exit(error instanceof InconclusiveSoak ? SOAK_INCONCLUSIVE_EXIT : 1);
 });
 
 function startCompilerExplorerMock() {

@@ -212,6 +212,70 @@ pub(super) struct SocketWork {
     pub(super) tool_response_outstanding: bool,
 }
 
+/// A socket replacement whose first reply audio has not been heard yet.
+///
+/// `started` is when the replacement began handling the close, so one caused
+/// by a reply timeout counts from after that wait, not from the silence.
+/// `connected` is when the new socket finished setup. `candidate_spoke_at` is
+/// when the first candidate speech since was processed, which for speech
+/// buffered during the gap is just after the watch is armed, not when it was
+/// said; audio that follows it may answer the candidate rather than the
+/// briefing.
+pub(super) struct RotationWatch {
+    pub(super) started: Instant,
+    pub(super) connected: Instant,
+    pub(super) resumed: bool,
+    pub(super) candidate_spoke_at: Option<Instant>,
+}
+
+/// How long past the room's silence window a speech-handoff socket is given to
+/// start a turn on the audio that follows, before it is asked for the reply.
+/// The handoff note adds to the conversation without requesting output, so a
+/// candidate who has already finished speaking sends the new socket nothing it
+/// would answer, and it stays silent until the reply watchdog replaces it. The
+/// margin covers the model's own start of a turn after the window closes.
+pub(super) const HANDOFF_REPLY_MARGIN: Duration = Duration::from_millis(2_500);
+
+/// The longest wait still reported as the replacement's. Something other than
+/// the briefing, a chat message or a test result among them, can draw the
+/// first audio after a replacement, and nothing else disarms the watch for it;
+/// without a bound that audio would be logged as the replacement's latency
+/// however late it came. The reply watchdog's longest inactivity limit is the
+/// bound, so a wait longer than that, which tool rounds that keep refreshing
+/// the watchdog could produce, goes unlogged rather than misreported.
+const ROTATION_WATCH_MAX: Duration =
+    Duration::from_secs(crate::config::MAX_GEMINI_REPLY_TIMEOUT_S as u64);
+
+impl RotationWatch {
+    /// The operator line for the first audio a replacement produced, heard at
+    /// `heard_at`, or `None` when the wait outlived [`ROTATION_WATCH_MAX`] and
+    /// so lies outside what is reported. `candidate_spoke_ms` is `none` when
+    /// nobody spoke first.
+    pub(super) fn first_audio_line(
+        &self,
+        clock: &str,
+        heard_at: Instant,
+        socket: u64,
+        room: &str,
+    ) -> Option<String> {
+        if heard_at.saturating_duration_since(self.connected) > ROTATION_WATCH_MAX {
+            return None;
+        }
+        let ms = |from: Instant, to: Instant| {
+            crate::agent::saturating_ms(to.saturating_duration_since(from))
+        };
+        let spoke = self
+            .candidate_spoke_at
+            .map_or("none".to_string(), |at| ms(self.started, at).to_string());
+        Some(format!(
+            "replacement first audio: at={clock} resumed={} since_start_ms={} since_connected_ms={} candidate_spoke_ms={spoke} socket={socket} room={room}",
+            self.resumed,
+            ms(self.started, heard_at),
+            ms(self.connected, heard_at),
+        ))
+    }
+}
+
 /// The prompt-token counts a context cut is judged from. Only a heuristic:
 /// the provider reports no compression event, so a cut is read off a drop in
 /// the prompt count between completed turns, with tool turns, whose totals sum
@@ -486,6 +550,12 @@ pub(super) struct RuntimeActivity {
     pub(super) live_usage: crate::gemini::TokenUsage,
     /// Which of this interview's sockets the next usage line belongs to.
     pub(super) live_socket: u64,
+    /// The latest socket replacement whose first reply audio has not been
+    /// heard yet; see [`RotationWatch`].
+    rotation: Option<RotationWatch>,
+    /// When a speech-handoff socket was told to keep listening, until it speaks
+    /// or is asked for the reply; see [`HANDOFF_REPLY_MARGIN`].
+    handoff_listening_since: Option<Instant>,
     /// The epoch second this room loop started. On every usage line, so two
     /// runs that shared a room name are not summed as one.
     pub(super) live_session_id: u64,
@@ -664,12 +734,21 @@ impl RuntimeActivity {
             self.latency.forget_context();
         }
         self.transcribed_on_socket = false;
+
+        // A watch left by the previous replacement belongs to a socket that is
+        // gone; the new one arms its own only when its briefing asks for a
+        // reply.
+        self.drop_rotation_watch();
+        self.drop_handoff_reply();
         self.clear_candidate_voice_activity();
     }
 
     pub(super) fn note_candidate_voice_activity(&mut self, active: bool, now: Instant) {
         if active || self.candidate_voice_active {
             self.reset_completed_coding_idle();
+        }
+        if active {
+            self.note_rotation_spoken_over(now);
         }
         self.candidate_voice_active = active;
         self.candidate_voice_ended_at = (!active).then_some(now);
@@ -747,6 +826,7 @@ impl RuntimeActivity {
     /// otherwise be counted silent and nudged. Only until then, because room
     /// noise above `VOICE_RMS` would hold every nudge back for good.
     pub(super) fn note_candidate_voice(&mut self, now: Instant) {
+        self.note_rotation_spoken_over(now);
         self.voiced_pcm_at = Some(now);
         self.incoming_speech_owed |= self.candidate_voice_active && self.reply_unfinished();
         self.candidate_voice_at = Some(now);
@@ -810,6 +890,8 @@ impl RuntimeActivity {
             behavioral_nudged: false,
             live_usage: crate::gemini::TokenUsage::default(),
             live_socket: 1,
+            rotation: None,
+            handoff_listening_since: None,
             live_session_id: 0,
             latency: super::latency::ReplyLatency::default(),
             live_exit: super::LiveOutcome::Ok,
@@ -864,6 +946,10 @@ impl RuntimeActivity {
     /// unanswered: the prompt itself, or `None` for one with nothing of its own
     /// to name.
     pub(super) fn mark_prompted(&mut self, now: Instant, text: Option<&str>, allows_silence: bool) {
+        // Any prompt after the replacement's briefing, a nudge or the farewell
+        // among them, is what the next audio answers.
+        self.drop_rotation_watch();
+        self.drop_handoff_reply();
         self.latency.prompt(now);
         self.mark_prompted_state(now, text, allows_silence, false);
     }
@@ -955,6 +1041,7 @@ impl RuntimeActivity {
     /// begun, and releasing it mid-turn would let a pending close start the
     /// wrap-up before the continuation finishes.
     pub(super) fn note_output(&mut self, now: Instant) {
+        self.drop_handoff_reply();
         self.generating = true;
         self.socket.thinking_reply_fallback = None;
         self.last_output_at = Some(now);
@@ -1291,10 +1378,107 @@ impl RuntimeActivity {
         self.mark_speaking();
     }
 
+    /// Starts timing a replacement socket's first reply, when its briefing
+    /// asked for one. A socket briefed without a reply has nothing to be heard
+    /// for until the candidate speaks, and that wait is theirs.
+    pub(super) fn begin_rotation_watch(&mut self, asked_for_reply: bool, watch: RotationWatch) {
+        self.rotation = asked_for_reply.then_some(watch);
+    }
+
+    /// The candidate is audibly speaking while a replacement's reply is still
+    /// awaited, from the provider's speech start or from voiced microphone
+    /// frames, whichever comes first, since the provider may send no start at
+    /// all. Kept on the watch, not used to drop it: the slow replacements are
+    /// the ones spoken over, and dropping them would leave exactly those out of
+    /// the log. The line says so, so its time is not read as the briefing's.
+    /// Speech the model never sees as an interruption, or a nudge, a chat
+    /// message or a test result that draws the audio instead, is not marked.
+    fn note_rotation_spoken_over(&mut self, now: Instant) {
+        if let Some(watch) = self.rotation.as_mut() {
+            watch.candidate_spoke_at.get_or_insert(now);
+        }
+    }
+
+    /// A speech handoff has told the new socket to keep listening, so its reply
+    /// waits on audio that may never come.
+    pub(super) fn arm_handoff_reply(&mut self, now: Instant) {
+        self.handoff_listening_since = Some(now);
+    }
+
+    /// The socket spoke, was prompted, was replaced or was held, so the wait
+    /// for
+    /// the audio it was told to listen for is over.
+    pub(super) fn drop_handoff_reply(&mut self) {
+        self.handoff_listening_since = None;
+    }
+
+    /// Whether a speech-handoff socket has heard nothing to answer for longer
+    /// than the silence window plus [`HANDOFF_REPLY_MARGIN`], counted from the
+    /// latest of when it was told to listen, the candidate's last voiced audio
+    /// and the provider's end-of-speech edge. Never while the provider or the
+    /// microphone says the candidate is speaking, or the interviewer's own
+    /// audio is playing.
+    pub(super) fn handoff_reply_due(
+        &self,
+        now: Instant,
+        silence: Duration,
+        audio_playing: bool,
+    ) -> bool {
+        let Some(armed) = self.handoff_listening_since else {
+            return false;
+        };
+
+        // The provider's own speech edge counts as well as the microphone: it
+        // may still be inside its silence window when the microphone has been
+        // quiet for a while, and a reply requested then cuts the candidate off.
+        if audio_playing || self.candidate_voice_active || self.incoming_speech_active(now) {
+            return false;
+        }
+        let quiet_since = [
+            Some(armed),
+            self.candidate_voice_ended_at,
+            self.voiced_pcm_at,
+        ]
+        .into_iter()
+        .flatten()
+        .max()
+        .unwrap_or(armed);
+        now.saturating_duration_since(quiet_since) >= silence + HANDOFF_REPLY_MARGIN
+    }
+
+    /// The reply the handoff socket owes is now being asked for directly. Its
+    /// first-output deadline restarts, held to the recovery minimum like a
+    /// replacement's briefing, and whatever platform request it still owed is
+    /// kept.
+    pub(super) fn renew_handoff_prompt(&mut self, now: Instant) {
+        let text = self.prompt_text.clone();
+        self.mark_recovery_prompted(now, text.as_deref());
+    }
+
+    /// Gives up the wait for a replacement's first audio, because whatever
+    /// comes next answers something else: a hold took the floor, another
+    /// prompt went out, the turn ended, or a newer socket took over.
+    pub(super) fn drop_rotation_watch(&mut self) {
+        self.rotation = None;
+    }
+
+    /// The watch of the replacement whose first reply audio was just queued,
+    /// once.
+    pub(super) fn take_rotation_watch(&mut self) -> Option<RotationWatch> {
+        self.rotation.take()
+    }
+
     /// Gemini finished the turn, so whatever a tool response was owed has
     /// arrived; the floor waits on the queue, or is the candidate's already
     /// when nothing is left to play.
     pub(super) fn settle_completed_turn(&mut self, audio_playing: bool) {
+        // A turn that ended without audio, a briefing the model chose to leave
+        // unanswered, stops the wait. Left armed, the next audio minutes later
+        // would be timed as its latency. A completion that merely precedes the
+        // real answer, or that an interruption caused, also stops it, so such a
+        // replacement goes unlogged rather than misreported.
+        self.drop_rotation_watch();
+        self.drop_handoff_reply();
         self.socket.tool_response_outstanding = false;
         self.floor = Floor::AwaitingPlayout;
         if !audio_playing {

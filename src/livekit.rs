@@ -667,9 +667,14 @@ async fn replace_gemini_session(
     context: &mut GeminiEventContext<'_>,
     interview: InterviewContext<'_>,
     loops: &mut RoomLoop,
-    reply_timeout: bool,
+    trigger: Trigger,
     speech_handoff: Option<session::SpeechHandoff>,
 ) -> Result<ControlFlow<()>, Box<dyn std::error::Error + Send + Sync>> {
+    // The gap the candidate sat through starts when the close is handled, not
+    // when the new socket is asked for: the budget checks and the resume
+    // attempt that fails before a cold open are part of it.
+    let rotation_started = Instant::now();
+
     // Neither a resume nor a cold open on the same key can get past a project
     // that cannot pay, so the budget is not spent learning that twice more.
     session::finish_turn_timing(
@@ -692,7 +697,11 @@ async fn replace_gemini_session(
     // Reading the handle also records closing-key failures for cold opens and
     // reporting, even when the handle or the restart budget cannot be used.
     let handle = context.gemini.recovery_handle(interview.keys);
-    let age = replaced_socket_age(context.gemini.age(), reply_timeout, context.activity);
+    let age = replaced_socket_age(
+        context.gemini.age(),
+        trigger == Trigger::Watchdog,
+        context.activity,
+    );
     if !take_restart_attempt(&mut loops.restarts, age) {
         context.activity.live_exit = LiveOutcome::GeminiUnreachable;
         eprintln!(
@@ -706,6 +715,7 @@ async fn replace_gemini_session(
     // on `None`, which would leave suppression stale across a replacement that
     // had no handle to offer.
     let allow_resume = loops.resume_recovery.allow_resume(context.gemini.age());
+    let had_handle = handle.is_some();
     let handle = handle.filter(|_| {
         allow_resume
             && speech_handoff.as_ref().is_none_or(|handoff| {
@@ -715,6 +725,7 @@ async fn replace_gemini_session(
                     .is_some_and(|age| age <= handoff.checkpoint_after.elapsed())
             })
     });
+    let handle_offered = handle.is_some();
 
     // The cold-rebuild line tells the two causes of a 1011 run apart: a resumed
     // conversation that keeps failing stops failing once it is rebuilt, while
@@ -723,9 +734,9 @@ async fn replace_gemini_session(
         eprintln!(
             "{}; rebuilding from local state room={}",
             if loops.resume_recovery.resumed {
-                "Gemini resumed session failed before recovery"
+                "Gemini resumed socket was replaced young, so resumption is suppressed"
             } else {
-                "Gemini cold rebuild also failed before recovery"
+                "Gemini cold socket was replaced young"
             },
             interview.boot.room_name
         );
@@ -773,6 +784,14 @@ async fn replace_gemini_session(
     };
 
     let resumed = resumed_session.is_some();
+    let fallback = fallback_reason(
+        resumed,
+        speech_handoff.is_some(),
+        allow_resume,
+        had_handle,
+        handle_offered,
+    );
+    let handover = handover_kind(fallback);
     let session = match resumed_session {
         Some(session) => Ok(session),
         None => open_cold_session(interview, &mut loops.restarts, Some(room)).await,
@@ -812,6 +831,13 @@ async fn replace_gemini_session(
     context.activity.reset_context_observations(resumed);
     context.activity.sync_cut_plausible(context.state);
 
+    // `rotation_gap_ms` ends at setup, before the briefing goes out. The
+    // first-audio line follows only when the briefing asked for a reply, and
+    // counts the briefing and any board resend too, so the difference between
+    // them is what those and the model's reply cost. Named apart from the
+    // `gap_ms` the floor lines carry, which measures something else.
+    let connected = Instant::now();
+    let gap = connected.saturating_duration_since(rotation_started);
     let (owed, debt, owed_prompt) =
         hand_over(context.state, context.activity, context.output_audio);
 
@@ -819,8 +845,10 @@ async fn replace_gemini_session(
     // how old the checkpoint it resumed from is, what was owed, and what the
     // local record holds that the checkpoint may predate.
     eprintln!(
-        "replacement: at={} resumed={resumed} checkpoint_age={checkpoint_age} owed={owed} ({debt}) owed_chars={} editor_chars={} {} room={}",
+        "replacement: at={} resumed={resumed} {} rotation_gap_ms={} checkpoint_age={checkpoint_age} owed={owed} ({debt}) owed_chars={} editor_chars={} {} room={}",
         log_clock(context.state),
+        replacement_fields(trigger, handover, fallback),
+        crate::agent::saturating_ms(gap),
         owed_prompt
             .as_deref()
             .map_or(0, |prompt| prompt.chars().count()),
@@ -831,11 +859,9 @@ async fn replace_gemini_session(
     close_turns(room, context);
     set_agent_state(room, context.agent_state, AGENT_STATE_LISTENING);
     publish_control(room, &interviewer_state(false), "the reconnected notice").await;
+    eprintln!("{}", replacement_notice_line(handover, room.name()));
     let spoke = if let Some(handoff) = speech_handoff {
-        if resumed {
-            eprintln!("Gemini session resumed; the interview continues where it left off");
-        }
-        match session::send_listening_handoff(
+        let listening = match session::send_listening_handoff(
             context.gemini,
             context.state,
             &handoff,
@@ -844,14 +870,18 @@ async fn replace_gemini_session(
         )
         .await
         {
-            Ok(()) => context.activity.commit_silent_editor(context.state),
+            Ok(()) => {
+                context.activity.commit_silent_editor(context.state);
+                true
+            }
             Err(error) => {
                 context.state.needs_cold_brief = true;
                 eprintln!(
                     "speech-handoff briefing failed ({error}); waiting for the close to be reported"
                 );
+                false
             }
-        }
+        };
 
         // Still owed after the handoff: the next output clears it, and a socket
         // that drops first names it in its own briefing. A reply owed to
@@ -860,6 +890,13 @@ async fn replace_gemini_session(
             context
                 .activity
                 .owe_prompt(Instant::now(), owed_prompt.clone());
+
+            // Only a socket that was told to keep listening, and owes a reply
+            // to what it was listening to: one that never got the note has no
+            // prefix to answer, and one owing nothing has no reply to ask for.
+            if listening {
+                context.activity.arm_handoff_reply(Instant::now());
+            }
         }
         false
     } else {
@@ -886,6 +923,15 @@ async fn replace_gemini_session(
     {
         eprintln!("cold-restart board failed ({error}); waiting for the close to be reported");
     }
+    context.activity.begin_rotation_watch(
+        spoke,
+        turn::RotationWatch {
+            started: rotation_started,
+            connected,
+            resumed,
+            candidate_spoke_at: None,
+        },
+    );
     if spoke {
         eprintln!(
             "{}",
@@ -999,13 +1045,154 @@ impl Replacement {
     }
 }
 
+/// What made the socket be replaced.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Trigger {
+    /// The reply watchdog gave up on a socket that was not answering.
+    Watchdog,
+    /// The server hung up before an advisory was acted on.
+    Close,
+    /// A `GoAway` advisory was acted on, held or not.
+    GoAway,
+}
+
+impl Trigger {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Watchdog => "watchdog",
+            Self::Close => "close",
+            Self::GoAway => "goaway",
+        }
+    }
+}
+
+/// Why a replacement did not resume, or `None` when it did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Fallback {
+    None,
+    /// The replaced socket had offered no handle.
+    NoHandle,
+    /// A handle existed, but the replaced socket had been resumed and was
+    /// itself replaced young, so resumption is withheld.
+    ResumeSuppressed,
+    /// The candidate was speaking and no checkpoint post-dated the
+    /// cancellation, so the handle was not offered on purpose.
+    CheckpointBeforeHandoff,
+    /// The handle was offered and the resume did not take.
+    ResumeRefused,
+}
+
+impl Fallback {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::NoHandle => "no_handle",
+            Self::ResumeSuppressed => "resume_suppressed",
+            Self::CheckpointBeforeHandoff => "checkpoint_before_handoff",
+            Self::ResumeRefused => "resume_refused",
+        }
+    }
+}
+
+/// How a replacement socket was brought up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Handover {
+    /// The conversation continued from a resumption handle.
+    Resumed,
+    /// Rebuilt from local state because the candidate was speaking and no
+    /// checkpoint post-dated the cancellation. Resuming from an older one can
+    /// replay the reply that was cancelled, so this is the designed fallback.
+    ColdHandoff,
+    /// Rebuilt from local state without that reason: no handle, a refused
+    /// handle, or resumption suppressed after a young resumed socket.
+    Degraded,
+}
+
+impl Handover {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Resumed => "resumed",
+            Self::ColdHandoff => "cold_handoff",
+            Self::Degraded => "degraded",
+        }
+    }
+}
+
+/// Why a replacement did not resume. The checkpoint rule is the cause only when
+/// a handle existed, resumption was allowed, there was a speech handoff, and
+/// that rule alone kept the handle from being offered; a handle that was
+/// offered and then refused, or never existed, is a failure to resume.
+fn fallback_reason(
+    resumed: bool,
+    speech_handoff: bool,
+    allow_resume: bool,
+    had_handle: bool,
+    handle_offered: bool,
+) -> Fallback {
+    if resumed {
+        Fallback::None
+    } else if !had_handle {
+        Fallback::NoHandle
+    } else if !allow_resume {
+        Fallback::ResumeSuppressed
+    } else if speech_handoff && !handle_offered {
+        Fallback::CheckpointBeforeHandoff
+    } else {
+        Fallback::ResumeRefused
+    }
+}
+
+fn handover_kind(fallback: Fallback) -> Handover {
+    match fallback {
+        Fallback::None => Handover::Resumed,
+        Fallback::CheckpointBeforeHandoff => Handover::ColdHandoff,
+        _ => Handover::Degraded,
+    }
+}
+
+/// The fields of the `replacement:` line the soak reads to judge a handover, in
+/// the spelling it parses. Kept as `key=value` tokens so a new field never
+/// moves the match.
+fn replacement_fields(trigger: Trigger, handover: Handover, fallback: Fallback) -> String {
+    format!(
+        "trigger={} handover={} fallback={}",
+        trigger.as_str(),
+        handover.as_str(),
+        fallback.as_str()
+    )
+}
+
+/// The line that says how a replacement socket was brought up, printed once per
+/// replacement with the room appended.
+///
+/// For the operator. The soak judges a handover from the structured fields of
+/// the `replacement:` line, see [`replacement_fields`], not from this text.
+fn replacement_notice(handover: Handover) -> &'static str {
+    match handover {
+        Handover::Resumed => "Gemini session resumed; the interview continues where it left off",
+        Handover::ColdHandoff => {
+            "Gemini session restart rebuilt locally; the candidate was speaking and no checkpoint post-dated it, so the interviewer is rebuilding from local transcript, editor and interview state"
+        }
+        Handover::Degraded => {
+            "Gemini session restart degraded; resumption was not used and the interviewer is rebuilding from local transcript, editor and interview state"
+        }
+    }
+}
+
+/// [`replacement_notice`] with the room appended after the matched text, so the
+/// soak's literal match still finds it and two rooms rotating together stay
+/// apart in the log.
+fn replacement_notice_line(handover: Handover, room: &str) -> String {
+    format!("{} room={room}", replacement_notice(handover))
+}
+
 /// Tells a replacement socket what it cannot know on its own, and reports
 /// whether the briefing asked for a reply.
 ///
 /// A resumed checkpoint is the last turn boundary the server marked resumable,
 /// so it may predate the latest test run or spoken answer; a cold one knows
 /// nothing. Both get the local record. Kept apart from `replace_gemini_session`
-/// so a test drives the same branch production does, log line included.
+/// so a test drives the same branch production does.
 async fn brief_replacement(
     gemini: &mut GeminiLiveSession,
     state: &mut RuntimeState,
@@ -1013,18 +1200,6 @@ async fn brief_replacement(
     replacement: Replacement,
     owed_prompt: Option<&str>,
 ) -> bool {
-    if matches!(replacement, Replacement::Resumed { .. }) {
-        // Matched literally by the soak in scripts/browser-check.cjs, which has
-        // no other way to tell a resumption from a cold replacement: both leave
-        // the interviewer in the room. Rewording this line without moving that
-        // one turns the soak's only positive signal into a timeout.
-        eprintln!("Gemini session resumed; the interview continues where it left off");
-    } else {
-        eprintln!(
-            "Gemini session restart degraded; resumption was not used and the interviewer is rebuilding from local transcript, editor and interview state"
-        );
-    }
-
     // Not `?`, for the reason the watch loop already gives about writes to
     // Gemini: a socket that came up and died again reports the close through
     // `next_event`, where this arm is waiting to restart it. Propagating here
@@ -1890,6 +2065,30 @@ async fn on_watch_tick(
         .await?;
         return Ok(ControlFlow::Break(()));
     }
+    if !context.state.interviewer_silenced()
+        && !context.state.end_requested
+        && context.activity.handoff_reply_due(
+            tick_at,
+            Duration::from_millis(u64::from(interview.boot.silence_ms)),
+            context.output_audio.is_playing(),
+        )
+    {
+        context.activity.drop_handoff_reply();
+        match session::request_handoff_reply(context.gemini, context.state).await {
+            Ok(()) => {
+                context.activity.renew_handoff_prompt(tick_at);
+                eprintln!(
+                    "handoff reply requested: the candidate went quiet after the handoff at={} room={}",
+                    log_clock(context.state),
+                    interview.boot.room_name
+                );
+            }
+            Err(error) => eprintln!(
+                "handoff reply request failed ({error}); waiting for the reply timeout room={}",
+                interview.boot.room_name
+            ),
+        }
+    }
     if reply_watch(
         context.state,
         context.activity,
@@ -1908,7 +2107,8 @@ async fn on_watch_tick(
             log_clock(context.state),
             interview.boot.room_name
         );
-        return replace_gemini_session(room, context, interview, loops, true, None).await;
+        return replace_gemini_session(room, context, interview, loops, Trigger::Watchdog, None)
+            .await;
     }
     if loops
         .deferred_restart
@@ -2291,7 +2491,7 @@ async fn on_gemini_event(
             );
         }
         loops.deferred_restart.cancel();
-        if replace_gemini_session(room, context, interview, loops, false, None)
+        if replace_gemini_session(room, context, interview, loops, Trigger::Close, None)
             .await?
             .is_break()
         {
@@ -2338,7 +2538,7 @@ async fn on_gemini_event(
             );
             return Ok(ControlFlow::Continue(()));
         }
-        if replace_gemini_session(room, context, interview, loops, false, None)
+        if replace_gemini_session(room, context, interview, loops, Trigger::GoAway, None)
             .await?
             .is_break()
         {
@@ -2455,7 +2655,8 @@ async fn spend_deferred_restart(
                 None
             }
         };
-        return replace_gemini_session(room, context, interview, loops, false, handoff).await;
+        return replace_gemini_session(room, context, interview, loops, Trigger::GoAway, handoff)
+            .await;
     }
     if !loops
         .deferred_restart
@@ -2475,7 +2676,7 @@ async fn spend_deferred_restart(
         log_clock(context.state),
         interview.boot.room_name
     );
-    replace_gemini_session(room, context, interview, loops, false, None).await
+    replace_gemini_session(room, context, interview, loops, Trigger::GoAway, None).await
 }
 
 /// Wake for a queued playout deadline even when it has already elapsed.

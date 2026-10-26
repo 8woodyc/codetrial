@@ -168,6 +168,29 @@ async fn a_failed_flush_is_an_error_the_caller_can_see() {
     );
 }
 
+/// Bytes a socket refused with an error are still held, and a later flush on
+/// another sink sends them. This pins the retention after a reported failure,
+/// not delivery of everything said during a gap, and nothing about a write the
+/// provider may have received before the error.
+#[tokio::test]
+async fn a_refused_flush_keeps_its_bytes_for_the_replacement_socket() {
+    let mut media = CandidateMedia::new();
+    let mut dead = RecordingSink {
+        fail: true,
+        ..RecordingSink::default()
+    };
+    media.audio_bytes.extend_from_slice(&[1, 2, 3, 4]);
+    assert!(pump_audio(&mut media, &mut dead, None).await.is_err());
+    assert_eq!(media.audio_bytes, [1, 2, 3, 4]);
+
+    let mut replacement = RecordingSink::default();
+    flush_audio(&mut replacement, &mut media.audio_bytes)
+        .await
+        .unwrap();
+    assert_eq!(replacement.sent, [vec![1, 2, 3, 4]]);
+    assert!(media.audio_bytes.is_empty());
+}
+
 /// An ended audio track is let go of even when the final flush fails.
 ///
 /// The flush writes to Gemini, which is exactly what is broken when a
