@@ -59,10 +59,7 @@ pub fn create_interview(
         return Ok(Some(pending));
     }
     accounts.transaction(|connection| {
-        // The re-read is the authority; the one above only skips the lock. A
-        // binary without the writer lock can still win the pending-row index;
-        // `DO NOTHING` plus the final read turns that into a reuse, while any
-        // other constraint violation still surfaces as an error.
+        // The re-read is the authority; the one above only skips the lock.
         if let Some(pending) = pending_interview(connection, account_id, consent_version)? {
             return Ok(Some(pending));
         }
@@ -74,20 +71,11 @@ pub fn create_interview(
         if total >= MAX_INTERVIEWS_PER_USER {
             return Ok(None);
         }
-        let inserted = connection.execute(
+        connection.execute(
             "INSERT INTO interviews (id, account_id, consent_version, consent_at)
-             VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(account_id, consent_version)
-                 WHERE room_name IS NULL AND consent_withdrawn_at IS NULL DO NOTHING",
+             VALUES (?1, ?2, ?3, ?4)",
             (id, account_id, consent_version, now),
         )?;
-        if inserted == 0 {
-            // Unreachable under BEGIN IMMEDIATE; Ok(None) would read as "quota
-            // full".
-            return pending_interview(connection, account_id, consent_version)?
-                .map(Some)
-                .ok_or(rusqlite::Error::QueryReturnedNoRows);
-        }
         Ok(Some(Interview {
             id: id.to_string(),
             account_id,

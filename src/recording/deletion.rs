@@ -241,15 +241,13 @@ fn tombstone(
         // disclosure promises deletion, and a replay is the interview without
         // the video: what was said, what was typed, what the tests said.
         // Keeping it after the file is gone keeps the interview.
-        if changed > 0 {
-            transaction.execute(
-                "
+        transaction.execute(
+            "
         DELETE FROM replay_events
         WHERE interview_id = (SELECT interview_id FROM recordings WHERE id = ?1)
         ",
-                [recording_id],
-            )?;
-        }
+            [recording_id],
+        )?;
         Ok(changed > 0)
     })
 }
