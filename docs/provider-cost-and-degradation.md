@@ -265,11 +265,19 @@ without one.
 ## What bounds concurrency
 
 The server admits at most `CODETRIAL_MAX_CONCURRENT_INTERVIEWS` live local
-agents, 16 by default. A reload of an already-live room reuses its slot;
-completion and panic release it. A report recovery window keeps its slot and
-LiveKit connection until expiry or 30 seconds after candidate departure, at most
-five minutes plus a 125-second regeneration and a 30-second rejoin. Provider outages can therefore fill the slots
-with completed interviews awaiting recovery; admission still refuses excess
+agents, 16 by default. A signed-in Practice request for a pinned development
+room reuses its slot while that interviewer is still assessing. A guest
+holding that room refuses the request with 503. If the project that owns
+the pin cannot take a connection, the request falls back to the pool and
+gets a fresh room. Strict always
+uses fresh room names. Practice does too without a development pin, which
+production ignores, so a reload can overlap the previous attempt's cleanup.
+Guests never reuse a live room and have a separate limit of two
+within the global cap. Task completion and panic release slots. A report
+recovery window keeps its slot and LiveKit connection until expiry or 30 seconds
+after candidate departure, at most five minutes plus a 125-second regeneration
+and a 30-second rejoin. Provider outages can therefore fill the slots with
+completed interviews awaiting recovery; admission still refuses excess
 starts rather than exceeding this bound. A fixed local room refuses a new
 start while its existing agent is finalizing or awaiting report recovery, as
 `dispatch_refused ... reason=finalizing` rather than `at_capacity`; it cannot

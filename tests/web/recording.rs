@@ -484,6 +484,78 @@ async fn a_malformed_body_is_a_bad_request_even_on_a_recording_server() {
     remove_database(path).await;
 }
 
+// Two overlapping requests share one consent: one is admitted, the other
+// refused. The join does not force the two to interleave, so a refusal at the
+// consent lookup passes too; the claim itself is atomic in the store.
+#[tokio::test]
+async fn concurrent_token_requests_spend_one_recording_consent_once() {
+    for pinned in [false, true] {
+        for selection in ["practice", "strict"] {
+            let (mut config, cookie, path) = signed_in_web_config("consent-race");
+            config.recording = Some(recording_config());
+            config.production = !pinned;
+            config.fixed_room_name = pinned.then(|| "interview-local".to_string());
+            rusqlite::Connection::open(&path)
+                .unwrap()
+                .execute(
+                    "UPDATE users SET email = 'one@example.test', email_verified = 1 WHERE id = 1",
+                    [],
+                )
+                .unwrap();
+            let dispatcher = std::sync::Arc::new(RecordingDispatcher::default());
+            let (base, server) =
+                spawn_web_server_with_dispatcher(config, std::sync::Arc::clone(&dispatcher)).await;
+            let client = http_client();
+            let interview = start_interview(&client, &base, &cookie).await;
+            let mut body = json!({
+                "interviewId": interview,
+                "selectionMode": selection,
+            });
+            if selection == "practice" {
+                body["problemId"] = json!("chargeback-pair-match");
+            }
+            let request = || {
+                client
+                    .post(format!("{base}/api/token"))
+                    .header("cookie", &cookie)
+                    .json(&body)
+                    .send()
+            };
+            let (first, second) = tokio::join!(request(), request());
+            let (first, second) = (first.unwrap(), second.unwrap());
+            let mut statuses = [first.status().as_u16(), second.status().as_u16()];
+            statuses.sort();
+            assert_eq!(
+                statuses,
+                [200, 403],
+                "pinned={pinned} selection={selection}"
+            );
+            let refused = if first.status() == 403 { first } else { second };
+            assert_eq!(
+                refused.json::<Value>().await.unwrap()["code"],
+                "recording_requires_consent"
+            );
+            let rooms = dispatcher.rooms();
+            assert_eq!(rooms.len(), 1, "one consent permits one dispatch call");
+            let claimed: String = rusqlite::Connection::open(&path)
+                .unwrap()
+                .query_row(
+                    "SELECT room_name FROM interviews WHERE id = ?1",
+                    [&interview],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(claimed, rooms[0]);
+            eprintln!(
+                "token consent probe pinned={pinned} selection={selection} \
+                 requests=2 statuses=200,403 dispatch_calls=1 consent_claims=1"
+            );
+            server.shutdown().await;
+            remove_database(path).await;
+        }
+    }
+}
+
 /// A request that fails after the consent check must not spend the consent.
 ///
 /// The claim used to run before the token was signed and before an interviewer

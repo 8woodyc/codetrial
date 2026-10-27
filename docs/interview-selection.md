@@ -145,7 +145,12 @@ semantics do not change, so no interview contract bundle or component version
 is bumped. The receipt's format tag versions only selection metadata.
 
 Regression coverage lives in `tests/unit/web/selection.rs`,
-`tests/web/token.rs` and `tests/browser/strict-selection.test.js`. The
+`tests/unit/dispatch_http.rs`, `tests/web/token.rs`, `tests/web/recording.rs`,
+`tests/browser/strict-selection.test.js` and
+`tests/browser/token-requests.test.js`. The
 credential-free browser tests use the real preflight and page reload with a
-fake media grant and room transport; provider reconnect and recording still
-need the existing credentialed integration checks for end-to-end assurance.
+fake media grant and room transport. Recording-enabled request counts and
+consent ordering use synthetic session, consent and recording API responses;
+they do not validate OAuth, Egress or recording delivery. Provider reconnect
+and recording still need the existing credentialed integration checks for
+end-to-end assurance.
