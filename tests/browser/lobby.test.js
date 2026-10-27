@@ -4244,6 +4244,7 @@ for (const storage of ["account", "device"]) {
       }
       await lobby(page);
       const history = page.locator("#attempt-history");
+      assert.equal(await history.locator("[data-copy-code]").count(), 0);
       assert.equal(
         await history.getByRole("button", { name: /^Download report/ }).count(),
         cases.length,
@@ -4733,6 +4734,30 @@ for (const storage of ["device", "account"]) {
           .locator(".report-card details")
           .filter({ hasText: "Your final code" });
         assert.equal(await finalCode.locator("pre").textContent(), shown);
+
+        const copy = row.getByRole("button", {
+          name: "Copy code",
+          exact: true,
+        });
+        if (title === "Kept code") {
+          await page.evaluate(() => {
+            Object.defineProperty(navigator.clipboard, "writeText", {
+              configurable: true,
+              value: async (text) => {
+                window.copiedCode = text;
+              },
+            });
+          });
+          await copy.click();
+          await page.waitForFunction(
+            () =>
+              document.querySelector("[data-copy-code-status]")?.textContent ===
+              "Copied!",
+          );
+          assert.equal(await page.evaluate(() => window.copiedCode), code);
+        } else {
+          assert.equal(await copy.count(), 0);
+        }
 
         const downloading = page.waitForEvent("download");
         await row.getByRole("button", { name: /^Download report/ }).click();

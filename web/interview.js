@@ -76,6 +76,7 @@ import {
   problemMarkup,
   reportMarkdown,
   reportMarkup,
+  mountFinalCodeCopy,
   reportSaveStatus,
   resultsMarkup,
   runnerStatusMarkup,
@@ -4253,6 +4254,7 @@ function renderReport() {
     unclearLines: unclearLines(),
     categoryComparison: state.categoryComparison,
   });
+  mountFinalCodeCopy(nodes.report, currentCode());
   mountBehavioralReview(nodes.report, state.transcript.values());
   state.categoryComparisonReady = updateCategoryComparison(state.report);
 }

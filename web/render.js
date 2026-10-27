@@ -16,6 +16,8 @@ import {
   languageLabel,
 } from "./lib.js";
 
+export const FINAL_CODE_NOT_SAVED = "(final code was not saved)";
+
 /// The six coding steps as a whiteboard candidate was shown them, in REACTO
 /// order, so index `i` here is index `i` of `FRAMEWORKS.coding.steps`.
 const BOARD_STEPS = frameworkChecklist("coding", [], "whiteboard").steps;
@@ -671,7 +673,45 @@ export function reportMarkup({
 
 /// The candidate's code, at the foot of an editor interview's card.
 function finalCodeMarkup(language, code) {
-  return `<details><summary>Your final code (${escapeHtml(languageLabel(language) || "not recorded")})</summary><pre>${escapeHtml(code.trimEnd() || "(editor was empty)")}</pre></details>`;
+  const available =
+    typeof code === "string" &&
+    code.trim() !== "" &&
+    code !== FINAL_CODE_NOT_SAVED;
+  return `<section class="final-code"><details><summary>Your final code (${escapeHtml(languageLabel(language) || "not recorded")})</summary><pre>${escapeHtml(code?.trimEnd() || "(editor was empty)")}</pre></details>${available ? '<button type="button" class="secondary" data-copy-code>Copy code</button><span class="muted small" role="status" data-copy-code-status></span>' : ""}</section>`;
+}
+
+/// Keep the original submission in the handler: the rendered preview trims
+/// trailing whitespace and HTML parsing normalizes line endings.
+export function mountFinalCodeCopy(
+  root,
+  code,
+  clipboard = globalThis.navigator?.clipboard,
+) {
+  const button = root.querySelector("[data-copy-code]");
+  if (!button) return;
+  const status = root.querySelector("[data-copy-code-status]");
+  let pending = false;
+  let reset;
+  button.addEventListener("click", async () => {
+    if (pending) return;
+    pending = true;
+    clearTimeout(reset);
+    button.setAttribute("aria-disabled", "true");
+    status.textContent = "Copying...";
+    try {
+      await clipboard.writeText(code);
+      status.textContent = "Copied!";
+      reset = setTimeout(() => {
+        status.textContent = "";
+      }, 2000);
+    } catch {
+      status.textContent =
+        "Could not copy code. Select the code and copy it manually.";
+    } finally {
+      pending = false;
+      button.removeAttribute("aria-disabled");
+    }
+  });
 }
 
 /// A whiteboard interview's work, step by step: the board when each step was
@@ -958,7 +998,7 @@ export function reportMarkdown({
   // the candidate's own download button would do nothing.
   const body =
     code == null
-      ? "(final code was not saved)"
+      ? FINAL_CODE_NOT_SAVED
       : code.trimEnd() || "(editor was empty)";
   const fencedCodeLines = (body, language) => {
     const longestRun = (body.match(/`+/g) || []).reduce(
