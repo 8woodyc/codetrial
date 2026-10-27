@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections import Counter
 from pathlib import Path
 
 SPEC = importlib.util.spec_from_file_location(
@@ -386,21 +387,35 @@ printf 'python:%s\\n' "$*" >> "$CALLS"
                 "#!/bin/sh\nfor arg do\n"
                 'case "$arg" in *.test.js) printf "%s\\n" "$arg" >&2 ;; esac\ndone\n',
             )
-            slices = []
-            for shard in ("1/2", "2/2"):
+            # Read the deployed matrix so an omitted, duplicated or invalid
+            # slice cannot leave CI green with part of the suite untested.
+            shards = re.findall(r"^            shard: (.+)$", gates_job(), re.M)
+            count = len(shards)
+            self.assertEqual(
+                sorted(shards), sorted(f"{i}/{count}" for i in range(1, count + 1))
+            )
+            self.assertGreater(count, 1)
+            suites = sorted((ROOT / "tests/browser").glob("*.test.js"))
+            expected = Counter(
+                suite for suite in suites if suite.name != "face-detector.test.js"
+            )
+            self.assertTrue(expected)
+            ran = Counter()
+            for shard in shards:
                 result = self.run_browser_tests(
                     ROOT, "static", path=directory, env={"BROWSER_SHARD": shard}
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
-                slices.append({Path(line) for line in result.stderr.splitlines()})
-            self.assertTrue(slices[0] and slices[1])
-            self.assertFalse(slices[0] & slices[1])
+                selected = [Path(line) for line in result.stderr.splitlines()]
+                self.assertTrue(selected, shard)
+                ran.update(selected)
+            # A Counter, not a set: a suite run twice must not look like once.
+            self.assertEqual(ran, expected)
             full = self.run_browser_tests(ROOT, "static", path=directory)
             self.assertEqual(
-                slices[0] | slices[1],
-                {Path(line) for line in full.stderr.splitlines()},
+                Counter(Path(line) for line in full.stderr.splitlines()), expected
             )
-            for bad in ("3/2", "0/2", "x"):
+            for bad in (f"{count + 1}/{count}", f"0/{count}", "x"):
                 refused = self.run_browser_tests(
                     ROOT, "static", path=directory, env={"BROWSER_SHARD": bad}
                 )
@@ -702,7 +717,18 @@ printf 'python:%s\\n' "$*" >> "$CALLS"
         gates, matrix = gates_job(), lanes()
         self.assertEqual(condition(gates, "Install system packages"), "matrix.packages")
         self.assertEqual(condition(gates, "Install Rust"), "matrix.lane != 'browser'")
-        self.assertTrue({"mold", "sqlite3"} <= set(matrix["rust"]["packages"].split()))
+        self.assertTrue(
+            {
+                "mold",
+                "sqlite3",
+                "libglib2.0-dev",
+                "libwebkit2gtk-4.1-dev",
+                "libxdo-dev",
+                "libssl-dev",
+                "librsvg2-dev",
+            }
+            <= set(matrix["rust"]["packages"].split())
+        )
         self.assertEqual(
             set(matrix["portable"]["packages"].split()), {"shellcheck", "shfmt"}
         )

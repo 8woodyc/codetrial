@@ -14,8 +14,9 @@ make check                # every gate, plus a live Gemini credential check
 ```
 
 CI runs one `gates (<lane>)` job per lane in parallel: `gates (rust)`,
-`gates (portable)` and, in two slices, `gates (browser 1/2)` and
-`gates (browser 2/2)` (`BROWSER_SHARD=1/2 ./scripts/test.sh browser` runs one
+`gates (portable)` and, in three slices, `gates (browser 1/3)`,
+`gates (browser 2/3)` and `gates (browser 3/3)`
+(`BROWSER_SHARD=1/3 ./scripts/test.sh browser` runs one
 locally). The `check` job only collects their
 results, the independent `audit` job and the mutation jobs', so its log does
 not say what failed: open the failing lane, `audit`, `plan-mutants` job or

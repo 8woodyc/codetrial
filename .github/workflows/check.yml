@@ -124,19 +124,24 @@ jobs:
         include:
           - lane: rust
             timeout: 45
-            packages: libglib2.0-dev mold sqlite3
+            # One apt transaction for both crates; all desktop dependencies
+            # remain required even when a change only touches the server.
+            packages: libglib2.0-dev mold sqlite3 libwebkit2gtk-4.1-dev libxdo-dev libssl-dev librsvg2-dev
           - lane: portable
             timeout: 20
             packages: shellcheck shfmt
-          # Two slices of the browser suites. They were the longest job by
-          # three minutes and are independent files. BROWSER_SHARD splits them
-          # by size (see scripts/test.sh); the lane's other gates are cheap and
-          # run in both.
+          # Browser suites are the critical path: with two slices the slower
+          # one spent 374s in the gates. Three runners keep the per-runner
+          # concurrency bounded while spreading independent files.
+          # BROWSER_SHARD partitions by size (see scripts/test.sh).
           - lane: browser
-            shard: 1/2
+            shard: 1/3
             timeout: 20
           - lane: browser
-            shard: 2/2
+            shard: 2/3
+            timeout: 20
+          - lane: browser
+            shard: 3/3
             timeout: 20
     # Pinned rather than `ubuntu-latest`: that label moves to a new image on
     # GitHub's schedule, which turns an unrelated morning into a debugging
@@ -245,16 +250,6 @@ jobs:
           prefix="desktop-${CARGO_PREFIX#cargo-}"
           echo "prefix=$prefix" >>"$GITHUB_OUTPUT"
           echo "key=$prefix$INPUTS" >>"$GITHUB_OUTPUT"
-
-      # What desktop/ links against. Installed on every run of this lane, not
-      # only when a pull request touches desktop/: the `desktop` gate skips
-      # without them, and under CI a gate that skips fails the run, so an
-      # unrelated pull request would fail here.
-      - name: Install the desktop app's build dependencies
-        if: matrix.lane == 'rust'
-        uses: ./.github/actions/apt-install
-        with:
-          packages: libwebkit2gtk-4.1-dev libxdo-dev libssl-dev librsvg2-dev
 
       # The desktop crate's build, in an entry of its own. The cargo cache is
       # also what every mutation shard restores, and a path added to it would
