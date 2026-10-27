@@ -202,6 +202,40 @@ export function memoryStorage() {
   };
 }
 
+/// A LiveKit room that connects to nothing and records what the page
+/// publishes. Shared by browser flows that must prove an editor action does or
+/// does not send a code_update packet; one fake keeps those publication tests
+/// on the same room contract.
+export const FAKE_LIVEKIT = `
+window.LivekitClient = {
+  RoomEvent: new Proxy({}, { get: (_, name) => String(name) }),
+  Track: { Source: { Microphone: "microphone", Camera: "camera" } },
+  Room: class {
+    constructor() {
+      this.remoteParticipants = new Map();
+      this.name = "fake-room";
+      this.localParticipant = {
+        identity: "candidate",
+        publishTrack: async () => {},
+        publishData: async (bytes, options) => {
+          (window.__published ||= []).push({
+            topic: options.topic,
+            payload: JSON.parse(new TextDecoder().decode(bytes)),
+          });
+        },
+        streamBytes: async () => ({ write: async () => {}, close: async () => {} }),
+      };
+    }
+    on(name, handler) {
+      (window.__handlers ||= {})[name] = handler;
+      return this;
+    }
+    registerTextStreamHandler() {}
+    async connect() {}
+    async disconnect() {}
+  },
+};`;
+
 // Speech as the fake microphone, not Chromium's built-in beep: under a local
 // sound server the beep is too short for the microphone check that enables
 // Join, so a test passes on a runner without one and fails on a desktop.

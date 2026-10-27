@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 
 import {
   DEFAULT_RUNTIME_CONFIG,
+  FAKE_LIVEKIT,
   FAKE_SPEECH_CAPTURE,
   launchChromium,
   startStaticServer,
@@ -60,40 +61,6 @@ function watch(page) {
   });
   return { errors, dialogs };
 }
-
-/// A LiveKit room that connects to nothing and records what the page
-/// publishes. The page reads `window.LivekitClient`, so this stands in for the
-/// vendored SDK, which is blocked below; `state.room` is then set and `publish`
-/// no longer returns early, which is what lets a test see the code_update.
-const FAKE_LIVEKIT = `
-window.LivekitClient = {
-  RoomEvent: new Proxy({}, { get: (_, name) => String(name) }),
-  Track: { Source: { Microphone: "microphone", Camera: "camera" } },
-  Room: class {
-    constructor() {
-      this.remoteParticipants = new Map();
-      this.name = "fake-room";
-      this.localParticipant = {
-        identity: "candidate",
-        publishTrack: async () => {},
-        publishData: async (bytes, options) => {
-          (window.__published ||= []).push({
-            topic: options.topic,
-            payload: JSON.parse(new TextDecoder().decode(bytes)),
-          });
-        },
-        streamBytes: async () => ({ write: async () => {}, close: async () => {} }),
-      };
-    }
-    on(name, handler) {
-      (window.__handlers ||= {})[name] = handler;
-      return this;
-    }
-    registerTextStreamHandler() {}
-    async connect() {}
-    async disconnect() {}
-  },
-};`;
 
 /// Restore works even when the browser does not offer an editing command.
 const WITHOUT_EDITING_COMMAND = `document.queryCommandSupported = () => false;`;
