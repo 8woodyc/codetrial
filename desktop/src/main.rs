@@ -15,7 +15,7 @@ mod server;
 use std::collections::HashSet;
 use std::io::Write as _;
 use std::path::Path;
-use std::sync::{LazyLock, Mutex, OnceLock, mpsc};
+use std::sync::{LazyLock, Mutex, mpsc};
 use std::time::Duration;
 
 use tauri::webview::{DownloadEvent, NewWindowResponse, PermissionKind, PermissionResponse};
@@ -35,6 +35,9 @@ const SERVER_ADDR: &str = "127.0.0.1:3101";
 static SERVER_URL: LazyLock<Url> = LazyLock::new(|| {
     Url::parse(&format!("http://{SERVER_ADDR}/")).expect("the server address is a URL")
 });
+
+static START_PAGE: LazyLock<Url> =
+    LazyLock::new(|| navigation::start_page(cfg!(any(windows, target_os = "android"))));
 
 /// How long the server gets to exit after its stdin closes before it is
 /// killed.
@@ -88,7 +91,6 @@ struct Shell {
     server: Mutex<Option<server::Server>>,
     phase: Mutex<Phase>,
     close: Mutex<Close>,
-    start_page: OnceLock<Url>,
 }
 
 impl Shell {
@@ -116,7 +118,6 @@ fn main() {
                 webrtc: None,
             }),
             close: Mutex::new(Close::Open),
-            start_page: OnceLock::new(),
         })
         .setup(|app| {
             open_window(app.handle())?;
@@ -179,13 +180,8 @@ fn open_window(app: &AppHandle) -> tauri::Result<()> {
         .inner_size(1280.0, 860.0)
         .min_inner_size(960.0, 640.0)
         .on_navigation(move |url| {
-            // Before the start page is recorded the window is loading it, and
-            // that first navigation is the only one there is.
             let shell = navigation_app.state::<Shell>();
-            let Some(start_page) = shell.start_page.get() else {
-                return true;
-            };
-            match navigation::judge(url, &SERVER_URL, start_page) {
+            match navigation::judge(url, &SERVER_URL, &START_PAGE) {
                 // The server's port only while this process is serving it
                 // there: after a failure, or with the interview in the browser,
                 // history or a link must not take the window back to whatever
@@ -281,8 +277,8 @@ fn open_window(app: &AppHandle) -> tauri::Result<()> {
             _ => true,
         })
         .build()?;
-
-    let _ = app.state::<Shell>().start_page.set(window.url()?);
+    #[cfg(not(target_os = "linux"))]
+    let _ = window;
 
     #[cfg(target_os = "linux")]
     window.with_webview(|webview| {
@@ -402,12 +398,10 @@ fn open_in_browser(url: &str) {
 
 /// The starting page again, with `pairs` as its whole query.
 fn show_start_page(app: &AppHandle, pairs: &[(&str, &str)]) {
-    let shell = app.state::<Shell>();
-    let (Some(page), Some(window)) = (shell.start_page.get(), app.get_webview_window(WINDOW))
-    else {
+    let Some(window) = app.get_webview_window(WINDOW) else {
         return;
     };
-    let mut page = page.clone();
+    let mut page = START_PAGE.clone();
     page.query_pairs_mut().clear().extend_pairs(pairs);
     let _ = window.navigate(page);
 }

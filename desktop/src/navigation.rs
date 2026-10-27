@@ -54,6 +54,25 @@ pub fn judge(url: &Url, server: &Url, start_page: &Url) -> Verdict {
     }
 }
 
+/// Where the window's start page loads, `http_scheme` being true on Windows
+/// and Android. Tauri serves `WebviewUrl::App("index.html")` at the root of
+/// its own origin, `http://tauri.localhost/` there and `tauri://localhost/`
+/// elsewhere, since this app sets neither `devUrl` nor `useHttpsScheme`.
+///
+/// Known before the window loads anything, so a failure the server reports
+/// first still reaches the page. Not `window.url()` after the window is
+/// built: on Windows WebView2 has not begun loading by then, and the start
+/// page itself was judged a stranger, cancelled and sent to the browser. Nor
+/// the first navigation, which a failure can come before.
+pub fn start_page(http_scheme: bool) -> Url {
+    let origin = if http_scheme {
+        "http://tauri.localhost/"
+    } else {
+        "tauri://localhost/"
+    };
+    Url::parse(origin).expect("the start page origin is a URL")
+}
+
 fn ask(url: &Url) -> Ask {
     for (key, value) in url.query_pairs() {
         match &*key {

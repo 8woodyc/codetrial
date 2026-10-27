@@ -82,6 +82,51 @@ fn only_the_start_page_can_ask_for_the_browser_or_report_webrtc() {
 }
 
 #[test]
+fn the_first_navigation_is_the_start_page_on_either_scheme() {
+    let server = url("http://127.0.0.1:3101/");
+
+    // What the window loads first: Tauri drops `index.html` from the URL of
+    // `WebviewUrl::App("index.html")`, as the tab #510 opened showed.
+    for (http_scheme, first) in [
+        (true, "http://tauri.localhost/"),
+        (false, "tauri://localhost"),
+    ] {
+        let start = start_page(http_scheme);
+        assert_eq!(
+            judge(&url(first), &server, &start),
+            Verdict::StartPage(Ask::Nothing),
+            "{first}"
+        );
+
+        // The page's own report reaches the app instead of the browser, and so
+        // does a failure shown before the page ever loaded.
+        let webrtc = url(first).join("index.html?webrtc=yes").unwrap();
+        assert_eq!(
+            judge(&webrtc, &server, &start),
+            Verdict::StartPage(Ask::WebRtc(true))
+        );
+        let mut failure = start.clone();
+        failure.query_pairs_mut().append_pair("error", "x");
+        assert_eq!(
+            judge(&failure, &server, &start),
+            Verdict::StartPage(Ask::Nothing)
+        );
+
+        // Against the other platform's start page the window's own page is a
+        // stranger: sent to the browser over http, as #510 saw, refused over
+        // tauri.
+        assert_eq!(
+            judge(&url(first), &server, &start_page(!http_scheme)),
+            if http_scheme {
+                Verdict::OpenInBrowser
+            } else {
+                Verdict::Refuse
+            }
+        );
+    }
+}
+
+#[test]
 fn a_download_keeps_its_name_and_never_overwrites() {
     let dir = std::env::temp_dir().join(format!(
         "codetrial-desktop-download-{}-{}",
