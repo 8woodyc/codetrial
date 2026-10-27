@@ -353,3 +353,290 @@ async fn a_rejected_token_is_forgotten_by_both_reads() {
     );
     assert!(delivery.token.try_lock().unwrap().is_none(), "object_range");
 }
+
+/// The clock can cross the token margin after any provider call. Exercise the
+/// real transfer and HTTP paths with a loopback OAuth, Storage and Drive stub.
+async fn transfer_with_expiry(
+    expire_after: &'static str,
+    token_fails: bool,
+) -> (Result<String, String>, Vec<String>) {
+    use axum::body::Bytes;
+    use axum::extract::{DefaultBodyLimit, State};
+    use axum::http::{HeaderMap, Method, StatusCode, Uri};
+    use axum::response::{IntoResponse, Response};
+    use std::sync::atomic::{AtomicI64, Ordering};
+
+    struct Stub {
+        base: String,
+        now: Arc<AtomicI64>,
+        expire_after: &'static str,
+        token_fails: bool,
+        seen: std::sync::Mutex<Vec<String>>,
+    }
+
+    async fn answer(
+        State(stub): State<Arc<Stub>>,
+        method: Method,
+        uri: Uri,
+        headers: HeaderMap,
+        body: Bytes,
+    ) -> Response {
+        let path = uri.path();
+        let bearer = headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("");
+        stub.seen
+            .lock()
+            .unwrap()
+            .push(format!("{method} {path} {bearer}"));
+        if path == "/token" {
+            if stub.token_fails {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    axum::Json(json!({"error": "unavailable"})),
+                )
+                    .into_response();
+            }
+            return axum::Json(json!({"access_token": "fresh-token", "expires_in": 3600}))
+                .into_response();
+        }
+        if path == "/session" && method == Method::PUT {
+            let content_range = headers
+                .get(axum::http::header::CONTENT_RANGE)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("");
+            if content_range == "bytes 0-8388607/8388609"
+                && body.len() == UPLOAD_CHUNK_BYTES as usize
+                && body.iter().all(|byte| *byte == b'x')
+            {
+                if stub.expire_after == "chunk" {
+                    stub.now.store(121, Ordering::SeqCst);
+                }
+                return (
+                    StatusCode::PERMANENT_REDIRECT,
+                    [(axum::http::header::RANGE, "bytes=0-8388607")],
+                )
+                    .into_response();
+            }
+            if content_range == "bytes 8388608-8388608/8388609" && body.as_ref() == b"y" {
+                return axum::Json(json!({"id": "file-1"})).into_response();
+            }
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+        if bearer == "Bearer old-token" && stub.now.load(Ordering::SeqCst) >= 120 {
+            return StatusCode::UNAUTHORIZED.into_response();
+        }
+        if path == "/drive/v3/files" {
+            if stub.expire_after == "search" {
+                stub.now.store(121, Ordering::SeqCst);
+            }
+            return axum::Json(json!({"files": []})).into_response();
+        }
+        if path == "/b/staging/o/recording.mp4" {
+            if uri.query() == Some("alt=media") {
+                let range = headers
+                    .get(axum::http::header::RANGE)
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or("");
+                let bytes = if range == "bytes=0-8388607" {
+                    vec![b'x'; UPLOAD_CHUNK_BYTES as usize]
+                } else if range == "bytes=8388608-8388608" {
+                    vec![b'y']
+                } else {
+                    return StatusCode::BAD_REQUEST.into_response();
+                };
+                return (StatusCode::PARTIAL_CONTENT, bytes).into_response();
+            }
+            if stub.expire_after == "metadata" {
+                stub.now.store(121, Ordering::SeqCst);
+            }
+            return axum::Json(json!({"size": UPLOAD_CHUNK_BYTES + 1})).into_response();
+        }
+        if path == "/upload/drive/v3/files" {
+            return (
+                StatusCode::OK,
+                [(
+                    axum::http::header::LOCATION,
+                    format!("{}/session", stub.base),
+                )],
+            )
+                .into_response();
+        }
+        StatusCode::NOT_FOUND.into_response()
+    }
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let now = Arc::new(AtomicI64::new(0));
+    let stub = Arc::new(Stub {
+        base: base.clone(),
+        now: now.clone(),
+        expire_after,
+        token_fails,
+        seen: std::sync::Mutex::new(Vec::new()),
+    });
+    let router = axum::Router::new()
+        .fallback(answer)
+        .layer(DefaultBodyLimit::disable())
+        .with_state(stub.clone());
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+
+    let mut delivery = delivery_reading_from(base.clone());
+    delivery.credentials.private_key = rsa_key(include_str!("test-only-private-key.pem")).unwrap();
+    delivery.credentials.client_email = "delivery@example.com".to_string();
+    delivery.credentials.token_uri = format!("{base}/token");
+    delivery.now = Arc::new(move || now.load(Ordering::SeqCst));
+    *delivery.token.lock().await = Some(CachedToken {
+        value: "old-token".to_string(),
+        expires_at: 120,
+    });
+
+    let result = tokio::time::timeout(
+        Duration::from_secs(10),
+        delivery.transfer("recording.mp4", "interview.mp4", "rec-1"),
+    )
+    .await
+    .expect("transfer should not hang");
+    server.abort();
+    let requests = stub.seen.lock().unwrap().clone();
+    (result, requests)
+}
+
+async fn assert_transfer_refreshes_after(stage: &'static str) {
+    let (result, requests) = transfer_with_expiry(stage, false).await;
+    assert_eq!(result, Ok("file-1".to_string()), "{stage}: {requests:?}");
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.starts_with("POST /token "))
+            .count(),
+        1,
+        "{stage}: {requests:?}"
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.starts_with("POST /upload/drive/v3/files "))
+            .count(),
+        1,
+        "{stage}: {requests:?}"
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.starts_with("PUT /session "))
+            .count(),
+        2,
+        "{stage}: {requests:?}"
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.starts_with("GET /b/staging/o/recording.mp4 "))
+            .count(),
+        3,
+        "metadata and exactly two ranges: {stage}: {requests:?}"
+    );
+    assert!(
+        requests
+            .iter()
+            .any(|request| request == "GET /b/staging/o/recording.mp4 Bearer fresh-token"),
+        "{stage}: {requests:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_transfer_refreshes_the_token_between_chunks() {
+    assert_transfer_refreshes_after("chunk").await;
+}
+
+#[tokio::test]
+async fn a_transfer_refreshes_after_duplicate_search() {
+    assert_transfer_refreshes_after("search").await;
+}
+
+#[tokio::test]
+async fn a_transfer_refreshes_after_metadata() {
+    assert_transfer_refreshes_after("metadata").await;
+}
+
+#[tokio::test]
+async fn a_transfer_reuses_a_valid_cached_token() {
+    let (result, requests) = transfer_with_expiry("", false).await;
+    assert_eq!(result, Ok("file-1".to_string()), "{requests:?}");
+    assert!(
+        requests
+            .iter()
+            .all(|request| !request.starts_with("POST /token "))
+    );
+    assert_eq!(
+        requests.iter().filter(|request| request.starts_with("GET /b/staging/o/recording.mp4 Bearer old-token")).count(),
+        3
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.starts_with("PUT /session "))
+            .count(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn a_failed_refresh_stops_before_the_next_range() {
+    let (result, requests) = transfer_with_expiry("chunk", true).await;
+    assert!(
+        result.unwrap_err().contains("token request was refused"),
+        "{requests:?}"
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.starts_with("POST /token "))
+            .count(),
+        1
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.starts_with("GET /b/staging/o/recording.mp4 "))
+            .count(),
+        2,
+        "metadata and the first range only: {requests:?}"
+    );
+}
+
+/// The margin is strict: 61 seconds left is reusable, exactly 60 is not.
+#[tokio::test]
+async fn the_token_refreshes_at_the_sixty_second_margin() {
+    use axum::response::IntoResponse;
+    use std::sync::atomic::{AtomicI64, Ordering};
+
+    let (base, seen) = storage_stub(|| {
+        axum::Json(json!({"access_token": "fresh-token", "expires_in": 3600})).into_response()
+    })
+    .await;
+    let mut delivery = delivery_reading_from(base.clone());
+    delivery.credentials.private_key = rsa_key(include_str!("test-only-private-key.pem")).unwrap();
+    delivery.credentials.client_email = "delivery@example.com".to_string();
+    delivery.credentials.token_uri = format!("{base}/token");
+    let clock = Arc::new(AtomicI64::new(59));
+    delivery.now = Arc::new({
+        let clock = clock.clone();
+        move || clock.load(Ordering::SeqCst)
+    });
+    *delivery.token.lock().await = Some(CachedToken {
+        value: "old-token".to_string(),
+        expires_at: 120,
+    });
+
+    assert_eq!(delivery.access_token().await, Ok("old-token".to_string()));
+    assert!(seen.lock().unwrap().is_empty());
+    clock.store(60, Ordering::SeqCst);
+    assert_eq!(delivery.access_token().await, Ok("fresh-token".to_string()));
+    assert_eq!(seen.lock().unwrap().len(), 1);
+    clock.store(61, Ordering::SeqCst);
+    assert_eq!(delivery.access_token().await, Ok("fresh-token".to_string()));
+    assert_eq!(seen.lock().unwrap().len(), 1);
+}

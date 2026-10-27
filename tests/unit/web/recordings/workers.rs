@@ -6,10 +6,10 @@
 
 use super::*;
 
-/// A throwaway RSA key, generated for this test and used nowhere else. The
-/// delivery client parses the key material at construction, so asserting
-/// that a configured deployment gets a client needs one that parses.
-const TEST_ONLY_PRIVATE_KEY: &str = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDoSml5zRLkE3B9\nK2p8uBW7Xeccy5KN5xOcCBIJ914tq32oMvPmgmOsI0EqbswJe05Csknu6XtDEWv3\na6dvFgYxnE8EvHmtWJedpJC2HbkWaHrNmh6rk6A9/D/AGGUijL6bZoWwuM3neNF7\ng4V+3YS5itPa+iAEeCH6ng+78bNNGaxZ4NxyqHqBa0yTFxKEpJNJt1r6fDl5LBBu\ngPwbG4VCHhG10uqN4ZNiMb/YjODT0nBGYz9ffR0FEooLpj9hU8olBeVekG2/RlNO\nWkahsuo6nWTWPBWo3Omi+t6ig0Eeic5ExEU1J0jSdAEByjzMMXOVbGle3EjzaNE7\nZy2kZD2zAgMBAAECggEAAZc8F8kgjAbQTJtsPplIwv2UnigBQ30OpDvIXxIDaQaM\n/g+a/Hr9y9HY3TSUaDdNrU1/Z7KRI8+QPa7ksyuPRCQhOaE39D2G5mJHbB+27rOv\njf4pAnyP8DDxKaEMXgLV27+0g7oc5QtDA7ZUuX8g0u1NVgrhPJ69Jhg4w/6Ews5c\nBKvztBawn7hh3WNpqD6TLm4+FXVQi/rvW0hD20nTsb9yM1+18m78YmF6ObPm6pdu\nq7/pp4QZ6nm4VS2zEdTuw+oWmvwRc0F10JCsmVc5noVm/q9oqc6gVYUX2oj7CR2T\nnKDhocF7xnUFJJKKJcP48CerIg16h44i8sGcl/GZsQKBgQD90JHwTa+zon41/jO9\n+najINdtH78C9cBWctnMtEjDyd11lSOdxD18uHIjHpgF+WWstwyT60w2ECAvTOhe\n+ANQeI+WKE3tIiq3QQHlChc0UH5KZan0G5QPq6pQWr9Pj5+7uNe8eMKTEQf+mCEt\ntv5aUc4gQVBdtWR5qFvUxtdEnwKBgQDqSmaqUKNkAerNmd0ChHuuGZzExrAZ0Kum\nQ+tnamLbXs3wR4rmxhEUOO2PGqbd/n3Q+cK+1UdSXRZhDq32xjflzo9AK3ffPuH1\newYPTkwHBChTXrAp3ViFn5l20NOE7VTu2DdrHKUz4MpnYEE3LVQFUUg7H+EqwfM5\nGqP3DNA6bQKBgQC1o+7dD2ufXbl/AGWdHsKKabVh5ec3whGcjGLsCVVNsIhpXor3\nm/n46LLeCUX4eIvX98Prk+edhRrTXvGpDUqp6y2u4zcpblstfDtT403J5ZULvwfK\np3XlZQ/ko5zn3jwNBvJ1ceKlhvm2rL6JzbznfEXMdZGDDo5SNjdJ5ecmtwKBgBc6\n3UcRy8GEtyU/ljxDqoeunm6cTKWinQJVRafxUm/xzHWAgnMzPEpHArbnq5fjPdJU\nkUyelP3DoQ5qiDEpoi0099si9DW8ZGcUlZs65irj7KOnhcwA2GAXXP384pwRdBRi\nd8w1AORN64OodY7k/amxT3odRRQaOuV0kMFUEelZAoGAZX6IVBljoQHlrMURpamm\nfD19TtC1Ggdl5k1raWY4dBIZv+mgETBhb9etYp8VHYinBV7SeKGt6KrU4eZDTe3h\nJMlxhF00N0zksKn37lWNJ3ayeBsiDoVHfsfIU9OpkT4j9it8J/W3WUAFqG3Lc8lv\nOgA+s0vjN/n+Kc5h8HNZONs=\n-----END PRIVATE KEY-----";
+/// A public test-only RSA key shared with the delivery tests. The delivery
+/// client parses the key material at construction, so asserting that a
+/// configured deployment gets a client needs one that parses.
+const TEST_ONLY_PRIVATE_KEY: &str = include_str!("../../test-only-private-key.pem");
 
 /// A deployment with credentials gets a delivery client, and one without
 /// gets a warning.
