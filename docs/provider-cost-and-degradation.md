@@ -128,6 +128,19 @@ microphone's own voice level on every frame or from provider speech detection,
 each Live socket therefore receives one presence frame and no more; during speech frames keep the
 five-second interval. Board images take their own path and are unaffected.
 
+There is no text-only interviewer. Every conversational Live model refuses
+`responseModalities: ["TEXT"]` with close code 1007, as tried on 2026-10-26
+against each model a key lists for `bidiGenerateContent`, so dropping the spoken
+reply is not a setting of the Live session. A text interviewer would be a
+per-turn `generateContent` path outside it, which would have to rebuild the
+endpointing, barge-in and resumption that `src/livekit.rs` relies on, and its
+saving is unmeasured: the candidate's audio is still sent, and such a path
+resends the context and tool declarations every turn. What an interview spends
+is bounded instead by the ceiling in [interview length](interview-length.md)
+and the deadline the agent holds, and the notice before Start says who pays.
+This is revisited when a Live model accepts a text reply, or when a matched
+comparison measures a per-turn path spending less for the same interview.
+
 Coding example drawings are opt-in in the lobby and disabled by default.
 The choice is carried in signed token metadata and applies to the Live tool
 declarations, instructions, interim and final report policy, and board stream
