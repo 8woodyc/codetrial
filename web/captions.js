@@ -1,8 +1,9 @@
 /// Captions over the editor.
 ///
 /// Keep completed interviewer turns readable while the candidate thinks.
-/// Interviewer captions reveal gradually, including final copies. Candidate
-/// captions retain their bounded window and idle timeout.
+/// Interviewer captions reveal gradually, including final copies, and never
+/// drop the start of the turn. Candidate captions retain their bounded window
+/// and idle timeout.
 
 import { captionWindow, MAX_UNCLEAR_LINES } from "./lib.js";
 
@@ -11,16 +12,26 @@ let nodes = null;
 export function initCaptions(deps) {
   ({ nodes } = deps);
   nodes.captionUnclear?.addEventListener("click", toggleUnclear);
+  nodes.captionsBar?.addEventListener?.("scroll", trackCandidateScroll);
 }
 
 const CAPTION_TICK_MS = 300;
 const CAPTION_CHARS_PER_TICK = 8;
 
-// Bound live captions until Jim's final text is fully revealed.
+// Only the candidate's caption is windowed. Jim's turn is what the candidate
+// has to answer, so the bar scrolls rather than cutting its opening.
 const CAPTION_MAX_CHARS = 160;
+// Slack for the fractional scrollTop that zoomed layouts report against whole
+// pixels of scrollHeight and clientHeight.
+const CAPTION_END_SLACK_PX = 2;
 // Candidate captions and the listening placeholder should clear when idle.
 const CAPTION_IDLE_HIDE_MS = 12000;
 let captionIdleTimer = null;
+// Whose words the bar holds, since only a Jim caption has a follow to change.
+let jimOnBar = false;
+// Where the bar was last seen resting, by a tick or by the scroll listener,
+// so a move since then that its geometry cannot explain is the candidate's.
+let seenTop = 0;
 let interviewerCaption = {
   id: null,
   text: "",
@@ -28,6 +39,7 @@ let interviewerCaption = {
   timer: null,
   final: false,
   pendingDismissal: false,
+  following: true,
 };
 
 // Each publish opens a separate stream, so replaced turns can arrive late.
@@ -49,7 +61,11 @@ export function updateCaptions(
     if (candidateCaption.id != null) candidateCaption.replaced = true;
     if (interviewerCaption.id !== id) {
       retireInterviewerCaption();
-      if (nodes.captionsBar) nodes.captionsBar.scrollTop = 0;
+      // Wherever the candidate left the last turn, this one follows from its
+      // first tick, which also scrolls a short opening back to the top. A
+      // scroll of the last turn still queued must not decide this one's
+      // follow, so its first tick skips the check for a candidate's move.
+      jimOnBar = false;
       interviewerCaption = {
         id,
         text: "",
@@ -57,6 +73,7 @@ export function updateCaptions(
         timer: null,
         final: false,
         pendingDismissal: false,
+        following: true,
       };
     }
     // The longest, not the latest. Every interim publish carries the whole turn
@@ -101,32 +118,74 @@ export function updateCaptions(
   }
   const clipped = captionWindow(text, CAPTION_MAX_CHARS);
   showUnclearButton(false);
+  jimOnBar = false;
   nodes.captionsText.textContent = `[${speaker === "you" ? "You" : "Jim"}]: ${clipped}`;
   showCaptions();
 }
 
 export function paceInterviewerCaption() {
   const caption = interviewerCaption;
+  const bar = nodes.captionsBar;
+  // A scroll the candidate made since the last tick can still be queued, and
+  // this tick's follow would write over it; the bar has already moved, though.
+  if (bar && jimOnBar && candidateMoved(bar)) {
+    caption.following = atCaptionEnd(bar);
+  }
   caption.shown = Math.min(
     caption.text.length,
     caption.shown + CAPTION_CHARS_PER_TICK,
   );
   const retained = caption.final && caption.shown === caption.text.length;
-  const text = retained
-    ? caption.text
-    : captionWindow(caption.text.slice(0, caption.shown), CAPTION_MAX_CHARS);
-  nodes.captionsText.textContent = `[Jim]: ${text}`;
+  jimOnBar = true;
+  nodes.captionsText.textContent = `[Jim]: ${caption.text.slice(0, caption.shown)}`;
   showUnclearButton(true);
   if (retained && caption.pendingDismissal) {
     dismissCaptions();
     return;
   }
   showCaptions({ persistent: retained });
+  // After showCaptions: a hidden bar has no scroll position to set.
+  if (bar) {
+    if (caption.following) bar.scrollTop = bar.scrollHeight;
+    // The new text can clamp the bar as well as the follow can move it, and
+    // either queues an event that is not the candidate's.
+    seenTop = bar.scrollTop;
+  }
   if (caption.shown < caption.text.length) {
     caption.timer = setTimeout(paceInterviewerCaption, CAPTION_TICK_MS);
   } else {
     caption.timer = null;
   }
+}
+
+/// Only the candidate decides whether Jim's reveal follows, but a scroll event
+/// also comes from our own follow and from the browser clamping scrollTop when
+/// Jim's text is replaced or the bar's size changes. While the bar holds the
+/// candidate's words, nothing done to it is about Jim.
+function trackCandidateScroll() {
+  const bar = nodes.captionsBar;
+  if (!jimOnBar) return;
+  if (candidateMoved(bar)) interviewerCaption.following = atCaptionEnd(bar);
+  seenTop = bar.scrollTop;
+}
+
+/// The browser moves the bar on its own only by clamping it into a range that
+/// shrank, which leaves it at the smaller of where it was and the new bottom:
+/// a bar that shrank under a follow stays put, a bar that grew taller under a
+/// candidate near the end lands on the new bottom, and a hidden bar, whose
+/// range is zero, sits at the top. Anything else is the candidate scrolling.
+function candidateMoved(bar) {
+  const bottom = Math.max(0, bar.scrollHeight - bar.clientHeight);
+  // Under zoom scrollTop is fractional while the bottom is whole pixels.
+  return (
+    Math.abs(bar.scrollTop - Math.min(seenTop, bottom)) > CAPTION_END_SLACK_PX
+  );
+}
+
+function atCaptionEnd(bar) {
+  return (
+    bar.scrollTop + bar.clientHeight >= bar.scrollHeight - CAPTION_END_SLACK_PX
+  );
 }
 
 /// Completed interviewer turns remain available while the candidate thinks.

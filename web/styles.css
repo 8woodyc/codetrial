@@ -1056,6 +1056,18 @@ p {
   display: block;
 }
 
+/* A long turn keeps the bar scrolled to Jim's newest words, so the head stays
+   pinned on the bar's own surface: the label and the Unclear button for the
+   line being read must not scroll away with the text. */
+.jim-stage .captions-head {
+  position: sticky;
+  /* Up through the bar's top padding, so no line shows above the head. */
+  top: -0.375rem;
+  margin-top: -0.375rem;
+  padding-top: 0.375rem;
+  background: var(--float-surface);
+}
+
 /* The turn countdown sits beside the line that explains it. The ring is a
    conic fill masked to a band, driven by `--turn-progress` from 0 to 1. */
 /* On its own surface, like the avatar and the captions: the stage floats

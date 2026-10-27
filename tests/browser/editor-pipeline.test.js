@@ -1105,7 +1105,7 @@ test("plain editor text follows the highlight layer's color setting", async (t) 
   }
 });
 
-test("a new Jim turn starts at the top of the caption bar", async (t) => {
+test("a new Jim turn follows its reveal wherever the last one was left", async (t) => {
   const ctx = await editorPage(t, {
     beforeLoad: (page) => page.clock.install(),
   });
@@ -1133,9 +1133,15 @@ test("a new Jim turn starts at the top of the caption bar", async (t) => {
     );
   };
 
-  const scrollDown = async () => {
+  const atEnd = () =>
+    bar.evaluate(
+      (node) => node.scrollTop + node.clientHeight >= node.scrollHeight - 2,
+    );
+
+  // Halfway, so following the reveal and keeping the position differ.
+  const scrollMidway = async () => {
     const position = await bar.evaluate((node) => {
-      node.scrollTop = node.scrollHeight;
+      node.scrollTop = (node.scrollHeight - node.clientHeight) / 2;
       return node.scrollTop;
     });
     assert.ok(position > 0, "the test must actually scroll the caption bar");
@@ -1153,7 +1159,23 @@ test("a new Jim turn starts at the top of the caption bar", async (t) => {
     assert.equal(await bar.isVisible(), true);
     assert.equal(await captionText.textContent(), `[Jim]: ${firstText}`);
 
-    const firstPosition = await scrollDown();
+    assert.equal(await atEnd(), true, "the reveal must follow to the end");
+    // Pinned to the end of a long turn, the bar must still show its head, which
+    // holds the Unclear button for the line being read.
+    const head = await bar.evaluate((node) => {
+      const outer = node.getBoundingClientRect();
+      const inner = node
+        .querySelector(".captions-head")
+        .getBoundingClientRect();
+      const unclear = node.querySelector("#caption-unclear");
+      return {
+        inView: inner.top >= outer.top - 1 && inner.bottom <= outer.bottom + 1,
+        unclear: !unclear.hidden,
+      };
+    });
+    assert.deepEqual(head, { inView: true, unclear: true });
+
+    const firstPosition = await scrollMidway();
     await showJim(firstText, "jim-scroll-1");
     assert.equal(
       await bar.evaluate((node) => node.scrollTop),
@@ -1161,21 +1183,39 @@ test("a new Jim turn starts at the top of the caption bar", async (t) => {
       "an update to the same turn must preserve the reading position",
     );
 
+    // The first turn was left midway, so only a per-turn follow reaches the end.
     await showJim(secondText, "jim-scroll-2");
     assert.equal(await captionText.textContent(), `[Jim]: ${secondText}`);
-    assert.equal(
-      await bar.evaluate((node) => node.scrollTop),
-      0,
-      "a new Jim turn must start at the top",
-    );
+    assert.equal(await atEnd(), true, "a new Jim turn must follow its reveal");
 
-    const secondPosition = await scrollDown();
+    const secondPosition = await scrollMidway();
     await showJim(firstText, "jim-scroll-1");
     assert.equal(await captionText.textContent(), `[Jim]: ${secondText}`);
     assert.equal(
       await bar.evaluate((node) => node.scrollTop),
       secondPosition,
       "a retired turn must not move the current reading position",
+    );
+
+    // The candidate scrolls and Jim's next tick runs in the same task, so the
+    // browser has not dispatched the scroll event when the tick could follow.
+    const raced = await page.evaluate(async (text) => {
+      const captions = await import("/captions.js");
+      const node = document.querySelector("#captions-bar");
+      captions.updateCaptions("interviewer", text, "jim-scroll-3", {
+        final: true,
+      });
+      for (let i = 0; i < 120; i++) captions.paceInterviewerCaption();
+      node.scrollTop = (node.scrollHeight - node.clientHeight) / 2;
+      const scrolled = node.scrollTop;
+      for (let i = 0; i < 60; i++) captions.paceInterviewerCaption();
+      return { scrolled, after: node.scrollTop };
+    }, firstText);
+    assert.ok(raced.scrolled > 0, "the third turn must overflow first");
+    assert.equal(
+      raced.after,
+      raced.scrolled,
+      "a tick must not write over a scroll whose event is still queued",
     );
 
     assert.deepEqual(errors, []);
