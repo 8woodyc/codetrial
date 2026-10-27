@@ -159,8 +159,8 @@ test("the interview shows the camera after a Meet release and only when recordin
 });
 
 // Every path that stops the camera goes through stopPreflight, the offline
-// fallback after a failed connect among them, and stopping a track fires no
-// `ended` to take the view down instead.
+// fallback after a failed connect and a start ended early among them, and
+// stopping a track fires no `ended` to take the view down instead.
 test("stopping the camera takes the self view down first", () => {
   const script = interviewSource();
   const stop = functionBody(script, "stopPreflight");
@@ -177,10 +177,34 @@ test("stopping the camera takes the self view down first", () => {
     "stopPreflight({ userStream: state.localUserStream });",
     "the end of the interview must stop the camera through stopPreflight",
   );
+  // Each way a start gives up leaves through abandonStart, checked one by one
+  // so that losing any of them fails here rather than passing on another.
+  const connect = functionBody(script, "connect");
   assertIncludesCompact(
-    functionBody(script, "connect"),
+    connect.slice(connect.indexOf("} catch (error) {")),
+    "abandonStart(preflight);",
+    "the offline fallback after a failed connect must leave through abandonStart",
+  );
+  assertIncludesCompact(
+    connect,
+    'const ended = () => { if (state.phase === "live") return false; abandonStart(preflight); return true; };',
+    "a start ended before its room must leave through abandonStart",
+  );
+  assertIncludesCompact(
+    connect,
+    'if (joined === "left") { abandonStart(preflight); return false; }',
+    "a join that left its room must leave through abandonStart",
+  );
+  assertIncludesCompact(
+    functionBody(script, "abandonStart"),
     "stopPreflight(preflight);",
-    "the offline fallback after a failed connect must stop the camera through stopPreflight",
+    "abandonStart must stop the camera through stopPreflight",
+  );
+  // A join handed to a report stops the camera itself.
+  assertIncludesCompact(
+    functionBody(script, "settleEndedJoin"),
+    "stopPreflight(preflight);",
+    "a join handed to a report must stop the camera through stopPreflight",
   );
 });
 

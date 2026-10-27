@@ -260,9 +260,571 @@ for (const action of ["wait", "edit", "choose", "run", "end"]) {
         /matchDisputedCharge\(/,
       );
     if (token) assert.equal((await token).postDataJSON().language, expected);
-    else assert.equal(await page.locator("#ending-overlay").isVisible(), true);
+    else {
+      assert.equal(await page.locator("#ending-overlay").isVisible(), true);
+      // The wait is over once C is enabled; an ended interview asks for no
+      // token, so it gets no room and no interviewer.
+      await page.evaluate(
+        () => new Promise((resolve) => queueMicrotask(resolve)),
+      );
+      assert.equal(tokens, 0, "an ended interview requests no token");
+      assert.equal(await page.evaluate(() => window.roomJoins.length), 0);
+      // With no room, nothing later stops the preflight's devices, so ending
+      // in the wait must release them itself.
+      const states = await page.evaluate(() =>
+        window.acquiredTracks.map((track) => track.readyState),
+      );
+      assert.ok(states.length > 0, "the preflight acquired a microphone");
+      assert.deepEqual([...new Set(states)], ["ended"]);
+    }
   });
 }
+
+// A start that fails after the interview has already ended offers no
+// fallback under that ending. Practice is ended by the candidate while its
+// token is held, and the token is then refused. Strict keeps End disabled
+// until it has started, so its interview ends through a report that arrives
+// during the join, after which the track publish fails.
+for (const selection of ["practice", "strict"]) {
+  test(`${selection === "strict" ? "Strict" : "Practice"} offers no fallback when its start fails after the interview ended`, async (t) => {
+    if (!browser) return t.skip("playwright chromium unavailable");
+    let respond;
+    const responded = new Promise((resolve) => {
+      respond = resolve;
+    });
+    t.after(() => respond());
+    // Paused before Start: with no interviewer, the end becomes the offline
+    // summary 300 ms later and takes the ending overlay down, which a slow
+    // runner would otherwise reach before this case looks for it.
+    const context = await browser.newContext();
+    t.after(() => context.close());
+    await context.clock.install();
+    const strict = selection === "strict";
+    const page = await interview(
+      t,
+      strict ? "selection=strict" : "problem=chargeback-pair-match",
+      async (route) => {
+        if (strict)
+          return route.fulfill({
+            json: grant("chargeback-pair-match", "failed-after-end"),
+          });
+        await responded;
+        return route.fulfill({ status: 503, json: { error: "No provider" } });
+      },
+      context,
+    );
+    if (strict) {
+      await page.evaluate(() => {
+        window.roomTrackHeld = new Promise((resolve, reject) => {
+          window.failTracks = () => reject(new Error("publish failed"));
+        });
+        window.roomTrackHeld.catch(() => {});
+      });
+      await preflight(page, { pause: true });
+      await page.waitForFunction(() => window.roomJoins.length === 1);
+      await deliverReport(page, { summary: "Ended by the interviewer." });
+      await page.locator("#report-modal").waitFor({ state: "visible" });
+      await page.evaluate(() => window.failTracks());
+    } else {
+      const requested = page.waitForRequest("**/api/token");
+      await preflight(page, { pause: true });
+      await requested;
+      await page.locator("#end").click();
+      await page.locator("#ending-overlay:not([hidden])").waitFor();
+      respond();
+    }
+    await tracksReleased(page);
+    // The failure has been handled once the tracks are released, and the
+    // fallback would have been written in the same turn.
+    await page.evaluate(
+      () => new Promise((resolve) => queueMicrotask(resolve)),
+    );
+    assert.doesNotMatch(
+      await page.locator("#transcript-panel").textContent(),
+      /Offline (?:mode|practice)/,
+    );
+    assert.equal(await page.locator("#audio-check").isHidden(), true);
+    // The failed publish does not take the room from the report, whose
+    // receipt the paused clock still holds.
+    if (strict)
+      assert.equal(await page.evaluate(() => window.roomLeaves ?? 0), 0);
+  });
+}
+
+// Past the C wait, a start still awaits the token response and then the room
+// join, with the workspace open for both. Ending in either leaves no
+// interview behind: no room, or one left at once, and no live device.
+for (const stage of ["token", "join"]) {
+  test(`Practice ended while its start awaits the ${stage} leaves no room and releases devices`, async (t) => {
+    if (!browser) return t.skip("playwright chromium unavailable");
+    let respond;
+    const responded = new Promise((resolve) => {
+      respond = resolve;
+    });
+    t.after(() => respond());
+    // The ending's own timers lead to the offline summary, whose cleanup
+    // would release the devices too. A paused clock leaves only the start
+    // that noticed the end to do it.
+    const context = await browser.newContext();
+    t.after(() => context.close());
+    await context.clock.install();
+    const page = await interview(
+      t,
+      "problem=chargeback-pair-match",
+      async (route) => {
+        if (stage === "token") await responded;
+        await route.fulfill({
+          json: grant("chargeback-pair-match", `ended-at-${stage}`),
+        });
+      },
+      context,
+    );
+    if (stage === "join")
+      await page.evaluate(() => {
+        window.roomJoinHeld = new Promise((resolve) => {
+          window.releaseJoin = resolve;
+        });
+      });
+    const requested = page.waitForRequest("**/api/token");
+    await preflight(page, { pause: true });
+    await requested;
+    if (stage === "join")
+      await page.waitForFunction(() => window.roomJoins.length === 1);
+    await page.locator("#end").click();
+    await page.locator("#ending-overlay:not([hidden])").waitFor();
+    if (stage === "token") respond();
+    else await page.evaluate(() => window.releaseJoin());
+    // The start ends itself once its await returns. A page that carried on
+    // would keep a microphone live and never get here.
+    await page.waitForFunction(
+      () =>
+        window.acquiredTracks.length > 0 &&
+        window.acquiredTracks.every((track) => track.readyState === "ended"),
+      null,
+      { timeout: 5_000 },
+    );
+    assert.deepEqual(
+      await page.evaluate(() => ({
+        joins: window.roomJoins.length,
+        leaves: window.roomLeaves ?? 0,
+      })),
+      stage === "token" ? { joins: 0, leaves: 0 } : { joins: 1, leaves: 1 },
+    );
+  });
+}
+
+// On a running clock an end with no interviewer becomes the offline summary
+// within a moment, so a slow join finds the page in `report` rather than
+// `ending`. That summary is no report from this room, and the join still
+// gives the room up.
+test("a join that outlasts the offline summary still leaves its room and releases devices", async (t) => {
+  const page = await interview(t, "problem=chargeback-pair-match", (route) =>
+    route.fulfill({
+      json: grant("chargeback-pair-match", "join-after-summary"),
+    }),
+  );
+  if (!page) return;
+  await page.evaluate(() => {
+    window.roomJoinHeld = new Promise((resolve) => {
+      window.releaseJoin = resolve;
+    });
+  });
+  await preflight(page);
+  await page.waitForFunction(() => window.roomJoins.length === 1);
+  await page.locator("#end").click();
+  await page.locator("#report-modal").waitFor({ state: "visible" });
+  await page.evaluate(() => window.releaseJoin());
+  await page.waitForFunction(
+    () =>
+      window.acquiredTracks.length > 0 &&
+      window.acquiredTracks.every((track) => track.readyState === "ended"),
+    null,
+    { timeout: 5_000 },
+  );
+  assert.deepEqual(
+    await page.evaluate(() => ({
+      leaves: window.roomLeaves ?? 0,
+      claimed: (window.roomPublishes ?? []).includes("integrity"),
+    })),
+    { leaves: 1, claimed: false },
+    "the room is left before it is claimed",
+  );
+});
+
+/// Hands `report` to the room's report handlers as the interviewer would.
+/// Not awaited: delivery waits on timers a paused clock may hold back.
+async function deliverReport(page, report) {
+  await page.evaluate((body) => {
+    const payload = new TextEncoder().encode(JSON.stringify(body));
+    for (const handler of window.roomEvents.DataReceived)
+      void handler(payload, { kind: "AGENT" }, null, "report");
+  }, report);
+}
+
+/// Waits for every track the preflight acquired to end.
+async function tracksReleased(page) {
+  await page.waitForFunction(
+    () =>
+      window.acquiredTracks.length > 0 &&
+      window.acquiredTracks.every((track) => track.readyState === "ended"),
+    null,
+    { timeout: 5_000 },
+  );
+}
+
+/// Holds the join's track publishes until `window.releaseTracks()`, which is
+/// after the room has connected and before it is claimed.
+async function holdTrackPublishes(page) {
+  await page.evaluate(() => {
+    window.roomTrackHeld = new Promise((resolve) => {
+      window.releaseTracks = resolve;
+    });
+  });
+}
+
+// A report that arrives during the join is using its room, for a receipt or
+// a retry, so the join keeps it: a report being received leaves it itself,
+// and recovery is handed it for the retry. The interview behind that report
+// is over, and the join starts nothing for it: the tracks end, and no
+// integrity event, which goes out only from a claimed stream, is published.
+async function reportDuringJoin(t, report) {
+  if (!browser) {
+    t.skip("playwright chromium unavailable");
+    return null;
+  }
+  // Paused, so neither the receipt's bound nor the recovery's timers move
+  // the page on while it is checked.
+  const context = await browser.newContext();
+  t.after(() => context.close());
+  await context.clock.install();
+  const page = await interview(
+    t,
+    "problem=chargeback-pair-match",
+    (route) =>
+      route.fulfill({
+        json: grant("chargeback-pair-match", "report-during-join"),
+      }),
+    context,
+  );
+  await holdTrackPublishes(page);
+  await page.evaluate(() => {
+    window.roomPublishHeld = new Promise((resolve) => {
+      window.releasePublishes = resolve;
+    });
+  });
+  await preflight(page, { pause: true });
+  await page.waitForFunction(() => window.roomJoins.length === 1);
+  await deliverReport(page, report);
+  // The receipt is on its way and held.
+  await page.waitForFunction(() => window.roomPublishes?.includes("control"));
+  await page.evaluate(() => window.releaseTracks());
+  await tracksReleased(page);
+  assert.deepEqual(
+    await page.evaluate(() => ({
+      leaves: window.roomLeaves ?? 0,
+      started: window.roomPublishes.includes("integrity"),
+    })),
+    { leaves: 0, started: false },
+    "the room stays for the report, and nothing starts behind it",
+  );
+  return page;
+}
+
+// A complete report is still being received until its receipt has gone out,
+// and leaving the room then could drop that receipt. The delivered report
+// leaves the room itself afterwards.
+test("a report still being received when the join finishes keeps the room for its receipt", async (t) => {
+  const page = await reportDuringJoin(t, {
+    summary: "Delivered while the join was finishing.",
+  });
+  if (!page) return;
+  await page.evaluate(() => window.releasePublishes());
+  // Past the receipt's 250 ms to leave.
+  await page.clock.runFor(1_000);
+  await page.waitForFunction(() => (window.roomLeaves ?? 0) === 1, null, {
+    timeout: 5_000,
+  });
+});
+
+// The receipt goes out over the data channel and need not wait for the join.
+// Once it is out, `receiveReport` has left this room, while the report stays
+// claimed until its history save settles. A join finishing then must not put
+// the left room back, or leaving the report would disconnect it again.
+test("a join finishing after a report's receipt went out does not take the room back", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const context = await browser.newContext();
+  t.after(() => context.close());
+  await context.clock.install();
+  let save;
+  const saved = new Promise((resolve) => {
+    save = resolve;
+  });
+  t.after(() => save());
+  await context.route("**/api/reports", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    await saved;
+    await route.fulfill({ json: {} });
+  });
+  await context.route(`${base}/`, (route) =>
+    route.fulfill({ contentType: "text/html", body: "<p>Lobby</p>" }),
+  );
+  const page = await interview(
+    t,
+    "problem=chargeback-pair-match",
+    (route) =>
+      route.fulfill({
+        json: grant("chargeback-pair-match", "receipt-before-join"),
+      }),
+    context,
+  );
+  await holdTrackPublishes(page);
+  await preflight(page, { pause: true });
+  await page.waitForFunction(() => window.roomJoins.length === 1);
+  await deliverReport(page, { summary: "Delivered before the join finished." });
+  await page.locator("#report-modal").waitFor({ state: "visible" });
+  // The receipt is hashed before it is published. Wait for the publish, so
+  // the clock below moves the receipt on rather than running out its bound.
+  await page.waitForFunction(() => window.roomPublishes?.includes("control"));
+  // Past the receipt's 250 ms to leave: `receiveReport` then leaves the room.
+  await page.clock.runFor(1_000);
+  await page.waitForFunction(() => (window.roomLeaves ?? 0) === 1, null, {
+    timeout: 5_000,
+  });
+  // Leaving navigates away, so its disconnects are counted where they last.
+  await page.evaluate(() => {
+    const room = window.LivekitClient.Room.prototype;
+    const leave = room.disconnect;
+    room.disconnect = function disconnect() {
+      const leaves = Number(sessionStorage.getItem("leftAfterReport") ?? 0);
+      sessionStorage.setItem("leftAfterReport", String(leaves + 1));
+      return leave.call(this);
+    };
+  });
+  await page.evaluate(() => window.releaseTracks());
+  await tracksReleased(page);
+  save();
+  await page.locator("#done:not([disabled])").waitFor();
+  await page.locator("#done").click();
+  await page.waitForURL(`${base}/`);
+  assert.equal(
+    await page.evaluate(() => sessionStorage.getItem("leftAfterReport")),
+    null,
+    "leaving finds no room to disconnect again",
+  );
+});
+
+// Once the room is claimed, the join still publishes its integrity events. An
+// end there has already asked the interviewer for a report, so the start
+// stops without leaving the room: the report and leave paths own it now.
+test("Practice ended while its join publishes integrity events keeps the room for the report", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  // Paused, so no ending timer can move the page on while the start settles.
+  const context = await browser.newContext();
+  t.after(() => context.close());
+  await context.clock.install();
+  const page = await interview(
+    t,
+    "problem=chargeback-pair-match",
+    (route) =>
+      route.fulfill({
+        json: grant("chargeback-pair-match", "ended-in-integrity"),
+      }),
+    context,
+  );
+  await page.evaluate(() => {
+    window.roomPublishHeld = new Promise((resolve) => {
+      window.releasePublishes = resolve;
+    });
+  });
+  await preflight(page, { pause: true });
+  await page.waitForFunction(() => window.roomPublishes?.includes("integrity"));
+  await page.locator("#end").click();
+  await page.locator("#ending-overlay:not([hidden])").waitFor();
+  await page.waitForFunction(() => window.roomPublishes.includes("control"));
+  await page.evaluate(() => window.releasePublishes());
+  // SESSION_START, MEDIA_PREFLIGHT_PASSED and CAMERA_NOT_USED: the join is
+  // done once the third is out, and the start then stops at its check.
+  await page.waitForFunction(
+    () =>
+      window.roomPublishes.filter((topic) => topic === "integrity").length >= 3,
+  );
+  await page.evaluate(() => new Promise((resolve) => queueMicrotask(resolve)));
+  assert.equal(
+    await page.evaluate(() => window.roomLeaves ?? 0),
+    0,
+    "the room stays for the report the end asked for",
+  );
+  assert.equal(
+    await page.evaluate(() => window.roomPublishes.includes("code_update")),
+    false,
+    "the start does not go on to publish the editor",
+  );
+});
+
+// A report can land while the join is still publishing those events. It has
+// stopped the monitors by then, and recovery keeps the room for its retry,
+// so a heartbeat restarted behind it would go on publishing to that room.
+test("a report arriving while the join publishes integrity events starts no monitor behind it", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  // Paused, so the heartbeat only beats when the clock is moved below.
+  const context = await browser.newContext();
+  t.after(() => context.close());
+  await context.clock.install();
+  const page = await interview(
+    t,
+    "problem=chargeback-pair-match",
+    (route) =>
+      route.fulfill({
+        json: grant("chargeback-pair-match", "report-in-integrity"),
+      }),
+    context,
+  );
+  await page.evaluate(() => {
+    window.roomPublishHeld = new Promise((resolve) => {
+      window.releasePublishes = resolve;
+    });
+  });
+  await preflight(page, { pause: true });
+  await page.waitForFunction(() => window.roomPublishes?.includes("integrity"));
+  await deliverReport(page, {
+    incomplete: true,
+    summary: "503",
+    reportRecovery: { expiresInSeconds: 300, retryAfterSeconds: 30 },
+  });
+  await page.waitForFunction(
+    () =>
+      document.querySelector("#ending-title").textContent ===
+      "Evaluation temporarily unavailable",
+    null,
+    { timeout: 5_000 },
+  );
+  await page.evaluate(() => window.releasePublishes());
+  const integrity = () =>
+    page.evaluate(
+      () =>
+        window.roomPublishes.filter((topic) => topic === "integrity").length,
+    );
+  // SESSION_START, MEDIA_PREFLIGHT_PASSED and CAMERA_NOT_USED.
+  await page.waitForFunction(
+    () =>
+      window.roomPublishes.filter((topic) => topic === "integrity").length >= 3,
+  );
+  const settled = await integrity();
+  // Two heartbeat periods, short of the recovery's 30 s retry.
+  await page.clock.runFor(12_000);
+  assert.equal(await integrity(), settled, "no heartbeat behind the report");
+});
+
+// The interviewer can end the session itself, so a report may arrive while
+// the join is still publishing tracks. One that offers recovery needs this
+// room for its retry.
+test("a report arriving while the join publishes tracks keeps the room for recovery", async (t) => {
+  const page = await reportDuringJoin(t, {
+    incomplete: true,
+    summary: "503",
+    reportRecovery: { expiresInSeconds: 300, retryAfterSeconds: 30 },
+  });
+  if (!page) return;
+  assert.equal(
+    await page.locator("#ending-title").textContent(),
+    "Evaluation temporarily unavailable",
+  );
+  // The retry goes out through the room the join handed over.
+  const controls = () =>
+    page.evaluate(
+      () => window.roomPublishes.filter((topic) => topic === "control").length,
+    );
+  const before = await controls();
+  await page.clock.runFor(31_000);
+  await page.locator("#retry-report:not([hidden]):not([disabled])").click();
+  await page.waitForFunction(
+    (count) =>
+      window.roomPublishes.filter((topic) => topic === "control").length >
+      count,
+    before,
+    { timeout: 5_000 },
+  );
+});
+
+// An end before the join leaves the offline summary's timer running, since no
+// interviewer was in a room to answer it. A recoverable report arriving
+// during the join outranks that summary, which would otherwise draw over the
+// recovery and leave the room its retry needs.
+test("an end before the join leaves a recovering report in place of the offline summary", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  // Paused, so the summary's 300 ms runs only when the clock is moved below.
+  const context = await browser.newContext();
+  t.after(() => context.close());
+  await context.clock.install();
+  const page = await interview(
+    t,
+    "problem=chargeback-pair-match",
+    (route) =>
+      route.fulfill({
+        json: grant("chargeback-pair-match", "recovery-over-summary"),
+      }),
+    context,
+  );
+  await holdTrackPublishes(page);
+  await preflight(page, { pause: true });
+  await page.waitForFunction(() => window.roomJoins.length === 1);
+  await page.locator("#end").click();
+  await page.locator("#ending-overlay:not([hidden])").waitFor();
+  await deliverReport(page, {
+    incomplete: true,
+    summary: "503",
+    reportRecovery: { expiresInSeconds: 300, retryAfterSeconds: 30 },
+  });
+  await page.waitForFunction(
+    () =>
+      document.querySelector("#ending-title").textContent ===
+      "Evaluation temporarily unavailable",
+    null,
+    { timeout: 5_000 },
+  );
+  await page.clock.runFor(1_000);
+  assert.equal(
+    await page.locator("#ending-title").textContent(),
+    "Evaluation temporarily unavailable",
+  );
+  assert.equal(await page.locator("#report-modal").isHidden(), true);
+  await page.evaluate(() => window.releaseTracks());
+  await tracksReleased(page);
+  assert.equal(
+    await page.evaluate(() => window.roomLeaves ?? 0),
+    0,
+    "the room stays for the retry",
+  );
+});
+
+// On a running clock the offline summary can be on screen before a slow join
+// finishes, and a report the interviewer sends then is ignored. It holds
+// nothing up: the join still leaves its room and starts nothing.
+test("a report arriving after the offline summary does not keep a slow join's room", async (t) => {
+  const page = await interview(t, "problem=chargeback-pair-match", (route) =>
+    route.fulfill({
+      json: grant("chargeback-pair-match", "report-after-summary"),
+    }),
+  );
+  if (!page) return;
+  await holdTrackPublishes(page);
+  await preflight(page);
+  await page.waitForFunction(() => window.roomJoins.length === 1);
+  await page.locator("#end").click();
+  await page.locator("#report-modal").waitFor({ state: "visible" });
+  await deliverReport(page, { summary: "Too late for the summary." });
+  await page.waitForFunction(() => window.roomPublishes?.includes("control"));
+  await page.evaluate(() => window.releaseTracks());
+  await tracksReleased(page);
+  assert.deepEqual(
+    await page.evaluate(() => ({
+      leaves: window.roomLeaves ?? 0,
+      started: (window.roomPublishes ?? []).includes("integrity"),
+    })),
+    { leaves: 1, started: false },
+    "an ignored report claims nothing, so the room is still the join's to leave",
+  );
+});
 
 /// A context whose interview page remembers `language` from an earlier start.
 async function rememberingContext(t, language, runtimeConfig) {

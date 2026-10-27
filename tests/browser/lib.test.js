@@ -3522,7 +3522,11 @@ test("only the first report copy claims the page, before its receipt is handed o
     "const first = claimReport(payload, receivedReports);",
     accepted,
   );
-  const guarded = connect.indexOf("if (first) {", claim);
+  // A page already showing a report draws nothing more, so it claims nothing.
+  const guarded = connect.indexOf(
+    'if (first && state.phase !== "report") {',
+    claim,
+  );
   const handoff = connect.indexOf("await receiveReportDelivery(", guarded);
   assert.ok(accepted >= 0 && claim > accepted && guarded > claim);
   // Everything that hides the ways out sits inside the first-copy branch.
