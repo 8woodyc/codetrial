@@ -16,6 +16,7 @@ import {
   loadCategoryMap,
   loadJudge,
   loadPageMap,
+  loadPageMapWithin,
   loadProblem,
 } from "./problem-data.js";
 import { downloadMarkdown, reportFilename } from "./download.js";
@@ -81,6 +82,7 @@ import {
   resultsMarkup,
   runnerStatusMarkup,
 } from "./render.js";
+import { loadOriginalProblem } from "./report-original-problem.js";
 import {
   acceptsReport,
   CANDIDATE_CASE_LIMIT,
@@ -508,6 +510,7 @@ const state = {
   categoryComparison: null,
   categoryComparisonReady: Promise.resolve(),
   downloadingReport: false,
+  reportSaveComplete: false,
   reportReceiving: false,
   /// Set when the interviewer's report reached this page and could not be
   /// rendered. The offline summary that follows is written from what this page
@@ -4109,6 +4112,7 @@ function stopEndingClock() {
 }
 
 function leaveRoom() {
+  if (state.downloadingReport) return;
   if (state.phase === "report_recovery") {
     reportRecovery.finish();
     return;
@@ -4240,6 +4244,7 @@ function renderReport() {
   stopEndingClock();
   clearCandidateCases();
   state.categoryComparison = null;
+  state.reportSaveComplete = false;
   nodes.ending.hidden = true;
   nodes.report.hidden = false;
   nodes.report.innerHTML = reportMarkup({
@@ -4255,6 +4260,7 @@ function renderReport() {
     categoryComparison: state.categoryComparison,
   });
   mountFinalCodeCopy(nodes.report, currentCode());
+  void loadOriginalProblem(nodes.report, problem.page);
   mountBehavioralReview(nodes.report, state.transcript.values());
   state.categoryComparisonReady = updateCategoryComparison(state.report);
 }
@@ -4345,7 +4351,8 @@ function renderReportSaveStatus(result) {
   const status = reportSaveStatus(result);
   node.textContent = status.message;
   node.className = status.className;
-  nodes.report.querySelector("#done").disabled = false;
+  state.reportSaveComplete = true;
+  nodes.report.querySelector("#done").disabled = state.downloadingReport;
 }
 
 // Overlapping saves may finish out of order. Only the newest one may decide
@@ -4418,30 +4425,43 @@ async function saveHistory(report = state.report) {
 
 async function downloadReport() {
   const button = nodes.report.querySelector?.("#download-report");
+  const done = nodes.report.querySelector?.("#done");
   if (state.downloadingReport || button?.disabled) return;
   state.downloadingReport = true;
   if (button) button.disabled = true;
+  if (done) done.disabled = true;
   let timer;
   try {
-    await Promise.race([
-      state.categoryComparisonReady.catch(() => {}),
-      new Promise((resolve) => {
-        timer = setTimeout(resolve, requestTimeoutMs);
-      }),
+    const [problemPages] = await Promise.all([
+      loadPageMapWithin(requestTimeoutMs),
+      Promise.race([
+        state.categoryComparisonReady.catch(() => {}),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, requestTimeoutMs);
+        }),
+      ]),
     ]);
     const at = new Date();
-    downloadMarkdown(buildMarkdown(at), reportFilename(problem.page, at));
+    downloadMarkdown(
+      buildMarkdown(at, problemPages),
+      reportFilename(problem.page, at),
+    );
   } finally {
     clearTimeout(timer);
     state.downloadingReport = false;
     if (button) button.disabled = false;
+    // Saving and exporting can finish in either order. Both must settle
+    // before Done can leave the report without interrupting either one.
+    if (done) done.disabled = !state.reportSaveComplete;
   }
 }
 
-function buildMarkdown(at) {
+function buildMarkdown(at, problemPages) {
   return reportMarkdown({
     report: state.report,
     problemTitle: problem.title,
+    problemPage: problem.page,
+    problemPages,
     language: state.language,
     code: currentCode(),
     board: finalBoardImage(),

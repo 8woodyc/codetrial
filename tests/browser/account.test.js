@@ -97,7 +97,7 @@ test("interview history routes through the shared persistence helper", () => {
   assert.match(functionBody(script, "renderReport"), /saveResult: null/);
   assert.match(
     functionBody(script, "renderReportSaveStatus"),
-    /querySelector\("#done"\)\.disabled = false/,
+    /querySelector\("#done"\)\.disabled = state\.downloadingReport/,
   );
   assert.match(
     functionBody(script, "renderReport"),
@@ -1634,6 +1634,7 @@ test("updateCategoryComparison renders category progress and degrades cleanly wh
         "climbing-stairs": { page: "step-ways", title: "Step Ways" },
       };
     },
+    loadPageMapWithin: async () => null,
     compareCategoryAttempt,
     categoryComparisonMarkup,
     reportMarkdown,

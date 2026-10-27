@@ -88,8 +88,9 @@ export async function loadProblem(page) {
 
 /// The published id of each problem, with its page, scenario title and
 /// published title. Fetched only by the paths that start from a published id
-/// or name: an old link, history saved before pages had names, and the lobby's
-/// opt-in toggle. Cached for the page's lifetime once it arrives; a failed fetch
+/// or name: an old link, history saved before pages had names, the lobby's
+/// opt-in toggle, and a completed report opened or downloaded after an interview.
+/// Cached for the page's lifetime once it arrives; a failed fetch
 /// is forgotten, so a dropped connection costs one lookup rather than every
 /// later one on the page.
 export function loadPageMap() {
@@ -98,6 +99,22 @@ export function loadPageMap() {
     throw error;
   });
   return pageMap;
+}
+
+/// History and exports can proceed without the optional page map. Bound only
+/// this caller's wait; other consumers may still need the shared lookup.
+export async function loadPageMapWithin(ms) {
+  let timer;
+  try {
+    return await Promise.race([
+      loadPageMap().catch(() => null),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(null), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /// The page-to-topic lookup is absent from the initial lobby HTML because it
