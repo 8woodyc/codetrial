@@ -352,6 +352,7 @@ const SETUP_PAGE: &str = r#"<!doctype html>
     <fieldset>
       <legend>Google AI <span class="requirement">Optional</span></legend>
       <p class="group-note">Add a key if this server will host the interviewer.</p>
+      <p class="group-note">Each Gemini Live turn is billed on the whole context it runs in, to the Google AI project of whichever configured key it uses: this key or an exported key list, unless the interview's LiveKit provider sets Google keys of its own. Retained audio and images cost again on every later turn. The reports, interim reviews and phase judge draw from the same configured keys and bill the project of whichever key each request uses.</p>
       <div class="field">
         <label for="googleApiKey">Google API Key</label>
         <input id="googleApiKey" name="googleApiKey" type="password">

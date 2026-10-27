@@ -128,6 +128,19 @@ microphone's own voice level on every frame or from provider speech detection,
 each Live socket therefore receives one presence frame and no more; during speech frames keep the
 five-second interval. Board images take their own path and are unaffected.
 
+There is no text-only interviewer. Every conversational Live model refuses
+`responseModalities: ["TEXT"]` with close code 1007, as tried on 2026-10-26
+against each model a key lists for `bidiGenerateContent`, so dropping the spoken
+reply is not a setting of the Live session. A text interviewer would be a
+per-turn `generateContent` path outside it, which would have to rebuild the
+endpointing, barge-in and resumption that `src/livekit.rs` relies on, and its
+saving is unmeasured: the candidate's audio is still sent, and such a path
+resends the context and tool declarations every turn. What an interview spends
+is bounded instead by the ceiling in [interview length](interview-length.md)
+and the deadline the agent holds, and the notice before Start says who pays.
+This is revisited when a Live model accepts a text reply, or when a matched
+comparison measures a per-turn path spending less for the same interview.
+
 Coding example drawings are opt-in in the lobby and disabled by default.
 The choice is carried in signed token metadata and applies to the Live tool
 declarations, instructions, interim and final report policy, and board stream
@@ -333,6 +346,41 @@ explicitly promising no personalized evaluation. An invalid or exhausted report
 says that no scores or verdict were created. Browser fallback may summarize
 local test progress only for a session that never reached an interviewer, and
 never presents canned feedback as an agent evaluation.
+
+Before an interview on a server that hosts its own interviewer, the lobby says
+above Start that each Gemini Live turn is billed on the whole context it runs
+in, to the Google AI project of each key used. The keys are the global
+ones, or the room's LiveKit provider's when it sets Google keys of its own,
+which replace the global ones for its rooms, and with a key list spanning
+projects a failover can move to another project (see
+[Gemini credential failover](providers.md#gemini-credential-failover)). It also
+names what reaches Gemini Live besides the text of the interview. That text is
+the instructions and, in a coding interview, the candidate's code, which
+reaches the model as text and is resent on a reconnect, plus, outside a
+coding-only session, any resume or job description snippets the candidate
+selected and agreed to send, built into the instructions of every generation.
+Besides it the notice names voice and any camera video for a coding interview
+with candidate video enabled, since a skipped camera or a hand-off to the
+presenter sends none, voice for one without, and voice and board images at a
+whiteboard, where the camera is off but every board stays in the context as a
+realtime image (see
+[What a whiteboard interview adds](#what-a-whiteboard-interview-adds)). A coding
+interview with example drawing checked also names the drawing, sent whenever
+Jim reads it: each `read_board` call sends the current example JPEG, which then
+stays in the context like any other image. The Setup page says the same beside
+the Google API key, naming the project of whichever configured key a turn
+uses, from that key or an exported key list, unless the interview's LiveKit
+provider sets Google keys of its own, and that the final report, the
+quiet-pause interim reviews and the phase judge draw from the same configured
+keys and bill the project of whichever key each request uses.
+The report requests fail over apart from Live, so with a list spanning projects
+a report can bill a different project than the interview it reviews.
+`/api/session` reports `candidateVideo` from the local agent config and `null`
+on the web half of a split deployment, whose agent's settings it cannot see;
+the lobby shows no notice while it is `null`, including before the answer and
+when the request fails. That is because the page cannot tell who pays, not
+because nothing is billed: Start stays enabled, and an interview started then
+may still be.
 
 ## Operating it
 
