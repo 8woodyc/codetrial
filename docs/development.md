@@ -101,14 +101,15 @@ sudo apt install libwebkit2gtk-4.1-dev   # Linux: clippy and tests of desktop/
 
 CI runs `scripts/test.sh rust`, `scripts/test.sh portable` and
 `scripts/test.sh browser` in parallel, with fail-fast disabled so a failure in
-one lane does not hide the others. The browser lane runs as two jobs, each with
-a `BROWSER_SHARD` slice (`1/2`, `2/2`) that splits the suites by source size;
-set it locally to run one slice. Clippy and Rust tests share the Rust lane's
-build cache; the desktop app's clippy and tests run in the same lane against
-their own lockfile and cache, after it installs WebKitGTK. Formatting, Python
-and shell checks run in the portable lane; Node browser tests have their own
-lane, except the face-detector suite,
-which needs the Rust binary and runs after its build. All lanes fetch and
+one lane does not hide the others. The browser lane runs as three jobs, each
+with a `BROWSER_SHARD` slice (`1/3`, `2/3`, `3/3`) that splits the suites by
+source size; set it locally to run one slice. Clippy and Rust tests share the
+Rust lane's build cache; the desktop app's clippy and tests run in the same
+lane against their own lockfile and cache. The Rust lane installs both crates'
+system packages in one apt transaction. Formatting, Python and shell checks
+run in the portable lane; Node browser tests have their own lane, except the
+face-detector suite, which needs the Rust binary and runs after its build. All
+lanes fetch and
 verify vendor assets; each restores the vendored-asset cache, and only the
 portable lane saves it, after its gates pass. Each lane has its own job
 timeout: 45 minutes for Rust, 20 for the others. The Rust and browser lanes
