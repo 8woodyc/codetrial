@@ -570,7 +570,12 @@ impl DeliveryProvider for GoogleDelivery {
                 return Ok(existing);
             }
 
+            // Each preceding provider call may have taken long enough to cross
+            // the expiry margin. Recheck before the next authenticated call
+            // instead of carrying one token through the whole transfer.
+            let token = self.access_token().await?;
             let total = self.object_size(gcs_object, &token).await?;
+            let token = self.access_token().await?;
             let session = self.upload_session(filename, recording_id, &token).await?;
 
             let mut sent = 0u64;
@@ -584,6 +589,7 @@ impl DeliveryProvider for GoogleDelivery {
                     return Err("the upload outran its deadline".to_string());
                 }
                 let end = (sent + UPLOAD_CHUNK_BYTES).min(total) - 1;
+                let token = self.access_token().await?;
                 let chunk = self.object_range(gcs_object, &token, sent, end).await?;
                 let last = sent + chunk.len() as u64 - 1;
 
