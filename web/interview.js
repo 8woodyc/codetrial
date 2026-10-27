@@ -3008,11 +3008,7 @@ function applyLanguages(spec) {
     ...nodes.preflightLanguage.options,
   ]) {
     const label = option.dataset.label ?? option.textContent;
-    const availability = harnessAvailability(
-      option.dataset.language,
-      spec,
-      editorOptions.execution,
-    );
+    const availability = languageAvailability(option.dataset.language, spec);
     option.dataset.label = label.replace(/ \(unavailable\)$/, "");
     option.textContent = availability
       ? option.dataset.label + " (unavailable: " + availability.reason + ")"
@@ -3021,9 +3017,26 @@ function applyLanguages(spec) {
     option.disabled = availability !== null;
   }
   nodes.languageSelect.title =
-    harnessAvailability(state.language, spec, editorOptions.execution)
-      ?.message ?? "";
+    languageAvailability(state.language, spec)?.message ?? "";
   updateRunAvailability();
+}
+
+/// Before a Strict assignment there is no judge to wait for, so the usual
+/// "waiting for judge" and its advice to reload would invite a wait or a
+/// reload that changes nothing. The assigned problem decides C instead.
+function languageAvailability(language, spec) {
+  const availability = harnessAvailability(
+    language,
+    spec,
+    editorOptions.execution,
+  );
+  if (strict && !problem && availability?.reason === "waiting for judge")
+    return {
+      message:
+        "The assigned problem decides whether C is offered. If it is, C appears in the editor's language menu after you join.",
+      reason: "decided by assigned problem",
+    };
+  return availability;
 }
 
 function setLanguage(language) {

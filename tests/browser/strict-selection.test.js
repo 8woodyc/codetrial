@@ -96,10 +96,18 @@ async function consentContext(t) {
   return { context, consents };
 }
 
-async function preflight(page) {
+/// With `pause`, the page's clock stops once Start is ready and before it is
+/// pressed, so no timer the start sets can expire on its own.
+async function preflight(page, { pause = false } = {}) {
   await page.locator("#audio-heard").click();
   await page.locator("#camera-skip").click();
   try {
+    if (pause) {
+      await page
+        .locator("#audio-check-join:not([disabled])")
+        .waitFor({ timeout: 10000 });
+      await pauseClock(page);
+    }
     await page.locator("#audio-check-join").click({ timeout: 10000 });
   } catch (error) {
     throw new Error(await page.locator("#audio-check-status").textContent(), {
@@ -134,48 +142,87 @@ for (const [requested, expected] of [
   });
 }
 
-for (const action of ["wait", "edit", "choose", "run", "end"]) {
-  test(`Strict delayed judge language restoration respects ${action}`, async (t) => {
-    if (!browser) return t.skip("playwright chromium unavailable");
-    let releaseJudge;
-    const held = new Promise((resolve) => {
-      releaseJudge = resolve;
-    });
-    t.after(() => releaseJudge());
-    const context = await browser.newContext();
-    t.after(() => context.close());
-    if (action === "end") await context.clock.install();
-    await context.route("**/runtime-config.js", (route) =>
+/// A context with compiled runs on, so C is withheld only for want of a judge,
+/// and judges held until `release` is called.
+async function heldJudgeContext(t) {
+  let release;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  t.after(() => release());
+  const context = await browser.newContext();
+  t.after(() => context.close());
+  await context.route("**/runtime-config.js", (route) =>
+    route.fulfill({
+      contentType: "text/javascript",
+      body: DEFAULT_RUNTIME_CONFIG.replace(
+        "ENABLED = false",
+        "ENABLED = true",
+      ).replace('BASE_URL = ""', 'BASE_URL = "https://godbolt.org"'),
+    }),
+  );
+  await context.route("**/judges/*.json", async (route) => {
+    await held;
+    await route.continue();
+  });
+  return { context, release };
+}
+
+test("Strict keeps the token's language when the assigned judge lands late", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const { context, release } = await heldJudgeContext(t);
+  const page = await interview(
+    t,
+    "selection=strict&language=c",
+    (route) =>
       route.fulfill({
-        contentType: "text/javascript",
-        body: DEFAULT_RUNTIME_CONFIG.replace(
-          "ENABLED = false",
-          "ENABLED = true",
-        ).replace('BASE_URL = ""', 'BASE_URL = "https://godbolt.org"'),
+        json: grant("chargeback-pair-match", "delayed-language-assignment"),
       }),
-    );
-    await context.route("**/judges/*.json", async (route) => {
-      await held;
-      await route.continue();
-    });
+    context,
+  );
+  await preflight(page);
+  await page.locator("#editor:not([disabled])").waitFor();
+  assert.equal(await page.locator("#language-select").inputValue(), "python");
+  const code = await page.locator("#editor").inputValue();
+  // The token named Python, so a judge enabling C afterwards does not switch
+  // to it even though the candidate only waited.
+  release();
+  await page.waitForFunction(
+    () =>
+      !document.querySelector('#language-select option[value="c"]').disabled,
+  );
+  assert.equal(await page.locator("#language-select").inputValue(), "python");
+  assert.equal(await page.locator("#editor").inputValue(), code);
+});
+
+// A Practice start that prefers C waits a bounded turn for the judge before
+// asking for a token, with the workspace already open. A judge landing in
+// that turn switches to C only if the candidate has not committed to a tab.
+for (const action of ["wait", "edit", "choose", "run", "end"]) {
+  test(`Practice judge landing during the C wait respects ${action}`, async (t) => {
+    if (!browser) return t.skip("playwright chromium unavailable");
+    const { context, release } = await heldJudgeContext(t);
+    await context.clock.install();
     const page = await interview(
       t,
-      "selection=strict&language=c",
+      "problem=chargeback-pair-match&language=c",
       (route) =>
         route.fulfill({
-          json: grant("chargeback-pair-match", "delayed-language-assignment"),
+          json: grant("chargeback-pair-match", "practice-c-wait"),
         }),
       context,
     );
-    await preflight(page);
-    await page.locator("#editor:not([disabled])").waitFor();
+    let tokens = 0;
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/api/token") tokens++;
+    });
     assert.equal(await page.locator("#language-select").inputValue(), "python");
-    assert.equal(
-      await page.locator('#language-select option[value="c"]').isDisabled(),
-      true,
-    );
-    let expected = "python";
-    let code = await page.locator("#editor").inputValue();
+    // Paused before Start, the bounded wait cannot expire before the judge is
+    // released, however slow the runner.
+    await preflight(page, { pause: true });
+    await page.locator("#audio-check").waitFor({ state: "hidden" });
+    let expected = action === "wait" ? "c" : "python";
+    let code = null;
     if (action === "edit") {
       code = "# Keep this candidate edit.\n";
       await page.locator("#editor").fill(code);
@@ -190,24 +237,30 @@ for (const action of ["wait", "edit", "choose", "run", "end"]) {
         "Running...",
       );
     } else if (action === "end") {
-      // With no interviewer here, the offline summary replaces the ending
-      // overlay on a timer, and the report phase refuses language changes on
-      // its own. The paused clock keeps the judge landing during the ending.
-      await pauseClock(page);
       await page.locator("#end").click();
       await page.locator("#ending-overlay:not([hidden])").waitFor();
     }
-    // The token named Python, so a judge enabling C afterwards does not
-    // switch to it even when the candidate only waited.
-    releaseJudge();
+    assert.equal(tokens, 0, "still inside the C wait");
+    const token = action === "end" ? null : page.waitForRequest("**/api/token");
+    release();
     await page.waitForFunction(
       () =>
         !document.querySelector('#language-select option[value="c"]').disabled,
     );
-    assert.equal(await page.locator("#language-select").inputValue(), expected);
-    if (action === "end")
-      assert.equal(await page.locator("#ending-overlay").isVisible(), true);
-    assert.equal(await page.locator("#editor").inputValue(), code);
+    await page.waitForFunction(
+      (language) =>
+        document.querySelector("#language-select").value === language,
+      expected,
+    );
+    if (code !== null)
+      assert.equal(await page.locator("#editor").inputValue(), code);
+    if (action === "wait")
+      assert.match(
+        await page.locator("#editor").inputValue(),
+        /matchDisputedCharge\(/,
+      );
+    if (token) assert.equal((await token).postDataJSON().language, expected);
+    else assert.equal(await page.locator("#ending-overlay").isVisible(), true);
   });
 }
 
@@ -256,10 +309,15 @@ for (const [remembered, picked, expected] of [
       },
       context,
     );
+    const c = page.locator('#preflight-language option[value="c"]');
+    assert.equal(await c.isDisabled(), true);
+    // No judge is coming before assignment, so the label names what decides
+    // C rather than a wait or a reload that would change nothing.
     assert.equal(
-      await page.locator('#preflight-language option[value="c"]').isDisabled(),
-      true,
+      await c.textContent(),
+      "C (unavailable: decided by assigned problem)",
     );
+    assert.doesNotMatch(await c.getAttribute("title"), /reload|waiting/i);
     if (picked) await page.locator("#preflight-language").selectOption(picked);
     assert.equal(
       await page.locator("#preflight-language").inputValue(),

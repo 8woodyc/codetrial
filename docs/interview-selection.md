@@ -75,7 +75,8 @@ A direct Strict URL may request a coding language with `language`, just as in
 Practice; without one, the language the candidate last started an interview in
 is preselected. The problem arrives with the token, so the Before you join menu
 offers what every problem can run: C, the one language a problem can withhold,
-waits for a judge and is withheld. A requested or remembered C, or no usable
+is withheld, labeled as decided by the assigned problem rather than as waiting
+for a judge that is not coming. A requested or remembered C, or no usable
 preference, starts in Python. The token names that language and the assigned
 problem opens in it; a delayed judge may enable C in the editor tabs but does
 not switch to it.
