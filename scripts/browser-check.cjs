@@ -1125,6 +1125,10 @@ async function isolateRustAgent(
           return {
             state: mount?.dataset.avatarState ?? null,
             canvases: mount?.querySelectorAll("canvas").length ?? 0,
+            boxHidden: mount?.hidden ?? false,
+            banner:
+              document.querySelector("#presence-banner")?.innerText.trim() ??
+              "",
             fallbackVisible:
               !!fallback &&
               fallback.getClientRects().length > 0 &&
@@ -1166,7 +1170,14 @@ async function isolateRustAgent(
           });
         view = await snapshot();
       }
-      const { state: avatarState, canvases, fallbackVisible, note } = view;
+      const {
+        state: avatarState,
+        canvases,
+        boxHidden,
+        banner,
+        fallbackVisible,
+        note,
+      } = view;
       if (avatarState === "ready") {
         if (canvases !== 1)
           throw new Error(
@@ -1182,11 +1193,11 @@ async function isolateRustAgent(
           throw new Error("the required avatar was retired under load");
         if (canvases !== 0)
           throw new Error("a degraded avatar must release its canvas");
-        if (!fallbackVisible)
-          throw new Error("a degraded avatar must show the voice-only panel");
-        if (!note.includes("keep the interview responsive"))
+        if (!boxHidden)
+          throw new Error("a degraded avatar must give its box back");
+        if (!banner.includes("keep the interview responsive"))
           throw new Error(
-            `a degraded avatar must explain the performance fallback, got: ${note}`,
+            `a degraded avatar must explain the performance fallback in the presence banner, got: ${banner}`,
           );
       } else if (avatarState === "unavailable") {
         if (requireModel && !modelDelivered)

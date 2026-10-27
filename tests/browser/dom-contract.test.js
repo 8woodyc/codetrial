@@ -894,14 +894,53 @@ test("the presence banner ranks its owners instead of racing them", () => {
   );
   // Every owner keeps a slot, so a warning raised behind a higher-ranked one is
   // deferred rather than discarded.
+  assert.match(read("lib.js"), /slots\[source\] = text \|\| "";/);
   assert.match(
     functionBody(script, "setBanner"),
-    /banners\[source\] = text \|\| "";/,
+    /bannerBoard\.set\(source, text\);/,
   );
   // The flag-and-deferred-field mechanism this replaced is gone entirely.
   assert.doesNotMatch(
     script,
     /interviewerBanner|faceBanner|paintPresenceBanner/,
+  );
+});
+
+// The avatar going quiet is news, not a fault: it is the lowest owner, so a
+// face or connection warning is never hidden behind it, and it is drawn yellow.
+test("the avatar notice is the lowest banner owner and drawn as a notice", () => {
+  const script = interviewSource();
+  const rank = script.match(/const BANNER_RANK = \{([^}]*)\}/)[1];
+  const ranks = Object.fromEntries(
+    [...rank.matchAll(/(\w+):\s*(\d+)/g)].map(([, owner, value]) => [
+      owner,
+      Number(value),
+    ]),
+  );
+  assert.equal(ranks.avatar, Math.min(...Object.values(ranks)));
+  assert.equal(
+    Object.values(ranks).filter((value) => value === ranks.avatar).length,
+    1,
+    "no other owner ties with the avatar",
+  );
+  // The ordering, the one-shot clock and the unchanged-text guard run in
+  // lib.test.js; here the page only has to be wired to them.
+  assert.match(
+    script,
+    /createBannerBoard\(\{\s*ranks: BANNER_RANK,\s*notice: "avatar",/,
+  );
+  assert.match(script, /dataset\.tone = top === "avatar" \? "notice" : ""/);
+  assert.match(
+    script,
+    /if \(nodes\.presenceBanner\.textContent !== text\)\s*nodes\.presenceBanner\.textContent = text;/,
+  );
+  assert.match(
+    script,
+    /initAvatarStage\(\{[^}]*onRetired: \(message\) => setBanner\("avatar", message\)/,
+  );
+  assert.match(
+    read("styles.css"),
+    /\.presence-banner\[data-tone="notice"\]\s*\{[^}]*--notice-tint/,
   );
 });
 

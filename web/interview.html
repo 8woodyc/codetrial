@@ -845,7 +845,7 @@
         <div id="jim-avatar" class="jim-avatar" data-avatar-state="loading">
           <p id="jim-avatar-fallback" class="jim-avatar-fallback">
             <span class="jim-avatar-initial" aria-hidden="true">J</span>
-            <span id="jim-avatar-note" class="muted small" tabindex="-1"
+            <span id="jim-avatar-note" class="muted small"
               >Jim is here by voice.</span
             >
           </p>
@@ -929,10 +929,13 @@
           class="visually-hidden"
           role="status"
         ></span>
-        <!-- Announces the turn-off, manual or automatic, and nothing else. A
-             live region over the whole mount announced the canvas arriving
-             and the preflight-time "unavailable". An automatic turn-off that
-             moves focus to the note leaves this silent, so it is read once. -->
+        <!-- Announces the candidate's own Hide, and nothing else. A live
+             region over the whole mount announced the canvas arriving and the
+             preflight-time "unavailable". An automatic turn-off is announced
+             by the presence banner and leaves this silent, so it is read
+             once, except while #ending-overlay is open: the sidebar holding
+             the banner is inert then, so the retirement writes its sentence
+             here instead. Keep that write. -->
         <span
           id="jim-avatar-status"
           class="visually-hidden"

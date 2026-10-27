@@ -107,8 +107,8 @@ builds it: import the same vendored bundle, do not add an import map.
 | `loading` | the page is asking whether a model exists | neutral panel |
 | `ready` | a VRM is loaded and rendering | the canvas |
 | `unavailable` | no model, no WebGL, a load failure, or a load timeout | neutral panel, with the reason in `#jim-avatar-note` |
-| `degraded` | Jim's audio was arriving late, or the live render budget was exceeded | neutral voice-only panel with an explanation |
-| `stopped` | the interview ended, the room was left, or the candidate hid the avatar | neutral panel |
+| `degraded` | Jim's audio was arriving late, or the live render budget was exceeded | the box is removed and the yellow presence banner explains |
+| `stopped` | the interview ended, the room was left, or the candidate hid the avatar | the box is removed when the candidate hid it; neutral panel when the interview ended or the room was left |
 
 Only `ready` hides the neutral panel, so a state nobody has invented yet
 degrades to the panel rather than to an empty box.
@@ -404,12 +404,15 @@ unlabeled canvas announced to a screen reader is worse than a hidden one. A
 picture of a person whose whole useful content is "this is the interviewer"
 needs one sentence, not a live region. The one live region on the stage is
 `#jim-avatar-status`, a visually hidden `role="status"` that speaks when the
-candidate hides the avatar and when it is retired automatically. A manual Hide
-leaves focus on the button, which now reads Show avatar, so the same key brings
-the avatar back and the status region is what announces the change. An
-automatic retirement hides the button; if the button held focus, focus moves to
-the note and the status region stays silent, so the change is read once either
-way.
+candidate hides the avatar. A manual Hide leaves focus on the button, which now
+reads Show avatar, so the same key brings the avatar back and the status region
+is what announces the change. An automatic retirement is announced by the
+presence banner, an alert region, and the status region stays silent, so the
+change is read once. While the wait for the report is up the sidebar holding
+the banner is inert but the stage is not, since Jim may still be saying his
+closing lines, so the status region carries it there instead. It hides the
+button; if the button held focus, focus moves to the stage, since the box that
+would have held a note is removed.
 
 The render loop stops scheduling frames while the document is hidden, the stage
 is narrower than the breakpoint, or the preflight overlay covers it. It starts
@@ -468,7 +471,11 @@ renderer.
 
 Retiring the avatar cancels its frame callback, stops the stats poll, disposes
 the model and releases its audio analyser and context. Jim's audio playback and
-captions continue, and the neutral panel explains the change. It stays off
+captions continue, the avatar box is removed so it stops covering the editor,
+and the presence banner (yellow, lowest rank) explains the change. The banner
+shows it once, for ten seconds from when it is first on show, because it is
+news rather than a fault and the banner is an alert region that would otherwise
+announce it again each time a higher owner cleared. It stays off
 rather than repeatedly testing whether rendering can compete with audio again.
 The console records which signal fired and the number that decided it, as
 `codetrial avatar_playout_delayed 412ms` or `codetrial avatar_budget_exceeded
@@ -480,7 +487,7 @@ time once the preflight has closed, including while the model is still
 loading. Hiding, or leaving, during the load aborts the download and stops
 before the renderer is imported or a WebGL context is built, so the CPU the
 candidate asked for is not spent on a model that would only be disposed. After
-a Hide the button offers Show avatar, which loads the model and reattaches
+a Hide the box is removed, announced through the status region, and the button offers Show avatar, which loads the model and reattaches
 Jim's current audio analyser. A Hide that lands during the parse cannot stop
 it, because the renderer and its WebGL context already exist by then, so Show
 waits for that parse to settle and its model to be disposed before it starts

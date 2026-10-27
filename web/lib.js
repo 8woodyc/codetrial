@@ -29,6 +29,46 @@ export function languageLabel(value) {
   return Object.hasOwn(labels, value) ? labels[value] : value;
 }
 
+/// Which owner the one presence banner shows, and for how long. Each owner
+/// keeps its own slot, so a text raised behind a higher-ranked one is deferred
+/// rather than thrown away. `notice` names the one owner whose text is news and
+/// not a fault: the banner is an alert region, so left in its slot that text
+/// would come back, and be announced again, each time a higher owner cleared.
+/// It is shown once instead. The clock starts when it is first on show, not
+/// when it is raised, because a timer started behind a higher owner would run
+/// out unseen; covered by another owner after that, it has been delivered and
+/// is dropped. `paint` is told the owner on show and its text after every call.
+/// The timers are parameters only so a test can drive them.
+export function createBannerBoard({
+  ranks,
+  notice,
+  noticeMs,
+  paint,
+  setTimer = setTimeout,
+  clearTimer = clearTimeout,
+}) {
+  const slots = Object.fromEntries(Object.keys(ranks).map((key) => [key, ""]));
+  let noticeTimer = null;
+  const set = (source, text) => {
+    slots[source] = text || "";
+    const top = Object.keys(slots)
+      .filter((key) => slots[key])
+      .sort((left, right) => ranks[right] - ranks[left])[0];
+    if (top === notice && noticeTimer === null) {
+      noticeTimer = setTimer(() => {
+        noticeTimer = null;
+        set(notice, "");
+      }, noticeMs);
+    } else if (top !== notice && noticeTimer !== null) {
+      clearTimer(noticeTimer);
+      noticeTimer = null;
+      slots[notice] = "";
+    }
+    paint(top, top ? slots[top] : "");
+  };
+  return { set };
+}
+
 export function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }

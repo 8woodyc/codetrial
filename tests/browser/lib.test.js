@@ -14,6 +14,7 @@ import {
 
 import {
   ACTIVE_CONTRACT,
+  createBannerBoard,
   MAX_REPORT_BODY_BYTES,
   unclearLinesOf,
   withUnclearLines,
@@ -3781,4 +3782,91 @@ test("the report body limit matches the server's", () => {
       `MAX_REPORT_BYTES: usize = ${MAX_REPORT_BODY_BYTES / 1024} \\* 1024;`,
     ),
   );
+});
+
+/// A banner board over a fake clock, recording what it paints.
+function bannerBoard() {
+  const ranks = { notice: 0, high: 2, low: 1 };
+  const painted = [];
+  const timers = new Map();
+  let nextTimer = 1;
+  const board = createBannerBoard({
+    ranks,
+    notice: "notice",
+    noticeMs: 10,
+    paint: (top, text) => painted.push([top, text]),
+    setTimer: (fn, ms) => {
+      timers.set(nextTimer, { fn, ms });
+      return nextTimer++;
+    },
+    clearTimer: (id) => timers.delete(id),
+  });
+  const fire = () => {
+    const [id, timer] = [...timers][0];
+    timers.delete(id);
+    timer.fn();
+  };
+  return { board, painted, timers, fire, shown: () => painted.at(-1) };
+}
+
+test("the banner shows the highest owner and falls back as owners clear", () => {
+  const { board, shown } = bannerBoard();
+  board.set("low", "low text");
+  assert.deepEqual(shown(), ["low", "low text"]);
+  board.set("high", "high text");
+  assert.deepEqual(shown(), ["high", "high text"]);
+  board.set("high", "");
+  assert.deepEqual(shown(), ["low", "low text"]);
+  board.set("low", "");
+  assert.deepEqual(shown(), [undefined, ""]);
+});
+
+test("the notice is shown once and cleared by its own clock", () => {
+  const { board, painted, timers, fire, shown } = bannerBoard();
+  board.set("notice", "avatar off");
+  assert.deepEqual(shown(), ["notice", "avatar off"]);
+  assert.equal(timers.size, 1);
+  assert.equal([...timers.values()][0].ms, 10);
+  fire();
+  assert.deepEqual(shown(), [undefined, ""]);
+  // A higher owner raised and cleared afterwards does not bring it back.
+  board.set("high", "high text");
+  board.set("high", "");
+  assert.deepEqual(shown(), [undefined, ""]);
+  assert.equal(
+    painted.filter(([, text]) => text === "avatar off").length,
+    1,
+    "painted once",
+  );
+});
+
+test("a notice raised behind a higher owner waits and starts its clock when shown", () => {
+  const { board, timers, shown } = bannerBoard();
+  board.set("high", "high text");
+  board.set("notice", "avatar off");
+  assert.deepEqual(shown(), ["high", "high text"]);
+  assert.equal(timers.size, 0, "no clock runs while it is covered");
+  board.set("high", "");
+  assert.deepEqual(shown(), ["notice", "avatar off"]);
+  assert.equal(timers.size, 1);
+});
+
+test("a notice covered after it was shown is dropped, not brought back", () => {
+  const { board, timers, shown } = bannerBoard();
+  board.set("notice", "avatar off");
+  board.set("low", "low text");
+  assert.deepEqual(shown(), ["low", "low text"]);
+  assert.equal(timers.size, 0, "its clock is cancelled");
+  board.set("low", "");
+  assert.deepEqual(shown(), [undefined, ""]);
+});
+
+test("a repeated clear of another owner leaves the notice and its clock alone", () => {
+  const { board, timers, shown } = bannerBoard();
+  board.set("notice", "avatar off");
+  const [id] = [...timers.keys()];
+  board.set("low", "");
+  board.set("high", "");
+  assert.deepEqual(shown(), ["notice", "avatar off"]);
+  assert.deepEqual([...timers.keys()], [id], "the same clock, not a new one");
 });
