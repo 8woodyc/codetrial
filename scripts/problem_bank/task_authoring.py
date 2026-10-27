@@ -18,11 +18,16 @@ from .bank import (
     write_json,
 )
 from .task_package import load_bank
-from .tasks import DEFAULTS, TASK_ID, default_sidecar
+from .tasks import DEFAULTS, OPTIMIZED_LANGS, TASK_ID, default_sidecar
 
 # Complete tasks that show what a sidecar can do. Each file holds `problem`,
 # `judge`, `variant` and `sidecar`, as a bank stores them for one task.
 EXAMPLES = ROOT / "problem-bank/task-examples"
+# The example `new` starts from when no reference is named. Unlike a catalog
+# problem it asks for a small system built in stages, from a table to a leaner
+# one, so what an instructor edits first shows the whole sidecar: several
+# completion targets, required cases, custom checks and follow-ups.
+DEFAULT_REFERENCE = "rubik"
 # The bank files `new` changes, beside what `load_bank` reads; problems.json
 # names the tasks, so it goes into place last.
 BANK_FILES = ("judges", "variants", "task-mode", "problems")
@@ -187,6 +192,11 @@ def new_task(bank, reference_id, task_id=None, languages=None):
             )
         sidecar["completionTargets"] = kept
         sidecar["languages"] = list(languages)
+        if "optimization" in sidecar and not OPTIMIZED_LANGS & set(languages):
+            del sidecar["optimization"]
+            notes.append(
+                "dropped the compiler optimization level: no C or C++ is offered"
+            )
     row["problem"]["id"] = task_id
     if (
         task_id != reference_id

@@ -86,3 +86,7 @@ pub(crate) fn opaque_id(value: &str) -> bool {
 #[cfg(test)]
 #[path = "../../tests/unit/tasks/support.rs"]
 pub(crate) mod test_support;
+
+#[cfg(test)]
+#[path = "../../tests/unit/tasks/rubik.rs"]
+mod rubik;

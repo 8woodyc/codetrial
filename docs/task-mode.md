@@ -94,6 +94,7 @@ below and rejects unknown fields; nested objects are closed too.
 | `maxHintRungs`        | Integer 0..default maximum                          |
 | `rubricProfile`       | Literal `task-engagement-v1`                        |
 | `languages`           | Optional; 1..5 distinct languages, default `python` |
+| `optimization`        | Optional; `O0` or `O1`, needs C or C++              |
 
 Set, target and check IDs match `[a-z][a-z0-9-]{0,63}`. Task record IDs also
 permit an initial digit, preserving catalog IDs such as `3sum`. Target IDs and
@@ -121,6 +122,13 @@ the public cases leave the machine for them and the page says so before the
 choice; reference material never does. A server with
 `CODETRIAL_COMPILER_EXPLORER_ENABLED` off offers only the task's other
 languages, and refuses a task with none as `language_unavailable`.
+
+`optimization` lowers the compiler optimization level a C or C++ run is built
+with, from the page's default to `O0` or `O1`, and can never raise it. A task
+sets it when the cost of its code is the point, so the compiler does not hide
+it; the page says so beside the compile notice, and the candidate's source has
+no way to change it. Absent, the default applies. It needs C or C++ in
+`languages`, since the other languages take no such flag.
 
 Required cases resolve by exact **source judge label**, before variant renames,
 not by index or fuzzy matching. Each label must resolve to exactly one case.
@@ -222,21 +230,38 @@ uploads, and finds its own Python, as
 
 ```bash
 scripts/task-package.py references
-scripts/task-package.py new --bank course --from delimiter-closer
-scripts/task-package.py new --bank course --from two-sum --id pair-sum \
-    --languages python,javascript,cpp
-scripts/task-package.py preview --bank course --task-id pair-sum
-scripts/task-package.py render-prompt --bank course --task-id pair-sum \
-    --language cpp
-scripts/task-package.py build --bank course \
-    --site https://teacher.github.io/course --output publish
+scripts/task-package.py new        # the default task, copied into ./tasks
+scripts/task-package.py new --from two-sum --id pair-sum --languages python,javascript,cpp
+scripts/task-package.py preview --task-id pair-sum
+scripts/task-package.py build --site https://teacher.github.io/course
 ```
+
+The bank is the directory `tasks` and the output the directory `publish`, both
+in the current directory, unless `--bank` and `--output` name others. `preview`
+and `render-prompt` (what Jim is told, in `--language` if the task offers more
+than one) take the bank's only task when `--task-id` is left out, and name the
+choices when there are several.
 
 `references` lists what a task can start from: the shipped examples under
 `problem-bank/task-examples/`, which show completion targets, required cases,
-custom checks and several languages, then every catalog problem. `new` copies
-one into the bank, creating the bank if needed, and writes the task's sidecar
-out in full, and a new bank's set rules, so each field can be edited in place.
+custom checks and several languages, then every catalog problem. `new` without
+`--from` copies `rubik`, the default example. Unlike a catalog problem it is
+not one function to write: the learner starts from a working cube solver in C
+that is correct and too slow and too large for the compiler service, so a run
+of it is reported as a timeout. The work is the one a service owner faces:
+predict where the time goes, measure, change one thing at a time, and keep
+every answer the same until the run finishes in time. The marked lines show
+where the cost is (how often the table is built, what ranking a position
+costs, what the queue holds, how each edge moves between positions) and are
+guidance only. The judge compares
+answers, so any implementation that returns the exact fewest turns for every
+case passes, including one leaner than the reference. The interviewer asks the
+learner to predict before running, to measure before changing, and afterwards
+how they know no answer changed. C runs on Compiler Explorer, so a server with
+it off refuses this task as `language_unavailable`. Whichever reference it
+starts from, `new` copies the task into the bank, creating the bank if needed,
+and writes the task's sidecar out in full, and a new bank's set rules, so each
+field can be edited in place.
 `--id` gives the copy its own id; it keeps the reference's origin, so the checks
 that keep a catalog problem's source out of what the learner reads still apply
 while the instructor rewrites it. `--languages` sets what the learner may choose
@@ -251,7 +276,8 @@ bank.
 
 `preview` shows what the learner sees and `render-prompt` what Jim is told; both
 are for authoring and neither is required. `build` names the set after the
-bank's directory, which must then be a valid set id, and takes the version after
+bank's directory (`tasks` unless `--bank` says otherwise), which must then be a
+valid set id, and takes the version after
 the last one the output holds, unless `--set-id` and `--version` say otherwise;
 it checks both, the bank and the output before asking for the PIN, and prints the landing
 page and each task's assignment link. The output is the only record of versions

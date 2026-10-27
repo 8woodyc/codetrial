@@ -3,11 +3,13 @@
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import types
 import unittest
 from unittest import mock
@@ -17,7 +19,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from problem_bank import runtime, task_authoring  # noqa: E402
 from problem_bank.bank import read_json  # noqa: E402
+from problem_bank.rules import posed  # noqa: E402
 from problem_bank.task_authoring import (  # noqa: E402
+    DEFAULT_REFERENCE,
     EXAMPLES,
     STAGING,
     new_task,
@@ -26,6 +30,7 @@ from problem_bank.task_authoring import (  # noqa: E402
     references,
 )
 from problem_bank.task_package import (  # noqa: E402
+    publish_scan,
     decrypt,
     load_bank,
     validate_package,
@@ -53,13 +58,66 @@ def snapshot(bank):
     return {path.name: path.read_text() for path in bank.iterdir() if path.is_file()}
 
 
-def run(*args, stdin=None):
+def run(*args, stdin=None, cwd=None):
     return subprocess.run(
         COMMAND + [str(arg) for arg in args],
         input=stdin,
         capture_output=True,
         text=True,
+        cwd=cwd,
     )
+
+
+class TaskAuthoringDefaultsTests(unittest.TestCase):
+    """The bank, the task and the output need not be named when there is one."""
+
+    def test_new_preview_and_render_work_in_the_current_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            added = run("new", cwd=directory)
+            self.assertEqual(added.returncode, 0, added.stderr)
+            self.assertTrue((directory / "tasks").is_dir())
+            # The command it suggests leaves out the bank it would have used.
+            self.assertIn("preview --task-id rubik", added.stdout)
+            self.assertNotIn("--bank", added.stdout)
+            shown = run("preview", cwd=directory)
+            self.assertEqual(shown.returncode, 0, shown.stderr)
+            self.assertEqual(json.loads(shown.stdout)["title"], "Cube Solve Planner")
+            prompt = run("render-prompt", cwd=directory)
+            self.assertEqual(prompt.returncode, 0, prompt.stderr)
+            self.assertIn("You are Jim", prompt.stdout)
+
+            # With two tasks it asks which, naming them; one named is shown.
+            second = run("new", "--from", "two-sum", "--id", "pair-sum", cwd=directory)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            for command in ("preview", "render-prompt"):
+                ambiguous = run(command, cwd=directory)
+                self.assertEqual(ambiguous.returncode, 1, command)
+                self.assertIn("pass --task-id: pair-sum, rubik", ambiguous.stderr)
+                named = run(command, "--task-id", "pair-sum", cwd=directory)
+                self.assertEqual(named.returncode, 0, named.stderr)
+
+    def test_a_bank_that_is_not_the_default_is_named_in_the_command_it_suggests(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            added = run("new", "--bank", "elsewhere", cwd=directory)
+            self.assertEqual(added.returncode, 0, added.stderr)
+            self.assertIn("preview --bank elsewhere --task-id rubik", added.stdout)
+            self.assertFalse((directory / "tasks").exists())
+
+    @needs_cryptography
+    def test_build_needs_only_the_site_and_writes_to_publish(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            self.assertEqual(run("new", cwd=directory).returncode, 0)
+            built = run("build", "--site", SITE, stdin=PIN + "\n", cwd=directory)
+            self.assertEqual(built.returncode, 0, built.stderr)
+            # The set is named for the bank's directory, in the default output.
+            self.assertTrue(
+                (directory / "publish/sets/tasks/1/manifest.json").is_file()
+            )
+            self.assertEqual(publish_scan(directory / "publish"), 1)
+            self.assertIn("/sets/tasks/1/", built.stdout)
 
 
 class TaskAuthoringTests(unittest.TestCase):
@@ -530,6 +588,138 @@ class TaskAuthoringTests(unittest.TestCase):
             again = run("new", "--bank", bank, "--from", "two-sum")
             self.assertNotEqual(again.returncode, 0)
             self.assertIn("already in", again.stderr)
+
+
+def valid_position(code):
+    return (
+        re.fullmatch(r"[1-7]{7}[1-3]{7}", code) is not None
+        and len(set(code[:7])) == 7
+        and sum(int(digit) - 1 for digit in code[7:]) % 3 == 0
+    )
+
+
+class RubikExampleTests(unittest.TestCase):
+    """The task `new` starts from: `mini.c` as the starter, correct and too
+    slow for the compiler service, to be made fast without changing an answer.
+    Its starter, cases and reference are compiled and run, not read."""
+
+    # Per test, not per class: the gate runs each test in a job of its own.
+    def setUp(self):
+        self.row = reference(DEFAULT_REFERENCE)
+        self.shipped, self.graded = posed(
+            self.row["problem"], self.row["judge"], self.row["variant"]
+        )
+
+    def test_it_is_the_default_and_is_worked_in_c(self):
+        self.assertEqual(DEFAULT_REFERENCE, "rubik")
+        sidecar = self.row["sidecar"]
+        self.assertEqual(sidecar["languages"], ["c"])
+        self.assertEqual(self.graded["entry"], "minimumTurns")
+        starter = self.shipped["starterCode"]["c"]
+        markers = [target["marker"] for target in sidecar["completionTargets"]]
+        self.assertEqual(len(markers), 4)
+        for marker in markers:
+            self.assertTrue(marker.startswith("TASK_OPTIMIZE_"), marker)
+            self.assertEqual(starter.count(marker), 1, marker)
+
+    def test_cases_are_valid_positions_over_every_kind_of_distance(self):
+        cases = self.graded["cases"]
+        self.assertGreaterEqual(len(cases), 10)
+        for case in cases:
+            with self.subTest(case=case["label"]):
+                self.assertTrue(valid_position(case["input"][0]))
+                self.assertTrue(0 <= case["expected"] <= 11)
+        distances = {case["expected"] for case in cases}
+        self.assertIn(0, distances)
+        self.assertIn(11, distances)
+        self.assertGreaterEqual(len(distances), 8)
+        self.assertEqual(
+            len({case["input"][0] for case in cases}), len(cases), "repeated position"
+        )
+
+    @unittest.skipUnless(shutil.which("cc"), "no C compiler on this machine")
+    def test_the_starter_is_correct_and_slow_until_its_table_is_reused(self):
+        entry = self.graded["entry"]
+        optimization = self.row["sidecar"]["optimization"]
+        self.assertEqual(optimization, "O1")
+        starter = self.shipped["starterCode"]["c"]
+        leaner = self.row["problem"]["referenceCode"].replace(
+            self.row["judge"]["entry"], entry
+        )
+        # The one change that matters first: the table lives across calls.
+        reused = starter.replace(
+            "    unsigned char *step = build_table();\n",
+            "    static unsigned char *step;\n    if (!step)\n        step = build_table();\n",
+        ).replace("    free(step);\n", "")
+        self.assertNotEqual(reused, starter)
+
+        def harness(cases):
+            calls = "".join(
+                f'    printf("%d\\n", {entry}("{case["input"][0]}") == {case["expected"]});\n'
+                for case in cases
+            )
+            return f"int main(void) {{\n{calls}    return 0;\n}}\n"
+
+        def passed(code, cases):
+            """Which of `cases` it answered right, and the seconds it took."""
+            with tempfile.TemporaryDirectory() as scratch:
+                source = Path(scratch) / "task.c"
+                source.write_text("#include <stdio.h>\n" + code + "\n" + harness(cases))
+                binary = Path(scratch) / "task"
+                # The flags the page asks Compiler Explorer for, with the
+                # optimization level the task fixes.
+                built = subprocess.run(
+                    [
+                        "cc",
+                        f"-{optimization}",
+                        "-std=c17",
+                        "-o",
+                        str(binary),
+                        str(source),
+                    ],
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(built.returncode, 0, built.stderr)
+                began = time.perf_counter()
+                ran = subprocess.run(
+                    [str(binary)], capture_output=True, text=True, timeout=300
+                )
+                seconds = time.perf_counter() - began
+                self.assertEqual(ran.returncode, 0, ran.stderr)
+                return [line == "1" for line in ran.stdout.split()], seconds
+
+        cases = self.graded["cases"]
+        # The starter builds its table for every case, so one case is enough
+        # to show it answers right, and all of them would only repeat the cost.
+        slow, slow_seconds = passed(starter, cases[-1:])
+        again, _ = passed(reused, cases)
+        fast, fast_seconds = passed(leaner, cases)
+        self.assertEqual(slow, [True], "the starter must be correct")
+        self.assertTrue(all(again), "reusing the table must keep every answer")
+        self.assertTrue(all(fast), "the reference must be correct")
+        # One build against twelve is the first reason it times out online. A
+        # wide margin, so a busy machine does not flip it.
+        self.assertGreater(slow_seconds, 3 * fast_seconds)
+
+    def test_the_optimization_level_goes_with_the_compiled_language(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            bank = Path(scratch) / "course"
+            _, notes = new_task(bank, "rubik", "plain", ["python"])
+            self.assertNotIn("optimization", bank_file(bank, "task-mode")["plain"])
+            self.assertTrue(any("optimization" in note for note in notes), notes)
+            _, notes = new_task(bank, "rubik", "kept", ["c"])
+            self.assertEqual(bank_file(bank, "task-mode")["kept"]["optimization"], "O1")
+            self.assertFalse(any("optimization" in note for note in notes), notes)
+
+    def test_new_without_a_reference_starts_from_it(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            bank = Path(scratch) / "course"
+            added = run("new", "--bank", bank)
+            self.assertEqual(added.returncode, 0, added.stderr)
+            sidecar = bank_file(bank, "task-mode")["rubik"]
+            self.assertEqual(sidecar["languages"], ["c"])
+            self.assertEqual(len(sidecar["completionTargets"]), 4)
 
 
 if __name__ == "__main__":

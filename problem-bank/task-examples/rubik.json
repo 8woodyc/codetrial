@@ -1,0 +1,236 @@
+{
+  "problem": {
+    "id": "rubik",
+    "difficulty": "Hard",
+    "topics": [
+      "Graph",
+      "Breadth-First Search",
+      "Math",
+      "Systems"
+    ],
+    "statement": [
+      "A 2x2x2 cube has eight corner cubies. Hold one corner fixed to remove whole-cube rotations and the other seven cubies each have a place and a twist of 0, 1 or 2, which makes 7! x 3^6 = 3674160 reachable positions. A position is written as 14 digits: seven digits 1 to 7 naming the cubie in each place, then seven digits 1 to 3 giving each twist plus one. The solved position is 12345671111111.",
+      "A turn is a clockwise quarter, half or counterclockwise quarter turn of the right, back or down face, and each of those nine counts as one turn. Return the fewest turns that solve the given position. The starter already does, correctly, and the work is making it finish in a short time."
+    ],
+    "constraints": [
+      "code has exactly 14 characters and is a valid position",
+      "code[0..6] is a permutation of the digits 1 to 7",
+      "code[7..13] are digits 1 to 3 whose values less one sum to a multiple of 3",
+      "every position is solved in at most 11 turns",
+      "a run that does not finish within the compiler service's time limit is reported as a timeout, not as a wrong answer"
+    ],
+    "starterCode": {
+      "c": "#include <stdlib.h>\n\n/* A 2x2x2 cube with one corner held fixed: seven cubies, each with a place\n * p and a twist o of 0, 1 or 2. */\nenum { C = 7, O = 729, N = 3674160 };\ntypedef struct {\n    unsigned char p[C], o[C];\n} state_t;\n\n/* One clockwise quarter turn of face f: 0 is R, 1 is B, 2 is D. */\nstatic state_t turn(state_t s, int f)\n{\n    static const char map[][15] = {\n        \"14203561202100\",\n        \"01245630001212\",\n        \"02531460000000\",\n    };\n    state_t t;\n    for (int i = 0; i < C; ++i) {\n        int j = map[f][i] - '0';\n        t.p[i] = s.p[j];\n        t.o[i] = (s.o[j] + map[f][i + C] - '0') % 3;\n    }\n    return t;\n}\n\n/* A dense index in 0..N-1 for a valid position; the solved one is 0. */\nstatic size_t rank_state(state_t s)\n{\n    size_t p = 0, o = 0;\n    for (int i = 0; i < C; ++i) {\n        int n = 0;\n        for (int j = i + 1; j < C; ++j)\n            n += s.p[j] < s.p[i]; /* TASK_OPTIMIZE_RANK */\n        p = p * (C - i) + n;\n        if (i < 6)\n            o = o * 3 + s.o[i];\n    }\n    return p * O + o;\n}\n\n/* step[r] is 1 plus the move that takes position r one step toward solved:\n * face * 3 plus the quarter turns it needs, less one. */\n\n/* Breadth-first search outward from the solved cube. */\nstatic unsigned char *build_table(void)\n{\n    unsigned char *step = calloc(N, 1);\n    /* TASK_OPTIMIZE_QUEUE */\n    state_t *queue = malloc(sizeof(*queue) * N);\n    size_t head = 0, tail = 1;\n    queue[0] = (state_t) {{0, 1, 2, 3, 4, 5, 6}, {0}};\n    while (head < tail) {\n        state_t from = queue[head++];\n        for (int f = 0; f < 3; ++f) {\n            state_t to = from;\n            for (int n = 0; n < 3; ++n) {\n                /* TASK_OPTIMIZE_TABLES */\n                size_t rank = rank_state(to = turn(to, f));\n                if (rank && !step[rank]) {\n                    step[rank] = f * 3 + 3 - n;\n                    queue[tail++] = to;\n                }\n            }\n        }\n    }\n    free(queue);\n    return step;\n}\n\nint solveLength(char* code)\n{\n    state_t s;\n    int moves = 0;\n    for (int i = 0; i < C; ++i) {\n        s.p[i] = code[i] - '1';\n        s.o[i] = code[i + C] - '1';\n    }\n    /* TASK_OPTIMIZE_REUSE */\n    unsigned char *step = build_table();\n    /* No position needs more than 11 turns, so a table that sends the walk\n     * in circles ends it here instead of hanging. */\n    for (size_t rank; moves <= 11 && (rank = rank_state(s)); ++moves) {\n        int move = step[rank] - 1;\n        for (int n = move % 3 + 1; n--;)\n            s = turn(s, move / 3);\n    }\n    free(step);\n    return moves;\n}\n",
+      "python": "class Solution:\n    def solveLength(self, code: str) -> int:\n        # This task is worked in C: the table has 3,674,160 entries.\n        return 0\n"
+    },
+    "referenceCode": "#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n\nenum { CUBIES = 7, PERMS = 5040, TWISTS = 729, STATES = PERMS * TWISTS };\n\ntypedef struct {\n    uint8_t p[CUBIES], o[CUBIES];\n} state_t;\n\n/* Destination i takes its cubie from source[face][i]. */\nstatic const uint8_t source[3][CUBIES] = {\n    {1, 4, 2, 0, 3, 5, 6}, {0, 1, 2, 4, 5, 6, 3}, {0, 2, 5, 3, 1, 4, 6}};\nstatic const uint8_t twist[3][CUBIES] = {\n    {1, 2, 0, 2, 1, 0, 0}, {0, 0, 0, 1, 2, 1, 2}, {0, 0, 0, 0, 0, 0, 0}};\n\nstatic state_t quarter(state_t s, int face)\n{\n    state_t t;\n    for (int i = 0; i < CUBIES; ++i) {\n        t.p[i] = s.p[source[face][i]];\n        t.o[i] = (s.o[source[face][i]] + twist[face][i]) % 3;\n    }\n    return t;\n}\n\nstatic uint32_t rank_state(const state_t *s)\n{\n    uint32_t p = 0, o = 0;\n    for (int i = 0; i < CUBIES; ++i) {\n        int smaller = 0;\n        for (int j = i + 1; j < CUBIES; ++j)\n            smaller += s->p[j] < s->p[i];\n        p = p * (CUBIES - i) + smaller;\n    }\n    for (int i = 0; i < 6; ++i)\n        o = o * 3 + s->o[i];\n    return p * TWISTS + o;\n}\n\nstatic void unrank_state(uint32_t rank, state_t *s)\n{\n    uint8_t free_[CUBIES] = {0, 1, 2, 3, 4, 5, 6};\n    uint32_t p = rank / TWISTS, o = rank % TWISTS, f = 720;\n    int sum = 0;\n    for (int i = 0; i < CUBIES; ++i) {\n        int q = p / f;\n        p %= f;\n        s->p[i] = free_[q];\n        for (int j = q; j + 1 < CUBIES - i; ++j)\n            free_[j] = free_[j + 1];\n        if (i < 5)\n            f /= 6 - i;\n    }\n    for (int i = 5; i >= 0; --i) {\n        s->o[i] = o % 3;\n        sum += s->o[i];\n        o /= 3;\n    }\n    s->o[6] = (3 - sum % 3) % 3;\n}\n\n/* back[r]: the move (face * 3 + quarter turns - 1) that takes r a step home. */\nstatic uint8_t *build_table(void)\n{\n    static uint16_t perm[3][PERMS], twst[3][TWISTS];\n    uint8_t *back = malloc(STATES);\n    uint32_t *queue = malloc(sizeof(*queue) * STATES);\n    uint32_t head = 0, tail = 1;\n    state_t s;\n    for (int r = 0; r < PERMS; ++r) {\n        unrank_state(r * TWISTS, &s);\n        for (int f = 0; f < 3; ++f) {\n            state_t n = quarter(s, f);\n            perm[f][r] = rank_state(&n) / TWISTS;\n        }\n    }\n    for (int r = 0; r < TWISTS; ++r) {\n        unrank_state(r, &s);\n        for (int f = 0; f < 3; ++f) {\n            state_t n = quarter(s, f);\n            twst[f][r] = rank_state(&n) % TWISTS;\n        }\n    }\n    memset(back, 255, STATES);\n    back[0] = 0;\n    queue[0] = 0;\n    while (head < tail) {\n        uint32_t here = queue[head++];\n        for (int f = 0; f < 3; ++f) {\n            uint32_t p = here / TWISTS, o = here % TWISTS;\n            for (int turn = 0; turn < 3; ++turn) {\n                p = perm[f][p];\n                o = twst[f][o];\n                uint32_t there = p * TWISTS + o;\n                if (back[there] == 255) {\n                    back[there] = f * 3 + (2 - turn);\n                    queue[tail++] = there;\n                }\n            }\n        }\n    }\n    free(queue);\n    return back;\n}\n\nint solveLength(char* code)\n{\n    static uint8_t *back;\n    state_t s;\n    int moves = 0;\n    if (!back)\n        back = build_table();\n    for (int i = 0; i < CUBIES; ++i) {\n        s.p[i] = code[i] - '1';\n        s.o[i] = code[i + CUBIES] - '1';\n    }\n    for (uint32_t r; (r = rank_state(&s)) != 0; ++moves)\n        for (int t = 0; t <= back[r] % 3; ++t)\n            s = quarter(s, back[r] / 3);\n    return moves;\n}\n",
+    "summary": "A correct but slow cube solver: make it fast enough to finish within the compiler service's time limit without changing an answer.",
+    "optimal": "Search once, backward, and keep the result: build the table on the first call and reuse it for every later one, then spend the work where it pays: rank a position once per edge at most, queue the 32-bit rank rather than the whole position, and move between positions through transition tables over the 5040 permutations and 729 twist patterns instead of rebuilding and re-ranking a cube for every edge. The working set falls from about fifty megabytes to a few and the search from tens of millions of cube rebuilds to table lookups. A learner may go further, for example by dropping the queue and scanning table levels, as long as every answer is unchanged.",
+    "pitfalls": "Optimizing before measuring, so the first change is not the one that matters; building the table on every call instead of once; changing an answer while changing the speed, and not rerunning every case; queueing the rank but then needing a whole position back without a way to get one; letting the solved position be marked visited by the search from itself; storing the move used to arrive rather than its inverse; trusting one passing run as a bound on the worst case.",
+    "origin": "original"
+  },
+  "judge": {
+    "kind": "function",
+    "entry": "solveLength",
+    "checker": "exact",
+    "cases": [
+      {
+        "label": "solved cube: code=\"12345671111111\"",
+        "input": [
+          "12345671111111"
+        ],
+        "expected": 0
+      },
+      {
+        "label": "light scramble: code=\"12367451111111\"",
+        "input": [
+          "12367451111111"
+        ],
+        "expected": 1
+      },
+      {
+        "label": "light scramble: code=\"13462751111111\"",
+        "input": [
+          "13462751111111"
+        ],
+        "expected": 2
+      },
+      {
+        "label": "short scramble: code=\"56324711211122\"",
+        "input": [
+          "56324711211122"
+        ],
+        "expected": 3
+      },
+      {
+        "label": "short scramble: code=\"67354123313333\"",
+        "input": [
+          "67354123313333"
+        ],
+        "expected": 5
+      },
+      {
+        "label": "mid scramble: code=\"21653471111312\"",
+        "input": [
+          "21653471111312"
+        ],
+        "expected": 6
+      },
+      {
+        "label": "mid scramble: code=\"41732562311231\"",
+        "input": [
+          "41732562311231"
+        ],
+        "expected": 7
+      },
+      {
+        "label": "long scramble: code=\"13457261332211\"",
+        "input": [
+          "13457261332211"
+        ],
+        "expected": 8
+      },
+      {
+        "label": "long scramble: code=\"32417651233121\"",
+        "input": [
+          "32417651233121"
+        ],
+        "expected": 9
+      },
+      {
+        "label": "long scramble: code=\"26517341333321\"",
+        "input": [
+          "26517341333321"
+        ],
+        "expected": 10
+      },
+      {
+        "label": "two cubies swapped: code=\"21345671111111\"",
+        "input": [
+          "21345671111111"
+        ],
+        "expected": 11
+      },
+      {
+        "label": "farthest position: code=\"35267141223233\"",
+        "input": [
+          "35267141223233"
+        ],
+        "expected": 11
+      }
+    ],
+    "paramNames": [
+      "code"
+    ],
+    "paramTypes": [
+      "string"
+    ],
+    "returnType": "integer"
+  },
+  "variant": {
+    "title": "Cube Solve Planner",
+    "entry": "minimumTurns",
+    "brief": [
+      "Our puzzle service answers 2x2x2 cube questions: given a scrambled position, how few turns does the best solution need? A teammate wrote a solver that searches the whole cube and answers a query from the table it builds. It is correct, but it takes too long and too much memory for the service, and the compiler service reports its run as timed out.",
+      "Starting from that solver, make minimumTurns(code) in C finish within the compiler service's time limit, counting each turn of the right, back or down face as one. Every case must still pass: a faster solver that changes an answer is worse than a slow one."
+    ],
+    "contract": "minimumTurns(code) receives a valid 14-digit position code, seven cubie digits 1 to 7 followed by seven twist digits 1 to 3, and returns the fewest turns of the right, back and down faces, each quarter, half or counterclockwise quarter turn counting as one, that restore the solved position 12345671111111. The result is between 0 and 11. It is called once for each position, many times in one process, and the whole run has to finish within the compiler service's time limit.",
+    "examples": [
+      {
+        "case": 10
+      }
+    ],
+    "clarifications": [
+      {
+        "question": "How do I read the digits of the code?",
+        "answer": "The first seven digits say which cubie sits in each place, numbered 1 to 7, and the last seven are each place's twist plus one, so 1, 2 or 3. Subtract one before using a digit as a value. The solved cube is 12345671111111."
+      },
+      {
+        "question": "What counts as one turn?",
+        "answer": "A clockwise quarter turn, a half turn or a counterclockwise quarter turn of the right, back or down face, so nine different turns. Two quarter turns of one face in a row are one half turn, and cost one."
+      },
+      {
+        "question": "Does the starter give the right answers?",
+        "answer": "Yes. It is correct and too slow. A run that does not finish in time is reported as a timeout and says nothing about its answers, so you have to make it faster before the cases can pass online."
+      },
+      {
+        "question": "How fast is fast enough?",
+        "answer": "Fast enough that a run of the public cases finishes on the compiler service without timing out. The build uses -O1, the compiler's first optimization level, so the compiler will not hide the cost for you. Measure what you change rather than guessing which part is slow."
+      },
+      {
+        "question": "May I rewrite it, or must I keep its structure?",
+        "answer": "Rewrite as much as you like. The marked lines show where the time and memory go, not what to write. Any approach that returns the exact fewest turns for every valid position passes."
+      },
+      {
+        "question": "Can the input be an invalid position?",
+        "answer": "No. Every input is a valid position, so you do not need to validate it."
+      }
+    ],
+    "followUps": [
+      "It passes now. Where did the time go, and how did you find out rather than assume?",
+      "How would you convince yourself that no answer changed, beyond the public cases?",
+      "If the memory budget were cut again, what would you give up next, and what would it cost you?"
+    ],
+    "hints": [
+      "Run it and read what the compiler service says. The function is called once for each of the twelve cases: how many times is the table built, and what does one build cost?",
+      "Once the table is built only once, what is left? Each edge rebuilds a whole cube and ranks it again: what does the new permutation depend on, and what does the new twist depend on?",
+      "What must the queue hold to find the next positions? Could it hold less than a whole cube, and how would you get a cube back from what it holds?"
+    ]
+  },
+  "sidecar": {
+    "promptVersion": 1,
+    "interactionPrompt": "Interview the candidate on {{title}} the way a senior engineer at a technology company would, in {{language}}. The starter is a correct solver that is too slow and too large for the service, and a run that exceeds the compiler service's time limit is reported as a timeout. Open by asking them to restate the problem and what the service needs, then to read the starter and say where they expect the time and memory to go, and how many times the table is built for a run of the cases. Ask them to predict before they run, and to measure before they change anything. They should change one thing at a time and keep every answer the same. They may rewrite as much as they like and a leaner design than the reference is welcome, as long as every case passes. Once it finishes in time, ask what else they would change and why, how they know no answer changed and what they would give up next if the budget shrank. Ask one short question at a time, and never provide completed code.",
+    "completionTargets": [
+      {
+        "id": "table-reuse",
+        "language": "c",
+        "marker": "TASK_OPTIMIZE_REUSE",
+        "goal": "Count how many times the table is built for a run of the cases, and what one build costs. Decide where it should live."
+      },
+      {
+        "id": "rank-cost",
+        "language": "c",
+        "marker": "TASK_OPTIMIZE_RANK",
+        "goal": "Count what ranking a position costs, and how many times the search ranks one. Decide whether it should be recomputed for every edge."
+      },
+      {
+        "id": "queue-size",
+        "language": "c",
+        "marker": "TASK_OPTIMIZE_QUEUE",
+        "goal": "Account for the memory this queue takes against the table it feeds, and shrink the working set without changing an answer."
+      },
+      {
+        "id": "transition-tables",
+        "language": "c",
+        "marker": "TASK_OPTIMIZE_TABLES",
+        "goal": "Stop rebuilding and re-ranking a whole cube for every edge. What does the new permutation depend on, and the new twist?"
+      }
+    ],
+    "understandingChecks": [
+      {
+        "id": "trace",
+        "question": "Trace 21345671111111 through the index and say what each part of the number means."
+      },
+      {
+        "id": "contract",
+        "question": "Why search outward from the solved cube, and why does the first visit to a position give a shortest path?"
+      },
+      {
+        "id": "revision",
+        "question": "What did you change first, how did you know it was the cost that mattered, and how do you know no answer changed?"
+      }
+    ],
+    "requiredCases": [
+      "solved cube: code=\"12345671111111\"",
+      "mid scramble: code=\"41732562311231\"",
+      "two cubies swapped: code=\"21345671111111\"",
+      "farthest position: code=\"35267141223233\""
+    ],
+    "maxHintRungs": 3,
+    "rubricProfile": "task-engagement-v1",
+    "languages": [
+      "c"
+    ],
+    "optimization": "O1"
+  }
+}

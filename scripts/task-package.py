@@ -2,9 +2,12 @@
 """Start, validate, preview and build an instructor task set; never publish
 it.
 
-    task-package.py references                    tasks to start from
-    task-package.py new --bank BANK --from REF    add one to BANK
-    task-package.py build --bank BANK --site URL  encrypt it for a site
+    task-package.py references                 tasks to start from
+    task-package.py new [--from REF]           add one to the bank
+    task-package.py build --site URL           encrypt the bank for a site
+
+The bank is the directory `tasks` and the output `publish`, both in the
+current directory, unless --bank and --output name others.
 """
 
 import sys
@@ -25,7 +28,12 @@ import os  # noqa: E402
 import shlex  # noqa: E402
 from pathlib import Path  # noqa: E402
 
-from problem_bank.task_authoring import new_task, next_version, references  # noqa: E402
+from problem_bank.task_authoring import (  # noqa: E402
+    DEFAULT_REFERENCE,
+    new_task,
+    next_version,
+    references,
+)
 from problem_bank.task_package import (  # noqa: E402
     assignment_link,
     build_package,
@@ -49,6 +57,23 @@ def read_pin():
     return pin
 
 
+# Where the tasks are and where the built set goes, unless told otherwise.
+DEFAULT_BANK = Path("tasks")
+DEFAULT_OUTPUT = Path("publish")
+
+
+def chosen_task(package, task_id):
+    """`task_id`, or the bank's only task when none is named."""
+    if task_id is not None:
+        return task_id
+    ids = sorted(package["variants"])
+    if len(ids) != 1:
+        raise ValueError(
+            f"the bank holds {len(ids)} tasks; pass --task-id: {', '.join(ids)}"
+        )
+    return ids[0]
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -56,8 +81,16 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("references", help="list the tasks `new` can start from")
     arg = sub.add_parser("new", help="add a copy of a reference task to a bank")
-    arg.add_argument("--bank", type=Path, required=True)
-    arg.add_argument("--from", dest="reference", required=True, metavar="REF")
+    arg.add_argument(
+        "--bank", type=Path, default=DEFAULT_BANK, help=f"{DEFAULT_BANK} by default"
+    )
+    arg.add_argument(
+        "--from",
+        dest="reference",
+        default=DEFAULT_REFERENCE,
+        metavar="REF",
+        help=f"the task to copy, {DEFAULT_REFERENCE} by default",
+    )
     arg.add_argument("--id", help="the new task's id; the reference's by default")
     arg.add_argument(
         "--languages",
@@ -67,7 +100,9 @@ def main():
     )
     for command in ("validate", "render-prompt", "preview", "build"):
         arg = sub.add_parser(command)
-        arg.add_argument("--bank", type=Path, required=True)
+        arg.add_argument(
+            "--bank", type=Path, default=DEFAULT_BANK, help=f"{DEFAULT_BANK} by default"
+        )
         # Authoring commands read the bank alone. A build names the set (the
         # bank's directory name unless given) and its version (the next one
         # the output does not hold unless given).
@@ -75,13 +110,18 @@ def main():
         arg.add_argument("--set-id", default=None if building else "preview")
         arg.add_argument("--version", type=int, default=None if building else 1)
         if command in {"render-prompt", "preview"}:
-            arg.add_argument("--task-id", required=True)
+            arg.add_argument("--task-id", help="the bank's only task by default")
         if command == "render-prompt":
             # One of the task's languages; the first it lists by default.
             arg.add_argument("--language")
         if building:
             arg.add_argument("--site", required=True)
-            arg.add_argument("--output", type=Path, required=True)
+            arg.add_argument(
+                "--output",
+                type=Path,
+                default=DEFAULT_OUTPUT,
+                help=f"{DEFAULT_OUTPUT} by default",
+            )
     arg = sub.add_parser("publish-scan")
     arg.add_argument("directory", type=Path)
     args = parser.parse_args()
@@ -101,7 +141,8 @@ def main():
                 args.bank, args.reference, args.id, args.languages
             )
             preview_command = shlex.join(
-                [sys.executable, sys.argv[0], "preview", "--bank", str(args.bank)]
+                [sys.executable, sys.argv[0], "preview"]
+                + (["--bank", str(args.bank)] if args.bank != DEFAULT_BANK else [])
                 + ["--task-id", task_id]
             )
             print(
@@ -152,9 +193,11 @@ def main():
             if args.command == "validate":
                 print(f"Validated {len(package['problems'])} tasks")
             elif args.command == "render-prompt":
-                print(render_prompt(package, args.task_id, args.language))
+                task_id = chosen_task(package, args.task_id)
+                print(render_prompt(package, task_id, args.language))
             else:
-                print(json.dumps(preview(package, args.task_id), indent=2))
+                task_id = chosen_task(package, args.task_id)
+                print(json.dumps(preview(package, task_id), indent=2))
     except (
         OSError,
         ValueError,
