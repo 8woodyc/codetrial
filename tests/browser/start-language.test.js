@@ -41,7 +41,9 @@ after(async () => {
 /// Joins through the preflight and answers the token request's body. The
 /// token is refused unless `granted`, which answers it with an empty grant:
 /// enough for the page to count the interview as started, not to join a room.
-async function joinAndCaptureToken(page, { granted = false } = {}) {
+/// `within` bounds only the wait from the Start press to the token request;
+/// the preflight before it keeps the page's own timeout.
+async function joinAndCaptureToken(page, { granted = false, within } = {}) {
   await page.route("**/api/token", (route) =>
     route.fulfill(
       granted
@@ -60,11 +62,15 @@ async function joinAndCaptureToken(page, { granted = false } = {}) {
   await page.waitForFunction(
     () => !document.querySelector("#audio-check-join").disabled,
   );
-  const sent = page.waitForRequest((request) =>
-    request.url().endsWith("/api/token"),
+  const sent = page.waitForRequest(
+    (request) => request.url().endsWith("/api/token"),
+    { timeout: within },
   );
-  await page.locator("#audio-check-join").click();
-  return sent;
+  const [request] = await Promise.all([
+    sent,
+    page.locator("#audio-check-join").click(),
+  ]);
+  return request;
 }
 
 /// Past `init()`, which runs after the problem loads and so after
@@ -153,9 +159,12 @@ for (const [query, expected] of [
         await page.locator("#language-select").inputValue(),
         expected,
       );
-      // Well inside the wait a requested C gets.
-      page.setDefaultTimeout(2_000);
-      const body = (await joinAndCaptureToken(page)).postDataJSON();
+      // Under the 5 s a requested C waits, so a start that waited cannot
+      // pass. Only the press is bounded: a slow runner stalling the preflight
+      // clicks says nothing about the judge.
+      const body = (
+        await joinAndCaptureToken(page, { within: 4_000 })
+      ).postDataJSON();
       assert.equal(body.language, expected);
     } finally {
       releaseJudge();
