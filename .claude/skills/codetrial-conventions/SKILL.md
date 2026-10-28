@@ -187,12 +187,13 @@ has how to answer a bot finding.
 
 ## Layout
 
-`README.md` has the tree under "Repository layout" and wins on it. Two
+`README.md` has the tree under "Repository layout" and wins on it. Three
 directories it does not name matter as soon as you add a test:
 
 ```text
 tests/unit/     Unit test bodies, compiled into src/ by `#[path]`
 tests/common/   What the integration tests share
+tests/stubs/    Fake executables the Python suites install, read by support.stub()
 ```
 
 ## No test bodies under src/

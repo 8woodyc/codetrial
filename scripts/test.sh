@@ -380,9 +380,11 @@ ruff_gate()
 # and the `function` keyword that dash refuses. So dash is asked first where it
 # is installed. Neither parser objects to `[[`, `local` or `echo -e`; shellcheck
 # does, and it says whether a script means what it reads like, which matters
-# here because these scripts include the supply-chain gate. Repo-wide false
-# positives are answered once in `.shellcheckrc`; the few local ones carry a
-# directive naming why, beside the code it is about.
+# here because these scripts include the supply-chain gate, and because the
+# fakes under tests/stubs/ stand in for gh, gcloud and curl, where a fake that
+# means something other than it reads passes a test for the wrong reason.
+# Repo-wide false positives are answered once in `.shellcheckrc`; the few local
+# ones carry a directive naming why, beside the code it is about.
 #
 # Optional: CI installs it, and a contributor without it gets a note rather than
 # a failure they cannot act on. That note counts the scripts off the same glob
@@ -396,13 +398,13 @@ shell_syntax()
     if command -v dash > /dev/null 2>&1; then
         posix_sh=dash
     fi
-    for script in "$ROOT"/scripts/*.sh "$ROOT"/.claude/skills/*/*.sh; do
+    for script in "$ROOT"/scripts/*.sh "$ROOT"/.claude/skills/*/*.sh "$ROOT"/tests/stubs/*/*.sh; do
         scripts=$((scripts + 1))
         "$posix_sh" -n "$script" || status=1
     done
 
     if command -v shellcheck > /dev/null 2>&1; then
-        (cd "$ROOT" && shellcheck scripts/*.sh .claude/skills/*/*.sh) || status=1
+        (cd "$ROOT" && shellcheck scripts/*.sh .claude/skills/*/*.sh tests/stubs/*/*.sh) || status=1
     else
         skip "shellcheck: installing it checks what $scripts shell scripts mean, not just that they parse"
     fi
