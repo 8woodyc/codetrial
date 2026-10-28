@@ -973,6 +973,8 @@ function cDeclaration(spec, testCase, type, index) {
     return cMatrixDeclaration(name, value, nestedItemType(type));
   if (type.endsWith("[]") || /^list<.+>$/.test(type))
     return cArrayDeclaration(name, value, nestedItemType(type));
+  if (type === "string")
+    return `    char ${name}[] = ${nativeLiteral(value, type, "c")};`;
   return `    ${compilerType(type, "c")} ${name} = ${nativeLiteral(value, type, "c")};`;
 }
 

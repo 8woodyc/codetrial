@@ -341,6 +341,75 @@ const noJava =
     : "javac/java are not available";
 
 describe("toolchain harnesses", { concurrency: 4 }, () => {
+  for (const [id, solution] of [
+    [
+      "reverse-words-in-a-string",
+      `static void reverseRange(char* s, int left, int right) {
+    while (left < right) {
+        char temp = s[left];
+        s[left++] = s[right];
+        s[right--] = temp;
+    }
+}
+char* restoreCaptionOrder(char* s) {
+    int read = 0, write = 0;
+    while (s[read]) {
+        while (s[read] == ' ') read++;
+        if (!s[read]) break;
+        if (write) s[write++] = ' ';
+        while (s[read] && s[read] != ' ') s[write++] = s[read++];
+    }
+    s[write] = '\\0';
+    reverseRange(s, 0, write - 1);
+    int start = 0;
+    for (int i = 0; i <= write; i++) {
+        if (s[i] == ' ' || s[i] == '\\0') {
+            reverseRange(s, start, i - 1);
+            start = i + 1;
+        }
+    }
+    return s;
+}`,
+    ],
+    [
+      "valid-anagram",
+      `static int compareCharacters(const void* a, const void* b) {
+    return *(const unsigned char*)a - *(const unsigned char*)b;
+}
+bool isRearrangedCode(char* s, char* t) {
+    size_t length = strlen(s);
+    if (length != strlen(t)) return false;
+    qsort(s, length, sizeof(*s), compareCharacters);
+    qsort(t, length, sizeof(*t), compareCharacters);
+    return strcmp(s, t) == 0;
+}`,
+    ],
+  ]) {
+    it(
+      `C ${id} harness accepts an in-place string solution`,
+      { skip: noCc },
+      async () => {
+        const dir = mkdtempSync(join(tmpdir(), "codetrial-c-string-"));
+        try {
+          const source = join(dir, "solution.c");
+          const binary = join(dir, "solution");
+          writeFileSync(source, generateHarness("c", judges[id], solution));
+          await run("cc", ["-std=c17", source, "-o", binary]);
+          const parsed = parseCompilerResults(
+            (await run(binary, [], { encoding: "utf8" })).stdout,
+          );
+          assert.equal(parsed.setupError, undefined);
+          assert.deepEqual(
+            parsed.results.map((result) => result.actual),
+            judges[id].cases.map((testCase) => testCase.expected),
+          );
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      },
+    );
+  }
+
   for (const value of ["INFINITY", "-INFINITY", "NAN"]) {
     it(
       `C double harness preserves all cases when returning ${value}`,
