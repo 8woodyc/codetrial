@@ -20,15 +20,9 @@ ACTION = support.ROOT / ".github/actions/install-mutants/action.yml"
 
 # CI's release installer, replaced so a case never reaches the network or
 # /usr/local/bin. It records its arguments and either succeeds or fails.
-FAKE_RELEASE = """#!/bin/sh
-printf '%s\\n' "$*" >> "$INSTALL_LOG.release"
-[ "$RELEASE_FAIL" != 1 ]
-"""
+FAKE_RELEASE = support.stub("mutants-install/install-release-binary.sh")
 
-FAKE_CARGO = """#!/bin/sh
-printf '%s\\n' "$*" >> "$INSTALL_LOG.cargo"
-[ "$CARGO_FAIL" != 1 ]
-"""
+FAKE_CARGO = support.stub("mutants-install/cargo.sh")
 
 
 class MutantsInstallTests(unittest.TestCase):

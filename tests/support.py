@@ -12,6 +12,22 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/check.yml"
+STUBS = ROOT / "tests/stubs"
+
+
+def stub(name, interpreter=None):
+    """The source of a fake executable kept under tests/stubs/.
+
+    Files there rather than strings in a suite, so each is read, parsed and
+    linted as the language it is written in: inside a Python string a shell stub
+    doubled every backslash and reached neither `sh -n` nor shellcheck.
+    `interpreter` replaces the shebang, for a stub that has to run under the
+    suite's own Python.
+    """
+    text = (STUBS / name).read_text()
+    if interpreter is not None:
+        text = f"#!{interpreter}\n" + text.split("\n", 1)[1]
+    return text
 
 
 def write_executable(path, text):

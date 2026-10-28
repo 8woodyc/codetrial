@@ -17,46 +17,9 @@ SPEC = importlib.util.spec_from_file_location(
 support = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(support)
 
-CARGO = """#!/usr/bin/env python3
-import json, os, subprocess, sys
-from pathlib import Path
-args = sys.argv
-db = Path(args[args.index("--db") + 1])
-with open(os.environ["AUDIT_CALLS"], "a") as log:
-    log.write(json.dumps(args[1:]) + "\\n")
-if "--no-fetch" not in args:
-    db.mkdir()
-    subprocess.run(["git", "init", "--quiet", str(db)], check=True)
-    subprocess.run(["git", "-C", str(db), "-c", "user.name=Test",
-                    "-c", "user.email=test@example.org", "-c", "core.hooksPath=/dev/null",
-                    "commit", "--quiet", "--allow-empty", "-m", "snapshot"], check=True)
-data = json.loads(Path(args[args.index("--file") + 1]).read_text())
-if "raw" in data:
-    print(data["raw"])
-    sys.exit(data.get("exit", 1))
-items = [{"advisory": {"id": a}, "package": {"name": n, "version": v}}
-         for a, n, v in data["findings"]]
-print(json.dumps({"vulnerabilities": {"found": bool(items), "count": len(items),
-                                    "list": items}, "warnings": data.get("warnings", {})}))
-sys.exit(data.get("exit", int(bool(items))))
-"""
+CARGO = support.stub("audit/cargo-audit.py")
 
-GH = """#!/usr/bin/env python3
-import json, os, subprocess, sys
-args = sys.argv[1:]
-action = "api" if args[0] == "api" else args[1]
-with open(os.environ["GH_CALLS"], "a") as log:
-    log.write(json.dumps(args) + "\\n")
-if action == os.environ["FAIL_ACTION"]:
-    sys.exit(1)
-if "--slurp" in args and ("--jq" in args or "--template" in args):
-    sys.exit("the `--slurp` option is not supported with `--jq` or `--template`")
-if action == "api":
-    comments = any(arg.endswith("/comments") for arg in args)
-    print(os.environ["COMMENT_PAGES" if comments else "ISSUE_PAGES"])
-if action == "view":
-    print(os.environ["OLD_BODY"])
-"""
+GH = support.stub("audit/gh.py")
 
 A = ["RUSTSEC-2026-0385", "ctutils", "0.4.3"]
 B = ["RUSTSEC-2026-9999", "other", "1.0.0"]

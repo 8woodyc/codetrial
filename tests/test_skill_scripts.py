@@ -39,23 +39,7 @@ FAKE_GH_FAILS = "#!/bin/sh\nexit 1\n"
 
 # The viewer and the one account with push access. The sweeps ask `gh` for
 # both before the GraphQL page; the runs listing is empty, so no PR is held.
-FAKE_GH = """#!/bin/sh
-case "$*" in
-  "api user --jq .login") echo viewer ;;
-  *collaborators*) printf 'maint\\nviewer\\n' ;;
-  *actions/runs*) cat "$FAKE_RUNS" ;;
-  "api graphql --paginate"*) cat "$FAKE_PAGE" ;;
-  "run list "*) [ -n "${FAKE_MAIN_FAILED:-}" ] || exit 1; echo 500 ;;
-  "run view 500 "*) printf '%s\\n' "$FAKE_MAIN_FAILED" ;;
-  "api graphql"*) cat "$FAKE_AGAIN" ;;
-  "pr view 404 "*) echo "no such pull request" >&2; exit 1 ;;
-  # FAKE_DIFFS maps a PR number to its diff; a PR missing from it fails.
-  "pr diff "*) [ -n "${FAKE_DIFFS:-}" ] || exit 1
-    jq -jre --arg n "$3" '.[$n] | strings' "$FAKE_DIFFS" ;;
-  "pr view"*) printf '{"pr":%s,"state":"MERGED","merge":"m%s"}\\n' "$3" "$3" ;;
-  *) echo "unexpected gh call: $*" >&2; exit 1 ;;
-esac
-"""
+FAKE_GH = support.stub("skill-scripts/gh.sh")
 
 # Enough prose and a pasted --version line that no lint fires unless a case
 # asks for it.
@@ -1147,15 +1131,7 @@ RELATED = SKILLS / "codetrial-contribute" / "related.sh"
 
 # The viewer, one issue held by someone else, and the open PRs; gh applies
 # --jq itself, so the issue view answers in the shape related.sh asks for.
-FAKE_GH_RELATED = """#!/bin/sh
-case "$*" in
-  "api user --jq .login") echo viewer ;;
-  "issue view 5 "*) echo '{"number":5,"title":"t","state":"OPEN","stateReason":"","assignees":["viewer","someone"]}' ;;
-  "issue view "*) printf '{"number":%s,"title":"t","state":"OPEN","stateReason":"","assignees":[]}\n' "$3" ;;
-  "pr list"*) cat "$FAKE_PRS" ;;
-  *) echo "unexpected gh call: $*" >&2; exit 1 ;;
-esac
-"""
+FAKE_GH_RELATED = support.stub("skill-scripts/gh-related.sh")
 
 
 def open_pr(number, author, branch, paths, closes=(), head=""):
@@ -1236,29 +1212,7 @@ REVIEW = SKILLS / "codetrial-review"
 
 # One PR at head "h1": a gates lane whose log names two gates, the aggregate job
 # main also fails, and a check from an app outside GitHub Actions.
-FAKE_GH_CI = """#!/bin/sh
-case "$*" in
-  "pr view 5 "*)
-    while [ "$1" != --jq ]; do shift; done
-    pr=${FAKE_PR:-}
-    [ -n "$pr" ] || pr='{"headRefOid":"h1","files":[],"changedFiles":0}'
-    printf '%s\\n' "$pr" | jq -c "$2" ;;
-  "pr checks 5 "*) cat "$FAKE_CHECKS"; exit 1 ;;
-  "run list "*"--event push "*) echo "500 ${FAKE_MAIN_AT:-2026-10-22T05:00:00Z}" ;;
-  "run view 500 "*)
-    if [ -n "${FAKE_MAIN:-}" ]; then printf '%s\\n' "$FAKE_MAIN"
-    else printf '%s\\n' '[{"name":"check","conclusion":"failure"},{"name":"gates (portable)","conclusion":"success"}]'
-    fi ;;
-  "run view 7 --repo sysprog21/codetrial --json headSha"*) echo "h1 2026-10-22T01:00:00Z" ;;
-  "run view 7 "*"--job 70 "*) cat "$FAKE_LOG" ;;
-  "run view 7 "*"--job 73 "*) printf 'gates (browser)\\tlobby\\t2026-10-22T00:00:00.0Z SyntaxError: Unexpected token\\n' ;;
-  "run view 7 "*"--job 74 "*) : ;;
-  "run view 7 "*"--job 75 "*) echo "log expired" >&2; exit 1 ;;
-  "run view 7 "*"--job 71 "*) printf 'check\\tcollect\\t2026-10-22T00:00:00.0Z ##[error]gate lanes: failure\\n' ;;
-  "pr diff 5 "*) cat "$FAKE_DIFF" ;;
-  *) echo "unexpected gh call: $*" >&2; exit 1 ;;
-esac
-"""
+FAKE_GH_CI = support.stub("skill-scripts/gh-ci.sh")
 
 # A step's first log line carries a byte order mark before its timestamp, in
 # the message column, as the real log of run 39712346073 does.
@@ -1673,17 +1627,7 @@ class VerifyScriptTests(unittest.TestCase):
 
 
 # The PR as post-review.sh rereads it before posting, and the post itself.
-FAKE_GH_POST = """#!/bin/sh
-case "$*" in
-  "pr view 5 "*) echo "${FAKE_HEAD:-h1} ${FAKE_UPDATED:-T1}" ;;
-  "pr diff 5 "*) cat "$FAKE_DIFF" ;;
-  # Only the checked text on stdin: posting the file again would let a
-  # rewrite after the checks through.
-  "api -X POST repos/sysprog21/codetrial/pulls/5/reviews --input - "*)
-    jq -r '"https://github.com/sysprog21/codetrial/pull/5#pullrequestreview-" + .commit_id' ;;
-  *) echo "unexpected gh call: $*" >&2; exit 1 ;;
-esac
-"""
+FAKE_GH_POST = support.stub("skill-scripts/gh-post.sh")
 
 
 @unittest.skipUnless(shutil.which("jq"), "jq is not installed")
@@ -1759,43 +1703,7 @@ POST_INLINE = REVIEW / "post-inline.sh"
 
 # The PR's head, diff and review threads, and each posted comment echoed back
 # as "posted path:line" in place of its URL.
-FAKE_GH_INLINE = """#!/bin/sh
-case "$*" in
-  "api user --jq .login") echo viewer ;;
-  "api repos/sysprog21/codetrial/issues/5/comments --paginate") echo '[]' ;;
-  # FAKE_PUSHED_AFTER names a file the first post creates: a push mid-way.
-  "pr view 5 "*)
-    if [ -e "${FAKE_PUSHED_AFTER:-/nonexistent}" ]; then echo h2
-    else echo "${FAKE_HEAD:-h1}"; fi ;;
-  # A second read of the diff fails: the anchors and the spans share one.
-  "pr diff 5 "*)
-    [ ! -e "$FAKE_DIFF.read" ] || { echo "diff read twice" >&2; exit 1; }
-    : > "$FAKE_DIFF.read"; cat "$FAKE_DIFF" ;;
-  "api repos/sysprog21/codetrial/pulls/5/comments --paginate") cat "$FAKE_THREADS" ;;
-  # A review is created whole or refused whole, as GitHub does.
-  "api repos/sysprog21/codetrial/pulls/5/reviews --input "*)
-    [ -z "${FAKE_REFUSE_REVIEW:-}" ] || exit 1
-    # GitHub has no quote field; a draft's own fields stay home.
-    ! jq -e 'any(.comments[]; has("quote") or has("moved"))' "$4" > /dev/null || {
-      echo "draft field posted" >&2; exit 1; }
-    # FAKE_LOSE_REVIEW: the review lands, and its answer is lost.
-    if [ -n "${FAKE_LOSE_REVIEW:-}" ]; then
-      jq --slurpfile r "$4" '. + [$r[0].comments[]
-        | {user: {login: "viewer"}, commit_id: $r[0].commit_id, path, line, body}]' \
-        "$FAKE_THREADS" > "$FAKE_THREADS.new" && mv "$FAKE_THREADS.new" "$FAKE_THREADS"
-      exit 1
-    fi
-    ! jq -e --arg l "${FAKE_REFUSE_LINE:-}" 'any(.comments[]; (.line | tostring) == $l)' \
-      "$4" > /dev/null || exit 1
-    jq -r '.commit_id as $c | .comments[] | "posted \\(.path):\\(.line) at \\($c)"' "$4" ;;
-  "api repos/sysprog21/codetrial/pulls/5/comments --input "*)
-    [ "$(jq -r .line "$4")" != "${FAKE_REFUSE_LINE:-}" ] || exit 1
-    [ -z "${FAKE_PUSHED_AFTER:-}" ] || : > "$FAKE_PUSHED_AFTER"
-    jq -r '"posted \\(.path):\\(.line) at \\(.commit_id)"' "$4" ;;
-  "pr comment 5 "*) echo "summary posted" ;;
-  *) echo "unexpected gh call: $*" >&2; exit 1 ;;
-esac
-"""
+FAKE_GH_INLINE = support.stub("skill-scripts/gh-inline.sh")
 
 
 def review_comment(login, path, line, at="h1", body="x"):
@@ -1951,37 +1859,7 @@ BUNDLE = REVIEW / "review-bundle.sh"
 # The PR read on both sides of its diff, its files at the head, its threads,
 # and the comparison with an earlier review's head. FAKE_AFTER is what the
 # second read sees.
-FAKE_GH_BUNDLE = """#!/bin/sh
-case "$*" in
-  "pr view 5 --repo sysprog21/codetrial --json title,"*) cat "$FAKE_PR" ;;
-  "pr diff 5 "*) cat "$FAKE_DIFF" ;;
-  # gh applies --jq and pages itself; the fake prints one object per file.
-  "api repos/sysprog21/codetrial/pulls/5/files?per_page=100 --paginate "*)
-    cat "$FAKE_FILES" ;;
-  "api repos/sysprog21/codetrial/pulls/5/comments?per_page=100 --paginate "*)
-    [ -z "${FAKE_NO_COMMENTS:-}" ] || exit 1
-    echo '{"path":"web/a.js","line":11,"author":"maint","reply":true,"commit":"h1","body":"Also here."}' ;;
-  "pr view 5 --repo sysprog21/codetrial --json headRefOid,baseRefOid --jq "*)
-    echo "${FAKE_AFTER:-h1 b1}" ;;
-  # A space reaches GitHub encoded; a failed read is named, not guessed at.
-  "api repos/sysprog21/codetrial/contents/web/old.js?ref=h1 "*)
-    echo "a removed file is not read" >&2; exit 1 ;;
-  "api repos/sysprog21/codetrial/contents/web/gone.js?ref=h1 "*) exit 1 ;;
-  "api repos/sysprog21/codetrial/contents/web/a%20b.txt?ref=h1 "*) echo spaced ;;
-  "api repos/sysprog21/codetrial/contents/"*"?ref=h1 "*) echo "at head" ;;
-  # gh applies --jq itself, so the fake prints the rows.
-  "api user --jq .login") echo "${FAKE_VIEWER:-someone}" ;;
-  "api graphql --paginate "*)
-    printf 'false\\tfalse\\tweb/a.js\\t11\\tmaint\\tHandle the empty list.\\n'
-    printf 'true\\ttrue\\tweb/a.js\\t3\\tmaint\\tFixed.\\n' ;;
-  # gh applies --jq itself: the status, then how many merges the run holds.
-  "api repos/sysprog21/codetrial/compare/c0ffee1...h1 --jq "*)
-    echo "${FAKE_COMPARE:-ahead 0}" ;;
-  "api repos/sysprog21/codetrial/compare/c0ffee1...h1 -H Accept: application/vnd.github.diff")
-    cat "$FAKE_DIFF" ;;
-  *) echo "unexpected gh call: $*" >&2; exit 1 ;;
-esac
-"""
+FAKE_GH_BUNDLE = support.stub("skill-scripts/gh-bundle.sh")
 
 BUNDLE_PR = {
     "title": "Fix the thing",
@@ -2362,21 +2240,7 @@ HYGIENE = SKILLS / "codetrial-triage" / "hygiene.sh"
 
 # The PR and its commits; every other call fails, so ci-failure.sh yields no
 # diagnosis and no CI item, which is also what a failed lookup must do.
-FAKE_GH_HYGIENE = """#!/bin/sh
-case "$*" in
-  "api user --jq .login") echo viewer ;;
-  *collaborators*) [ -z "${FAKE_NO_PUSHERS:-}" ] || exit 1; printf 'maint\\nviewer\\n' ;;
-  "pr view 5 --repo sysprog21/codetrial --json number,"*) cat "$FAKE_PR" ;;
-  "pr view 5 --repo sysprog21/codetrial --json headRefOid --jq .headRefOid") echo h1 ;;
-  "api repos/sysprog21/codetrial/pulls/5/commits --paginate") cat "$FAKE_COMMITS" ;;
-  "api repos/sysprog21/codetrial/pulls/5/comments --paginate")
-    if [ -n "${FAKE_INLINE:-}" ]; then printf '%s\n' "$FAKE_INLINE"; else echo '[]'; fi ;;
-  "api repos/sysprog21/codetrial/commits/h1/check-suites "*)
-    [ -z "${FAKE_NO_SUITE:-}" ] || exit 0
-    echo "${FAKE_PUSHED:-2026-10-20T12:00:00Z}" ;;
-  *) exit 1 ;;
-esac
-"""
+FAKE_GH_HYGIENE = support.stub("skill-scripts/gh-hygiene.sh")
 
 GOOD_MESSAGE = "Add a thing\n\nThe lobby needed it, and this says why in one line.\n"
 
