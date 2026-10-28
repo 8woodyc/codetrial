@@ -436,13 +436,23 @@ fn run_web(options: CliOptions) -> Result<(), String> {
     // anywhere else, or set up to record or to share one fixed room, its routes
     // say why they are off. A declared proxy makes a loopback bind as public as
     // any other.
-    config.tasks = task_mode_enabled(
-        config.task_mode_requested,
-        reachable_from_elsewhere(&values, bound),
-        config.fixed_room_name.is_some(),
-        config.recording.is_some(),
-    )
-    .then(codetrial::tasks::access::TaskService::new);
+    let reachable = reachable_from_elsewhere(&values, bound);
+    let (fixed_room, recording) = (config.fixed_room_name.is_some(), config.recording.is_some());
+    config.tasks = task_mode_enabled(config.task_mode_requested, reachable, fixed_room, recording)
+        .then(codetrial::tasks::access::TaskService::new);
+
+    // Said at startup, because the address printed above is the interview lobby
+    // on any other server, and a learner who asked for task mode would not
+    // otherwise know what to open or why nothing changed.
+    if config.tasks.is_some() {
+        println!(
+            "codetrial: task mode is on; open http://{bound} for the default task, or the assignment link your instructor sent"
+        );
+    } else if config.task_mode_requested
+        && let Some(reason) = task_mode_refusal(reachable, fixed_room, recording)
+    {
+        eprintln!("codetrial: --task-mode is off: {reason}");
+    }
 
     // Past every startup check, so whatever a previous run left in the log is
     // no longer true. Written on failure and removed on none, the file outlives
@@ -1311,6 +1321,7 @@ fn relaxed_for_local_use(values: &BTreeMap<String, String>) -> Vec<String> {
 /// credentials open. What each guard says about it is not shared: the remedies
 /// differ, an address is passed on the command line and a declared proxy is a
 /// variable in the environment.
+#[derive(Clone, Copy)]
 enum Reachable {
     /// The bind address is not loopback.
     Address,
@@ -1334,7 +1345,29 @@ fn reachable_from_elsewhere(
 }
 
 fn task_mode_allowed(reachable: Option<Reachable>, fixed_room: bool, recording: bool) -> bool {
-    reachable.is_none() && !fixed_room && !recording
+    task_mode_refusal(reachable, fixed_room, recording).is_none()
+}
+
+/// Why task mode may not run on this server, in the words of what to change, or
+/// `None` where it may.
+fn task_mode_refusal(
+    reachable: Option<Reachable>,
+    fixed_room: bool,
+    recording: bool,
+) -> Option<&'static str> {
+    match (reachable, fixed_room, recording) {
+        (Some(Reachable::Address), _, _) => Some(
+            "it is bound to an address other than loopback; start it with --web-addr 127.0.0.1:3000",
+        ),
+        (Some(Reachable::DeclaredProxy), _, _) => {
+            Some("CODETRIAL_TRUSTED_PROXY_HOPS says requests arrive through a proxy; unset it")
+        }
+        (None, true, _) => Some("INTERVIEW_ROOM_NAME shares one fixed room; unset it"),
+        (None, false, true) => {
+            Some("recording is on; task mode does not run on a recording server")
+        }
+        (None, false, false) => None,
+    }
 }
 
 /// Task mode is on when `--task-mode` asked for it and the server is one it may

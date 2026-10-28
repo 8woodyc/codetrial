@@ -695,3 +695,96 @@ fn a_compiled_language_is_unavailable_without_compiler_explorer_not_unsupported(
     );
     assert_eq!(attempt("cpp-on", "cpp", true), None);
 }
+
+/// The default task is one assignment, named by one site, set and version, and
+/// nothing an instructor's link can spell is mistaken for it.
+#[test]
+fn only_the_built_in_site_set_and_version_name_the_default_task() {
+    use crate::tasks::access::{BUILT_IN_SET, BUILT_IN_SITE, BUILT_IN_VERSION};
+    let built_in = Assignment::built_in();
+    assert!(built_in.is_built_in());
+    for site in [BUILT_IN_SITE, BUILT_IN_SITE.trim_end_matches('/')] {
+        let named = Assignment::new(site, BUILT_IN_SET, BUILT_IN_VERSION).unwrap();
+        assert_eq!(named, built_in, "{site}");
+    }
+
+    // A real site, another set, another version: none of them is it, and the
+    // reserved site is no instructor's.
+    assert!(!assignment("classroom", 7).is_built_in());
+    assert!(!assignment(BUILT_IN_SET, BUILT_IN_VERSION).is_built_in());
+
+    // Valid as links, since the site is syntactically one, but not the default
+    // task: a guest is refused them, and a download from it never resolves.
+    for (set, version) in [(BUILT_IN_SET, BUILT_IN_VERSION + 1), ("classroom", 1)] {
+        assert!(
+            !Assignment::new(BUILT_IN_SITE, set, version)
+                .unwrap()
+                .is_built_in(),
+            "{set} {version}"
+        );
+    }
+    // The address that opens it.
+    assert_eq!(
+        Assignment::built_in_path(),
+        "/t/default/rubik?site=https%3A%2F%2Fbuilt-in.invalid%2F&version=1"
+    );
+}
+
+/// Anyone may load and start the default task, with no unlock: it is the set
+/// the program ships, with the default rules, and its task is the shipped one.
+#[tokio::test]
+async fn the_default_task_opens_without_an_unlock_for_anyone() {
+    let service = TaskService::new();
+    let built_in = Assignment::built_in();
+    for owner in [0, 1, 99] {
+        let task = service.load_task(owner, &built_in, "rubik").unwrap();
+        assert_eq!(task["taskId"], "rubik");
+        assert_eq!(task["setId"], "default");
+        assert_eq!(task["languages"], json!(["c"]));
+        assert_eq!(task["explainers"], json!(["cube"]));
+        assert_eq!(task["rules"]["durationMin"], 60);
+        assert_eq!(
+            task["rules"]["lookAwaySeconds"],
+            default_number("lookAwaySeconds")
+        );
+        assert_eq!(task["rules"]["closesAt"], Value::Null);
+    }
+    assert_eq!(
+        service
+            .load_task(0, &built_in, "delimiter-closer")
+            .unwrap_err()
+            .code,
+        "task_not_found"
+    );
+    // Nothing else is open without the unlock the instructor's PIN gives.
+    assert_eq!(
+        service
+            .load_task(0, &assignment("classroom", 7), "delimiter-closer")
+            .unwrap_err()
+            .code,
+        "unlock_required"
+    );
+    let admitted = match service
+        .begin_admission(
+            0,
+            ("guest", 0),
+            &built_in,
+            "rubik",
+            "guest-start",
+            Preparation {
+                language: "c".to_owned(),
+                ..preparation()
+            },
+            100,
+        )
+        .unwrap()
+    {
+        Admission::New(task) => task,
+        Admission::Replayed(_) => panic!("unexpected replay"),
+    };
+    assert_eq!(
+        (admitted.github_login.as_str(), admitted.github_id),
+        ("guest", 0)
+    );
+    assert_eq!(admitted.config.id, "default");
+}

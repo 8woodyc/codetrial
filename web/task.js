@@ -60,11 +60,19 @@ const { Room, RoomEvent, Track } = globalThis.LivekitClient;
 
 const $ = (id) => document.getElementById(id);
 const parts = location.pathname.split("/");
-const setId = parts[2];
+// The assignment this page works from: the link's, or, for a learner who goes
+// on to their instructor's tasks, the ones they enter.
+let setId = parts[2];
 let taskId = parts[3];
 const query = new URLSearchParams(location.search);
-const site = query.get("site") ?? "";
-const version = Number(query.get("version"));
+let site = query.get("site") ?? "";
+let version = Number(query.get("version"));
+// The default task, for a learner with nothing to sign in to: set by the
+// session where task mode is on.
+let builtIn = null;
+// Whether the learner asked for their instructor's tasks while not signed in,
+// so the sign-in that follows ends at the server, not at a PIN.
+let wantsInstructor = false;
 let task, state, room, review;
 // The whiteboard, mounted once the page is loaded; `lock` repaints it.
 let board;
@@ -154,7 +162,9 @@ function rememberAttempt(
 function forgetAttempt() {
   writeStored(recoveryKey(), "", storageArea("sessionStorage"));
 }
-async function signedInFlow() {
+async function signedInFlow(
+  next = () => (wantsInstructor ? showServer() : showUnlock()),
+) {
   let saved;
   try {
     saved = JSON.parse(
@@ -182,7 +192,7 @@ async function signedInFlow() {
     return;
   }
   forgetAttempt();
-  return showUnlock();
+  return next();
 }
 
 /// The line the learner types during calibration.
@@ -224,7 +234,14 @@ async function api(path, body) {
 
 /// Shows one stage of the flow and hides the others.
 function show(section) {
-  for (const name of ["signin", "unlock", "prepare", "task", "review"])
+  for (const name of [
+    "signin",
+    "server",
+    "unlock",
+    "prepare",
+    "task",
+    "review",
+  ])
     $(name).hidden = name !== section;
 }
 
@@ -332,9 +349,85 @@ $("device-start").onclick = async () => {
 
 function showUnlock() {
   show("unlock");
+  // A learner who entered the server can go back to it; one who followed a
+  // link has nowhere else to go.
+  $("unlock-back").hidden = !wantsInstructor;
   $("assignment").textContent =
     `Task set ${setId}, version ${version}, from ${site}. Enter the PIN your instructor gave you.`;
 }
+
+/// The address of the assignment the page now works from, so a reload comes
+/// back to it.
+function openAssignment() {
+  history.replaceState(
+    null,
+    "",
+    `/t/${encodeURIComponent(setId)}/${encodeURIComponent(taskId)}?site=${encodeURIComponent(site)}&version=${version}`,
+  );
+}
+
+// --- Your instructor's tasks ------------------------------------------------
+
+/// Where a learner who is signed in with GitHub says which server their
+/// instructor's tasks are on, before the PIN.
+function showServer() {
+  show("server");
+  $("server-message").textContent = "";
+}
+
+/// The default task: the one the session names, with nothing to pick from.
+function openDefault() {
+  ({ setId, taskId, site, version } = builtIn);
+  wantsInstructor = false;
+  $("task-picker").replaceChildren(new Option(taskId, taskId));
+  $("task-picker").value = taskId;
+  openAssignment();
+  showPrepare();
+  return loadTask();
+}
+
+$("instructor-tasks").onclick = async () => {
+  try {
+    const session = await api("/api/session");
+    // Signed in with GitHub already: straight to the server. Otherwise sign in
+    // first, which ends at the same place.
+    if (session.signedIn && session.githubSignedIn) return showServer();
+    wantsInstructor = true;
+    await showSignin();
+  } catch (value) {
+    error(value);
+  }
+};
+
+$("server-form").onsubmit = (event) => {
+  event.preventDefault();
+  const entered = {
+    site: $("server-site").value.trim(),
+    set: $("server-set").value.trim(),
+    version: Number($("server-version").value),
+  };
+  // The same checks the server makes of an assignment link, said before the
+  // PIN is spent on one that cannot open.
+  const problem = !/^https:\/\/[^/\s]+/.test(entered.site)
+    ? "The server is an https address, such as https://teacher.github.io/course."
+    : !/^[a-z][a-z0-9-]{0,63}$/.test(entered.set)
+      ? "The set is lower case letters, digits and hyphens, and starts with a letter."
+      : !Number.isSafeInteger(entered.version) || entered.version < 1
+        ? "The version is a whole number from 1."
+        : "";
+  $("server-message").textContent = problem;
+  if (problem) return;
+  wantsInstructor = true;
+  ({ setId, site, version } = {
+    setId: entered.set,
+    site: entered.site,
+    version: entered.version,
+  });
+  taskId = "";
+  showUnlock();
+};
+$("server-back").onclick = () => openDefault().catch(error);
+$("unlock-back").onclick = () => showServer();
 
 $("pin-form").onsubmit = async (event) => {
   event.preventDefault();
@@ -347,7 +440,11 @@ $("pin-form").onsubmit = async (event) => {
     $("task-picker").replaceChildren(
       ...unlocked.tasks.map((row) => new Option(row.title, row.id)),
     );
+    // A set the learner entered names no task, so it opens at its first.
+    if (!unlocked.tasks.some((row) => row.id === taskId))
+      taskId = unlocked.tasks[0].id;
     $("task-picker").value = taskId;
+    openAssignment();
     showPrepare();
     await loadTask();
   } catch (value) {
@@ -491,6 +588,11 @@ $("task-picker").onchange = () => {
 
 function showPrepare() {
   show("prepare");
+  // Offered on the default task alone, and a picker is only for a set with a
+  // choice in it.
+  $("instructor-offer").hidden = !isBuiltIn();
+  $("task-picker").closest("label").hidden =
+    $("task-picker").options.length < 2;
   acknowledgedAt = null;
   $("acknowledge").checked = false;
   $("devices").disabled = true;
@@ -1725,19 +1827,28 @@ async function pollReview() {
 
 // --- Boot --------------------------------------------------------------------
 
-if (!site || !Number.isSafeInteger(version) || version < 1)
-  error({
-    code: "site_invalid",
-    message:
-      "Open this task from the assignment link on your instructor's page; it names the site and version.",
-  });
-else
-  api("/api/session")
+const isBuiltIn = () =>
+  Boolean(builtIn) &&
+  setId === builtIn.setId &&
+  site === builtIn.site &&
+  version === builtIn.version;
+
+api("/api/session")
+  .then((session) => {
+    builtIn = session.builtInTask ?? null;
+    // The default task needs no sign-in, no server and no PIN: straight to
+    // preparing for it, unless an attempt at it is waiting to be collected.
+    if (isBuiltIn()) return signedInFlow(openDefault);
+    if (!site || !Number.isSafeInteger(version) || version < 1)
+      return error({
+        code: "site_invalid",
+        message:
+          "Open this task from the assignment link on your instructor's page; it names the site and version.",
+      });
     // A result names a GitHub account, so one signed in under a name of its
     // own choosing signs in again here.
-    .then((session) =>
-      session.signedIn && session.githubSignedIn
-        ? signedInFlow()
-        : showSignin(),
-    )
-    .catch(error);
+    return session.signedIn && session.githubSignedIn
+      ? signedInFlow()
+      : showSignin();
+  })
+  .catch(error);

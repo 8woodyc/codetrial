@@ -155,30 +155,34 @@ async fn task_routes_answer_only_a_page_naming_this_machine() {
 }
 
 #[tokio::test]
-async fn a_signed_out_page_is_told_to_sign_in_in_the_task_error_shape() {
+async fn a_signed_out_page_is_told_to_sign_in_for_an_instructors_task_only() {
     let (mut config, _, db) = signed_in_web_config("task-signed-out");
     config.tasks = Some(TaskService::new());
     let (url, server) = spawn_web_server(config).await;
     let client = http_client();
-    for response in [
-        client
-            .get(format!(
-                "{url}/api/task-sets/classroom/tasks/delimiter-closer?site=https%3A%2F%2Fteacher.github.io%2Fcourse&version=7"
-            ))
-            .send()
-            .await
-            .unwrap(),
-        client
-            .get(format!("{url}/api/task-reviews/room-1"))
-            .send()
-            .await
-            .unwrap(),
-    ] {
-        assert_eq!(
-            code(response).await,
-            (401, "authentication_required".to_owned())
-        );
-    }
+
+    // An instructor's task needs a GitHub sign-in, said in the task error shape
+    // the page recovers from.
+    let response = client
+        .get(format!(
+            "{url}/api/task-sets/classroom/tasks/delimiter-closer?site=https%3A%2F%2Fteacher.github.io%2Fcourse&version=7"
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        code(response).await,
+        (401, "authentication_required".to_owned())
+    );
+
+    // A guest holds results by an id of their own, so a room nobody started is
+    // just no result.
+    let response = client
+        .get(format!("{url}/api/task-reviews/room-1"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(code(response).await, (404, "result_unavailable".to_owned()));
     server.shutdown().await;
     remove_database(db).await;
 }
@@ -192,9 +196,11 @@ async fn task_unlock_requires_a_session_the_page_header_and_an_https_site() {
     let endpoint = format!("{url}/api/task-sets/classroom/unlock");
     let body = |site: &str, pin: &str| json!({"site": site, "version": 7, "pin": pin});
     let https = "https://teacher.github.io/course";
+    // Nobody signed in has nothing to unlock: the default task needs no PIN.
     assert_eq!(
         client
             .post(&endpoint)
+            .header("x-codetrial-task-request", "1")
             .json(&body(https, PIN))
             .send()
             .await
@@ -236,6 +242,146 @@ async fn task_unlock_requires_a_session_the_page_header_and_an_https_site() {
         code(send(json!({"pin": PIN})).await.unwrap()).await,
         (400, "site_invalid".to_owned())
     );
+    server.shutdown().await;
+    remove_database(db).await;
+}
+
+/// Where task mode is on, the home address is the default task, which opens
+/// with no sign-in, no PIN and no download; the lobby is at its own name. The
+/// session tells the page which assignment that is.
+#[tokio::test]
+async fn task_mode_opens_the_default_task_at_the_home_address_for_a_guest() {
+    let (mut config, _, db) = signed_in_web_config("task-default");
+    config.tasks = Some(TaskService::new());
+    let dispatcher = Arc::new(TaskDispatcher::default());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let server = spawn_test_server(
+        listener,
+        codetrial::web::web_service_with_dispatcher(config, Some(dispatcher.clone())),
+    );
+    let client = http_client_builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    // Home is the default task; `/index.html` is still the lobby.
+    let home = client.get(format!("{url}/")).send().await.unwrap();
+    assert_eq!(home.status(), 307);
+    let target = home.headers()["location"].to_str().unwrap().to_owned();
+    assert_eq!(
+        target,
+        "/t/default/rubik?site=https%3A%2F%2Fbuilt-in.invalid%2F&version=1"
+    );
+    assert_eq!(
+        client
+            .get(format!("{url}{target}"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    assert_eq!(
+        client
+            .get(format!("{url}/index.html"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    // The page learns which assignment is the default from the session.
+    let session = client
+        .get(format!("{url}/api/session"))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(session["signedIn"], false);
+    assert_eq!(
+        session["builtInTask"],
+        json!({"setId": "default", "taskId": "rubik",
+            "site": "https://built-in.invalid/", "version": 1})
+    );
+
+    // A guest loads it, with the explainer its sidecar names, and starts an
+    // attempt at it; the result names the guest.
+    let load = client
+        .get(format!("{url}/api/task-sets/default/tasks/rubik?site=https%3A%2F%2Fbuilt-in.invalid%2F&version=1"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(load.status(), 200);
+    let task = load.json::<Value>().await.unwrap();
+    assert_eq!(task["taskId"], "rubik");
+    assert_eq!(task["explainers"], json!(["cube"]));
+    assert_eq!(task["languages"], json!(["c"]));
+    let start = client
+        .post(format!("{url}/api/task-sets/default/tasks/rubik/attempts"))
+        .header("x-codetrial-task-request", "1")
+        .json(&json!({"site":"https://built-in.invalid/","version":1,"requestKey":"guest-1",
+            "language":"c","supportedPlatform":true,
+            "rulesAcknowledgedAt":"2026-10-07T00:00:00Z",
+            "calibration":{"ok":true,"metric":"keypoints","baseline":0.5,"keyboard":0.7,"limit":0.75}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(start.status(), 200);
+    {
+        let tasks = dispatcher.tasks.lock().unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(
+            (tasks[0].github_login.as_str(), tasks[0].github_id),
+            ("guest", 0)
+        );
+    }
+
+    // Nothing else is open to a guest: not an instructor's set, and not a PIN
+    // to unlock one with.
+    let other = client
+        .get(format!("{url}/api/task-sets/default/tasks/rubik?site=https%3A%2F%2Fteacher.github.io%2Fcourse&version=1"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        code(other).await,
+        (401, "authentication_required".to_owned())
+    );
+    let unlock = client
+        .post(format!("{url}/api/task-sets/classroom/unlock"))
+        .header("x-codetrial-task-request", "1")
+        .json(&json!({"site":"https://teacher.github.io/course","version":7,"pin":PIN}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        code(unlock).await,
+        (401, "authentication_required".to_owned())
+    );
+    server.shutdown().await;
+    drop(dispatcher);
+    remove_database(db).await;
+
+    // Off, the home address is the lobby, as it always was, and the session
+    // names no default task.
+    let (config, _, db) = signed_in_web_config("task-default-off");
+    let (url, server) = spawn_web_server(config).await;
+    assert_eq!(
+        client.get(format!("{url}/")).send().await.unwrap().status(),
+        200
+    );
+    let session = client
+        .get(format!("{url}/api/session"))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    // Absent, not null: the session is what it was where task mode is off.
+    assert!(session.get("builtInTask").is_none(), "{session}");
     server.shutdown().await;
     remove_database(db).await;
 }
@@ -826,8 +972,21 @@ async fn a_self_declared_login_is_told_to_sign_in_with_github_for_a_result() {
         (&session["signedIn"], &session["githubSignedIn"]),
         (&json!(true), &json!(false))
     );
+
+    // Signed in under a name of its own choosing, it may open the default task
+    // as a guest does, and has no result by GitHub's name: asked for, a room it
+    // never started is no result, and an instructor's task is told to sign in.
     let response = client
         .get(format!("{url}/api/task-reviews/room-1"))
+        .header("Cookie", &cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(code(response).await, (404, "result_unavailable".to_owned()));
+    let response = client
+        .get(format!(
+            "{url}/api/task-sets/classroom/tasks/delimiter-closer?site=https%3A%2F%2Fteacher.github.io%2Fcourse&version=7"
+        ))
         .header("Cookie", &cookie)
         .send()
         .await

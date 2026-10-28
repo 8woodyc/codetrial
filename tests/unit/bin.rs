@@ -754,6 +754,32 @@ fn task_mode_is_asked_for_by_a_flag_that_takes_no_value() {
     );
 }
 
+/// A refusal says what to change, and each reason names its own cause.
+#[test]
+fn task_mode_says_why_it_may_not_run_here() {
+    assert_eq!(super::task_mode_refusal(None, false, false), None);
+    let reasons = [
+        super::task_mode_refusal(Some(super::Reachable::Address), false, false).unwrap(),
+        super::task_mode_refusal(Some(super::Reachable::DeclaredProxy), false, false).unwrap(),
+        super::task_mode_refusal(None, true, false).unwrap(),
+        super::task_mode_refusal(None, false, true).unwrap(),
+    ];
+    for (reason, needle) in reasons.iter().zip([
+        "--web-addr",
+        "CODETRIAL_TRUSTED_PROXY_HOPS",
+        "INTERVIEW_ROOM_NAME",
+        "recording",
+    ]) {
+        assert!(reason.contains(needle), "{reason}");
+    }
+    // The first cause that applies is the one said.
+    assert_eq!(
+        super::task_mode_refusal(Some(super::Reachable::Address), true, true),
+        Some(reasons[0])
+    );
+    assert_eq!(super::task_mode_refusal(None, true, true), Some(reasons[2]));
+}
+
 #[test]
 fn task_mode_needs_the_flag_and_a_server_it_may_run_on() {
     assert!(super::task_mode_enabled(true, None, false, false));

@@ -326,6 +326,31 @@ usual channel; those files are self-reported.
 
 ## Learner flow
 
+### The default task
+
+With `--task-mode` the home address opens the default task, `rubik`, as a
+guest: no sign-in, no PIN and no download. It is the task the program ships
+(`problem-bank/task-examples/rubik.json`, the row `new` copies when no
+`--from` names one), alone in a set called `default`, version 1, under the
+default rules except for sixty minutes, since the task is a measured rewrite. Its assignment names the site `https://built-in.invalid/`;
+`.invalid` never resolves, so no instructor's site can be mistaken for it. The
+session names the task (`builtInTask`), so the page needs no link and goes
+straight to the rules, the devices and the calibration, and then the task. The
+interview lobby stays at `/index.html`.
+
+A guest has an id of their own, which holds the attempt and its result, and the
+result names them as `guest` with an id of 0 where an instructor's names a
+GitHub login. A guest, or anyone not signed in with GitHub, may open the default
+task and nothing else: any other set answers `authentication_required`, and
+there is nothing for a guest to unlock.
+
+On the default task the page offers the learner's instructor's tasks. The
+learner signs in with GitHub, says which server and which set the instructor
+named (the site, the set and its version, the three things an assignment link
+carries), enters the PIN, and then goes through the same preparation and test.
+How a server names its sets, so that the learner need not type them, is still to
+be settled.
+
 ### Assignment links
 
 An assignment is an address naming one version:
@@ -369,7 +394,7 @@ PIN, the likeliest cause. The PIN and derived key are dropped once the set is
 decoded. CodeTrial never writes the decoded set anywhere; it lives in process
 memory until exit, which is not a promise about what the operating system
 pages to disk. A restart downloads the set and asks for the PIN again. No
-failure falls back to a catalog problem.
+failure falls back to a catalog problem, or to the default task.
 
 ### Rules and preparation
 

@@ -119,3 +119,11 @@ fn a_task_is_offered_in_the_languages_this_server_can_run() {
     }
     assert!(!runnable("rust", true));
 }
+
+/// The page keeps the default task's address through a GitHub sign-in, since a
+/// sign-in leaves the page and returns to the address it left from.
+#[test]
+fn the_default_tasks_address_survives_a_sign_in() {
+    let path = crate::tasks::access::Assignment::built_in_path();
+    assert_eq!(task_return_path(&path).as_deref(), Some(path.as_str()));
+}

@@ -203,7 +203,8 @@ label:has(input[type="checkbox"]) {
   color: var(--ink);
 }
 #signin,
-#unlock {
+#unlock,
+#server {
   max-width: 560px;
   margin: 4rem auto;
   padding: clamp(1.5rem, 4vw, 3rem);
@@ -212,12 +213,39 @@ label:has(input[type="checkbox"]) {
   background: var(--surface);
 }
 #signin h1,
-#unlock h1 {
+#unlock h1,
+#server h1 {
   margin-bottom: 1rem;
 }
 #signin p,
+#server p,
 #assignment {
   color: var(--sub);
+}
+#server-message:not(:empty) {
+  color: var(--warning);
+}
+#server-form {
+  display: grid;
+  gap: 0.75rem;
+}
+#server-form label {
+  margin: 0;
+}
+/* A button that reads as a link, for a way back or a way to another flow. */
+.link-button {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+.link-button:hover:enabled {
+  background: none;
+  border-color: transparent;
 }
 #pin-form {
   display: flex;

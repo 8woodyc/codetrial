@@ -549,34 +549,40 @@ pub(crate) async fn session_handler(
     match current_user(state.accounts.as_ref(), request.headers()).await {
         Ok(Some(user)) => json_response(
             StatusCode::OK,
-            json!({
-                "signedIn": true,
-                "identityVerified": user.identity_verified,
+            super::tasks::with_built_in_task(
+                &state,
+                json!({
+                    "signedIn": true,
+                    "identityVerified": user.identity_verified,
 
-                // Task mode admits only a login GitHub vouched for; the task
-                // page asks before the learner types a PIN.
-                "githubSignedIn": user.github_id.is_some(),
-                "loginRequired": login_required,
-                "guestModeAvailable": state.guest_mode_available(),
-                "deviceLogin": device_client_id(&state.config).is_some(),
-                "maxDurationMin": max_duration_min,
-                "candidateVideo": candidate_video,
-                "user": {
-                    "login": user.login,
-                    "avatarUrl": user.avatar_url
-                }
-            }),
+                    // Task mode admits only a login GitHub vouched for; the
+                    // task page asks before the learner types a PIN.
+                    "githubSignedIn": user.github_id.is_some(),
+                    "loginRequired": login_required,
+                    "guestModeAvailable": state.guest_mode_available(),
+                    "deviceLogin": device_client_id(&state.config).is_some(),
+                    "maxDurationMin": max_duration_min,
+                    "candidateVideo": candidate_video,
+                    "user": {
+                        "login": user.login,
+                        "avatarUrl": user.avatar_url
+                    }
+                }),
+            ),
         ),
         Ok(None) => json_response(
             StatusCode::OK,
-            json!({
-                "signedIn": false,
-                "loginRequired": login_required,
-                "guestModeAvailable": state.guest_mode_available(),
-                "deviceLogin": device_client_id(&state.config).is_some(),
-                "maxDurationMin": max_duration_min,
-                "candidateVideo": candidate_video,
-            }),
+            super::tasks::with_built_in_task(
+                &state,
+                json!({
+                    "signedIn": false,
+                    "loginRequired": login_required,
+                    "guestModeAvailable": state.guest_mode_available(),
+                    "deviceLogin": device_client_id(&state.config).is_some(),
+                    "maxDurationMin": max_duration_min,
+                    "candidateVideo": candidate_video,
+                }),
+            ),
         ),
         Err(_) => json_response(
             StatusCode::INTERNAL_SERVER_ERROR,

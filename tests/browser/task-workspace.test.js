@@ -16,6 +16,14 @@ after(async () => {
 
 const SITE = "https://teacher.github.io/course";
 const ASSIGNMENT = `/t/classroom/delimiter-closer?site=${encodeURIComponent(SITE)}&version=7`;
+// The default task, which the session names where task mode is on.
+const BUILT_IN = {
+  setId: "default",
+  taskId: "rubik",
+  site: "https://built-in.invalid/",
+  version: 1,
+};
+const DEFAULT_TASK = `/t/default/rubik?site=${encodeURIComponent(BUILT_IN.site)}&version=1`;
 
 const task = {
   setId: "classroom",
@@ -128,6 +136,7 @@ async function pageFor(
     githubSignedIn = null,
     taskOverrides = {},
     realLivekit = false,
+    builtIn = null,
   } = {},
 ) {
   if (!browser) {
@@ -195,7 +204,7 @@ async function pageFor(
     },
     { denied, faceFiles },
   );
-  await page.route(`**/t/classroom/*`, (route) =>
+  await page.route(/\/t\/[^/]+\/[^/?]+/, (route) =>
     route.fulfill({ contentType: "text/html", body: read("web/task.html") }),
   );
   if (!realLivekit)
@@ -234,6 +243,7 @@ async function pageFor(
         signedIn: session,
         githubSignedIn: githubSignedIn ?? session,
         deviceLogin,
+        builtInTask: builtIn,
       };
     else if (url.pathname === "/api/github/device")
       body = {
@@ -276,7 +286,7 @@ async function pageFor(
           ],
         };
       }
-    } else if (!unlocked) {
+    } else if (!unlocked && !(builtIn && url.pathname.includes("/default/"))) {
       status = 403;
       body = { code: "unlock_required", message: "Enter the PIN." };
     } else
@@ -725,6 +735,150 @@ test("the cube turns at once for a reader who asks for less motion", async (t) =
       { timeout: 1000 },
     );
     assert.equal(await page.locator(".cube-layer").count(), 0);
+  } finally {
+    await page.close();
+  }
+});
+
+test("the default task opens straight into preparation with no sign-in or PIN", async (t) => {
+  const ctx = await pageFor(t, {
+    signedIn: false,
+    builtIn: BUILT_IN,
+    path: DEFAULT_TASK,
+    taskOverrides: { title: "Cube Solve Planner" },
+  });
+  if (!ctx) return;
+  const { page } = ctx;
+  try {
+    await page.locator("#prepare").waitFor({ state: "visible" });
+    await page.waitForFunction(
+      () =>
+        document.getElementById("prepare-title").textContent ===
+        "Cube Solve Planner",
+    );
+    for (const hidden of ["#signin", "#unlock", "#server", "#task"])
+      assert.equal(await page.locator(hidden).isVisible(), false, hidden);
+    // One task, so nothing to pick; and a way to the instructor's tasks.
+    assert.equal(await page.locator("#task-picker").isVisible(), false);
+    assert.equal(await page.locator("#instructor-offer").isVisible(), true);
+    // Rules, devices and calibration come first, as for any task.
+    assert.equal((await page.locator("#rules li").count()) > 0, true);
+    assert.equal(await page.locator("#start").isDisabled(), true);
+    await prepare(page, true);
+    assert.equal(await page.locator("#start").isEnabled(), true);
+  } finally {
+    await page.close();
+  }
+});
+
+test("the page does not offer the default task to a link that names another", async (t) => {
+  const ctx = await pageFor(t, { builtIn: BUILT_IN });
+  if (!ctx) return;
+  const { page } = ctx;
+  try {
+    // An instructor's link, signed in: the PIN, as always, and no offer.
+    await page.locator("#pin-form").waitFor({ state: "visible" });
+    await unlock(page);
+    assert.equal(await page.locator("#instructor-offer").isVisible(), false);
+  } finally {
+    await page.close();
+  }
+});
+
+test("a learner can leave the default task for their instructor's, through GitHub, a server and a PIN", async (t) => {
+  const ctx = await pageFor(t, {
+    signedIn: false,
+    builtIn: BUILT_IN,
+    path: DEFAULT_TASK,
+    taskOverrides: { title: "Cube Solve Planner" },
+  });
+  if (!ctx) return;
+  const { page, unlocks } = ctx;
+  try {
+    await page.locator("#instructor-offer").waitFor({ state: "visible" });
+    // Not signed in: GitHub first, then where the tasks are.
+    await page.click("#instructor-tasks");
+    await page.locator("#signin").waitFor({ state: "visible" });
+    await page.click("#device-start");
+    await page.locator("#device-code").waitFor({ state: "visible" });
+    await page.clock.runFor(11000);
+    await page.locator("#server").waitFor({ state: "visible" });
+    assert.equal(await page.locator("#signin").isVisible(), false);
+
+    // What cannot be an assignment is said before the PIN is spent on it.
+    const message = page.locator("#server-message");
+    await page.fill("#server-site", "http://teacher.example");
+    await page.fill("#server-set", "classroom");
+    await page.click("#server-form button");
+    assert.match(await message.textContent(), /https address/);
+    await page.fill("#server-site", SITE);
+    await page.fill("#server-set", "Class Room");
+    await page.click("#server-form button");
+    assert.match(await message.textContent(), /lower case/);
+    await page.fill("#server-set", "classroom");
+    await page.fill("#server-version", "0");
+    await page.evaluate(() => {
+      document.getElementById("server-version").removeAttribute("min");
+    });
+    await page.click("#server-form button");
+    assert.match(await message.textContent(), /whole number/);
+    assert.deepEqual(unlocks, []);
+
+    // Then the PIN for that set, and a way back to the server.
+    await page.fill("#server-version", "7");
+    await page.click("#server-form button");
+    await page.locator("#unlock").waitFor({ state: "visible" });
+    assert.match(
+      await page.locator("#assignment").textContent(),
+      /classroom, version 7/,
+    );
+    await page.click("#unlock-back");
+    await page.locator("#server").waitFor({ state: "visible" });
+    await page.click("#server-form button");
+    await page.fill("#pin", "123456");
+    await page.locator("#pin-form button").click();
+    await page.locator("#prepare").waitFor({ state: "visible" });
+    assert.deepEqual(unlocks.at(-1), { site: SITE, version: 7, pin: "123456" });
+
+    // The set's own first task, in the set's own address, and no offer now.
+    await page.waitForFunction(
+      () =>
+        document.getElementById("prepare-title").textContent !==
+        "Loading assignment…",
+    );
+    assert.equal(
+      new URL(page.url()).pathname + new URL(page.url()).search,
+      ASSIGNMENT,
+    );
+    assert.equal(await page.locator("#task-picker").isVisible(), true);
+    assert.equal(await page.locator("#instructor-offer").isVisible(), false);
+  } finally {
+    await page.close();
+  }
+});
+
+test("a learner already signed in goes straight to the server, and can come back to the default task", async (t) => {
+  const ctx = await pageFor(t, {
+    builtIn: BUILT_IN,
+    path: DEFAULT_TASK,
+    taskOverrides: { title: "Cube Solve Planner" },
+  });
+  if (!ctx) return;
+  const { page } = ctx;
+  try {
+    await page.locator("#instructor-offer").waitFor({ state: "visible" });
+    await page.click("#instructor-tasks");
+    await page.locator("#server").waitFor({ state: "visible" });
+    assert.equal(await page.locator("#signin").isVisible(), false);
+    await page.click("#server-back");
+    await page.locator("#prepare").waitFor({ state: "visible" });
+    await page.waitForFunction(
+      () =>
+        document.getElementById("prepare-title").textContent ===
+        "Cube Solve Planner",
+    );
+    assert.equal(new URL(page.url()).pathname, "/t/default/rubik");
+    assert.equal(await page.locator("#instructor-offer").isVisible(), true);
   } finally {
     await page.close();
   }

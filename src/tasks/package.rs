@@ -340,6 +340,55 @@ pub fn site_base(text: &str) -> Result<reqwest::Url, TaskError> {
     Ok(url)
 }
 
+/// How long a guest has with the default task: it asks for a measured
+/// rewrite of a solver, which the default fifteen minutes of a short task
+/// would cut short.
+pub const BUILT_IN_DURATION_MIN: u64 = 60;
+
+/// The set a learner who has not signed in works from: the default task,
+/// shipped with the program, as a set of one with the default rules. It is read
+/// from the same bank row the instructor's tool copies, so the default a
+/// learner sees is the default an instructor starts from.
+///
+/// Panics if the shipped row is not a valid task, which a test of this crate
+/// reads every run.
+pub fn built_in_set() -> Arc<LoadedSet> {
+    static SET: std::sync::LazyLock<Arc<LoadedSet>> = std::sync::LazyLock::new(|| {
+        let row: Value =
+            serde_json::from_str(include_str!("../../problem-bank/task-examples/rubik.json"))
+                .expect("the shipped default task is JSON");
+        let record = TaskRecord::from_bank(
+            &row["problem"],
+            &row["judge"],
+            &row["variant"],
+            Some(&row["sidecar"]),
+        )
+        .expect("the shipped default task is a valid task");
+        Arc::new(LoadedSet {
+            config: Arc::new(SetConfig {
+                id: super::access::BUILT_IN_SET.to_owned(),
+                version: super::access::BUILT_IN_VERSION,
+                rules: Rules {
+                    duration_min: BUILT_IN_DURATION_MIN,
+                    max_hint_rungs: default_number("maxHintRungs"),
+                    closes_at: None,
+                    look_away_seconds: default_number("lookAwaySeconds"),
+                    rules_note: None,
+                },
+            }),
+            records: BTreeMap::from([(record_id_of(&row), Arc::new(record))]),
+        })
+    });
+    SET.clone()
+}
+
+fn record_id_of(row: &Value) -> String {
+    row["problem"]["id"]
+        .as_str()
+        .expect("the shipped default task has an id")
+        .to_owned()
+}
+
 /// A downloaded set version, not yet opened.
 pub struct Download {
     pub manifest: Vec<u8>,

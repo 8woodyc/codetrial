@@ -38,6 +38,54 @@
         </p>
       </section>
 
+      <section id="server" hidden>
+        <h1>Your instructor's tasks</h1>
+        <p>
+          Enter the server your instructor gave you and the task set it
+          publishes. The next step asks for the PIN.
+        </p>
+        <form id="server-form">
+          <label
+            >Server
+            <input
+              id="server-site"
+              type="url"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="https://teacher.github.io/course"
+              required
+          /></label>
+          <div class="assignment-fields">
+            <label
+              >Set
+              <input
+                id="server-set"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="classroom"
+                required
+            /></label>
+            <label
+              >Version
+              <input
+                id="server-version"
+                type="number"
+                min="1"
+                step="1"
+                value="1"
+                required
+            /></label>
+          </div>
+          <div class="start-row">
+            <button class="primary">Continue</button>
+          </div>
+        </form>
+        <p id="server-message" role="status"></p>
+        <button id="server-back" type="button" class="link-button">
+          Back to the default task
+        </button>
+      </section>
+
       <section id="unlock" hidden>
         <h1>Unlock task set</h1>
         <p id="assignment"></p>
@@ -53,10 +101,19 @@
               required /></label
           ><button class="primary">Unlock</button>
         </form>
+        <button id="unlock-back" type="button" class="link-button" hidden>
+          Back to the server
+        </button>
       </section>
 
       <section id="prepare" hidden>
         <h1 id="prepare-title"></h1>
+        <p id="instructor-offer" hidden>
+          This is the default task. Do you have tasks from your instructor?
+          <button id="instructor-tasks" type="button" class="link-button">
+            Sign in with GitHub to open them
+          </button>
+        </p>
         <div class="assignment-fields">
           <label
             >Task

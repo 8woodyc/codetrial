@@ -41,6 +41,15 @@ const MAX_ADMISSIONS: usize = 256;
 /// Bytes of a client's admission request key.
 const MAX_REQUEST_KEY_BYTES: usize = 128;
 
+/// The default task, which needs no sign-in, no PIN and no download. A link
+/// naming this site, set and version is the one assignment every learner may
+/// open: `.invalid` is reserved and never resolves, so no instructor's site can
+/// be mistaken for it.
+pub const BUILT_IN_SITE: &str = "https://built-in.invalid/";
+pub const BUILT_IN_SET: &str = "default";
+pub const BUILT_IN_TASK: &str = "rubik";
+pub const BUILT_IN_VERSION: u32 = 1;
+
 /// One assignment link: the instructor's site and the set version it names.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Assignment {
@@ -53,6 +62,12 @@ impl Assignment {
     /// Checks a link's parts. A set or version no package can carry is the
     /// link's fault, not the site's, and no download would change it.
     pub fn new(site: &str, set_id: &str, version: u32) -> Result<Self, AccessError> {
+        if site.trim_end_matches('/') == BUILT_IN_SITE.trim_end_matches('/')
+            && set_id == BUILT_IN_SET
+            && version == BUILT_IN_VERSION
+        {
+            return Ok(Self::built_in());
+        }
         if !super::identifier(set_id) || version == 0 || version > i32::MAX as u32 {
             return Err(AccessError::new("site_invalid"));
         }
@@ -61,6 +76,30 @@ impl Assignment {
             set_id: set_id.to_owned(),
             version,
         })
+    }
+}
+
+impl Assignment {
+    /// The default task's assignment.
+    pub fn built_in() -> Self {
+        Self {
+            site: reqwest::Url::parse(BUILT_IN_SITE).expect("the built-in site is a URL"),
+            set_id: BUILT_IN_SET.to_owned(),
+            version: BUILT_IN_VERSION,
+        }
+    }
+
+    /// Whether this is the default task's assignment, which anyone may open.
+    pub fn is_built_in(&self) -> bool {
+        *self == Self::built_in()
+    }
+
+    /// The page address that opens the default task.
+    pub fn built_in_path() -> String {
+        format!(
+            "/t/{BUILT_IN_SET}/{BUILT_IN_TASK}?site={}&version={BUILT_IN_VERSION}",
+            crate::percent_encode_component(BUILT_IN_SITE)
+        )
     }
 }
 
@@ -448,16 +487,19 @@ impl TaskService {
         task_id: &str,
     ) -> Result<Value, AccessError> {
         // The set is shared; the lock is held only to find it.
-        let set = self
-            .0
-            .state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .unlocked
-            .get(&(owner_id, assignment.clone()))
-            .ok_or_else(|| AccessError::new("unlock_required"))?
-            .set
-            .clone();
+        let set = if assignment.is_built_in() {
+            super::package::built_in_set()
+        } else {
+            self.0
+                .state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .unlocked
+                .get(&(owner_id, assignment.clone()))
+                .ok_or_else(|| AccessError::new("unlock_required"))?
+                .set
+                .clone()
+        };
         let record = set
             .records
             .get(task_id)
@@ -530,14 +572,18 @@ impl TaskService {
         if state.active.is_some() {
             return Err(AccessError::new("active_task_session"));
         }
-        let unlocked = state
-            .unlocked
-            .get(&(owner_id, assignment.clone()))
-            .ok_or_else(|| AccessError::new("unlock_required"))?;
-        if unlocked.set.config.closed(unlocked.now(now)) {
-            return Err(AccessError::new("set_closed"));
-        }
-        let set = unlocked.set.clone();
+        let set = if assignment.is_built_in() {
+            super::package::built_in_set()
+        } else {
+            let unlocked = state
+                .unlocked
+                .get(&(owner_id, assignment.clone()))
+                .ok_or_else(|| AccessError::new("unlock_required"))?;
+            if unlocked.set.config.closed(unlocked.now(now)) {
+                return Err(AccessError::new("set_closed"));
+            }
+            unlocked.set.clone()
+        };
         let record = set
             .records
             .get(task_id)

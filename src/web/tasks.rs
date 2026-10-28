@@ -212,9 +212,37 @@ pub(crate) fn device_refusal(headers: &HeaderMap) -> Option<Response> {
     }
 }
 
-/// The signed-in account, refused in the task error shape: the interview
+/// Who is working a task. A signed-in account, or, where task mode is on, a
+/// guest: one process serves one learner on their own machine, so a guest needs
+/// no account, only a stable identity to hold the attempt and its result by.
+/// An account's GitHub login is what an instructor's result names; a guest may
+/// open only the default task, and its result names them as the guest.
+pub(crate) struct Learner {
+    pub id: i64,
+    pub login: String,
+    pub github_id: Option<u64>,
+}
+
+/// An account's id is never 0, so this one cannot hold anyone else's attempt.
+const GUEST_ID: i64 = 0;
+const GUEST_LOGIN: &str = "guest";
+
+impl Learner {
+    /// The login and id a result records for an attempt at `assignment`:
+    /// GitHub's, or the guest's where nothing else is needed, which is the
+    /// default task alone. `None` where the assignment needs a GitHub sign-in.
+    fn recorded(&self, assignment: &Assignment) -> Option<(String, u64)> {
+        match self.github_id {
+            Some(id) => Some((self.login.clone(), id)),
+            None if assignment.is_built_in() => Some((GUEST_LOGIN.to_owned(), 0)),
+            None => None,
+        }
+    }
+}
+
+/// The learner at the page, refused in the task error shape: the interview
 /// routes' refusal carries no `code`, and the page would offer no sign-in.
-pub(crate) struct TaskOwner(Owner);
+pub(crate) struct TaskOwner(Learner);
 
 impl axum::extract::FromRequestParts<AppState> for TaskOwner {
     type Rejection = Response;
@@ -224,13 +252,43 @@ impl axum::extract::FromRequestParts<AppState> for TaskOwner {
         state: &AppState,
     ) -> Result<Self, Response> {
         match Owner::from_request_parts(parts, state).await {
-            Ok(owner) => Ok(Self(owner)),
+            Ok(owner) => Ok(Self(Learner {
+                id: owner.user.id,
+                login: owner.user.login.clone(),
+                github_id: owner.user.github_id,
+            })),
+
+            // Nobody signed in is a guest, but only where task mode is on;
+            // elsewhere the routes answer as they always did.
             Err(refusal) if refusal.status() == StatusCode::UNAUTHORIZED => {
-                Err(refuse("authentication_required"))
+                if state.config.tasks.is_some() {
+                    Ok(Self(Learner {
+                        id: GUEST_ID,
+                        login: GUEST_LOGIN.to_owned(),
+                        github_id: None,
+                    }))
+                } else {
+                    Err(refuse("authentication_required"))
+                }
             }
             Err(refusal) => Err(refusal),
         }
     }
+}
+
+/// `session` with what the page needs to open the default task without a link,
+/// where task mode is on, and unchanged where it is off. Sent with the session,
+/// so the page asks once.
+pub(crate) fn with_built_in_task(state: &AppState, mut session: Value) -> Value {
+    if state.config.tasks.is_some() {
+        session["builtInTask"] = json!({
+            "setId": crate::tasks::access::BUILT_IN_SET,
+            "taskId": crate::tasks::access::BUILT_IN_TASK,
+            "site": crate::tasks::access::BUILT_IN_SITE,
+            "version": crate::tasks::access::BUILT_IN_VERSION,
+        });
+    }
+    session
 }
 
 fn refuse(code: &'static str) -> Response {
@@ -241,15 +299,15 @@ pub(crate) async fn task_result_handler(
     State(state): State<AppState>,
     Path(room): Path<String>,
     headers: HeaderMap,
-    TaskOwner(owner): TaskOwner,
+    TaskOwner(learner): TaskOwner,
 ) -> Response {
     let Some(service) = service(&state, &headers) else {
         return unavailable(&state);
     };
-    if owner.user.github_id.is_none() {
-        return refuse("authentication_required");
-    }
-    match service.result(owner.user.id, &room, crate::current_epoch_seconds()) {
+
+    // Held by the learner's own id, so no sign-in is needed to ask for one's
+    // own result.
+    match service.result(learner.id, &room, crate::current_epoch_seconds()) {
         ResultLookup::Ready(result) => json_response(StatusCode::OK, result),
         ResultLookup::Pending => json_response(StatusCode::ACCEPTED, json!({"pending": true})),
         ResultLookup::Unavailable => refuse("result_unavailable"),
@@ -288,7 +346,7 @@ struct UnlockRequest {
 pub(crate) async fn task_unlock_handler(
     State(state): State<AppState>,
     Path(set_id): Path<String>,
-    TaskOwner(owner): TaskOwner,
+    TaskOwner(learner): TaskOwner,
     request: Request<Body>,
 ) -> Response {
     let Some(service) = service(&state, request.headers()) else {
@@ -297,7 +355,8 @@ pub(crate) async fn task_unlock_handler(
     if !task_csrf(request.headers()) {
         return refuse("csrf_rejected");
     }
-    if owner.user.github_id.is_none() {
+    // A guest has the default task and nothing to unlock.
+    if learner.github_id.is_none() {
         return refuse("authentication_required");
     }
     let Ok(bytes) = to_bytes(request.into_body(), MAX_BODY_BYTES).await else {
@@ -312,7 +371,7 @@ pub(crate) async fn task_unlock_handler(
     };
     match service
         .unlock(
-            owner.user.id,
+            learner.id,
             &assignment,
             &body.pin,
             crate::current_epoch_seconds(),
@@ -338,9 +397,7 @@ pub(crate) async fn task_load_handler(
     Path((set_id, task_id)): Path<(String, String)>,
     headers: HeaderMap,
 
-    // After the session, so an anonymous request is told to sign in before
-    // anything about its query.
-    TaskOwner(owner): TaskOwner,
+    TaskOwner(learner): TaskOwner,
     query: Result<Query<AssignmentQuery>, axum::extract::rejection::QueryRejection>,
 ) -> Response {
     let Some(service) = service(&state, &headers) else {
@@ -352,7 +409,12 @@ pub(crate) async fn task_load_handler(
     let Ok(Query(query)) = query else {
         return refuse("site_invalid");
     };
-    if owner.user.github_id.is_none() {
+    let assignment = match Assignment::new(&query.site, &set_id, query.version) {
+        Ok(assignment) => assignment,
+        Err(error) => return task_error(error),
+    };
+    // Only the default task is open to someone not signed in with GitHub.
+    if learner.recorded(&assignment).is_none() {
         return refuse("authentication_required");
     }
 
@@ -361,11 +423,7 @@ pub(crate) async fn task_load_handler(
     if state.dispatcher.is_none() {
         return refuse("credentials_missing");
     }
-    let assignment = match Assignment::new(&query.site, &set_id, query.version) {
-        Ok(assignment) => assignment,
-        Err(error) => return task_error(error),
-    };
-    match service.load_task(owner.user.id, &assignment, &task_id) {
+    match service.load_task(learner.id, &assignment, &task_id) {
         Ok(mut value) => {
             let languages =
                 offered_languages(&value["languages"], state.config.compiler_explorer_enabled);
@@ -412,7 +470,7 @@ pub(crate) async fn task_start_handler(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Path((set_id, task_id)): Path<(String, String)>,
-    TaskOwner(owner): TaskOwner,
+    TaskOwner(learner): TaskOwner,
     request: Request<Body>,
 ) -> Response {
     let Some(service) = service(&state, request.headers()) else {
@@ -428,10 +486,6 @@ pub(crate) async fn task_start_handler(
             retry_after: Some(60),
         });
     }
-    // The result records the learner's GitHub login and numeric id.
-    let Some(github_id) = owner.user.github_id else {
-        return refuse("authentication_required");
-    };
     let Ok(bytes) = to_bytes(request.into_body(), MAX_BODY_BYTES).await else {
         return refuse("request_too_large");
     };
@@ -468,9 +522,15 @@ pub(crate) async fn task_start_handler(
         Ok(assignment) => assignment,
         Err(error) => return task_error(error),
     };
+
+    // The result records the learner's GitHub login and numeric id, or the
+    // guest's where the assignment is the default task.
+    let Some((login, github_id)) = learner.recorded(&assignment) else {
+        return refuse("authentication_required");
+    };
     let task = match service.begin_admission(
-        owner.user.id,
-        (&owner.user.login, github_id),
+        learner.id,
+        (&login, github_id),
         &assignment,
         &task_id,
         &body.request_key,
@@ -493,7 +553,7 @@ pub(crate) async fn task_start_handler(
 
     // Every way out short of the answer, a failure or the page dropping the
     // request mid-setup, releases the request key it claimed.
-    let pending = service.unanswered_start(owner.user.id, &body.request_key, claim_id);
+    let pending = service.unanswered_start(learner.id, &body.request_key, claim_id);
     let (room_name, provider) = match super::token::reserved_room(&state, false).await {
         Ok(reserved) => reserved,
         Err(_) => return refuse("setup_failed"),
