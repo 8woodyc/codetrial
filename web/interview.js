@@ -529,6 +529,7 @@ const state = {
   /// read it from.
   interviewId: null,
   micEnabled: true,
+  micChanging: false,
   /// Up while a microphone switch holds LiveKit's mute flag; web/integrity.js
   /// reads the Mic button rather than the track for that stretch.
   microphoneSwapHolding: false,
@@ -609,6 +610,8 @@ const nodes = {
   roundPlanSummary: document.querySelector("#round-plan-summary"),
 
   mic: document.querySelector("#mic"),
+  micMutedStatus: document.querySelector("#mic-muted-status"),
+  micControlStatus: document.querySelector("#mic-control-status"),
   thinking: document.querySelector("#thinking"),
   yieldTurn: document.querySelector("#yield-turn"),
   turnStatus: document.querySelector("#turn-status"),
@@ -743,6 +746,7 @@ initAvatarStage({
 // undrawn under it until the preflight closes.
 holdWorkspaceBehindDialogs();
 initAudioOutput({ nodes, jimAudioElement: () => jimAudio });
+paintMicrophoneState();
 initRecording({ state, nodes, recordingEnabled, addTranscript, setBanner });
 initIntegrity({
   state,
@@ -2909,30 +2913,69 @@ async function consumeTranscript(room, reader, participant) {
 }
 
 async function toggleMicrophone() {
-  state.micEnabled = !state.micEnabled;
-  if (state.localUserStream) {
-    setLocalAudioEnabled(state.micEnabled);
-    // An input a microphone switch is still handing to the sender is in
-    // neither the stream nor the publication yet.
-    microphoneSwitch().setEnabled(state.micEnabled);
-    if (!state.micEnabled) {
+  if (state.phase !== "live" || state.micChanging || nodes.mic.disabled) return;
+  const enabled = !state.micEnabled;
+  state.micChanging = true;
+  nodes.mic.setAttribute("aria-disabled", "true");
+  try {
+    if (state.localUserStream) {
+      const tracks = state.localUserStream.getAudioTracks();
+      if (
+        enabled &&
+        (!tracks.length || tracks.some((track) => track.readyState !== "live"))
+      )
+        throw new Error("Microphone unavailable");
+      setLocalAudioEnabled(enabled);
+      // An input a microphone switch is still handing to the sender is in
+      // neither the stream nor the publication yet.
+      microphoneSwitch().setEnabled(enabled);
+    } else if (state.room) {
+      const publication =
+        await state.room.localParticipant.setMicrophoneEnabled(enabled);
+      const track = publication?.track?.mediaStreamTrack;
+      if (enabled && (!track || track.readyState !== "live"))
+        throw new Error("Microphone unavailable");
+      if (enabled && track) startTurnRing(new MediaStream([track]));
+    } else {
+      throw new Error("Microphone unavailable");
+    }
+    // The room can stay connected while ending, so a late success must still
+    // be reflected by the mute indicator.
+    state.micEnabled = enabled;
+    paintMicrophoneState();
+    if (!enabled && state.localUserStream) {
       void publishIntegrityEvent({
         type: "MICROPHONE_STOPPED",
         source: "microphone",
         severity: "warning",
       });
     }
-  } else if (state.room) {
-    const publication = await state.room.localParticipant
-      .setMicrophoneEnabled(state.micEnabled)
-      .catch(() => {
-        state.micEnabled = !state.micEnabled;
-      });
-    // LiveKit builds a fresh track here, which the ring's meter has never seen.
-    const track = publication?.track?.mediaStreamTrack;
-    if (state.micEnabled && track) startTurnRing(new MediaStream([track]));
+  } catch {
+    if (state.phase === "live")
+      paintMicrophoneState(
+        state.micEnabled
+          ? "Could not mute the microphone. It is still on. Please try again."
+          : "Could not unmute the microphone. It is still muted. Please try again.",
+      );
+  } finally {
+    state.micChanging = false;
+    nodes.mic.setAttribute("aria-disabled", "false");
   }
-  nodes.mic.textContent = state.micEnabled ? "Mic on" : "Muted";
+}
+
+function paintMicrophoneState(error = "") {
+  const muted = !state.micEnabled;
+  nodes.mic.innerHTML = muted
+    ? '<svg class="mic-muted-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M9 5a3 3 0 0 1 6 0v4M9 9v3a3 3 0 0 0 5 2M5 10v2a7 7 0 0 0 12 5M19 10v2M12 19v3M8 22h8M3 3l18 18"/></svg>Muted'
+    : "Mic on";
+  nodes.mic.setAttribute(
+    "aria-label",
+    muted ? "Muted: unmute microphone" : "Mic on: mute microphone",
+  );
+  nodes.mic.classList.toggle("is-muted", muted);
+  nodes.micMutedStatus.hidden = !muted;
+  nodes.micControlStatus.textContent = error;
+  nodes.micControlStatus.hidden = !error;
 }
 
 function renderProblem() {

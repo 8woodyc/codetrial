@@ -24,6 +24,9 @@
               </span>
               <span id="agent-state">Connecting...</span>
             </div>
+            <span id="mic-muted-status" class="mic-muted-status" hidden>
+              Mic muted
+            </span>
             <div id="timer" class="timer" title="Time remaining">00:00</div>
           </div>
           <div
@@ -81,7 +84,15 @@
             Your turn is done
           </button>
           <div class="control-row">
-            <button id="mic" class="pill-button" type="button">Mic on</button>
+            <button
+              id="mic"
+              class="pill-button"
+              type="button"
+              aria-label="Mic on: mute microphone"
+              aria-describedby="mic-control-status"
+            >
+              Mic on
+            </button>
             <!-- Filled once the room is joined, from the inputs the browser
                  names after the preflight grant; hidden while there is only
                  one to pick. -->
@@ -121,6 +132,9 @@
             class="visually-hidden"
             role="status"
           ></span>
+          <div role="status" aria-live="polite">
+            <p id="mic-control-status" class="muted small" hidden></p>
+          </div>
           <!-- Recording, apart from ending: withdrawing consent and ending the
                interview are different acts and should not sit side by side. -->
           <div class="recording-row">
