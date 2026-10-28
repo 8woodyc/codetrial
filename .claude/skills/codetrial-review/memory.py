@@ -3620,10 +3620,6 @@ def install_snapshot(db, path, data, repo):
 
         # Only canonical tables are replaced. Local experience and its marker
         # survive even when this is the first official snapshot in the clone.
-        db.execute(
-            "ATTACH DATABASE ? AS verified_snapshot",
-            (Path(path).resolve().as_uri() + "?mode=ro",),
-        )
         expired = [False]
 
         def progress():
@@ -3636,9 +3632,17 @@ def install_snapshot(db, path, data, repo):
                 return 1
             return 0
 
+        attached = False
         db.set_progress_handler(progress, 1000)
         try:
             with write_lock(db):
+                # Attached inside the write transaction: SQLite 3.31 raises "readonly"
+                # on BEGIN IMMEDIATE once a read-only database is attached.
+                db.execute(
+                    "ATTACH DATABASE ? AS verified_snapshot",
+                    (Path(path).resolve().as_uri() + "?mode=ro",),
+                )
+                attached = True
                 if not empty_store(db):
                     raise Fail("existing memory data will not be replaced")
                 for table in [
@@ -3687,7 +3691,8 @@ def install_snapshot(db, path, data, repo):
             raise
         finally:
             db.set_progress_handler(None, 0)
-            db.execute("DETACH DATABASE verified_snapshot")
+            if attached:
+                db.execute("DETACH DATABASE verified_snapshot")
         # The installed schema is known before migration can execute any SQL.
         prepare(db, repo)
         db.commit()
