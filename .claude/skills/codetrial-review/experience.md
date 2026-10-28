@@ -68,6 +68,25 @@ python3 .claude/skills/codetrial-review/memory.py experience record \
   --skill codetrial-review --report "$SCRATCH/experience.json"
 ```
 
+A non-review skill (triage, contribute, verify, odds) closes with
+`experience-close.sh` instead of the heredoc above. Write only the fields that
+are the invocation's own to a JSON file, and it adds `schema_version`, the full
+head (HEAD unless one is given) and empty case arrays, then runs the record
+command:
+
+```sh
+cat > "$SCRATCH/fields.json" <<'JSON'
+{"outcome": "complete", "skills_used": ["codetrial-triage"],
+ "coverage": "What was read and run, and what was not."}
+JSON
+.claude/skills/codetrial-review/experience-close.sh "$SCRATCH/fields.json"
+```
+
+It refuses a file with no outcome, `skills_used` or coverage, and never
+completes a report: findings, refuted cases, questions and history evidence
+stay the invocation's to write, and a failed record leaves
+`$SCRATCH/experience.json` and the error in place to disclose.
+
 For every prepared review, finish with the report after checking all evidence:
 
 ```sh

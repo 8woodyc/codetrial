@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -33,6 +34,14 @@ SKILLS = ROOT / ".claude" / "skills"
 ISSUE_SWEEP = SKILLS / "codetrial-triage" / "issue-sweep.sh"
 PR_SWEEP = SKILLS / "codetrial-triage" / "pr-sweep.sh"
 SKILL_REFS = ROOT / "scripts" / "check-skill-refs.py"
+REVIEW_PICK = SKILLS / "codetrial-triage" / "review-pick.sh"
+REVIEW_FINISH = SKILLS / "codetrial-triage" / "review-finish.sh"
+APPLY_ACTIONS = SKILLS / "codetrial-triage" / "apply-pr-actions.sh"
+POST_SIMILAR = SKILLS / "codetrial-triage" / "post-similar.sh"
+CI_CACHED = SKILLS / "codetrial-verify" / "ci-cached.sh"
+EXPERIENCE_CLOSE = SKILLS / "codetrial-review" / "experience-close.sh"
+FEEDBACK_BUNDLE = SKILLS / "codetrial-contribute" / "feedback-bundle.sh"
+REVIEW_BRIEF = SKILLS / "codetrial-triage" / "review-brief.sh"
 
 # A gh that fails every call, so only a script's own check can refuse first.
 FAKE_GH_FAILS = "#!/bin/sh\nexit 1\n"
@@ -1704,6 +1713,13 @@ POST_INLINE = REVIEW / "post-inline.sh"
 # The PR's head, diff and review threads, and each posted comment echoed back
 # as "posted path:line" in place of its URL.
 FAKE_GH_INLINE = support.stub("skill-scripts/gh-inline.sh")
+FAKE_GH_APPLY = support.stub("skill-scripts/gh-apply.sh")
+FAKE_GH_SIMILAR = support.stub("skill-scripts/gh-similar.sh")
+FAKE_GH_FEEDBACK = support.stub("skill-scripts/gh-feedback.sh")
+FAKE_GH_CACHED = support.stub("skill-scripts/gh-cached.sh")
+FAKE_GH_LIVE = support.stub("skill-scripts/gh-live.sh")
+FAKE_INLINE_LOG = support.stub("skill-scripts/inline-log.sh")
+FAKE_CI_COUNT = support.stub("skill-scripts/ci-count.sh")
 
 
 def review_comment(login, path, line, at="h1", body="x"):
@@ -2880,6 +2896,1067 @@ Path(sys.argv[-1], 'history.md').write_text('fixture context')
                         self.assertEqual(
                             "fixture context" in history,
                             context_called and not context_failed,
+                        )
+
+
+@unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+class ReviewQueueTests(unittest.TestCase):
+    """review-pick.sh and review-finish.sh share the ledger in the git dir."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo = Path(self.tmp.name)
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+        self.ledger = self.repo / ".git" / "codetrial-triage" / "reviewed"
+
+    def pick(self, sweep):
+        path = self.repo / "sweep.json"
+        path.write_text(json.dumps(sweep))
+        result = subprocess.run(
+            ["sh", str(REVIEW_PICK), str(path)],
+            cwd=self.repo,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return [json.loads(line) for line in result.stdout.splitlines()]
+
+    def finish(self, draft, live, inline_rc=0, **env):
+        path = self.repo / "draft.json"
+        path.write_text(json.dumps(draft))
+        with tempfile.TemporaryDirectory() as scratch:
+            support.write_executable(Path(scratch) / "gh", FAKE_GH_LIVE)
+            # The stand-in for post-inline.sh logs that it was asked to post.
+            support.write_executable(Path(scratch) / "inline.sh", FAKE_INLINE_LOG)
+            return subprocess.run(
+                ["sh", str(REVIEW_FINISH), "7", str(path)],
+                cwd=self.repo,
+                capture_output=True,
+                text=True,
+                env=os.environ
+                | {
+                    "PATH": f"{scratch}:{os.environ['PATH']}",
+                    "REVIEW_FINISH_INLINE": f"{scratch}/inline.sh",
+                    "FAKE_LIVE": live,
+                    "FAKE_INLINE_LOG": f"{self.repo}/inline.log",
+                    "FAKE_INLINE_RC": str(inline_rc),
+                }
+                | env,
+            )
+
+    def posted(self):
+        log = self.repo / "inline.log"
+        return log.read_text() if log.exists() else ""
+
+    def test_brief_reads_a_crashed_or_empty_status_as_unavailable(self):
+        pick = {
+            "pr": 1,
+            "head": "abc",
+            "title": "T",
+            "why": [],
+            "since": None,
+            "outdated": [],
+            "collide": [],
+        }
+        (self.repo / "pick.json").write_text(json.dumps(pick))
+        for text in ("", "{}", "not json", '{"outcome": null}'):
+            (self.repo / "status.json").write_text(text)
+            result = subprocess.run(
+                [
+                    "sh",
+                    str(REVIEW_BRIEF),
+                    str(self.repo / "pick.json"),
+                    "/s",
+                    str(self.repo / "status.json"),
+                    "1",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn("Outcome/reason/coverage: unavailable.", result.stdout, text)
+
+    def test_pick_hands_the_newest_reviewed_head_to_the_bundle(self):
+        sweep = {
+            "viewer": "maint",
+            "outdated": [],
+            "collide": [],
+            "status": [
+                {
+                    "pr": 1,
+                    "grade": "low",
+                    "head": "h3",
+                    "author": "a",
+                    "title": "t",
+                    "why": [],
+                }
+            ],
+        }
+        self.ledger.parent.mkdir(parents=True)
+        self.ledger.write_text("1 h1\n1 h2\n")
+        self.assertEqual(self.pick(sweep)[0]["since"], "h2")
+
+    def test_brief_names_the_pr_its_history_and_its_collisions(self):
+        pick = {
+            "pr": 519,
+            "head": "abc",
+            "title": "T",
+            "why": ["5 open thread(s)"],
+            "since": "old",
+            "outdated": [{"thread": "T1", "path": "a.js"}],
+            "collide": [{"other": 110, "path": "web/x.js", "context": ["f"]}],
+        }
+        (self.repo / "pick.json").write_text(json.dumps(pick))
+        (self.repo / "status.json").write_text(
+            json.dumps({"outcome": "degraded", "reason": "busy"})
+        )
+        result = subprocess.run(
+            [
+                "sh",
+                str(REVIEW_BRIEF),
+                str(self.repo / "pick.json"),
+                "/s",
+                str(self.repo / "status.json"),
+                "2",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for want in (
+            "PR #519",
+            "head abc",
+            "shared_memory_exit=2",
+            "degraded (busy)",
+            "collides with #110 at web/x.js (f)",
+            "reviewed head: old",
+            "T1 (a.js)",
+        ):
+            self.assertIn(want.lower(), result.stdout.lower())
+
+    def test_pick_skips_graded_up_prs_the_viewers_and_reviewed_heads(self):
+        def row(pr, grade, head, author="someone"):
+            return {
+                "pr": pr,
+                "grade": grade,
+                "head": head,
+                "author": author,
+                "title": f"t{pr}",
+                "why": [],
+            }
+
+        sweep = {
+            "viewer": "maint",
+            "status": [
+                row(1, "low", "h1"),
+                row(2, "high", "h2"),
+                row(3, "blocked", "h3", author="maint"),
+                row(4, "blocked", "h4new"),
+                row(5, "low", "h5"),
+            ],
+            "outdated": [{"pr": 1, "thread": "T1", "path": "a.js"}],
+            "collide": [{"a": 1, "b": 5, "path": "web/x.js", "context": ["f"]}],
+        }
+        self.ledger.parent.mkdir(parents=True)
+        self.ledger.write_text("4 h4old\n5 h5\n")
+        picked = self.pick(sweep)
+        self.assertEqual([p["pr"] for p in picked], [1, 4])
+        self.assertIsNone(picked[0]["since"])
+        self.assertEqual(picked[0]["outdated"], [{"thread": "T1", "path": "a.js"}])
+        self.assertEqual(picked[0]["collide"][0]["other"], 5)
+        self.assertEqual(picked[1]["since"], "h4old")
+
+    def test_finish_records_the_head_only_when_nothing_is_left(self):
+        draft = {"pr": 7, "sha": "abc", "comments": [], "similar": [], "resolve": []}
+        self.assertEqual(self.finish(draft, "abc").returncode, 0)
+        self.assertEqual(self.ledger.read_text(), "7 abc\n")
+
+    def test_finish_refuses_a_moved_head_and_posts_nothing(self):
+        draft = {
+            "pr": 7,
+            "sha": "abc",
+            "comments": [{"path": "a"}],
+            "similar": [],
+            "resolve": [],
+        }
+        self.assertEqual(self.finish(draft, "def").returncode, 3)
+        self.assertEqual(self.posted(), "")
+        self.assertFalse(self.ledger.exists())
+
+    def test_finish_posts_the_inline_comments_and_records_only_after_they_land(self):
+        draft = {
+            "pr": 7,
+            "sha": "abc",
+            "comments": [{"path": "a"}],
+            "similar": [],
+            "resolve": [],
+        }
+        self.assertEqual(self.finish(draft, "abc").returncode, 0)
+        self.assertIn("7 ", self.posted())
+        self.assertEqual(self.ledger.read_text(), "7 abc\n")
+        self.ledger.unlink()
+        result = self.finish(draft, "abc", inline_rc=1)
+        self.assertEqual(result.returncode, 1)
+        self.assertFalse(self.ledger.exists())
+
+    def test_finish_refuses_a_sha_that_would_split_into_other_fields(self):
+        draft = {
+            "pr": 7,
+            "sha": "abc 0 0",
+            "comments": [{"path": "a"}],
+            "similar": [],
+            "resolve": [],
+        }
+        result = self.finish(draft, "abc 0 0")
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(self.posted(), "")
+        self.assertFalse(self.ledger.exists())
+
+    def test_finish_leaves_a_thread_to_resolve_to_the_caller(self):
+        draft = {
+            "pr": 7,
+            "sha": "abc",
+            "comments": [],
+            "similar": [],
+            "resolve": [{"thread": "T1", "path": "a.js", "why": "fixed"}],
+        }
+        result = self.finish(draft, "abc")
+        self.assertEqual(result.returncode, 4)
+        self.assertIn("T1", result.stdout)
+        self.assertFalse(self.ledger.exists())
+
+    def test_finish_refuses_unpostable_notices_before_posting_anything(self):
+        draft = {
+            "pr": 7,
+            "sha": "abc",
+            "comments": [{"path": "a"}],
+            "resolve": [],
+            "similar": [
+                {
+                    "kind": "pr",
+                    "number": 8,
+                    "notice": "see #8",
+                    "other_notice": "see #7",
+                    "other_sha": "h8",
+                }
+            ],
+        }
+        # No SCRATCH for the pair ledger, then a notice that names no thread.
+        for env, similar in (
+            ({"SCRATCH": ""}, draft["similar"]),
+            (
+                {"SCRATCH": str(self.repo)},
+                [draft["similar"][0] | {"notice": "no link"}],
+            ),
+        ):
+            result = self.finish(draft | {"similar": similar}, "abc", **env)
+            self.assertEqual(result.returncode, 2, env)
+            self.assertEqual(self.posted(), "")
+            self.assertFalse(self.ledger.exists())
+
+    def test_finish_refuses_a_malformed_draft_before_recording_anything(self):
+        good = {"pr": 7, "sha": "abc", "comments": [], "similar": [], "resolve": []}
+        for field, value in (
+            ("similar", True),
+            ("comments", "x"),
+            ("pr", 8),
+            ("sha", None),
+        ):
+            result = self.finish(good | {field: value}, "abc")
+            self.assertEqual(result.returncode, 2, field)
+            self.assertFalse(self.ledger.exists(), field)
+
+
+@unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+class ApplyPrActionsTests(unittest.TestCase):
+    """apply-pr-actions.sh against a gh that logs every write it is asked for."""
+
+    FAKE = FAKE_GH_APPLY
+
+    def sweep(self, **fields):
+        base = {
+            "maintainers_known": True,
+            "prs": [{"number": n, "head": f"h{n}"} for n in (1, 2, 3, 4)],
+            "approve": [
+                self.approval()["approve"][0],
+                self.approval(pr=2, run=12, first_time=False)["approve"][0],
+            ],
+            "rebase": [{"pr": 3, "reason": "conflicts"}],
+            "hide": [
+                {"pr": 3, "id": "IC_3", "by": "maint"},
+                {"pr": 4, "id": "IC_4", "by": "maint"},
+            ],
+        }
+        return json.dumps(base | fields)
+
+    def run_actions(self, sweep, workflows=None, repo=None, hygiene=None, **env):
+        with tempfile.TemporaryDirectory() as scratch:
+            scratch = Path(scratch)
+            (scratch / "bin").mkdir()
+            support.write_executable(scratch / "bin" / "gh", self.FAKE)
+            (scratch / "sweep.json").write_text(sweep)
+            (scratch / "log").write_text("")
+            # A workflow directory the guard reads; None leaves the real one.
+            if workflows is not None:
+                (scratch / "wf").mkdir()
+                for name, text in workflows.items():
+                    (scratch / "wf" / name).write_text(text)
+                env["WORKFLOWS_DIR"] = str(scratch / "wf")
+            # A hygiene.sh stand-in: $1 is the PR, and it prints that PR's result.
+            if hygiene is not None:
+                (scratch / "hygiene.sh").write_text(hygiene)
+                env["APPLY_HYGIENE"] = str(scratch / "hygiene.sh")
+            result = subprocess.run(
+                ["sh", str(APPLY_ACTIONS), str(scratch / "sweep.json")]
+                + ([repo] if repo else [])
+                + (["--hygiene"] if hygiene is not None else []),
+                capture_output=True,
+                text=True,
+                env=os.environ
+                | {
+                    "PATH": f"{scratch / 'bin'}:{os.environ['PATH']}",
+                    "FAKE_LOG": str(scratch / "log"),
+                }
+                | env,
+            )
+            log = (scratch / "log").read_text()
+        receipts = [json.loads(line) for line in result.stdout.splitlines()]
+        return result, {(r["action"], r["pr"]): r["result"] for r in receipts}, log
+
+    def approval(self, **fields):
+        entry = {
+            "pr": 1,
+            "run": 11,
+            "first_time": True,
+            "touches_workflows": False,
+            "files_truncated": False,
+        }
+        return {"approve": [entry | fields]}
+
+    HYGIENE = (
+        'case "$1" in\n'
+        '  1) echo \'{"pr":1,"head":"h1","items":[{"key":"indent"}],"body":"fix"}\' ;;\n'
+        '  2) echo \'{"pr":2,"head":"h2","items":[],"body":""}\' ;;\n'
+        '  3) echo \'{"pr":3,"head":"h3","items":[{"key":"k"}],"body":"old"}\' ;;\n'
+        "  *) exit 1 ;;\n"
+        "esac\n"
+    )
+
+    def test_hygiene_reviews_post_only_a_body_read_at_the_live_head(self):
+        quiet = {"approve": [], "rebase": [], "hide": []}
+        result, got, log = self.run_actions(
+            self.sweep(**quiet), hygiene=self.HYGIENE, FAKE_MOVED="3"
+        )
+        self.assertEqual(
+            got,
+            {
+                ("hygiene", 1): "applied",
+                ("hygiene", 3): "skipped",
+                ("hygiene", 4): "failed",
+            },
+        )
+        # The empty body of PR 2 posts nothing, and a failed read exits 1.
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("pulls/1/reviews -f commit_id=h1", log)
+        self.assertNotIn("pulls/2/reviews", log)
+        self.assertNotIn("pulls/3/reviews", log)
+
+    def test_hygiene_is_off_without_the_flag(self):
+        quiet = {"approve": [], "rebase": [], "hide": []}
+        _, got, log = self.run_actions(self.sweep(**quiet))
+        self.assertEqual((got, "reviews" in log), ({}, False))
+
+    def test_an_approval_needs_each_guard_to_hold(self):
+        for field, value in (
+            ("touches_workflows", True),
+            ("files_truncated", True),
+            ("first_time", False),
+        ):
+            _, got, log = self.run_actions(
+                self.sweep(**self.approval(**{field: value}))
+            )
+            self.assertEqual(got[("approve", 1)], "confirm", field)
+            self.assertNotIn("/approve", log, field)
+
+    def test_a_workflow_on_a_base_token_trigger_confirms_every_approval(self):
+        for trigger in ("pull_request_target", "workflow_run"):
+            _, got, log = self.run_actions(
+                self.sweep(**self.approval()), workflows={"w.yml": f"on: {trigger}\n"}
+            )
+            self.assertEqual(got[("approve", 1)], "confirm", trigger)
+            self.assertNotIn("/approve", log, trigger)
+
+    def test_workflows_that_cannot_be_inspected_confirm_the_approval(self):
+        _, got, _ = self.run_actions(self.sweep(**self.approval()), workflows={})
+        self.assertEqual(got[("approve", 1)], "confirm")
+        _, got, log = self.run_actions(
+            self.sweep(**self.approval()),
+            workflows={"w.yml": "on: push\n"},
+            repo="other/repo",
+        )
+        self.assertEqual(got[("approve", 1)], "confirm")
+        self.assertNotIn("/approve", log)
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads an unreadable file")
+    def test_a_workflow_directory_grep_cannot_read_confirms_the_approval(self):
+        # An unreadable file makes grep exit 2, which is no answer either way.
+        with tempfile.TemporaryDirectory() as wf:
+            unreadable = Path(wf) / "w.yml"
+            unreadable.write_text("on: pull_request\n")
+            unreadable.chmod(0)
+            try:
+                _, got, log = self.run_actions(
+                    self.sweep(**self.approval()), WORKFLOWS_DIR=wf
+                )
+            finally:
+                unreadable.chmod(0o644)
+        self.assertEqual(got[("approve", 1)], "confirm")
+        self.assertNotIn("/approve", log)
+
+    def test_a_hide_with_no_author_evidence_is_left_to_confirm(self):
+        _, got, log = self.run_actions(self.sweep(hide=[{"pr": 4, "id": "IC_4"}]))
+        self.assertEqual(got[("hide", 4)], "confirm")
+        self.assertNotIn("minimizeComment", log)
+
+    def test_clean_workflows_leave_the_approval_to_the_sweep(self):
+        _, got, _ = self.run_actions(
+            self.sweep(**self.approval()), workflows={"w.yml": "on: pull_request\n"}
+        )
+        self.assertEqual(got[("approve", 1)], "applied")
+
+    def test_a_sweep_of_the_wrong_shape_writes_nothing_and_exits_2(self):
+        bad = (
+            self.approval(first_time="false"),
+            {"approve": [{"pr": 1, "run": 11, "first_time": True}]},
+            {"rebase": None},
+            {"rebase": [{"pr": 3}]},
+            {"rebase": [{"pr": 3, "reason": "confict"}]},
+            {"hide": [{"pr": 3}]},
+            {"maintainers_known": None},
+        )
+        for fields in bad:
+            result, got, log = self.run_actions(self.sweep(**fields))
+            self.assertEqual((result.returncode, got), (2, {}), fields)
+            self.assertEqual(log, "", fields)
+
+    def test_applies_what_a_sweep_may_and_leaves_the_rest_to_confirm(self):
+        result, got, log = self.run_actions(self.sweep())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            got,
+            {
+                ("approve", 1): "applied",
+                ("approve", 2): "confirm",
+                ("rebase", 3): "applied",
+                ("hide", 3): "applied",
+                ("hide", 4): "applied",
+            },
+        )
+        self.assertIn("actions/runs/11/approve", log)
+        self.assertNotIn("actions/runs/12/approve", log)
+
+    def test_a_moved_head_posts_nothing_and_keeps_the_old_request_visible(self):
+        result, got, log = self.run_actions(self.sweep(), FAKE_VIEW="CONFLICTING h9")
+        self.assertEqual(got[("rebase", 3)], "skipped")
+        self.assertEqual(got[("hide", 3)], "skipped")
+        self.assertEqual(got[("hide", 4)], "applied")
+        self.assertNotIn("pulls/3/reviews", log)
+        result, got, _ = self.run_actions(self.sweep(), FAKE_VIEW="MERGEABLE h3")
+        self.assertEqual(got[("rebase", 3)], "skipped")
+
+    def test_a_run_approved_meanwhile_is_not_a_failure(self):
+        result, got, _ = self.run_actions(self.sweep(), FAKE_NOT_WAITING="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(got[("approve", 1)], "already")
+
+    def test_unknown_maintainers_require_confirmation_before_hiding(self):
+        result, got, log = self.run_actions(self.sweep(maintainers_known=False))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(got[("hide", 3)], "confirm")
+        self.assertEqual(got[("hide", 4)], "confirm")
+        self.assertNotIn("minimizeComment", log)
+
+    def test_a_run_no_longer_waiting_needs_a_verified_running_status(self):
+        for status in ("queued", "completed", "unread"):
+            with self.subTest(status=status):
+                result, got, log = self.run_actions(
+                    self.sweep(), FAKE_NOT_WAITING="1", FAKE_RUN_STATUS=status
+                )
+                self.assertIn("run view 11", log)
+                self.assertEqual(
+                    got[("approve", 1)], "already" if status == "queued" else "failed"
+                )
+                self.assertEqual(result.returncode, 0 if status == "queued" else 1)
+
+
+@unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+class PostSimilarTests(unittest.TestCase):
+    """post-similar.sh: both threads read first, heads checked, pairs once."""
+
+    FAKE = FAKE_GH_SIMILAR
+
+    def run_similar(
+        self,
+        views,
+        similar,
+        preposted="",
+        shell="sh",
+        after=None,
+        claimed=None,
+        live=None,
+    ):
+        draft = {
+            "pr": 7,
+            "sha": "h7",
+            "comments": [],
+            "resolve": [],
+            "similar": similar,
+        }
+        with tempfile.TemporaryDirectory() as scratch:
+            scratch = Path(scratch)
+            (scratch / "bin").mkdir()
+            support.write_executable(scratch / "bin" / "gh", self.FAKE)
+            for number, view in views.items():
+                view = {"body": "", "comments": []} | view
+                (scratch / f"{number}.json").write_text(json.dumps(view))
+            (scratch / "draft.json").write_text(json.dumps(draft))
+            (scratch / "similar-posted").write_text(preposted)
+            if claimed:
+                (scratch / f"similar-posted.claim-{claimed}").mkdir()
+            # A push to PR b that lands once a comment on PR a has posted.
+            for (a, b), view in (after or {}).items():
+                (scratch / f"after-{a}-{b}").write_text(json.dumps(view))
+            # A head that moved after its view was read, though the view says h.
+            for number, head in (live or {}).items():
+                (scratch / f"{number}.live").write_text(head + "\n")
+            result = subprocess.run(
+                [shell, str(POST_SIMILAR), "7", str(scratch / "draft.json")],
+                capture_output=True,
+                text=True,
+                env=os.environ
+                | {
+                    "PATH": f"{scratch / 'bin'}:{os.environ['PATH']}",
+                    "FAKE_DIR": str(scratch),
+                    "SCRATCH": str(scratch),
+                },
+            )
+            posted = scratch / "posted"
+            posted = posted.read_text().split() if posted.exists() else []
+            pairs = (scratch / "similar-posted").read_text()
+            # Claims the run left behind, which only a posted pair keeps.
+            self.claims = [c.name for c in scratch.glob("similar-posted.claim-*")]
+            calls = scratch / "calls"
+            self.calls = calls.read_text().splitlines() if calls.exists() else []
+        receipts = [json.loads(line)["result"] for line in result.stdout.splitlines()]
+        return result.returncode, receipts, posted, pairs
+
+    def entry(self, **fields):
+        return {
+            "kind": "pr",
+            "number": 8,
+            "notice": "Overlaps #8.",
+            "other_notice": "Overlaps #7.",
+            "other_sha": "h8",
+        } | fields
+
+    def test_each_thread_is_decided_on_its_own_and_the_pair_recorded(self):
+        views = {
+            7: {"headRefOid": "h7", "comments": [{"body": "see #8"}]},
+            8: {"headRefOid": "h8"},
+        }
+        code, receipts, posted, pairs = self.run_similar(views, [self.entry()])
+        # #7 already links #8, so only the mirror goes to #8.
+        self.assertEqual((code, receipts, posted), (0, ["applied"], ["8"]))
+        self.assertEqual(pairs, "7 8\n")
+
+    def test_a_linked_pair_and_a_pair_already_posted_post_nothing(self):
+        views = {
+            7: {"headRefOid": "h7", "body": "#8"},
+            8: {"headRefOid": "h8", "comments": [{"body": "x #7."}]},
+        }
+        code, receipts, posted, _ = self.run_similar(views, [self.entry()])
+        self.assertEqual((code, receipts, posted), (0, ["linked"], []))
+        views = {7: {"headRefOid": "h7"}, 8: {"headRefOid": "h8"}}
+        code, receipts, posted, _ = self.run_similar(
+            views, [self.entry()], preposted="7 8\n"
+        )
+        self.assertEqual((code, receipts, posted), (0, ["pair"], []))
+
+    def test_a_number_inside_a_longer_one_is_not_a_link(self):
+        views = {7: {"headRefOid": "h7", "body": "closes #80"}, 8: {"headRefOid": "h8"}}
+        _, receipts, posted, _ = self.run_similar(views, [self.entry()])
+        self.assertEqual((receipts, posted), (["applied"], ["7", "8"]))
+
+    def test_a_moved_head_on_either_side_posts_nothing_and_exits_1(self):
+        for moved in (7, 8):
+            views = {7: {"headRefOid": "h7"}, 8: {"headRefOid": "h8"}}
+            views[moved] = {"headRefOid": "new"}
+            code, receipts, posted, pairs = self.run_similar(views, [self.entry()])
+            self.assertEqual((code, receipts, posted, pairs), (1, ["moved"], [], ""))
+            # A pair that leaves without a post gives its claim back.
+            self.assertEqual(self.claims, [], moved)
+
+    def test_an_issue_notice_goes_to_this_pr_only(self):
+        views = {7: {"headRefOid": "h7"}}
+        issue = {"kind": "issue", "number": 5, "notice": "Delivers #5."}
+        code, receipts, posted, _ = self.run_similar(views, [issue])
+        self.assertEqual((code, receipts, posted), (0, ["applied"], ["7"]))
+
+    def test_missing_required_mirror_notice_keeps_the_pair_pending(self):
+        views = {7: {"headRefOid": "h7"}, 8: {"headRefOid": "h8"}}
+        for notice in (None, "", "   "):
+            with self.subTest(notice=notice):
+                code, receipts, posted, pairs = self.run_similar(
+                    views, [self.entry(other_notice=notice)]
+                )
+                self.assertEqual((code, receipts, pairs), (1, ["failed"], ""))
+                self.assertNotIn("8", posted)
+                # A pair that leaves without a post gives its claim back.
+                self.assertEqual(self.claims, [])
+
+    def test_missing_mirror_text_is_allowed_when_other_thread_already_links(self):
+        views = {
+            7: {"headRefOid": "h7"},
+            8: {"headRefOid": "h8", "body": "see #7"},
+        }
+        code, receipts, posted, pairs = self.run_similar(
+            views, [self.entry(other_notice=None)]
+        )
+        self.assertEqual(
+            (code, receipts, posted, pairs), (0, ["applied"], ["7"], "7 8\n")
+        )
+
+    @unittest.skipUnless(shutil.which("dash"), "dash is not installed")
+    def test_the_pair_key_is_the_same_whichever_side_the_draft_is_for(self):
+        # The ledger holds the pair as "3 9"; a draft for PR 9 must find it.
+        views = {7: {"headRefOid": "h7"}, 3: {"headRefOid": "h3"}}
+        entry = self.entry(number=3, notice="Overlaps #3.", other_sha="h3")
+        code, receipts, posted, _ = self.run_similar(views, [entry], preposted="3 7\n")
+        self.assertEqual((code, receipts, posted), (0, ["pair"], []))
+
+    def test_a_draft_whose_notices_do_not_name_the_other_thread_is_refused(self):
+        views = {7: {"headRefOid": "h7"}, 8: {"headRefOid": "h8"}}
+        for fields in ({"notice": "no number"}, {"other_notice": "see #9"}):
+            code, receipts, posted, pairs = self.run_similar(
+                views, [self.entry(**fields)]
+            )
+            self.assertEqual((code, receipts, posted, pairs), (2, [], [], ""), fields)
+
+    def test_a_mirror_owed_but_not_drafted_fails_before_the_first_post(self):
+        views = {7: {"headRefOid": "h7"}, 8: {"headRefOid": "h8"}}
+        code, receipts, posted, pairs = self.run_similar(
+            views, [self.entry(other_notice=None)]
+        )
+        self.assertEqual((code, receipts, posted, pairs), (1, ["failed"], [], ""))
+        self.assertEqual(self.claims, [])
+
+    def test_a_pair_another_finish_holds_is_not_posted_twice(self):
+        views = {7: {"headRefOid": "h7"}, 8: {"headRefOid": "h8"}}
+        code, receipts, posted, _ = self.run_similar(
+            views, [self.entry()], claimed="7-8"
+        )
+        # Held is not posted, so the finish stays pending instead of recording.
+        self.assertEqual((code, receipts, posted), (1, ["held"], []))
+        # The pair is owned before either thread is read: a read taken earlier
+        # would be stale once its owner gave the claim back after a failed post.
+        self.assertEqual(self.calls, [])
+
+    def test_a_push_during_the_first_post_stops_the_mirror_and_frees_the_pair(self):
+        views = {7: {"headRefOid": "h7"}, 8: {"headRefOid": "h8"}}
+        moved = {"body": "", "comments": [], "headRefOid": "new"}
+        for pushed in ((7, 8), (7, 7)):
+            code, receipts, posted, pairs = self.run_similar(
+                views, [self.entry()], after={pushed: moved}
+            )
+            self.assertEqual(
+                (code, receipts, posted, pairs), (1, ["moved"], ["7"], ""), pushed
+            )
+            # Only a pair that posted stays claimed, so a rerun can try again.
+            self.assertEqual(self.claims, [], pushed)
+
+    def test_the_other_head_is_checked_before_the_first_notice_too(self):
+        views = {7: {"headRefOid": "h7"}, 8: {"headRefOid": "h8"}}
+        code, receipts, posted, pairs = self.run_similar(
+            views, [self.entry()], live={8: "new"}
+        )
+        self.assertEqual((code, receipts, posted, pairs), (1, ["moved"], [], ""))
+        # Also when the other thread already links this PR and only this side
+        # would be posted.
+        views[8]["body"] = "see #7"
+        code, receipts, posted, _ = self.run_similar(
+            views, [self.entry(other_notice=None)], live={8: "new"}
+        )
+        self.assertEqual((code, receipts, posted), (1, ["moved"], []))
+
+    def test_a_thread_read_without_its_comments_is_failed_not_unlinked(self):
+        views = {7: {"headRefOid": "h7", "comments": None}, 8: {"headRefOid": "h8"}}
+        code, receipts, posted, _ = self.run_similar(views, [self.entry()])
+        self.assertEqual((code, receipts, posted), (1, ["failed"], []))
+        self.assertEqual(self.claims, [])
+
+    def test_multiline_notices_preserve_json_escapes_under_dash(self):
+        views = {7: {"headRefOid": "h7"}, 8: {"headRefOid": "h8"}}
+        code, receipts, posted, pairs = self.run_similar(
+            views,
+            [
+                self.entry(
+                    notice="first #8\nsecond", other_notice="path \\notes #7\nmore"
+                )
+            ],
+            shell="dash",
+        )
+        self.assertEqual(
+            (code, receipts, posted, pairs), (0, ["applied"], ["7", "8"], "7 8\n")
+        )
+
+
+@unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+class CiCachedTests(unittest.TestCase):
+    """ci-cached.sh reads the job logs once per head, and never a live check."""
+
+    SETTLED = {"pr": 7, "pending": [], "held": [], "failing": []}
+    # A PR with a failed check, the only kind whose diagnosis is cached.
+    RED = '[{"name":"lint","state":"FAILURE","bucket":"fail","link":"run/1"}]'
+
+    def run_cached(
+        self,
+        heads,
+        diagnosis=None,
+        repos=("a/b", "a/b"),
+        checks=None,
+        reported=None,
+        age=False,
+        ci_fails=False,
+    ):
+        """Run ci-cached.sh once per head; return (outputs, runs, results)."""
+        diagnosis = diagnosis or self.SETTLED
+        with tempfile.TemporaryDirectory() as scratch:
+            scratch = Path(scratch)
+            (scratch / "bin").mkdir()
+            support.write_executable(scratch / "bin" / "gh", FAKE_GH_CACHED)
+            # The stand-in for ci-failure.sh counts its runs.
+            support.write_executable(scratch / "ci.sh", FAKE_CI_COUNT)
+            env = os.environ | {
+                "PATH": f"{scratch / 'bin'}:{os.environ['PATH']}",
+                "FAKE_DIR": str(scratch),
+                "CI_FAILURE_CACHE": str(scratch / "cache"),
+                "CI_FAILURE_SCRIPT": str(scratch / "ci.sh"),
+                "FAKE_CI_FAILS": "1" if ci_fails else "",
+            }
+            results = []
+            for head, repo, listed in zip(heads, repos, checks or (self.RED,) * 9):
+                (scratch / "head").write_text(head + "\n")
+                (scratch / "checks").write_text(listed)
+                out = diagnosis | {"head": reported or head}
+                (scratch / "out").write_text(json.dumps(out))
+                results.append(
+                    subprocess.run(
+                        ["sh", str(CI_CACHED), "7", repo],
+                        capture_output=True,
+                        text=True,
+                        env=env,
+                    )
+                )
+                # An hour is past the 15 minutes an entry is served for.
+                for entry in (scratch / "cache").glob("*.json") if age else ():
+                    hour_ago = time.time() - 3600
+                    os.utime(entry, (hour_ago, hour_ago))
+            runs = scratch / "runs"
+            count = len(runs.read_text().split()) if runs.exists() else 0
+            # No temp file is left behind, and every stored entry is whole.
+            cache = scratch / "cache"
+            left = [f.name for f in cache.glob("ci.*")] if cache.exists() else []
+            stored = list(cache.glob("*.json")) if cache.exists() else []
+            for entry in stored:
+                json.loads(entry.read_text())
+            self.assertEqual(left, [])
+        return results, count, len(stored)
+
+    def heads(self, results):
+        return [json.loads(r.stdout)["head"] for r in results]
+
+    def test_a_settled_diagnosis_is_served_again_only_for_the_same_head(self):
+        results, runs, _ = self.run_cached(["a", "a"])
+        self.assertEqual((self.heads(results), runs), (["a", "a"], 1))
+        results, runs, _ = self.run_cached(["a", "b"])
+        self.assertEqual((self.heads(results), runs), (["a", "b"], 2))
+
+    def test_a_rerun_of_a_job_on_the_same_head_is_not_served_the_old_diagnosis(self):
+        red = '[{"name":"lint","state":"FAILURE","bucket":"fail","link":"run/1"}]'
+        green = '[{"name":"lint","state":"SUCCESS","bucket":"pass","link":"run/2"}]'
+        _, runs, _ = self.run_cached(["a", "a"], checks=(red, green))
+        self.assertEqual(runs, 2)
+
+    def test_a_changed_failed_list_on_the_same_head_is_a_new_entry(self):
+        one = '[{"name":"lint","state":"FAILURE","bucket":"fail","link":"run/1"}]'
+        two = '[{"name":"lint","state":"FAILURE","bucket":"fail","link":"run/2"}]'
+        _, runs, stored = self.run_cached(["a", "a"], checks=(one, two))
+        self.assertEqual((runs, stored), (2, 2))
+
+    def test_a_list_with_no_failed_check_or_none_readable_bypasses_the_cache(self):
+        green = '[{"name":"lint","state":"SUCCESS","bucket":"pass","link":"run/1"}]'
+        for listed in ("[]", green, "oops"):
+            _, runs, stored = self.run_cached(["a", "a"], checks=(listed, listed))
+            self.assertEqual((runs, stored), (2, 0), listed)
+
+    def test_repositories_that_differ_by_one_character_do_not_share_entries(self):
+        _, runs, _ = self.run_cached(["a", "a"], repos=("a-b/c", "a/b-c"))
+        self.assertEqual(runs, 2)
+
+    def test_a_diagnosis_with_a_running_or_held_check_is_never_stored(self):
+        for field in ("pending", "held"):
+            live = self.SETTLED | {field: ["gates (rust)"]}
+            _, runs, stored = self.run_cached(["a", "a"], live)
+            self.assertEqual((runs, stored), (2, 0), field)
+
+    def test_a_diagnosis_of_another_head_is_served_but_never_stored(self):
+        results, runs, stored = self.run_cached(["a", "a"], reported="b")
+        self.assertEqual((self.heads(results), runs, stored), (["b", "b"], 2, 0))
+
+    def test_an_entry_older_than_the_ttl_is_read_again(self):
+        _, runs, _ = self.run_cached(["a", "a"], age=True)
+        self.assertEqual(runs, 2)
+
+    def test_a_head_that_is_not_a_commit_id_never_reaches_a_file_name(self):
+        results, runs, stored = self.run_cached(["../x"], repos=("a/b",))
+        self.assertEqual((results[0].returncode, runs, stored), (1, 0, 0))
+
+    def test_a_failed_diagnosis_is_a_failure_not_an_empty_one(self):
+        results, _, stored = self.run_cached(["a"], repos=("a/b",), ci_fails=True)
+        self.assertNotEqual(results[0].returncode, 0)
+        self.assertEqual((results[0].stdout, stored), ("", 0))
+
+
+@unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+class ExperienceCloseTests(unittest.TestCase):
+    """experience-close.sh fills the fixed fields and refuses an unstated outcome."""
+
+    HEAD = "a" * 40
+
+    def close(self, fields, head=None, same_path=False):
+        with tempfile.TemporaryDirectory() as scratch:
+            scratch = Path(scratch)
+            output = scratch / "out"
+            output.mkdir()
+            source = (
+                output / "experience.json" if same_path else scratch / "fields.json"
+            )
+            source.write_text(json.dumps(fields))
+            # A record command that echoes the report it was handed.
+            (scratch / "memory.py").write_text(
+                "import sys\nprint(open(sys.argv[sys.argv.index('--report') + 1]).read())\n"
+                "print([a[8:] for a in sys.argv if a.startswith('--skill=')][0], file=sys.stderr)\n"
+            )
+            result = subprocess.run(
+                [
+                    "sh",
+                    str(EXPERIENCE_CLOSE),
+                    str(source),
+                    head or self.HEAD,
+                ],
+                capture_output=True,
+                text=True,
+                env=os.environ
+                | {
+                    "SCRATCH": str(output),
+                    "EXPERIENCE_MEMORY": str(scratch / "memory.py"),
+                },
+            )
+        return result
+
+    def test_fills_the_fixed_fields_and_keeps_the_invocations_own(self):
+        fields = {
+            "outcome": "complete",
+            "skills_used": ["codetrial-triage"],
+            "coverage": "Swept 17 PRs.",
+            "questions": [{"q": "x"}],
+        }
+        result = self.close(fields)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["head"], self.HEAD)
+        self.assertEqual(report["schema_version"], 1)
+        self.assertEqual(report["findings"], [])
+        self.assertEqual(report["questions"], [{"q": "x"}])
+        self.assertIn("codetrial-triage", result.stderr)
+
+    def test_a_report_that_does_not_state_its_outcome_is_refused(self):
+        base = {"outcome": "complete", "skills_used": ["s"], "coverage": "c"}
+        for drop in ("outcome", "skills_used", "coverage"):
+            result = self.close({k: v for k, v in base.items() if k != drop})
+            self.assertEqual(result.returncode, 2, drop)
+        self.assertEqual(self.close(base, head="abc123").returncode, 2)
+        self.assertEqual(self.close(base | {"coverage": "  \n"}).returncode, 2)
+        self.assertEqual(self.close(base, head="z" * 40).returncode, 2)
+        self.assertEqual(self.close(base | {"outcome": "done"}).returncode, 2)
+
+    def test_fixed_fields_cannot_override_the_examined_head_or_schema(self):
+        result = self.close(
+            {
+                "outcome": "complete",
+                "skills_used": ["codetrial-review"],
+                "coverage": "local diff",
+                "head": "b" * 40,
+                "schema_version": 99,
+            }
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["head"], self.HEAD)
+        self.assertEqual(report["schema_version"], 1)
+
+    def test_an_existing_report_can_be_used_as_the_fields_file(self):
+        result = self.close(
+            {"outcome": "complete", "skills_used": ["s"], "coverage": "kept"},
+            same_path=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["coverage"], "kept")
+        self.assertEqual(report["head"], self.HEAD)
+
+
+@unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+class FeedbackBundleTests(unittest.TestCase):
+    """feedback-bundle.sh refetches a cut thread and never reads a failure as empty."""
+
+    FAKE = FAKE_GH_FEEDBACK
+
+    def run_bundle(self, env=(), bulk=0):
+        def node(author, body):
+            return {"id": body, "author": {"login": author}, "body": body, "url": "u"}
+
+        page = {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "nodes": [
+                                {
+                                    "id": "T1",
+                                    "isResolved": False,
+                                    "isOutdated": False,
+                                    "path": "a.js",
+                                    "line": 3,
+                                    "originalLine": 3,
+                                    "comments": {
+                                        "pageInfo": {"hasNextPage": True},
+                                        "nodes": [node("m", "first")],
+                                    },
+                                },
+                                {
+                                    "id": "T2",
+                                    "isResolved": True,
+                                    "isOutdated": True,
+                                    "path": "b.js",
+                                    "line": None,
+                                    "originalLine": 9,
+                                    "comments": {
+                                        "pageInfo": {"hasNextPage": False},
+                                        "nodes": [node("m", "done")],
+                                    },
+                                },
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+        rest = {
+            "data": {
+                "node": {
+                    "comments": {
+                        "nodes": [
+                            node("m", "first"),
+                            node("a", "reply" + "x" * bulk),
+                            node("m", "last"),
+                        ]
+                    }
+                }
+            }
+        }
+        pr = {"number": 7, "url": "u", "headRefOid": "h", "comments": [], "reviews": []}
+        with tempfile.TemporaryDirectory() as scratch:
+            scratch = Path(scratch)
+            (scratch / "bin").mkdir()
+            support.write_executable(scratch / "bin" / "gh", self.FAKE)
+            for name, value in (("pr", pr), ("threads", page), ("thread", rest)):
+                (scratch / f"{name}.json").write_text(json.dumps(value))
+            return subprocess.run(
+                ["sh", str(FEEDBACK_BUNDLE), "7"],
+                capture_output=True,
+                text=True,
+                env=os.environ
+                | {
+                    "PATH": f"{scratch / 'bin'}:{os.environ['PATH']}",
+                    "FAKE_DIR": str(scratch),
+                }
+                | dict(env),
+            )
+
+    def test_a_cut_thread_is_refetched_whole_and_open_requests_are_listed(self):
+        result = self.run_bundle()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        out = json.loads(result.stdout)
+        first = out["threads"][0]
+        self.assertEqual(
+            [c["body"] for c in first["comments"]], ["first", "reply", "last"]
+        )
+        self.assertTrue(out["complete"])
+        self.assertEqual([t["id"] for t in out["open"]], ["T1"])
+
+    def test_a_refetched_thread_past_the_argument_limit_still_makes_a_bundle(self):
+        # Two megabytes is past what one argument can carry on every platform
+        # this runs on, which a thread of many long replies can reach.
+        result = self.run_bundle(bulk=2_000_000)
+        self.assertEqual(result.returncode, 0, result.stderr[-200:])
+        out = json.loads(result.stdout)
+        self.assertEqual(len(out["threads"][0]["comments"][1]["body"]), 2_000_005)
+        self.assertTrue(out["complete"])
+
+    def test_a_thread_that_cannot_be_refetched_marks_the_bundle_incomplete(self):
+        out = json.loads(self.run_bundle({"FAKE_NO_THREAD": "1"}).stdout)
+        self.assertFalse(out["complete"])
+        self.assertFalse(out["threads"][0]["complete"])
+
+    def test_no_sign_in_is_an_error_not_an_empty_pull_request(self):
+        result = self.run_bundle({"FAKE_NO_AUTH": "1"})
+        self.assertEqual((result.returncode, result.stdout), (1, ""))
+
+
+class BadArgumentTests(unittest.TestCase):
+    """Every new script's header says a bad argument exits 2, not just fails."""
+
+    def test_a_missing_or_malformed_argument_exits_2_before_any_call(self):
+        scripts = (
+            APPLY_ACTIONS,
+            POST_SIMILAR,
+            REVIEW_BRIEF,
+            REVIEW_FINISH,
+            REVIEW_PICK,
+            EXPERIENCE_CLOSE,
+            FEEDBACK_BUNDLE,
+        )
+        with tempfile.TemporaryDirectory() as scratch:
+            support.write_executable(Path(scratch) / "gh", FAKE_GH_FAILS)
+            env = os.environ | {
+                "PATH": f"{scratch}:{os.environ['PATH']}",
+                "SCRATCH": scratch,
+            }
+            for script in scripts:
+                for args in ([], ["not-a-number"]):
+                    for shell in ("sh", "bash"):
+                        result = subprocess.run(
+                            [shell, str(script), *args],
+                            capture_output=True,
+                            text=True,
+                            env=env,
+                            cwd=ROOT,
+                        )
+                        self.assertEqual(
+                            result.returncode,
+                            2,
+                            (script.name, args, shell, result.stderr),
                         )
 
 

@@ -39,13 +39,18 @@ here applies to PRs too, and the confirmed-list rule governs every comment it
 drafts.
 
 A bare `/codetrial-triage` is both halves at once, and it runs often, so run
-it wide. One call starts `issue-sweep.sh` and `pr-sweep.sh` together (each
+it wide. One call starts `issue-sweep.sh` and the PR half, `codetrial-odds/snapshot.sh`
+(which runs `pr-sweep.sh` against the saved last sweep, so `moved` and `gone` are
+filled, and keeps that baseline unless the sweep is whole), together (each
 in the background of one shell, then `wait`). The next response does
 everything that needs only their output in parallel: the no-ask actions in
-[pulls.md](pulls.md), `hygiene.sh` for every open PR, one review agent per low
+[pulls.md](pulls.md) (its `--hygiene` runs `hygiene.sh` for every open PR), one review agent per low
 or blocked PR from [review-prs.md](review-prs.md), and the issue body, comment
 and search reads below. Each PR's review is verified and posted the moment it lands, and the
-report waits only for the last of them.
+report waits only for the last of them. The agents run in the background and
+announce themselves when done: do not poll their output files or sleep-loop,
+handle each PR when its notification arrives, and say in one line what is still
+running if a long wait leaves the user without news.
 
 How work moves on this tracker (who the maintainers are, how a PR is scoped,
 what the one-line review requests mean) is in

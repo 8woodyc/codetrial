@@ -7,13 +7,23 @@ is sent back for a rebase. One read-only call gathers all five, plus each PR's
 status and merge grade:
 
 ```sh
-.claude/skills/codetrial-triage/pr-sweep.sh "$repo" > "$SCRATCH/sweep.json"
+snap=$(.claude/skills/codetrial-odds/snapshot.sh "$repo") &&
+  cp "$snap" "$SCRATCH/sweep.json" && snap=$SCRATCH/sweep.json
 ```
 
-The second argument overrides the idle threshold, seven days unless the user
-gives another; the third is an earlier output, which adds `moved` and `gone`
-(see [Rank by size and merge
-confidence](#rank-by-size-and-merge-confidence)). Report the open PR
+The copy is the sweep for everything that follows: the saved file is replaced
+whole by any later run, `/codetrial-odds` included, and a script that read it
+twice could see two sweeps.
+
+`snapshot.sh` runs `pr-sweep.sh` against the last saved sweep (one per
+repository, in the git directory, never tracked) and prints the path of the new
+one, which replaces the old only when the sweep was whole. That fills `moved`
+and `gone` (see [Rank by size and merge
+confidence](#rank-by-size-and-merge-confidence)) with nothing to wire up, and
+`/codetrial-odds` and a bare sweep read the same baseline. Its second argument
+overrides the idle threshold, seven days unless the user gives another. A
+failed sweep exits 1 and prints nothing: stop and say so rather than reading
+the old snapshot as today's. Report the open PR
 count, and any PR whose `files_truncated`, `reviews_truncated`,
 `threads_truncated`, `comments_truncated` or `closes_truncated` is set, since
 the lists below miss what was cut. In particular, `overlap` is incomplete when
@@ -96,8 +106,20 @@ and these actions go on the confirmed list instead.
   too is text the maintainer approved by writing it. "Sweep the PRs" alone
   lists the items and posts none.
 
+`apply-pr-actions.sh` does all of it in one call, except resolving outdated
+threads (the review of a low or blocked PR owns that), and prints a receipt per
+action (`applied`, `already`, `skipped`, `confirm` or `failed`); the commands
+after it are what it runs, for doing one by hand. `--hygiene` adds the
+hygiene reviews, which only a bare sweep takes. Every `confirm` and `failed`
+receipt goes in the report or on the confirmed list, and `hide_ask` stays the
+maintainer's:
+
 ```sh
-gh api -X POST "repos/$repo/actions/runs/$run/approve"
+.claude/skills/codetrial-triage/apply-pr-actions.sh "$snap" "$repo" --hygiene
+```
+
+```sh
+gh api -X POST "repos/$repo/actions/runs/$run/approve"   # 403 "not waiting for approval": see below
 gh api graphql -F id="$thread" -f query='
   mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) {
     thread { isResolved } } }'
@@ -114,6 +136,13 @@ head, where the next sweep reads it as not current, instead of on code nobody
 looked at. The same minimize call hides a review (`PRR_` id) or a comment
 (`IC_` id), and `OUTDATED` is the classifier for every rebase request,
 hand-written or not.
+
+A 403 "This workflow run is not waiting for approval" from the approve call
+can mean someone approved the run between the sweep and the post, as with
+#537. Check `gh run view "$run" --repo "$repo" --json status --jq .status`
+shows that run is `queued` or `in_progress`, report it as already approved,
+and move on without retrying. An unread or inactive run leaves approval
+unverified and is reported as failed.
 
 An inspection request ("what needs attention") still applies nothing. Runner
 time is the one thing an approval risks, and any file the tests execute can
@@ -136,10 +165,13 @@ Most changes requested here are the same few requests typed again: run
 merge, open the PR from a topic branch, drop the AI attribution, fix the CI
 regressions before asking for review, show a screenshot of a page change.
 `hygiene.sh` decides each of them for one PR at its current head and prints
-the review text, the maintainers' own wording for every item that applies:
+the review text, the maintainers' own wording for every item that applies.
+`apply-pr-actions.sh --hygiene` runs it for every open PR and posts each
+non-empty body, so a bare sweep does not repeat the loop below; the loop and
+the post are the same steps by hand:
 
 ```sh
-for pr in $(jq -r '.prs[].number' "$SCRATCH/sweep.json"); do
+for pr in $(jq -r '.prs[].number' "$snap"); do
   { .claude/skills/codetrial-triage/hygiene.sh "$pr" > "$SCRATCH/hygiene-$pr.json" ||
     rm -f "$SCRATCH/hygiene-$pr.json"; } &
 done
@@ -169,9 +201,9 @@ gh api "repos/$repo/pulls/$pr/reviews" \
 ```
 
 The fixed `rebase.md` request and this review go out in the same response,
-so `hygiene.sh` cannot see the first. It holds the CI item back on a
-conflicting PR for that reason, and the two reviews otherwise ask for different
-things.
+and `hygiene.sh` reads the PR before either is posted. It holds the CI item
+back on a conflicting PR for that reason, since a rebase may be the whole
+answer to the failure, and the two reviews otherwise ask for different things.
 
 The posted review is itself the request at that head, so the next sweep finds
 it and asks nothing again until the author pushes. When the maintainers type a
@@ -367,7 +399,7 @@ write permissions beyond the sweep actions above.
 
 ```sh
 jq -r '.status[:10][] | "#\(.pr) \(.size.total) (\(.size.source)/\(.size.tests)) \(.grade): \(.why | join("; "))"' \
-  "$SCRATCH/sweep.json"
+  "$snap"
 ```
 
 `size` splits the lines into source and tests, since a 90-line PR can be a
@@ -425,8 +457,7 @@ reviewer rather than into their own queue. A failing job whose name
 so only `ci-failure.sh` can tell a failure `main` shares, which is the
 maintainer's, from the PR's own in the same lane.
 
-Save each sweep and pass it back as the third argument the next time. `moved`
-then lists the PRs whose head, mergeability, decision, grade, `waits_on`,
+`moved` lists the PRs whose head, mergeability, decision, grade, `waits_on`,
 checks or threads changed, each field as `[before, after]`, plus `{pr, new: true}` for a PR
 opened since. `gone` says which left the open list, merged or closed and at
 which commit, or `UNKNOWN` when that lookup failed. A repeated request then
