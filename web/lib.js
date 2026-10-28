@@ -2149,3 +2149,9 @@ export function isYieldShortcut(event, editor) {
 export function retryReportPayload() {
   return { type: "retry_report" };
 }
+
+/// Tells the agent to stop writing the report: the candidate chose to leave
+/// without one. The agent drops whatever it generated and publishes nothing.
+export function skipReportPayload() {
+  return { type: "skip_report" };
+}

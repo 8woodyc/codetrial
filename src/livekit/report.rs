@@ -395,6 +395,57 @@ fn recovery_request(
     })
 }
 
+/// Whether a packet is the candidate asking to drop the report. Same sender
+/// rule as `recovery_request`: only the original candidate may say it, so a
+/// bystander in the room cannot cancel somebody else's report.
+fn skip_request(
+    topic: Option<&str>,
+    sender: Option<&str>,
+    candidate: &str,
+    payload: &[u8],
+) -> bool {
+    super::interview_packet(topic, sender, candidate, payload).is_some_and(|(topic, payload)| {
+        topic == crate::runtime::TOPIC_CONTROL && payload["type"] == "skip_report"
+    })
+}
+
+/// What the agent tells the page once it has dropped the report. The page
+/// leaves on this and on nothing else, so it is the only signal that Skip took
+/// effect; `web/interview.js` matches the same `type`.
+pub(super) fn skip_report_ack() -> serde_json::Value {
+    serde_json::json!({ "type": "skip_report_ack" })
+}
+
+/// Resolves once the candidate asks to skip the report. Raced against the
+/// generation, because that wait runs inside the event handler and nothing
+/// else reads the room while it does.
+///
+/// Every other event is dropped here. The recovery that follows decides
+/// presence from the room roster rather than from events it may have missed
+/// (see `candidate_present`), and no receipt can be queued before a report
+/// has been published. A closed event stream never resolves: the room is gone,
+/// and the generation then decides how this ends.
+pub(super) async fn wait_for_skip(
+    events: &mut tokio::sync::mpsc::UnboundedReceiver<::livekit::RoomEvent>,
+    candidate: &str,
+) {
+    while let Some(event) = events.recv().await {
+        if let RoomEvent::DataReceived {
+            topic,
+            payload,
+            participant,
+            ..
+        } = event
+        {
+            let sender = participant.as_ref().map(|p| p.identity().0);
+            if skip_request(topic.as_deref(), sender.as_deref(), candidate, &payload) {
+                return;
+            }
+        }
+    }
+    std::future::pending::<()>().await;
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RecoveryEvent {
     Retry,
