@@ -286,6 +286,24 @@ def validated_problems(source: Path = SOURCE) -> list[dict]:
         cleaned = [topic.strip() for topic in topics if named(topic)]
         if len(cleaned) != len(topics) or len(set(cleaned)) != len(cleaned):
             raise RuntimeError(f"{problem_id}: topics must be non-empty and unique")
+    # Exactly one level up, so the lobby can offer a sequel as the next step
+    # without ever skipping Medium on the way from Easy to Hard.
+    levels = {"Easy": 0, "Medium": 1, "Hard": 2}
+    by_id = {problem["id"]: problem for problem in problems}
+    for problem in problems:
+        if "sequel" not in problem:
+            continue
+        # A list or object here would raise TypeError from the lookup instead
+        # of the refusal below, which is the one that names the problem.
+        named_sequel = problem["sequel"]
+        sequel = by_id.get(named_sequel) if isinstance(named_sequel, str) else None
+        if (
+            sequel is None
+            or levels[sequel["difficulty"]] != levels[problem["difficulty"]] + 1
+        ):
+            raise RuntimeError(
+                f"{problem['id']}: sequel must name a problem one level harder"
+            )
     return problems
 
 

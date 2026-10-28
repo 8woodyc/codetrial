@@ -304,6 +304,17 @@ p {
   margin: 0;
 }
 
+/* A row of its own under the button and the line beside it, so the offer
+   never squeezes the selected problem it sits next to. */
+.random-picker #sequel-suggestion {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin: 0;
+}
+
 .problem-picker .problem-grid {
   margin-top: 1rem;
 }
@@ -620,12 +631,14 @@ p {
 
 .start-button:disabled,
 #random-problem:disabled,
-#practice-list-pick:disabled {
+#practice-list-pick:disabled,
+#sequel-suggestion-pick:disabled {
   opacity: 0.6;
 }
 
 .lobby #random-problem:disabled,
-.lobby #practice-list-pick:disabled {
+.lobby #practice-list-pick:disabled,
+.lobby #sequel-suggestion-pick:disabled {
   cursor: not-allowed;
 }
 
@@ -3654,6 +3667,7 @@ body:not([data-recording]) .replay-detail > :not(header) {
 
 .lobby #random-problem,
 .lobby #practice-list-pick,
+.lobby #sequel-suggestion-pick,
 .lobby .interview-context button,
 .lobby #problem-filters-reset,
 .lobby .weak-topic button,
@@ -3673,6 +3687,7 @@ body:not([data-recording]) .replay-detail > :not(header) {
 
 .lobby #random-problem:not(:disabled):hover,
 .lobby #practice-list-pick:not(:disabled):hover,
+.lobby #sequel-suggestion-pick:not(:disabled):hover,
 .lobby .interview-context button:hover,
 .lobby #problem-filters-reset:hover,
 .lobby .weak-topic button:hover,
