@@ -19,6 +19,11 @@ scenario, renamed entry point or class name, examples, clarifications,
 follow-ups, and hints. Class judges omit C because its harness supports only
 function exercises.
 
+An optional `sequel` names the problem the lobby offers next after a pass:
+the same technique exactly one level harder, so an Easy problem names a
+Medium one and a Medium problem a Hard one. The card generator writes it onto
+the card by page name, so no problem id reaches the page.
+
 An imported LeetCode exercise keeps `title` and published `examples` in
 `problems.json`, belongs to `scripts/top-interview-150.json`, and is checked
 against the study plan. An original exercise sets `"origin": "original"`,
@@ -53,6 +58,9 @@ source file to fix; do not edit generated output to silence them.
 - `missing rubric`, `unknown difficulty`, and `topics must contain 1..8
   values` (or `topics must be non-empty and unique`) name required problem
   metadata.
+- `sequel must name a problem one level harder` comes from a `sequel` in
+  `problems.json` that is not a string, names no problem in the bank, or
+  names one that is not exactly one level harder.
 - `variants must list every problem once, in bank order`, `a variant has
   exactly`, `a function problem declares a new entry`, and `a class problem
   declares a new className` name the scenario record to repair.

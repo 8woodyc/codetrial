@@ -196,6 +196,31 @@ export function pickProblem(
   };
 }
 
+/// The harder problem to offer after the latest interview, or null.
+///
+/// Only a pass earns the offer: a fail or an unscored interview already leaves
+/// the problem to the review schedule above, which is the better next step than
+/// one a level up. The latest interview is found by its time rather than by
+/// position, so an older pass cannot speak for a newer attempt that did not
+/// pass. Read beside the selection rather than inside `pickProblem`, so nothing
+/// the lobby selects changes until the candidate takes the offer.
+export function sequelSuggestion(cards, reports) {
+  const latest = (Array.isArray(reports) ? reports : [])
+    .filter((entry) => Number.isFinite(entry?.at))
+    .reduce(
+      (newest, entry) => (newest && newest.at >= entry.at ? newest : entry),
+      null,
+    );
+  if (latest?.report?.decision !== "HIRE") return null;
+  const from = cards.find((card) => card.id === latest.problemId);
+  const to = from?.sequel && cards.find((card) => card.id === from.sequel);
+  if (!to) return null;
+  const passed = reports.some(
+    (entry) => entry?.problemId === to.id && entry?.report?.decision === "HIRE",
+  );
+  return passed ? null : { from, to };
+}
+
 function reviewStatus(reports, now) {
   const outcomes = new Map();
   for (const entry of reports) {

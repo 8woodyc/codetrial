@@ -9695,3 +9695,168 @@ lobbyTest(
   },
   { viewport: { width: 1280, height: 800 } },
 );
+
+lobbyTest(
+  "a pass offers its sequel beside the selection, and taking it selects the sequel",
+  async (page) => {
+    const [passed, sequel] = [
+      "two-sum",
+      "two-sum-ii-input-array-is-sorted",
+    ].map(pageOf);
+    reports = [hired(passed, { createdAt: 50 })];
+    // A fixed draw, so the selection the offer sits beside is never the sequel.
+    await page.addInitScript(() => {
+      Math.random = () => 0;
+    });
+    await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
+    await awaitReady(page);
+
+    const offer = page.locator("#sequel-suggestion");
+    const selected = () =>
+      page.$eval(
+        '[data-problem][aria-pressed="true"]',
+        (card) => card.dataset.problem,
+      );
+    assert.equal(await offer.isVisible(), true);
+    assert.equal(
+      await page.textContent("#sequel-suggestion-text"),
+      "You passed Chargeback Pair Match. Next in this series: Gift Card Bundle Pair (Medium).",
+    );
+    const before = await selected();
+    assert.notEqual(before, sequel, "the offer selects nothing on its own");
+
+    await page.click("#sequel-suggestion-pick");
+    assert.equal(await selected(), sequel);
+    assert.equal(
+      await page.textContent("#recommendation"),
+      "Selected problem: Gift Card Bundle Pair (Medium).",
+    );
+    assert.equal(await offer.isVisible(), false);
+  },
+);
+
+lobbyTest("a fail offers no sequel", async (page) => {
+  reports = [missed(pageOf("two-sum"), { createdAt: 50 })];
+  await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
+  await awaitReady(page);
+  assert.equal(await page.locator("#sequel-suggestion").isVisible(), false);
+});
+
+lobbyTest(
+  "taking the sequel offer from the keyboard leaves focus on a visible control",
+  async (page) => {
+    reports = [hired(pageOf("two-sum"), { createdAt: 50 })];
+    await page.addInitScript(() => {
+      Math.random = () => 0;
+    });
+    await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
+    await awaitReady(page);
+
+    await page.focus("#sequel-suggestion-pick");
+    await page.keyboard.press("Enter");
+    assert.equal(await page.locator("#sequel-suggestion").isVisible(), false);
+    // The offer hid its own button; the next Tab must not restart at the top.
+    assert.equal(
+      await page.evaluate(() => document.activeElement.id),
+      "random-problem",
+    );
+  },
+);
+
+lobbyTest(
+  "the sequel offer is disabled while an account refresh is pending",
+  async (page) => {
+    await page.addInitScript(() => {
+      const fetch = window.fetch.bind(window);
+      window.pendingHistory = [];
+      window.fetch = (url, ...args) =>
+        url === "/api/reports"
+          ? new Promise((resolve) =>
+              window.pendingHistory.push((reports) =>
+                resolve(new Response(JSON.stringify({ reports }))),
+              ),
+            )
+          : fetch(url, ...args);
+    });
+    const passed = [hired(pageOf("two-sum"), { createdAt: 50 })];
+    const answer = (index) =>
+      page.evaluate(
+        async ([index, reports]) => {
+          window.pendingHistory[index](reports);
+          await new Promise(requestAnimationFrame);
+        },
+        [index, passed],
+      );
+    await page.goto(`${base}/`);
+    await page.waitForFunction(() => window.pendingHistory.length === 1);
+    await answer(0);
+    await page.waitForFunction(
+      () => !document.querySelector("#sequel-suggestion").hidden,
+    );
+    assert.equal(await page.isDisabled("#sequel-suggestion-pick"), false);
+
+    await restore(page);
+    await page.waitForFunction(() => window.pendingHistory.length === 2);
+    assert.equal(await page.isDisabled("#sequel-suggestion-pick"), true);
+    await answer(1);
+    assert.equal(await page.isDisabled("#sequel-suggestion-pick"), false);
+  },
+);
+
+lobbyTest(
+  "taking a Hard sequel shows its card while only Medium is checked",
+  async (page) => {
+    const [passed, sequel] = [
+      "container-with-most-water",
+      "trapping-rain-water",
+    ].map(pageOf);
+    reports = [hired(passed, { createdAt: 50 })];
+    await page.addInitScript(() => {
+      Math.random = () => 0;
+    });
+    await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
+    await awaitReady(page);
+    const checked = () =>
+      page.$$eval("input[name=difficulty]:checked", (boxes) =>
+        boxes.map((box) => box.value),
+      );
+    const levels = await checked();
+    assert.ok(!levels.includes("Hard"), `Hard is not checked: ${levels}`);
+    // The level filter hides the sequel until the offer is taken.
+    assert.equal((await cardInfo(page, sequel)).hidden, true);
+
+    await page.click("#sequel-suggestion-pick");
+    assert.equal((await cardInfo(page, sequel)).hidden, false);
+    assert.equal(
+      await page.getAttribute(`[data-problem="${sequel}"]`, "aria-pressed"),
+      "true",
+    );
+    assert.deepEqual(
+      await checked(),
+      levels,
+      "taking the offer checks no level",
+    );
+  },
+);
+
+lobbyTest(
+  "Strict Interview hides the sequel offer with the other pickers",
+  async (page) => {
+    reports = [hired(pageOf("two-sum"), { createdAt: 50 })];
+    await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
+    await awaitReady(page);
+    const offer = page.locator("#sequel-suggestion");
+    assert.equal(await offer.isVisible(), true);
+
+    // Strict assigns the problem, so nothing may offer one to choose.
+    await page.selectOption("#selection-mode", "strict");
+    assert.equal(await offer.isVisible(), false);
+    assert.equal(
+      await page.locator("#sequel-suggestion-pick").isVisible(),
+      false,
+    );
+
+    await page.selectOption("#selection-mode", "practice");
+    assert.equal(await offer.isVisible(), true);
+  },
+);

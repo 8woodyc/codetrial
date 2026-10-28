@@ -7,6 +7,7 @@
       "String",
       "Stack"
     ],
+    "sequel": "generate-parentheses",
     "statement": [
       "Given a string s containing just the characters '(', ')', '{', '}', '[' and ']', determine if the input string is valid.",
       "An input string is valid if open brackets are closed by the same type of bracket, open brackets are closed in the correct order, and every close bracket has a corresponding open bracket of the same type."
@@ -52,6 +53,7 @@
       "Array",
       "Hash Table"
     ],
+    "sequel": "two-sum-ii-input-array-is-sorted",
     "statement": [
       "Given an array of integers nums and an integer target, return the indices of the two numbers such that they add up to target.",
       "You may assume that each input has exactly one solution, and you may not use the same element twice.",
@@ -180,6 +182,7 @@
       "Array",
       "Two Pointers"
     ],
+    "sequel": "remove-duplicates-from-sorted-array-ii",
     "statement": [
       "Given a nondecreasing integer array nums, compact it in place so each distinct value appears once.",
       "Return the number of distinct values. The first returned-length items of nums must hold those values in their original sorted order."
@@ -335,6 +338,7 @@
       "Array",
       "Dynamic Programming"
     ],
+    "sequel": "best-time-to-buy-and-sell-stock-ii",
     "statement": [
       "Given daily stock prices, choose one day to buy and a later day to sell.",
       "Return the largest possible profit. If no profitable sale exists, return 0."
@@ -373,6 +377,7 @@
       "Dynamic Programming",
       "Greedy"
     ],
+    "sequel": "best-time-to-buy-and-sell-stock-iii",
     "statement": [
       "Given daily stock prices, return the largest profit you can make with as many buy-sell transactions as you want.",
       "You may hold at most one share at a time, so each sell must happen before the next buy."
@@ -1125,6 +1130,7 @@
       "Two Pointers",
       "Greedy"
     ],
+    "sequel": "trapping-rain-water",
     "statement": [
       "Given vertical line heights, choose two lines that form a container holding the most water.",
       "The area is the distance between the two lines multiplied by the shorter height."
@@ -1287,6 +1293,7 @@
       "String",
       "Sliding Window"
     ],
+    "sequel": "minimum-window-substring",
     "statement": [
       "Given a string, return the length of the longest substring that contains no repeated characters.",
       "A substring must be contiguous."
@@ -2147,6 +2154,7 @@
       "Math",
       "Stack"
     ],
+    "sequel": "basic-calculator",
     "statement": [
       "Given tokens for a valid arithmetic expression in Reverse Polish Notation, evaluate the expression.",
       "Operators are +, -, *, and /. Division between integers truncates toward zero."
@@ -2404,6 +2412,7 @@
     "topics": [
       "Linked List"
     ],
+    "sequel": "reverse-nodes-in-k-group",
     "statement": [
       "Given the head of a singly linked list and two integers left and right where left <= right, reverse the nodes of the list from position left to position right, and return the head of the modified list.",
       "Positions are one-based, so left = 1 refers to the first node."
@@ -3839,6 +3848,7 @@
       "String",
       "BFS"
     ],
+    "sequel": "word-ladder",
     "statement": [
       "Given a start gene, an end gene, and a bank of valid genes, return the fewest one-character mutations needed to reach the end gene.",
       "Every intermediate gene must be in the bank, and each mutation may change only one character to A, C, G, or T."
@@ -4111,6 +4121,7 @@
       "Array",
       "Backtracking"
     ],
+    "sequel": "n-queens-ii",
     "statement": [
       "Given an array of distinct integers, return every possible ordering of its values.",
       "The list of permutations may be returned in any order."
@@ -4262,6 +4273,7 @@
       "Backtracking",
       "Matrix"
     ],
+    "sequel": "word-search-ii",
     "statement": [
       "Given a grid of characters and a word, decide whether the word can be formed by walking adjacent cells horizontally or vertically.",
       "A path may not reuse the same cell more than once."
@@ -4421,6 +4433,7 @@
       "Array",
       "Binary Search"
     ],
+    "sequel": "find-first-and-last-position-of-element-in-sorted-array",
     "statement": [
       "Given a sorted array of distinct integers and a target, return the index where the target is found.",
       "If the target is absent, return the index where it should be inserted to keep the array sorted."
@@ -4546,6 +4559,7 @@
       "Array",
       "Bit Manipulation"
     ],
+    "sequel": "single-number-ii",
     "statement": [
       "Given a non-empty integer array where every value appears twice except one, return the value that appears once.",
       "The solution should run in linear time and use constant extra space."
@@ -4628,6 +4642,7 @@
       "Dynamic Programming",
       "Memoization"
     ],
+    "sequel": "house-robber",
     "statement": [
       "You are climbing a staircase with n steps and can move either one or two steps at a time.",
       "Return how many distinct ways there are to reach the top."
@@ -5472,6 +5487,7 @@
       "Heap",
       "Quickselect"
     ],
+    "sequel": "find-median-from-data-stream",
     "statement": [
       "Given an integer array and k, return the value that would appear in position k when the values are ordered from largest to smallest.",
       "Duplicate values count as separate positions."
@@ -5509,6 +5525,7 @@
       "Array",
       "Binary Search"
     ],
+    "sequel": "median-of-two-sorted-arrays",
     "statement": [
       "Given a sorted integer array, return the first and last index where target appears.",
       "Return [-1, -1] when target does not appear."
@@ -5717,6 +5734,7 @@
       "Sorting",
       "Merge Sort"
     ],
+    "sequel": "merge-k-sorted-lists",
     "statement": [
       "Given the head of a linked list, return a linked list containing the same values in ascending order.",
       "The returned list should contain every original value exactly once."

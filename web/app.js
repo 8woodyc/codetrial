@@ -17,6 +17,7 @@ import {
 import {
   pickProblem,
   practiceFocus,
+  sequelSuggestion,
   storeSharedFocus,
   suggestDifficulty,
 } from "./problem-picker.js";
@@ -146,6 +147,9 @@ const nodes = {
   deleteReports: document.querySelector("#delete-reports"),
   reportDeleteStatus: document.querySelector("#report-delete-status"),
   recommendation: document.querySelector("#recommendation"),
+  sequelSuggestion: document.querySelector("#sequel-suggestion"),
+  sequelSuggestionText: document.querySelector("#sequel-suggestion-text"),
+  sequelSuggestionPick: document.querySelector("#sequel-suggestion-pick"),
   randomProblem: document.querySelector("#random-problem"),
   practiceListPick: document.querySelector("#practice-list-pick"),
   practiceListStatus: document.querySelector("#practice-list-status"),
@@ -205,6 +209,7 @@ const cards = [...document.querySelectorAll("[data-problem]")].map(
     },
     leetcodeTitle: "",
     difficulty: button.dataset.difficulty,
+    sequel: button.dataset.sequel ?? null,
     topics: [],
     button,
     entry: document.querySelector(`#problem-entry-${button.dataset.problem}`),
@@ -407,6 +412,27 @@ nodes.practiceListPick.addEventListener("click", () => {
   searchVisibilityException = card;
   setDuration(suggestedDuration(new Set([card.difficulty])));
   nodes.recommendation.textContent = `From my list: ${title(card)} (${card.difficulty}).`;
+});
+
+// Selects the sequel the way a list draw selects its pick, across the level
+// filters, since moving up a level is the reason it is offered.
+nodes.sequelSuggestionPick.addEventListener("click", () => {
+  if (!historyReady || starting || accountUpdatePending() || deletingReports)
+    return;
+  const card = sequelSuggestion(cards, reports)?.to;
+  if (!card) return;
+  manualProblem = true;
+  keptDraw = null;
+  applyProblemFilters();
+  if (!nodes.problemSearch.value.trim()) setCardHidden(card, false);
+  // Selecting the sequel hides the offer and this button with it, which would
+  // drop keyboard focus to the body. The random draw stays visible, and the
+  // guard above is the one that leaves it enabled.
+  nodes.randomProblem.focus();
+  setProblem(card);
+  searchVisibilityException = card;
+  setDuration(suggestedDuration(new Set([card.difficulty])));
+  nodes.recommendation.textContent = `Selected problem: ${title(card)} (${card.difficulty}).`;
 });
 
 function refreshPracticeList() {
@@ -943,6 +969,10 @@ function syncLobbyControls() {
     starting ||
     accountBusy ||
     deletingReports;
+  // The click handler's own guard, so the button never looks pressable while
+  // a press would do nothing.
+  nodes.sequelSuggestionPick.disabled =
+    !historyReady || starting || accountBusy || deletingReports;
   const deleteBlocked = reportDeletesBlocked();
   nodes.deleteReports.disabled = deleteBlocked;
   for (const remove of nodes.attemptHistory.querySelectorAll(
@@ -1600,6 +1630,18 @@ function setProblem(card, language = null) {
   searchVisibilityException = null;
   retryLanguage = language;
   syncLobbyControls();
+  renderSequelSuggestion();
+}
+
+/// Beside the selection rather than in it: the offer selects nothing until it
+/// is pressed, and it goes once the sequel is what is selected.
+function renderSequelSuggestion() {
+  const suggestion = sequelSuggestion(cards, reports);
+  const shown = suggestion !== null && problem !== suggestion.to;
+  nodes.sequelSuggestion.hidden = !shown;
+  nodes.sequelSuggestionText.textContent = shown
+    ? `You passed ${title(suggestion.from)}. Next in this series: ${title(suggestion.to)} (${suggestion.to.difficulty}).`
+    : "";
 }
 
 /// Says whether a button is the chosen one, in both the ways that answer has to
@@ -1796,6 +1838,7 @@ function showProgressError(message) {
   nodes.progressProblem.value = "all";
   shownAttempts = [];
   renderPracticeFocus();
+  renderSequelSuggestion();
   hideRecentPerformance();
   nodes.historyHeader.hidden = false;
   nodes.history.hidden = false;
@@ -1820,6 +1863,7 @@ function renderProblemAttempts(attempts) {
 
 function showProgress(entries, suffix) {
   renderPracticeFocus();
+  renderSequelSuggestion();
   renderRecentPerformance();
   // Normalized once here, not per render: the filters below only select from
   // these rows, so a dropdown change has nothing to re-sanitize.

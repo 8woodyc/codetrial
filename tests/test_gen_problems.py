@@ -85,6 +85,58 @@ class ProblemMetadataGeneratorTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     GEN.validated_problems(path)
 
+    def test_a_sequel_names_a_problem_exactly_one_level_harder(self):
+        def problem(problem_id, difficulty, **extra):
+            return {
+                "id": problem_id,
+                "origin": "original",
+                "difficulty": difficulty,
+                "topics": ["Array"],
+                "summary": "Summary.",
+                "optimal": "Optimal.",
+                "pitfalls": "Pitfalls.",
+                **extra,
+            }
+
+        easy = problem("easy", "Easy", sequel="medium")
+        medium = problem("medium", "Medium", sequel="hard")
+        hard = problem("hard", "Hard")
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "problems.json"
+            path.write_text(json.dumps([easy, medium, hard]))
+            self.assertEqual(GEN.validated_problems(path), [easy, medium, hard])
+            for problems in (
+                [{**easy, "sequel": "missing"}, medium, hard],
+                [{**easy, "sequel": "hard"}, medium, hard],
+                [{**medium, "sequel": "easy"}, easy, hard],
+                [{**hard, "sequel": "easy"}, easy, medium],
+                [{**easy, "sequel": "easy"}, medium, hard],
+                # Not a name at all: refused the same way, not by a TypeError.
+                [{**easy, "sequel": ["medium"]}, medium, hard],
+                [{**easy, "sequel": {"id": "medium"}}, medium, hard],
+                [{**easy, "sequel": None}, medium, hard],
+            ):
+                path.write_text(json.dumps(problems))
+                with self.assertRaisesRegex(RuntimeError, "one level harder"):
+                    GEN.validated_problems(path)
+
+    def test_a_card_names_its_sequel_by_page_and_not_by_id(self):
+        problems = [
+            {"id": "two-sum", "difficulty": "Easy", "sequel": "two-sum-ii"},
+            {"id": "two-sum-ii", "difficulty": "Medium"},
+        ]
+        pages = {
+            "two-sum": {"page": "pair-match", "title": "Pair Match"},
+            "two-sum-ii": {"page": "bundle-pair", "title": "Bundle Pair"},
+        }
+        block = CARDS.generated(problems, pages)
+        self.assertIn(
+            'data-problem="pair-match" data-difficulty="Easy" data-sequel="bundle-pair">',
+            block,
+        )
+        self.assertIn('data-problem="bundle-pair" data-difficulty="Medium">', block)
+        self.assertNotIn("two-sum", block)
+
     def test_public_projection_has_a_closed_schema_and_ordered_stages(self):
         problem = {
             "id": "one",

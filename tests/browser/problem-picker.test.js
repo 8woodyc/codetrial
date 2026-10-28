@@ -6,6 +6,7 @@ import {
   consumeSharedFocus,
   pickProblem,
   practiceFocus,
+  sequelSuggestion,
   storeSharedFocus,
   suggestDifficulty,
 } from "../../web/problem-picker.js";
@@ -716,4 +717,77 @@ test("random draws respect narrowed practice while reviews keep their broader po
     );
   assert.equal(draw("recommend").picked.id, "passed");
   assert.equal(draw("random").picked.id, "fresh");
+});
+
+const series = [
+  { id: "pair", difficulty: "Easy", sequel: "bundle" },
+  { id: "bundle", difficulty: "Medium", sequel: "triple" },
+  { id: "triple", difficulty: "Hard", sequel: null },
+  { id: "alone", difficulty: "Easy", sequel: null },
+];
+const attempt = (problemId, at, decision) => ({
+  problemId,
+  at,
+  report: decision ? { decision } : { incomplete: true },
+});
+const offered = (reports) => {
+  const suggestion = sequelSuggestion(series, reports);
+  return suggestion && [suggestion.from.id, suggestion.to.id];
+};
+
+test("a pass offers its sequel one level up, from Easy and from Medium", () => {
+  assert.deepEqual(offered([attempt("pair", 2, "HIRE")]), ["pair", "bundle"]);
+  assert.deepEqual(offered([attempt("bundle", 2, "HIRE")]), [
+    "bundle",
+    "triple",
+  ]);
+});
+
+test("no sequel is offered after a fail, an unscored interview or a problem without one", () => {
+  assert.equal(offered([]), null);
+  assert.equal(offered([attempt("pair", 2, "NO_HIRE")]), null);
+  assert.equal(offered([attempt("pair", 2)]), null);
+  assert.equal(offered([attempt("alone", 2, "HIRE")]), null);
+  assert.equal(offered([attempt("triple", 2, "HIRE")]), null);
+});
+
+test("a sequel already passed is not offered again", () => {
+  assert.equal(
+    offered([attempt("pair", 2, "HIRE"), attempt("bundle", 1, "HIRE")]),
+    null,
+  );
+  // A failed attempt at the sequel is not a pass, so the offer stands.
+  assert.deepEqual(
+    offered([attempt("pair", 2, "HIRE"), attempt("bundle", 1, "NO_HIRE")]),
+    ["pair", "bundle"],
+  );
+});
+
+test("the latest interview decides the offer whatever order the reports arrive in", () => {
+  // An older pass cannot speak for a newer interview that did not pass.
+  assert.equal(
+    offered([attempt("pair", 1, "HIRE"), attempt("alone", 2, "NO_HIRE")]),
+    null,
+  );
+  assert.equal(
+    offered([attempt("alone", 2, "NO_HIRE"), attempt("pair", 1, "HIRE")]),
+    null,
+  );
+  assert.deepEqual(
+    offered([attempt("alone", 1, "NO_HIRE"), attempt("pair", 2, "HIRE")]),
+    ["pair", "bundle"],
+  );
+  // A row without a time cannot be placed, so it is not the latest.
+  assert.deepEqual(
+    offered([
+      { problemId: "alone", report: { decision: "NO_HIRE" } },
+      attempt("pair", 1, "HIRE"),
+    ]),
+    ["pair", "bundle"],
+  );
+});
+
+test("a sequel the lobby has no card for is not offered", () => {
+  const cards = [{ id: "pair", difficulty: "Easy", sequel: "retired" }];
+  assert.equal(sequelSuggestion(cards, [attempt("pair", 2, "HIRE")]), null);
 });

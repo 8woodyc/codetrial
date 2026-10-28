@@ -44,19 +44,23 @@ def read_json(path: Path) -> object:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def card(problem: dict[str, object], page: str, title: str) -> str:
+def card(
+    problem: dict[str, object], page: str, title: str, sequel: str | None = None
+) -> str:
     """One lobby card, named the way the interview will name the exercise.
 
     Keyed by page name, with the scenario title the recommendation line reads.
     A `coin-change` key, published title or "Dynamic Programming" tag tells the
     candidate what they are about to be asked, so none ships in the initial
     page. The published title and topic map are fetched only after the candidate
-    opts into the corresponding picker control.
+    opts into the corresponding picker control. The sequel is a page name for
+    the same reason.
     """
+    sequel_attribute = f' data-sequel="{html.escape(sequel)}"' if sequel else ""
     return "\n".join(
         [
             f'  <div class="problem-entry" id="problem-entry-{html.escape(page)}">',
-            f'    <button class="problem-card" type="button" data-problem="{html.escape(page)}" data-difficulty="{html.escape(problem["difficulty"])}">',
+            f'    <button class="problem-card" type="button" data-problem="{html.escape(page)}" data-difficulty="{html.escape(problem["difficulty"])}"{sequel_attribute}>',
             f'      <span class="problem-title">{html.escape(title)}</span>',
             '      <span class="problem-source" hidden></span>',
             f'      <span class="problem-meta">{html.escape(problem["difficulty"])}</span>',
@@ -71,7 +75,12 @@ def card(problem: dict[str, object], page: str, title: str) -> str:
 
 def generated(problems: list, pages: dict) -> str:
     cards = "\n".join(
-        card(problem, pages[problem["id"]]["page"], pages[problem["id"]]["title"])
+        card(
+            problem,
+            pages[problem["id"]]["page"],
+            pages[problem["id"]]["title"],
+            pages[problem["sequel"]]["page"] if "sequel" in problem else None,
+        )
         for problem in problems
     )
     return "\n".join(
