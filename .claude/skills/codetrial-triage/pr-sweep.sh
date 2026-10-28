@@ -601,7 +601,7 @@ done | jq -s .)
 # One ci-failure.sh run per candidate, a handful at most: it reads job logs,
 # which the sweep does not. A run that fails leaves its PR out, since this list
 # posts without asking.
-ci=${PR_SWEEP_CI:-$(dirname "$0")/../codetrial-verify/ci-failure.sh}
+ci=${PR_SWEEP_CI:-$(dirname "$0")/../codetrial-verify/ci-cached.sh}
 
 # A diagnosis of another head, after a push mid-sweep, says nothing about the
 # head this sweep read, so it is dropped rather than trusted.

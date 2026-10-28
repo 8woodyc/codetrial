@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -33,6 +34,7 @@ SKILLS = ROOT / ".claude" / "skills"
 ISSUE_SWEEP = SKILLS / "codetrial-triage" / "issue-sweep.sh"
 PR_SWEEP = SKILLS / "codetrial-triage" / "pr-sweep.sh"
 SKILL_REFS = ROOT / "scripts" / "check-skill-refs.py"
+CI_CACHED = SKILLS / "codetrial-verify" / "ci-cached.sh"
 
 # A gh that fails every call, so only a script's own check can refuse first.
 FAKE_GH_FAILS = "#!/bin/sh\nexit 1\n"
@@ -1704,6 +1706,8 @@ POST_INLINE = REVIEW / "post-inline.sh"
 # The PR's head, diff and review threads, and each posted comment echoed back
 # as "posted path:line" in place of its URL.
 FAKE_GH_INLINE = support.stub("skill-scripts/gh-inline.sh")
+FAKE_GH_CACHED = support.stub("skill-scripts/gh-cached.sh")
+FAKE_CI_COUNT = support.stub("skill-scripts/ci-count.sh")
 
 
 def review_comment(login, path, line, at="h1", body="x"):
@@ -2881,6 +2885,123 @@ Path(sys.argv[-1], 'history.md').write_text('fixture context')
                             "fixture context" in history,
                             context_called and not context_failed,
                         )
+
+
+@unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+class CiCachedTests(unittest.TestCase):
+    """ci-cached.sh reads the job logs once per head, and never a live check."""
+
+    SETTLED = {"pr": 7, "pending": [], "held": [], "failing": []}
+    # A PR with a failed check, the only kind whose diagnosis is cached.
+    RED = '[{"name":"lint","state":"FAILURE","bucket":"fail","link":"run/1"}]'
+
+    def run_cached(
+        self,
+        heads,
+        diagnosis=None,
+        repos=("a/b", "a/b"),
+        checks=None,
+        reported=None,
+        age=False,
+        ci_fails=False,
+    ):
+        """Run ci-cached.sh once per head; return (outputs, runs, results)."""
+        diagnosis = diagnosis or self.SETTLED
+        with tempfile.TemporaryDirectory() as scratch:
+            scratch = Path(scratch)
+            (scratch / "bin").mkdir()
+            support.write_executable(scratch / "bin" / "gh", FAKE_GH_CACHED)
+            # The stand-in for ci-failure.sh counts its runs.
+            support.write_executable(scratch / "ci.sh", FAKE_CI_COUNT)
+            env = os.environ | {
+                "PATH": f"{scratch / 'bin'}:{os.environ['PATH']}",
+                "FAKE_DIR": str(scratch),
+                "CI_FAILURE_CACHE": str(scratch / "cache"),
+                "CI_FAILURE_SCRIPT": str(scratch / "ci.sh"),
+                "FAKE_CI_FAILS": "1" if ci_fails else "",
+            }
+            results = []
+            for head, repo, listed in zip(heads, repos, checks or (self.RED,) * 9):
+                (scratch / "head").write_text(head + "\n")
+                (scratch / "checks").write_text(listed)
+                out = diagnosis | {"head": reported or head}
+                (scratch / "out").write_text(json.dumps(out))
+                results.append(
+                    subprocess.run(
+                        ["sh", str(CI_CACHED), "7", repo],
+                        capture_output=True,
+                        text=True,
+                        env=env,
+                    )
+                )
+                # An hour is past the 15 minutes an entry is served for.
+                for entry in (scratch / "cache").glob("*.json") if age else ():
+                    hour_ago = time.time() - 3600
+                    os.utime(entry, (hour_ago, hour_ago))
+            runs = scratch / "runs"
+            count = len(runs.read_text().split()) if runs.exists() else 0
+            # No temp file is left behind, and every stored entry is whole.
+            cache = scratch / "cache"
+            left = [f.name for f in cache.glob("ci.*")] if cache.exists() else []
+            stored = list(cache.glob("*.json")) if cache.exists() else []
+            for entry in stored:
+                json.loads(entry.read_text())
+            self.assertEqual(left, [])
+        return results, count, len(stored)
+
+    def heads(self, results):
+        return [json.loads(r.stdout)["head"] for r in results]
+
+    def test_a_settled_diagnosis_is_served_again_only_for_the_same_head(self):
+        results, runs, _ = self.run_cached(["a", "a"])
+        self.assertEqual((self.heads(results), runs), (["a", "a"], 1))
+        results, runs, _ = self.run_cached(["a", "b"])
+        self.assertEqual((self.heads(results), runs), (["a", "b"], 2))
+
+    def test_a_rerun_of_a_job_on_the_same_head_is_not_served_the_old_diagnosis(self):
+        red = '[{"name":"lint","state":"FAILURE","bucket":"fail","link":"run/1"}]'
+        green = '[{"name":"lint","state":"SUCCESS","bucket":"pass","link":"run/2"}]'
+        _, runs, _ = self.run_cached(["a", "a"], checks=(red, green))
+        self.assertEqual(runs, 2)
+
+    def test_a_changed_failed_list_on_the_same_head_is_a_new_entry(self):
+        one = '[{"name":"lint","state":"FAILURE","bucket":"fail","link":"run/1"}]'
+        two = '[{"name":"lint","state":"FAILURE","bucket":"fail","link":"run/2"}]'
+        _, runs, stored = self.run_cached(["a", "a"], checks=(one, two))
+        self.assertEqual((runs, stored), (2, 2))
+
+    def test_a_list_with_no_failed_check_or_none_readable_bypasses_the_cache(self):
+        green = '[{"name":"lint","state":"SUCCESS","bucket":"pass","link":"run/1"}]'
+        for listed in ("[]", green, "oops"):
+            _, runs, stored = self.run_cached(["a", "a"], checks=(listed, listed))
+            self.assertEqual((runs, stored), (2, 0), listed)
+
+    def test_repositories_that_differ_by_one_character_do_not_share_entries(self):
+        _, runs, _ = self.run_cached(["a", "a"], repos=("a-b/c", "a/b-c"))
+        self.assertEqual(runs, 2)
+
+    def test_a_diagnosis_with_a_running_or_held_check_is_never_stored(self):
+        for field in ("pending", "held"):
+            live = self.SETTLED | {field: ["gates (rust)"]}
+            _, runs, stored = self.run_cached(["a", "a"], live)
+            self.assertEqual((runs, stored), (2, 0), field)
+
+    def test_a_diagnosis_of_another_head_is_served_but_never_stored(self):
+        results, runs, stored = self.run_cached(["a", "a"], reported="b")
+        self.assertEqual((self.heads(results), runs, stored), (["b", "b"], 2, 0))
+
+    def test_an_entry_older_than_the_ttl_is_read_again(self):
+        _, runs, _ = self.run_cached(["a", "a"], age=True)
+        self.assertEqual(runs, 2)
+
+    def test_a_head_that_is_not_a_commit_id_never_reaches_a_file_name(self):
+        results, runs, stored = self.run_cached(["../x"], repos=("a/b",))
+        self.assertEqual((results[0].returncode, runs, stored), (1, 0, 0))
+
+    def test_a_failed_diagnosis_is_a_failure_not_an_empty_one(self):
+        results, _, stored = self.run_cached(["a"], repos=("a/b",), ci_fails=True)
+        self.assertNotEqual(results[0].returncode, 0)
+        self.assertEqual((results[0].stdout, stored), ("", 0))
 
 
 if __name__ == "__main__":

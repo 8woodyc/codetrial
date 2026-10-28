@@ -5,7 +5,8 @@
 # ledger, so it survives sessions and is never tracked, one per repository,
 # since the sweep matches PRs by number alone.
 #
-# Usage: snapshot.sh [repo] (default sysprog21/codetrial)
+# Usage: snapshot.sh [repo] [stale-days] (default sysprog21/codetrial, the
+# sweep's own)
 #        Prints the snapshot's path; exits 1, printing nothing, when the sweep
 #        failed. ODDS_SWEEP names the pr-sweep.sh to run, for tests.
 
@@ -18,7 +19,7 @@ mkdir -p "$dir"
 last=$dir/pr-sweep-$(printf '%s' "$repo" | tr / -).json
 
 # An empty stale-days leaves pr-sweep.sh its own default.
-set -- "$repo" ""
+set -- "$repo" "${2:-}"
 if [ -s "$last" ]; then
     set -- "$@" "$last"
 fi

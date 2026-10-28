@@ -39,7 +39,9 @@ here applies to PRs too, and the confirmed-list rule governs every comment it
 drafts.
 
 A bare `/codetrial-triage` is both halves at once, and it runs often, so run
-it wide. One call starts `issue-sweep.sh` and `pr-sweep.sh` together (each
+it wide. One call starts `issue-sweep.sh` and the PR half, `codetrial-odds/snapshot.sh`
+(which runs `pr-sweep.sh` against the saved last sweep, so `moved` and `gone` are
+filled, and keeps that baseline unless the sweep is whole), together (each
 in the background of one shell, then `wait`). The next response does
 everything that needs only their output in parallel: the no-ask actions in
 [pulls.md](pulls.md), `hygiene.sh` for every open PR, one review agent per low

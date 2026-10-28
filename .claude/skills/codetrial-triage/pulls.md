@@ -7,13 +7,23 @@ is sent back for a rebase. One read-only call gathers all five, plus each PR's
 status and merge grade:
 
 ```sh
-.claude/skills/codetrial-triage/pr-sweep.sh "$repo" > "$SCRATCH/sweep.json"
+snap=$(.claude/skills/codetrial-odds/snapshot.sh "$repo") &&
+  cp "$snap" "$SCRATCH/sweep.json" && snap=$SCRATCH/sweep.json
 ```
 
-The second argument overrides the idle threshold, seven days unless the user
-gives another; the third is an earlier output, which adds `moved` and `gone`
-(see [Rank by size and merge
-confidence](#rank-by-size-and-merge-confidence)). Report the open PR
+The copy is the sweep for everything that follows: the saved file is replaced
+whole by any later run, `/codetrial-odds` included, and a script that read it
+twice could see two sweeps.
+
+`snapshot.sh` runs `pr-sweep.sh` against the last saved sweep (one per
+repository, in the git directory, never tracked) and prints the path of the new
+one, which replaces the old only when the sweep was whole. That fills `moved`
+and `gone` (see [Rank by size and merge
+confidence](#rank-by-size-and-merge-confidence)) with nothing to wire up, and
+`/codetrial-odds` and a bare sweep read the same baseline. Its second argument
+overrides the idle threshold, seven days unless the user gives another. A
+failed sweep exits 1 and prints nothing: stop and say so rather than reading
+the old snapshot as today's. Report the open PR
 count, and any PR whose `files_truncated`, `reviews_truncated`,
 `threads_truncated`, `comments_truncated` or `closes_truncated` is set, since
 the lists below miss what was cut. In particular, `overlap` is incomplete when
@@ -367,7 +377,7 @@ write permissions beyond the sweep actions above.
 
 ```sh
 jq -r '.status[:10][] | "#\(.pr) \(.size.total) (\(.size.source)/\(.size.tests)) \(.grade): \(.why | join("; "))"' \
-  "$SCRATCH/sweep.json"
+  "$snap"
 ```
 
 `size` splits the lines into source and tests, since a 90-line PR can be a
@@ -425,8 +435,7 @@ reviewer rather than into their own queue. A failing job whose name
 so only `ci-failure.sh` can tell a failure `main` shares, which is the
 maintainer's, from the PR's own in the same lane.
 
-Save each sweep and pass it back as the third argument the next time. `moved`
-then lists the PRs whose head, mergeability, decision, grade, `waits_on`,
+`moved` lists the PRs whose head, mergeability, decision, grade, `waits_on`,
 checks or threads changed, each field as `[before, after]`, plus `{pr, new: true}` for a PR
 opened since. `gone` says which left the open list, merged or closed and at
 which commit, or `UNKNOWN` when that lookup failed. A repeated request then

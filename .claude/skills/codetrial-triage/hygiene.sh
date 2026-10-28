@@ -104,8 +104,9 @@ done < "$work/commits.lines"
 
 # Failing checks at this head, and whether main shares them. A diagnosis that
 # fails, or that read another head, yields no CI item rather than a guess.
-# HYGIENE_CI names the ci-failure.sh to ask, for tests.
-sh "${HYGIENE_CI:-$root/.claude/skills/codetrial-verify/ci-failure.sh}" "$pr" "$repo" \
+# HYGIENE_CI names the script to ask (ci-cached.sh, which shares one read of the
+# job logs per head with the sweep), for tests.
+sh "${HYGIENE_CI:-$root/.claude/skills/codetrial-verify/ci-cached.sh}" "$pr" "$repo" \
     > "$work/ci.json" 2> /dev/null || echo '{}' > "$work/ci.json"
 # Every read above describes one head only if the PR did not move meanwhile.
 again=$(gh pr view "$pr" --repo "$repo" --json headRefOid --jq .headRefOid)

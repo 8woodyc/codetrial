@@ -153,6 +153,11 @@ What this adds is one call that reads all of it at the PR's head:
 .claude/skills/codetrial-verify/ci-failure.sh "$pr" > "$SCRATCH/ci-$pr.json"
 ```
 
+A sweep reads the same diagnosis through `ci-cached.sh`, which takes the
+same arguments, serves a finished one (nothing pending or held) again for the
+same head within 5 minutes, and so reads each PR's job logs once for the
+sweep and hygiene together; call `ci-failure.sh` itself for a live read.
+
 Read its `failing` entries in this order. `current` false is history, not the
 current failure: say so and stop there. `current` or `on_main` null means its
 lookup failed, and `gates`, `errors` and `excerpt` null mean the job log could
