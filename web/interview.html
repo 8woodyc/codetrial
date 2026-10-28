@@ -334,7 +334,10 @@
         ></div>
         <section id="test-drawer" class="test-drawer">
           <details id="candidate-case">
-            <summary>Add a case</summary>
+            <summary>
+              <span class="drawer-chevron" aria-hidden="true"></span>
+              <span>Add a case</span>
+            </summary>
             <label
               >Input JSON
               <textarea
@@ -396,8 +399,8 @@
             aria-expanded="true"
             aria-controls="results-body"
           >
-            <span id="results-label">Test results</span>
             <span id="results-chevron" aria-hidden="true"></span>
+            <span id="results-label">Test results</span>
           </button>
           <div id="results-body" class="results-body">
             <div id="results-filter" hidden>
