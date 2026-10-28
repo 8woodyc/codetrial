@@ -295,20 +295,22 @@ async function mountStage(
     focused: 0,
     disposedAtLoad: [],
   };
+  const retirements = [];
   let click;
   let finishLoading;
   let signal;
   const nodes = {
-    jimStage: { inert: false },
-    jimAvatar: { dataset: {}, clientWidth: width },
-    jimAvatarNote: {
-      textContent: "",
+    jimStage: {
+      inert: false,
       focus: () => {
         counts.focused++;
-        env.document.activeElement = nodes.jimAvatarNote;
+        env.document.activeElement = nodes.jimStage;
       },
     },
+    jimAvatar: { dataset: {}, clientWidth: width, hidden: false },
+    jimAvatarNote: { textContent: "" },
     jimAvatarStatus: { textContent: "" },
+    ending: { hidden: true },
     hideAvatar: {
       hidden: true,
       addEventListener: (_, fn) => {
@@ -318,6 +320,7 @@ async function mountStage(
   };
   stage.initAvatarStage({
     nodes,
+    onRetired: (message) => retirements.push(message),
     loadModel: async (_mount, abort) => {
       counts.loads++;
       // What had been disposed when each load began, so a test can tell a load
@@ -358,6 +361,7 @@ async function mountStage(
     stage,
     nodes,
     counts,
+    retirements,
     tick,
     poll,
     settle,
@@ -513,7 +517,7 @@ test("stage retires the avatar when Jim's audio is late", async (t) => {
   assert.equal(env.intervals.size, 0, "the stats poll stops with it");
   assert.equal(env.frames.size, 0);
   assert.equal(env.closed, 1);
-  assert.match(s.nodes.jimAvatarStatus.textContent, /keep the interview/);
+  assert.match(s.retirements[0], /keep the interview/);
   // The number that decided is logged, so a real session can be calibrated.
   assert.ok(
     warnings.some((line) =>
@@ -670,6 +674,25 @@ test("a poll that starts while hidden takes no baseline", async (t) => {
   s.stage.stopAvatar();
 });
 
+test("a retirement during the wait for the report is said on the stage", async (t) => {
+  const env = installBrowser(t);
+  let cost = 0;
+  const s = await mountStage(env, { drawCost: () => cost });
+  s.stage.attachAvatarAnalyser(
+    { mediaStreamTrack: {} },
+    { identity: "interviewer-jim" },
+  );
+  await s.start();
+  s.closePreflight();
+  // The sidebar holding the presence banner is inert under this overlay, so
+  // the banner can be neither seen nor announced.
+  s.nodes.ending.hidden = false;
+  exhaustBudget(s, (next) => (cost = next));
+  assert.equal(s.nodes.jimAvatar.dataset.avatarState, "degraded");
+  assert.equal(s.retirements.length, 1);
+  assert.equal(s.nodes.jimAvatarStatus.textContent, s.retirements[0]);
+});
+
 for (const trigger of ["budget", "budget-while-focused"]) {
   test(`stage retires the renderer for good after ${trigger}`, async (t) => {
     const env = installBrowser(t);
@@ -692,11 +715,19 @@ for (const trigger of ["budget", "budget-while-focused"]) {
       s.nodes.jimAvatar.dataset.avatarState,
       automatic ? "degraded" : "stopped",
     );
-    // Said once: by focus for a manual hide, or when the hidden button held
-    // focus, and by the status region otherwise.
-    const byFocus = !automatic || focused;
-    assert.equal(s.counts.focused, byFocus ? 1 : 0);
-    assert.equal(s.nodes.jimAvatarStatus.textContent === "", byFocus);
+    assert.equal(
+      s.nodes.jimAvatar.hidden,
+      true,
+      "the box gives its space back",
+    );
+    // An automatic retirement is said by the presence banner, once, and the
+    // candidate's own Hide by the status region. Focus only moves when the
+    // button it was on has gone.
+    assert.equal(s.retirements.length, automatic ? 1 : 0);
+    if (automatic) assert.match(s.retirements[0], /responsive/);
+    assert.equal(s.counts.focused, automatic && focused ? 1 : 0);
+    if (focused) assert.equal(env.document.activeElement, s.nodes.jimStage);
+    assert.equal(s.nodes.jimAvatarStatus.textContent === "", automatic);
     assert.equal(env.closed, 1);
     assert.equal(env.disconnected, 1);
 
@@ -745,10 +776,11 @@ for (const focused of [false, true]) {
       focused ? s.nodes.hideAvatar : null,
     );
     assert.match(s.nodes.jimAvatarStatus.textContent, /turned off/);
+    assert.equal(s.nodes.jimAvatar.hidden, true);
 
     s.click();
+    assert.equal(s.nodes.jimAvatar.hidden, false);
     assert.equal(s.nodes.jimAvatarStatus.textContent, "");
-    assert.equal(s.nodes.jimAvatarNote.textContent, "Jim is here by voice.");
     for (let attempt = 0; attempt < 5; attempt++) {
       if (s.nodes.jimAvatar.dataset.avatarState === "ready") break;
       await s.settle();
@@ -845,7 +877,7 @@ test("Hide during loading aborts the load and nothing is built", async (t) => {
   assert.equal(env.frames.size, 0);
   assert.equal(env.intervals.size, 0);
   assert.equal(s.nodes.jimAvatar.dataset.avatarState, "stopped");
-  assert.match(s.nodes.jimAvatarNote.textContent, /turned off/);
+  assert.equal(s.nodes.jimAvatar.hidden, true);
   s.stage.startAvatar();
   assert.equal(s.counts.loads, 1);
   s.click();

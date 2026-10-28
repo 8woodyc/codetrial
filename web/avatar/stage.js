@@ -28,6 +28,10 @@ import {
 /// frame.
 let nodes = null;
 
+/// Told when the stage retires the avatar by itself, with the sentence to show.
+/// The candidate's own Hide never calls it: they know what they pressed.
+let onRetired = () => {};
+
 /// The model loader. `deps.loadModel` replaces it for the stage test only,
 /// which has no WebGL; the page passes nothing.
 let loadModel = async (mount, signal) => {
@@ -40,6 +44,7 @@ let loadModel = async (mount, signal) => {
 export function initAvatarStage(deps) {
   if (nodes) throw new Error("the avatar stage is initialized once");
   ({ nodes } = deps);
+  if (deps.onRetired) onRetired = deps.onRetired;
   if (deps.loadModel) loadModel = deps.loadModel;
   nodes.hideAvatar.addEventListener("click", () =>
     avatarHidden ? showAvatar() : disableAvatar(null),
@@ -162,9 +167,9 @@ export function startAvatar() {
     // Hide is offered while there is something to hide, and Show after the
     // candidate's own Hide. This decides the button on every change of state;
     // the Hide itself and a final `stopAvatar` write it too, because after
-    // either one there is no model left to report a state. The panel says
-    // which of the two things happened, because "Jim is here by voice" under a
-    // blank box is indistinguishable from a broken page.
+    // either one there is no model left to report a state. Both remove the
+    // box, so the panel only ever explains `unavailable`: a Hide is announced
+    // by the status region and a retirement by the presence banner.
     onState: (next) => {
       const offered =
         next === "loading" ||
@@ -314,31 +319,41 @@ function disableAvatar(reason, measured) {
   if (reason) avatarRetired = true;
   else avatarHidden = true;
   stopAvatar(reason ? "degraded" : "stopped", !reason);
-  const note = reason
-    ? "Jim is here by voice; his avatar was turned off to keep the interview responsive."
-    : "Jim is here by voice; his avatar is turned off.";
-  nodes.jimAvatarNote.textContent = note;
-  if (reason) console.warn(`codetrial avatar_${reason} ${measured}`);
-  // The candidate's own Hide leaves the button where it was, now as Show, so
-  // focus stays on it and the same key undoes it. Moving focus to the note made
-  // a keyboard user tab back to find the control they had just pressed, and
-  // with focus unmoved the status region is what says the avatar went away.
-  if (!reason) {
-    nodes.hideAvatar.hidden = false;
-    nodes.hideAvatar.textContent = "Show avatar";
-    nodes.jimAvatarStatus.textContent = note;
+  // Either way the box is gone rather than left holding a placeholder: it
+  // floats over the editor, and an empty panel there is code the candidate
+  // cannot see. The sentence it used to carry lives where it can be read
+  // without it.
+  nodes.jimAvatar.hidden = true;
+  if (reason) {
+    console.warn(`codetrial avatar_${reason} ${measured}`);
+    const message =
+      "Jim is here by voice; his avatar was turned off to keep the interview responsive.";
+    // The presence banner is an alert region, so it is what says it; focus only
+    // has to land somewhere when the button it was on has just gone.
+    onRetired(message);
+    // Except while the wait for the report is up: the sidebar holding the banner
+    // is inert then, but the stage is not, since Jim may still be saying his
+    // closing lines. The stage's own status region carries it there.
+    if (nodes.ending && !nodes.ending.hidden)
+      nodes.jimAvatarStatus.textContent = message;
+    if (hadFocus) nodes.jimStage?.focus?.({ preventScroll: true });
     return;
   }
-  // Focus says it once. The status region says it only when focus did not
-  // move, since a note both focused and announced is read twice.
-  if (hadFocus) nodes.jimAvatarNote.focus({ preventScroll: true });
-  else nodes.jimAvatarStatus.textContent = note;
+  // The candidate's own Hide leaves the button where it was, now as Show, so
+  // focus stays on it and the same key undoes it. With focus unmoved the status
+  // region is what says the avatar went away.
+  nodes.hideAvatar.hidden = false;
+  nodes.hideAvatar.textContent = "Show avatar";
+  nodes.jimAvatarStatus.textContent =
+    "Jim is here by voice; his avatar is turned off.";
 }
 
 function showAvatar() {
   if (!avatarHidden || avatarRetired) return;
   avatarHidden = false;
-  nodes.jimAvatarNote.textContent = "Jim is here by voice.";
+  // Before `startAvatar`, which reads the computed display to tell a box the
+  // stylesheet hid from one it should build into.
+  nodes.jimAvatar.hidden = false;
   nodes.jimAvatarStatus.textContent = "";
   // Said here rather than left to `onState`: when an abandoned load is still
   // settling, `startAvatar` waits for it and no state arrives yet, and the

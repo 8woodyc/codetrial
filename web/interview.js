@@ -93,6 +93,7 @@ import {
   codeUpdatePayload,
   codingLoop,
   countdown,
+  createBannerBoard,
   FRAMEWORKS,
   frameworkChecklist,
   endInterviewPayload,
@@ -734,7 +735,10 @@ const audioPlayback = createAudioPlayback({
 // are handed over rather than re-derived: one `state` object, one `nodes` map.
 initReplay({ state, nodes, recordingEnabled, consentVersion, replayVersion });
 initCaptions({ nodes });
-initAvatarStage({ nodes });
+initAvatarStage({
+  nodes,
+  onRetired: (message) => setBanner("avatar", message),
+});
 // The preflight overlay is up from the first paint; the stage stays inert and
 // undrawn under it until the preflight closes.
 holdWorkspaceBehindDialogs();
@@ -3095,6 +3099,7 @@ function setLanguage(language) {
 /// deferred-text field that only one of the two owners got, and a lock-breaking
 /// special case for session-ending events.
 const BANNER_RANK = {
+  avatar: 0,
   session: 6,
   connection: 5,
   output: 4,
@@ -3102,23 +3107,30 @@ const BANNER_RANK = {
   reconnect: 2,
   face: 1,
 };
-const banners = {
-  session: "",
-  connection: "",
-  output: "",
-  interviewer: "",
-  reconnect: "",
-  face: "",
-};
+
+/// How long the avatar notice stays up once it is the banner on show. It is
+/// news, not a fault, so `createBannerBoard` shows it once.
+const AVATAR_NOTICE_MS = 10000;
+const bannerBoard = createBannerBoard({
+  ranks: BANNER_RANK,
+  notice: "avatar",
+  noticeMs: AVATAR_NOTICE_MS,
+  paint: (top, text) => {
+    // Not rewritten when unchanged: the banner is an alert region, and
+    // replacing its text node for the same words is read out again. Callers
+    // clear their own slot on every state change, so most calls arrive with
+    // nothing new to say.
+    if (nodes.presenceBanner.textContent !== text)
+      nodes.presenceBanner.textContent = text;
+    nodes.presenceBanner.hidden = !top;
+    // Information, not a fault to act on: the avatar going quiet is yellow.
+    nodes.presenceBanner.dataset.tone = top === "avatar" ? "notice" : "";
+  },
+});
 
 function setBanner(source, text) {
   if (!nodes.presenceBanner) return;
-  banners[source] = text || "";
-  const top = Object.keys(banners)
-    .filter((key) => banners[key])
-    .sort((left, right) => BANNER_RANK[right] - BANNER_RANK[left])[0];
-  nodes.presenceBanner.textContent = top ? banners[top] : "";
-  nodes.presenceBanner.hidden = !top;
+  bannerBoard.set(source, text);
 }
 
 function updatePresenceBanner(eventType) {
