@@ -16,16 +16,22 @@ export function mediaAndRoom() {
       return analyser;
     }
   };
+  // Every track handed out, so a test can check the page released them.
+  window.acquiredTracks = [];
+  const handOut = (stream) => {
+    window.acquiredTracks.push(...stream.getTracks());
+    return stream;
+  };
   navigator.mediaDevices.getUserMedia = async (constraints) => {
     if (constraints.video) {
       if (globalThis.CODETRIAL_RECORDING_ENABLED !== true)
         throw new DOMException("No camera", "NotFoundError");
       const canvas = document.createElement("canvas");
       canvas.getContext("2d").fillRect(0, 0, 1, 1);
-      return canvas.captureStream();
+      return handOut(canvas.captureStream());
     }
     sink ??= new NativeAudioContext();
-    return sink.createMediaStreamDestination().stream;
+    return handOut(sink.createMediaStreamDestination().stream);
   };
   window.roomJoins = [];
   window.roomEvents = {};
@@ -33,9 +39,19 @@ export function mediaAndRoom() {
     RoomEvent: new Proxy({}, { get: (_, key) => key }),
     Room: class {
       remoteParticipants = new Map();
+      // Each publish's topic is recorded, and a test that sets
+      // `window.roomPublishHeld` to a promise holds every publish there.
+      // A test that sets `window.roomTrackHeld` to a promise holds each track
+      // publish there, after the room is connected but before it is claimed,
+      // and a promise that rejects fails the publish.
       localParticipant = {
-        publishTrack: async () => {},
-        publishData: async () => {},
+        publishTrack: async () => {
+          await window.roomTrackHeld;
+        },
+        publishData: async (payload, options) => {
+          (window.roomPublishes ??= []).push(options?.topic);
+          await window.roomPublishHeld;
+        },
       };
       on(event, callback) {
         (window.roomEvents[event] ??= []).push(callback);
@@ -47,10 +63,15 @@ export function mediaAndRoom() {
         );
         return this;
       }
+      // A test that sets `window.roomJoinHeld` to a promise holds the join
+      // there, so it can act while the page is still joining.
       async connect(url, token) {
         window.roomJoins.push({ url, token });
+        await window.roomJoinHeld;
       }
-      async disconnect() {}
+      async disconnect() {
+        window.roomLeaves = (window.roomLeaves ?? 0) + 1;
+      }
     },
   };
 }

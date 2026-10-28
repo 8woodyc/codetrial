@@ -2060,6 +2060,17 @@ async function connect(preflight, presenting = false) {
       ]);
       clearTimeout(timer);
     }
+    // The workspace is open from here until the room is joined, so the
+    // candidate may end during any await of this start. Carrying on would give
+    // that ended interview a room and an interviewer. The tracks are released
+    // here too: the report and leave paths stop `state.localUserStream`, which
+    // only a finished join assigns.
+    const ended = () => {
+      if (state.phase === "live") return false;
+      abandonStart(preflight);
+      return true;
+    };
+    if (ended()) return false;
     languageChoiceCommitted = true;
     // `hideExamples` goes only when ticked, so Jim is not told the examples are
     // on a screen that does not show them. The preflight holding the box is
@@ -2129,11 +2140,23 @@ async function connect(preflight, presenting = false) {
       initializeLanguages(state.language);
       void initializeCandidateCases();
     }
+    // After the receipt is saved, so a Strict assignment ended here is still
+    // excluded from the next attempt.
+    if (ended()) return false;
     // Before the room, and before anything that reads the length: the replay's
     // opening lifecycle event carries the round split, and a split computed
     // from the requested length would be the first thing written down.
     applyGrantedDuration(connection.durationMin);
-    await connectLiveKit(connection, preflight, presenting);
+    const joined = await connectLiveKit(connection, preflight, presenting);
+    // A join ended before it finished has left its room, and the tracks are
+    // still the start's to release.
+    if (joined === "left") {
+      abandonStart(preflight);
+      return false;
+    }
+    // Handed to a report, or ended once the room was claimed: the report and
+    // leave paths own the room and the tracks, so the start only stops here.
+    if (joined === "reporting" || state.phase !== "live") return false;
     state.connected = true;
     if (strict) updateRunAvailability();
     if (strict && !whiteboard) nodes.editor.disabled = false;
@@ -2189,11 +2212,11 @@ async function connect(preflight, presenting = false) {
     // how a page ran "offline practice" with a live LiveKit room underneath it,
     // still holding the microphone and still receiving Jim, while nothing on
     // screen could act on either.
-    const joined = state.room;
-    state.connected = false;
-    state.room = null;
-    if (joined) void joined.disconnect?.()?.catch?.(() => {});
-    stopPreflight(preflight);
+    abandonStart(preflight);
+    // An end during any await of this start can still land here, a token
+    // timeout or refusal after the candidate pressed End among them. The
+    // interview is over, so no fallback is offered under its ending.
+    if (state.phase !== "live") return false;
     const reason =
       strict &&
       (error?.name === "TimeoutError" || [408, 504].includes(error?.status))
@@ -2307,8 +2330,10 @@ async function connectLiveKit(connection, preflight, presenting = false) {
       // beside it; `reportRenderFailed` gives the ways out back. Only the copy
       // that renders claims this: a retransmission landing after a failed draw
       // would otherwise hide the ways out again with nothing to restore them.
+      // A page already showing a report, the offline summary among them,
+      // draws nothing more, and a claim made then would never be released.
       const first = claimReport(payload, receivedReports);
-      if (first) {
+      if (first && state.phase !== "report") {
         state.reportReceiving = true;
         nodes.end.disabled = true;
         nodes.forceReport.hidden = true;
@@ -2412,10 +2437,14 @@ async function connectLiveKit(connection, preflight, presenting = false) {
     await room.connect(connection.serverUrl, connection.token);
     await publishPreflightTracks(room, preflight);
   } catch (error) {
+    // An interview that moved on during the join is settled as below, not as
+    // a failure: a report arriving then may still need this room.
+    if (state.phase !== "live") return settleEndedJoin(room, preflight);
     audioPlayback.release(room);
     await room.disconnect().catch(() => {});
     throw error;
   }
+  if (state.phase !== "live") return settleEndedJoin(room, preflight);
   state.room = room;
   state.connected = true;
   // Sticky, unlike `state.room`, which a disconnect clears. This is what says
@@ -2455,6 +2484,10 @@ async function connectLiveKit(connection, preflight, presenting = false) {
       detail: preflight.cameraSkipReason,
     });
   }
+  // A report or an end may have landed during these publishes. A report has
+  // already stopped what was running, and the report and leave paths own the
+  // room and tracks either way, so no monitor starts behind that interview.
+  if (state.phase !== "live") return "joined";
   startIntegrityHeartbeat();
   // Keyed on what the candidate chose, not on whether a camera happens to be
   // in the stream. A camera that died between the preflight and here leaves an
@@ -2476,6 +2509,33 @@ async function connectLiveKit(connection, preflight, presenting = false) {
     // says so instead of claiming a release.
     startIntegrityWorker();
   }
+  return "joined";
+}
+
+/// What a join owes once the interview moved on before it claimed its room.
+/// Until `state.room` names the room it is the start's own, and from then on
+/// the report and leave paths own it, so the start settles it here.
+async function settleEndedJoin(room, preflight) {
+  // An end could not reach the interviewer without this room, so no report is
+  // owed, even once the end has become the offline summary's `report`.
+  if (!state.reportReceiving && state.phase !== "report_recovery") {
+    audioPlayback.release(room);
+    await room.disconnect().catch(() => {});
+    return "left";
+  }
+  // An interviewer's report is using this room, for its receipt or for a
+  // retry. Nothing starts behind the finished interview: the report released
+  // the devices before this stream existed, so the tracks stop here and no
+  // stream is claimed.
+  stopPreflight(preflight);
+  // A report being received holds this room through the handler's closure and
+  // leaves it once its receipt is out, perhaps before the join got here, so the
+  // room is left to it. Only recovery retries through `state.room`.
+  if (state.phase !== "report_recovery") return "reporting";
+  state.room = room;
+  state.connected = true;
+  state.joinedRoom = true;
+  return "reporting";
 }
 
 /// The reason a skipped camera goes into the signed trail, from the same
@@ -2529,6 +2589,16 @@ async function publishPreflightTracks(room, preflight) {
 
 /// The undo for the self view, or a no-op while none is shown.
 let detachSelfView = () => {};
+
+/// Leaves whatever room a start has already joined and releases the
+/// preflight's tracks. Dropping the room's reference alone does not leave it.
+function abandonStart(preflight) {
+  const joined = state.room;
+  state.connected = false;
+  state.room = null;
+  if (joined) void joined.disconnect?.()?.catch?.(() => {});
+  stopPreflight(preflight);
+}
 
 function stopPreflight(preflight) {
   // `stop()` fires no `ended`, so the ring's meter is retired here rather
@@ -3051,11 +3121,7 @@ function applyLanguages(spec) {
     ...nodes.preflightLanguage.options,
   ]) {
     const label = option.dataset.label ?? option.textContent;
-    const availability = harnessAvailability(
-      option.dataset.language,
-      spec,
-      editorOptions.execution,
-    );
+    const availability = languageAvailability(option.dataset.language, spec);
     option.dataset.label = label.replace(/ \(unavailable\)$/, "");
     option.textContent = availability
       ? option.dataset.label + " (unavailable: " + availability.reason + ")"
@@ -3064,9 +3130,26 @@ function applyLanguages(spec) {
     option.disabled = availability !== null;
   }
   nodes.languageSelect.title =
-    harnessAvailability(state.language, spec, editorOptions.execution)
-      ?.message ?? "";
+    languageAvailability(state.language, spec)?.message ?? "";
   updateRunAvailability();
+}
+
+/// Before a Strict assignment there is no judge to wait for, so the usual
+/// "waiting for judge" and its advice to reload would invite a wait or a
+/// reload that changes nothing. The assigned problem decides C instead.
+function languageAvailability(language, spec) {
+  const availability = harnessAvailability(
+    language,
+    spec,
+    editorOptions.execution,
+  );
+  if (strict && !problem && availability?.reason === "waiting for judge")
+    return {
+      message:
+        "The assigned problem decides whether C is offered. If it is, C appears in the editor's language menu after you join.",
+      reason: "decided by assigned problem",
+    };
+  return availability;
 }
 
 function setLanguage(language) {
@@ -4342,8 +4425,15 @@ function leaveRoom() {
 
 async function showReport() {
   // An arrived report outranks the offline summary, including from the timer
-  // `endInterview` sets when no report is expected.
-  if (state.phase === "report" || state.reportReceiving) return;
+  // `endInterview` sets when no report is expected. One waiting to be retried
+  // does too: an end during the join leaves that timer running, and the
+  // summary would leave the room the retry needs.
+  if (
+    state.phase === "report" ||
+    state.phase === "report_recovery" ||
+    state.reportReceiving
+  )
+    return;
   // Leaving without a report: the offline summary is a report too, and it is
   // saved to history the same way.
   if (state.reportSkipped) return;
