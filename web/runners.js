@@ -11,6 +11,7 @@ import {
   harnessGap,
   harnessLineOffset,
   mapCompilerResponse,
+  MAX_QUAD_TREE_NODES,
 } from "./compiler-explorer.js";
 import { DIAGNOSTIC, checkAnswer, renderValue } from "./lib.js";
 
@@ -533,7 +534,7 @@ const JS_RUNNER_SOURCE = `
     self.onmessage = (event) => {
       // \`name\` is the one \`runWorker\` checked and bound in the prelude, sent
       // rather than re-derived so the message names what was looked up.
-      const { spec, name } = event.data;
+      const { spec, name, maxQuadTreeNodes } = event.data;
       const sanitize = (value) => {
         const normalized = value === undefined ? null : value;
         try { return JSON.parse(JSON.stringify(normalized)); } catch { return String(normalized); }
@@ -688,6 +689,7 @@ const JS_RUNNER_SOURCE = `
         const visit = (node) => {
           if (!node) return;
           if (ancestors.has(node)) throw new TypeError("Returned tree must not contain a cycle.");
+          if (rows.length >= maxQuadTreeNodes) throw new TypeError("Returned quad tree must not expand to more than " + maxQuadTreeNodes + " nodes.");
           ancestors.add(node);
           const isLeaf = Boolean(node.isLeaf);
           rows.push([isLeaf ? 1 : 0, isLeaf && node.val ? 1 : (isLeaf ? 0 : 1)]);
@@ -870,7 +872,7 @@ function runWorker(code, spec) {
         new Error(event.message || "Worker crashed while running your code."),
       );
     };
-    worker.postMessage({ spec, name });
+    worker.postMessage({ spec, name, maxQuadTreeNodes: MAX_QUAD_TREE_NODES });
   });
 }
 
@@ -1028,11 +1030,14 @@ def _next_tree_to_levels(root):
 def _quad_tree_to_preorder(root):
     rows = []
     ancestors = set()
+    # Valid bank trees have bounded depth; very deep malformed chains raise RecursionError instead of the cycle or expansion error.
     def visit(node):
         if node is None:
             return
         if id(node) in ancestors:
             raise TypeError("Returned tree must not contain a cycle.")
+        if len(rows) >= ${MAX_QUAD_TREE_NODES}:
+            raise TypeError("Returned quad tree must not expand to more than ${MAX_QUAD_TREE_NODES} nodes.")
         ancestors.add(id(node))
         is_leaf = bool(getattr(node, "isLeaf", False))
         rows.append([1 if is_leaf else 0, 1 if (not is_leaf or getattr(node, "val", False)) else 0])
