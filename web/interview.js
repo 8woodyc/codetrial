@@ -12,6 +12,7 @@ import {
   reconnectCodingInterview,
 } from "./example-board.js";
 import { mountInterviewDrawer } from "./interview-drawer.js";
+import { mountBoardText } from "./board-text.js";
 import {
   loadCategoryMap,
   loadJudge,
@@ -705,6 +706,7 @@ const nodes = {
   board: document.querySelector("#board"),
   boardPens: document.querySelector("#board-pens"),
   boardEraser: document.querySelector("#board-eraser"),
+  boardText: document.querySelector("#board-text"),
   boardEraserSizes: document.querySelector("#board-eraser-sizes"),
   boardUndo: document.querySelector("#board-undo"),
   boardRedo: document.querySelector("#board-redo"),
@@ -5367,6 +5369,7 @@ function initWhiteboard() {
   nodes.boardEraser.addEventListener("click", () =>
     selectTool(board.tool === "eraser" ? "pen" : "eraser"),
   );
+  nodes.boardText.addEventListener("click", () => selectTool("text"));
   for (const [index, width] of ERASER_WIDTHS.entries()) {
     const size = document.createElement("button");
     size.type = "button";
@@ -5458,6 +5461,16 @@ function initWhiteboard() {
 /// alternative is a line that stops at the border and a stroke that never
 /// ends.
 function bindBoardPointer() {
+  board.textDraft = mountBoardText(nodes.board, {
+    pointers: board.pointers,
+    active: () => board.tool === "text" && !board.model.isDrawing(),
+    locked: boardLocked,
+    commit(label) {
+      const changed = applyBoardEdit(board.model.addText(label));
+      if (changed) flushPendingBoardCheckpoints();
+      return changed;
+    },
+  });
   nodes.board.addEventListener("pointerdown", (event) => {
     if (boardLocked()) return;
     const claim = board.pointers.down(event);
@@ -5524,14 +5537,16 @@ function selectEraserWidth(width) {
 /// The toolbar and the cursor, from `board` alone, so no selector has to
 /// remember which other controls it un-presses.
 function paintToolState() {
+  board.textDraft?.refresh();
   const erasing = board.tool === "eraser";
   for (const swatch of nodes.boardPens.children) {
     swatch.setAttribute(
       "aria-pressed",
-      String(!erasing && swatch.dataset.color === board.color),
+      String(board.tool === "pen" && swatch.dataset.color === board.color),
     );
   }
   nodes.boardEraser.setAttribute("aria-pressed", String(erasing));
+  nodes.boardText.setAttribute("aria-pressed", String(board.tool === "text"));
   for (const size of nodes.boardEraserSizes.children) {
     size.setAttribute(
       "aria-pressed",
@@ -5587,6 +5602,7 @@ function applyBoardEdit(changed) {
 }
 
 function paintBoard() {
+  board.textDraft?.refresh();
   board.painter.paint(
     board.context,
     board.model.strokes(),

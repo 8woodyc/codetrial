@@ -1,5 +1,9 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
+import {
+  exerciseTextDraft,
+  exerciseTextBaseline,
+} from "./board-text-fixture.js";
 import { read, launchChromium, startStaticServer } from "./source.js";
 
 let browser;
@@ -131,6 +135,81 @@ test("selecting an example pen color switches from erasing to drawing", async (t
       { color: "#c2261b", width: 3 },
     ],
   );
+});
+
+test("example confirmation preserves draft glyph positions", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await browser.newPage({
+    viewport: { width: 1100, height: 900 },
+  });
+  t.after(() => page.close());
+  await page.goto(`${base}/drawer`);
+  await page.evaluate(async (base) => {
+    const { mountExampleBoard } = await import(`${base}/example-board.js`);
+    const root = document.querySelector("#example-board");
+    root.open = true;
+    mountExampleBoard(root, {
+      locked: () => false,
+      connected: () => false,
+      record() {},
+      publish: async () => true,
+    });
+  }, base);
+  await exerciseTextBaseline(
+    page,
+    page.locator("canvas"),
+    page.getByRole("button", { name: "Text", exact: true }),
+  );
+});
+
+test("example text drafts journal only confirmed labels and export the painted image", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await browser.newPage({
+    viewport: { width: 1100, height: 900 },
+  });
+  t.after(() => page.close());
+  await page.goto(`${base}/drawer`);
+  await page.evaluate(async (base) => {
+    const { mountExampleBoard } = await import(`${base}/example-board.js`);
+    window.textOps = [];
+    window.textUploads = [];
+    const root = document.querySelector("#example-board");
+    root.open = true;
+    window.example = mountExampleBoard(root, {
+      locked: () => false,
+      record: (ops) => window.textOps.push(...ops),
+      publish: async (blob, count) => {
+        const image = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.readAsDataURL(blob);
+        });
+        window.textUploads.push({ image, count });
+        return true;
+      },
+    });
+  }, base);
+  const root = page.locator("#example-board");
+  const canvas = root.locator("canvas");
+  const blank = await exerciseTextDraft(
+    page,
+    canvas,
+    root.getByRole("button", { name: "Text", exact: true }),
+  );
+  assert.deepEqual(
+    await page.evaluate(() => window.textOps.map((op) => op.op)),
+    ["text"],
+  );
+  await page.evaluate(() => window.example.flush());
+  assert.equal(
+    await page.evaluate(
+      () => window.textUploads.at(-1).image === window.example.image(),
+    ),
+    true,
+  );
+  assert.equal(await page.evaluate(() => window.textUploads.at(-1).count), 1);
+  await root.locator('[data-action="undo"]').click();
+  assert.equal(await canvas.evaluate((node) => node.toDataURL()), blank);
 });
 
 test("the example drawer preserves code, journals pen strokes, and sends the cleared state after reconnecting", async (t) => {
@@ -302,7 +381,7 @@ test("the example drawer preserves code, journals pen strokes, and sends the cle
       .evaluateAll((buttons) =>
         buttons.map((button) => button.getAttribute("aria-label")),
       ),
-    ["Pen", "Eraser"],
+    ["Pen", "Eraser", "Text"],
   );
   assert.equal(await page.locator("[data-action=redo]").count(), 0);
   await page.getByRole("button", { name: "Pen", exact: true }).click();
@@ -388,6 +467,78 @@ test("the example drawer preserves code, journals pen strokes, and sends the cle
       .evaluate((node) => node.getBoundingClientRect().height),
     beforeHeight,
   );
+});
+
+test("example text drafts do not hand over before confirmation or after cancellation", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await browser.newPage({
+    viewport: { width: 1100, height: 900 },
+  });
+  t.after(() => page.close());
+  await page.goto(`${base}/drawer`);
+  await page.evaluate(async (base) => {
+    const { createDrawingTurn, mountExampleBoard } = await import(
+      `${base}/example-board.js`
+    );
+    window.clock = 0;
+    window.sent = [];
+    window.pings = 0;
+    window.turn = createDrawingTurn({
+      now: () => window.clock,
+      requestFrame: (frame) => {
+        window.frame = frame;
+      },
+      windowMs: () => 3000,
+      blocked: () => false,
+      paint() {},
+      flush: () => window.example.flush(),
+      yieldTurn: async () => {
+        window.sent.push("yield");
+      },
+    });
+    const root = document.querySelector("#example-board");
+    root.open = true;
+    window.example = mountExampleBoard(root, {
+      locked: () => false,
+      turnActivity: () => window.turn.activity(),
+      cancelTurn: () => window.turn.reset(),
+      activity: () => {
+        window.pings++;
+      },
+      record() {},
+      publish: async () => {
+        window.sent.push("image");
+        return true;
+      },
+    });
+    window.step = () => {
+      window.clock += 3000;
+      window.frame?.();
+    };
+  }, base);
+  await page.getByRole("button", { name: "Text", exact: true }).click();
+  const canvas = page.locator("canvas");
+  const input = page.getByRole("textbox", { name: "Label text" });
+  for (const cancel of ["Escape", "Cancel", "empty"]) {
+    await canvas.click({ position: { x: 40, y: 40 } });
+    await input.fill(cancel === "empty" ? "  " : "unfinished");
+    await page.getByRole("button", { name: "Red text" }).click();
+    await page.evaluate(() => window.step());
+    assert.equal(await page.evaluate(() => window.turn.pending()), false);
+    if (cancel === "Cancel")
+      await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    else await input.press(cancel === "empty" ? "Control+Enter" : "Escape");
+    await page.evaluate(() => window.step());
+    assert.deepEqual(await page.evaluate(() => window.sent), []);
+  }
+  assert.ok(await page.evaluate(() => window.pings > 0));
+  await canvas.click({ position: { x: 40, y: 40 } });
+  await input.fill("ready");
+  await input.press("Control+Enter");
+  assert.equal(await page.evaluate(() => window.turn.pending()), true);
+  await page.evaluate(() => window.step());
+  await page.waitForFunction(() => window.sent.includes("yield"));
+  assert.deepEqual(await page.evaluate(() => window.sent), ["image", "yield"]);
 });
 
 test("a stationary pointer counts down without a microphone, shares its preview, and can keep drawing", async (t) => {
@@ -646,7 +797,7 @@ test("offline drawings skip JPEG encoding and locked controls repaint", async (t
   await page.waitForFunction(
     () =>
       window.uploads === 1 &&
-      document.querySelector("#example-board [role=status]").textContent ===
+      document.querySelector("#example-board > [role=status]").textContent ===
         "Drawing ready for Jim to read when you refer to it.",
   );
   assert.equal(await page.evaluate(() => window.encodings), 1);

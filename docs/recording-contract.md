@@ -840,11 +840,23 @@ so a producer from a later deploy does not stop a recording.
 |---|---|---|
 | `stage` | `{title, meta, remainingSeconds}` | the problem heading and the clock |
 | `editor` | `{code, language}` | the code panel, as text |
-| `board` | `{ops, checkpoint?, surface?}`, each op `{op: "stroke", color, width, points}` or `{op: "undo" \| "redo" \| "clear"}`; `checkpoint` is a completed REACTO phase id; `surface: "example"` accompanies the coding editor | the drawing, redrawn from every op so far, with completed phases named in the replay |
+| `board` | `{ops, checkpoint?, surface?}`, each op `{op: "stroke", color, width, points}`, `{op: "text", text, color, x, y, fontSize}` or `{op: "undo" \| "redo" \| "clear"}`; `checkpoint` is a completed REACTO phase id; `surface: "example"` accompanies the coding editor | the drawing, redrawn from every op so far, with completed phases named in the replay |
 | `tests` | `{passed, failed, total}` | one line, red if anything failed |
 | `avatar` | `{state}`, one of `speaking`, `thinking`, `listening` | Jim's expression and label |
 | `transcript` | `{speaker, text}` | nothing here; the replay page renders it |
 | `lifecycle` | `{state}` | nothing here |
+
+Text operations contain confirmed labels only. Draft entry, movement, scaling,
+color changes and cancellation are not recorded. Text uses the board's fixed
+1600 x 1000 coordinates, Arial with a sans-serif fallback (12-128 board
+pixels), and a line height of 1.25 times the font size. Rendering uses the
+same centered font box as the draft textarea, so confirmation preserves the
+glyph position. Only explicit newlines break lines; resizing the viewer does
+not reflow text. Input is limited to 500 UTF-16 code units and
+20 lines, with CRLF and CR normalized to LF. Each label shares the stroke
+history as one item; erasing overlays it with background-colored strokes.
+System font rasterization may differ across platforms. Older viewers that do
+not support text operations cannot faithfully replay these newer recordings.
 
 The producers live in `web/interview.js`, one call site per kind, all of them
 through `recordReplay`: one answer to "is this server recording" and one place
@@ -913,7 +925,11 @@ the interview in order to protect it.
 - Any string that begins, after leading whitespace, with `data:` or `blob:`,
   replaced with `[media removed]`. Whitespace is skipped because a browser that
   wrote `" data:image/png..."` wrote a data URL.
-  This is the one thing a replay must never carry: the video is the provider's,
+  The direct `text` field of a `text` operation in a board event's `ops` array
+  is exempt when it is at most 500 UTF-16 code units: labels are painted as
+  literal text, never loaded as URLs. Other fields, nested values and event
+  kinds retain the media rule, and secret-key removal still applies.
+  Media outside that literal-text field remains forbidden: the video is the provider's,
   delivered under a permission that expires, and a frame smuggled into an event
   outlives it.
 

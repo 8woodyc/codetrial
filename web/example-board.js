@@ -8,8 +8,10 @@ import {
   createPointerGate,
   drawBoard,
 } from "./whiteboard.js";
+import { mountBoardText } from "./board-text.js";
 
 const TOOL_ICONS = {
+  text: '<path d="M4 5h16 M12 5v16 M8 21h8"/>',
   pen: '<path d="m4 16 12-12 4 4-12 12-5 1Z M14 6l4 4"/>',
   eraser: '<path d="m4 14 9-10 7 7-9 10H7Z M8 10l7 7 M11 21h10"/>',
   undo: '<path d="m9 5-5 5 5 5 M4 10h10a6 6 0 0 1 0 12"/>',
@@ -42,7 +44,7 @@ export function mountExampleBoard(
   const model = createBoard();
   const pointers = createPointerGate();
   const tools = root.querySelector("[data-tools]");
-  const status = root.querySelector("[role=status]");
+  const status = root.querySelector(":scope > [role=status]");
   let tool = "pen";
   let color = PEN_COLORS[0].color;
   let drag = null;
@@ -57,6 +59,10 @@ export function mountExampleBoard(
 
   function noteActivity() {
     turnActivity?.();
+    pingActivity();
+  }
+
+  function pingActivity() {
     const now = performance.now();
     if (now - lastActivity < 1000) return;
     lastActivity = now;
@@ -64,6 +70,7 @@ export function mountExampleBoard(
   }
 
   function paint() {
+    textDraft.refresh();
     root.querySelector("[data-action=clear]").disabled = locked();
     const strokes = model.strokes();
     drawBoard(context, strokes);
@@ -129,16 +136,32 @@ export function mountExampleBoard(
   }
 
   function paintToolState() {
+    canvas.style.cursor = tool === "text" ? "crosshair" : "";
+    textDraft.refresh();
     for (const button of tools.querySelectorAll("button"))
       button.setAttribute("aria-pressed", String(button.dataset.tool === tool));
-    for (const button of root.querySelectorAll(".board-color"))
+    for (const button of root.querySelectorAll("[data-colors] .board-color"))
       button.setAttribute(
         "aria-pressed",
         String(button.dataset.color === color),
       );
   }
 
-  for (const name of ["pen", "eraser"]) {
+  const textDraft = mountBoardText(canvas, {
+    pointers,
+    active: () => tool === "text" && !drag,
+    locked: () => locked() || stopped || !root.open,
+    activity() {
+      cancelTurn?.();
+      pingActivity();
+    },
+    commit(label) {
+      if (!model.addText(label)) return false;
+      changed();
+      return true;
+    },
+  });
+  for (const name of ["pen", "eraser", "text"]) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "board-tool";
@@ -305,6 +328,7 @@ export function mountExampleBoard(
     },
     async finish() {
       stopped = true;
+      textDraft.cancel(false);
       finish();
       clearTimeout(settle);
       // An upload that stalls must not hold the interview's End button.
