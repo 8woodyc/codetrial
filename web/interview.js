@@ -277,6 +277,7 @@ const FRAMEWORK_HINT_MS = 12000;
 const HIDE_EXAMPLES_KEY = "codetrial:hideExamples";
 const EDITOR_FONT_SIZE_KEY = "codetrial:editorFontSize";
 const EDITOR_THEME_KEY = "codetrial:editorTheme";
+const EDITOR_WRAP_KEY = "codetrial:editorWrap";
 const SELF_VIEW_KEY = "codetrial:selfView";
 const SIDEBAR_WIDTH_KEY = "codetrial:sidebarWidth";
 const TEST_DRAWER_HEIGHT_KEY = "codetrial:testDrawerHeight";
@@ -628,6 +629,7 @@ const nodes = {
   editorFontSmaller: document.querySelector("#editor-font-smaller"),
   editorFontLarger: document.querySelector("#editor-font-larger"),
   editorThemeToggle: document.querySelector("#editor-theme-toggle"),
+  editorWrapToggle: document.querySelector("#editor-wrap-toggle"),
   restoreStarter: document.querySelector("#editor-restore-starter"),
   restoreStatus: document.querySelector("#editor-restore-status"),
   compileDisclosure: document.querySelector(".compile-disclosure"),
@@ -815,6 +817,7 @@ async function init() {
     nodes.editorStack.style.setProperty("--editor-font-family", "inherit");
   applyEditorFontSize(readStored(EDITOR_FONT_SIZE_KEY));
   applyEditorTheme(readStored(EDITOR_THEME_KEY));
+  applyEditorWrap(readStored(EDITOR_WRAP_KEY));
   if (problem) {
     renderProblem();
     initializeLanguages();
@@ -1273,6 +1276,12 @@ function bindEvents() {
     const theme = current === "light" ? "dark" : "light";
     applyEditorTheme(theme);
     writeStored(EDITOR_THEME_KEY, theme);
+  });
+  nodes.editorWrapToggle.addEventListener("click", () => {
+    const on = !nodes.editorStack.classList.contains("wrap");
+    applyEditorWrap(on ? "1" : "0");
+    syncEditorScroll();
+    writeStored(EDITOR_WRAP_KEY, on ? "1" : "0");
   });
   // The CSS media query repaints the editor itself on a system theme change
   // with no reload, but aria-pressed is JS state and would otherwise go
@@ -4104,7 +4113,12 @@ function navigateToDiagnostic(location) {
   const lineHeight = Number.parseFloat(style.lineHeight);
   const paddingTop = Number.parseFloat(style.paddingTop);
   if (Number.isFinite(lineHeight) && Number.isFinite(paddingTop)) {
-    const rowTop = paddingTop + (line - 1) * lineHeight;
+    // While wrapping, a logical line can span several rows, so the line
+    // count alone cannot place it. Measure the text above the caret in a
+    // mirror of the textarea's width and font instead.
+    const rowTop = nodes.editorStack.classList.contains("wrap")
+      ? paddingTop + wrappedTextHeight(snapshot.code.slice(0, position), style)
+      : paddingTop + (line - 1) * lineHeight;
     nodes.editor.scrollTop = Math.max(
       0,
       rowTop - (nodes.editor.clientHeight - lineHeight) / 2,
@@ -4115,7 +4129,20 @@ function navigateToDiagnostic(location) {
   paintEditor(true);
   if (status) status.textContent = "";
 }
-
+function wrappedTextHeight(text, style) {
+  const probe = document.createElement("div");
+  probe.style.cssText =
+    "position:absolute;visibility:hidden;white-space:pre-wrap;" +
+    "overflow-wrap:anywhere;padding:0;border:0;";
+  probe.style.width = `${nodes.editor.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight)}px`;
+  probe.style.font = style.font;
+  probe.style.tabSize = style.tabSize;
+  probe.textContent = text;
+  nodes.editorStack.append(probe);
+  const height = probe.offsetHeight;
+  probe.remove();
+  return height;
+}
 function addTranscript(speaker, text, final) {
   updateTranscriptSegment(randomId(), speaker, text, final);
 }
@@ -5173,6 +5200,11 @@ function applyEditorTheme(stored) {
   );
 }
 
+function applyEditorWrap(stored) {
+  const on = stored === "1";
+  nodes.editorStack.classList.toggle("wrap", on);
+  nodes.editorWrapToggle.setAttribute("aria-pressed", String(on));
+}
 /// How wide the sidebar may be, in pixels, for the window as it is now: no
 /// narrower than it was before it could be resized, no wider than half the
 /// window, and never so wide that the panel beside it loses its minimum. The

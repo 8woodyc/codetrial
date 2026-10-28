@@ -646,12 +646,12 @@ p {
 
 /* The light-theme toggle's label stays fixed (see applyEditorTheme), so
    sighted users need this instead of changing text to see which theme is
-   current. */
-#editor-theme-toggle[aria-pressed="true"] {
+   current. The wrap toggle works the same way. */
+#editor-theme-toggle[aria-pressed="true"],
+#editor-wrap-toggle[aria-pressed="true"] {
   border-color: var(--accent);
   color: var(--ink);
 }
-
 .history {
   margin-top: 1rem;
   padding: 1rem;
@@ -1722,8 +1722,9 @@ p {
   font-size: var(--editor-font-size);
   line-height: 1.5;
   tab-size: 4;
-  /* Not pre-wrap: the gutter numbers logical lines, so a wrapped line would
-     put every number below it against the wrong row. Long lines scroll. */
+  /* Not pre-wrap by default: the gutter numbers logical lines, so a wrapped
+     line would put every number below it against the wrong row. Long lines
+     scroll. Auto wrap (.wrap, below) hides the gutter and wraps instead. */
   white-space: pre;
   overflow: auto;
 }
@@ -4317,4 +4318,27 @@ body:not([data-recording]) .replay-detail > :not(header) {
   padding: 0.35rem;
   color: var(--ink);
   background: var(--float-surface);
+}
+
+/* Auto wrap: the gutter and the active-line band both assume one visual row
+   per logical line, so they are off while lines wrap. The highlight layer
+   must wrap exactly as the textarea does, or its colors drift off the text. */
+.editor-stack.wrap {
+  --editor-gutter: 0px;
+}
+
+.editor-stack.wrap #editor-lines {
+  display: none;
+}
+
+.editor-stack.wrap #editor,
+.editor-stack.wrap #editor-highlight,
+.editor-stack.wrap #editor-highlight code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.editor-stack.wrap #editor-highlight,
+.editor-stack.wrap.plain-text #editor {
+  background-image: none;
 }
