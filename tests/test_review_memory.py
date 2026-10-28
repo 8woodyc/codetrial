@@ -820,6 +820,52 @@ class BootstrapTests(MemoryCase):
         self.assertEqual(offline.returncode, 2)
         self.assertEqual(json.loads(offline.stdout)["outcome"], "degraded")
 
+    def test_snapshot_attaches_inside_the_write_lock_and_detaches_after_commit(self):
+        # SQLite 3.31 refuses BEGIN IMMEDIATE once a read-only database is
+        # attached, so the order is the contract, whatever SQLite runs the test.
+        memory, manifest, path = self.artifact()
+        target = memory.connect(str(self.dir / "order.db"))
+        self.addCleanup(target.close)
+        statements = []
+        target.set_trace_callback(statements.append)
+        memory.install_snapshot(target, str(path), manifest, "sysprog21/codetrial")
+        target.set_trace_callback(None)
+        steps = [
+            " ".join(statement.split(" ")[:2])
+            for statement in statements
+            if statement.startswith(("BEGIN", "ATTACH", "DETACH", "COMMIT"))
+        ]
+        self.assertEqual(
+            steps[:4],
+            ["BEGIN IMMEDIATE", "ATTACH DATABASE", "COMMIT", "DETACH DATABASE"],
+        )
+        self.assertEqual(
+            [row[1] for row in target.execute("PRAGMA database_list")], ["main"]
+        )
+
+    def test_failed_attach_reports_itself_and_leaves_the_store_empty(self):
+        memory, manifest, path = self.artifact()
+        target = memory.connect(str(self.dir / "attach.db"))
+        self.addCleanup(target.close)
+
+        class RefusesAttach:
+            def __getattr__(self, name):
+                return getattr(target, name)
+
+            def execute(self, sql, *arguments):
+                if sql.lstrip().startswith("ATTACH"):
+                    raise sqlite3.OperationalError("attach refused")
+                return target.execute(sql, *arguments)
+
+        with self.assertRaisesRegex(sqlite3.OperationalError, "attach refused"):
+            memory.install_snapshot(
+                RefusesAttach(), str(path), manifest, "sysprog21/codetrial"
+            )
+        self.assertTrue(memory.empty_store(target))
+        self.assertFalse(target.in_transaction)
+        memory.install_snapshot(target, str(path), manifest, "sysprog21/codetrial")
+        self.assertFalse(memory.empty_store(target))
+
     def bootstrap_cli(self, target, *arguments, failure=""):
         script = """import http.client,importlib.util,os,sys
 from pathlib import Path
