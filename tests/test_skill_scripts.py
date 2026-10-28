@@ -34,8 +34,12 @@ SKILLS = ROOT / ".claude" / "skills"
 ISSUE_SWEEP = SKILLS / "codetrial-triage" / "issue-sweep.sh"
 PR_SWEEP = SKILLS / "codetrial-triage" / "pr-sweep.sh"
 SKILL_REFS = ROOT / "scripts" / "check-skill-refs.py"
+REVIEW_PICK = SKILLS / "codetrial-triage" / "review-pick.sh"
+REVIEW_FINISH = SKILLS / "codetrial-triage" / "review-finish.sh"
 APPLY_ACTIONS = SKILLS / "codetrial-triage" / "apply-pr-actions.sh"
+POST_SIMILAR = SKILLS / "codetrial-triage" / "post-similar.sh"
 CI_CACHED = SKILLS / "codetrial-verify" / "ci-cached.sh"
+REVIEW_BRIEF = SKILLS / "codetrial-triage" / "review-brief.sh"
 
 # A gh that fails every call, so only a script's own check can refuse first.
 FAKE_GH_FAILS = "#!/bin/sh\nexit 1\n"
@@ -1708,7 +1712,10 @@ POST_INLINE = REVIEW / "post-inline.sh"
 # as "posted path:line" in place of its URL.
 FAKE_GH_INLINE = support.stub("skill-scripts/gh-inline.sh")
 FAKE_GH_APPLY = support.stub("skill-scripts/gh-apply.sh")
+FAKE_GH_SIMILAR = support.stub("skill-scripts/gh-similar.sh")
 FAKE_GH_CACHED = support.stub("skill-scripts/gh-cached.sh")
+FAKE_GH_LIVE = support.stub("skill-scripts/gh-live.sh")
+FAKE_INLINE_LOG = support.stub("skill-scripts/inline-log.sh")
 FAKE_CI_COUNT = support.stub("skill-scripts/ci-count.sh")
 
 
@@ -2890,6 +2897,274 @@ Path(sys.argv[-1], 'history.md').write_text('fixture context')
 
 
 @unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+class ReviewQueueTests(unittest.TestCase):
+    """review-pick.sh and review-finish.sh share the ledger in the git dir."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo = Path(self.tmp.name)
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+        self.ledger = self.repo / ".git" / "codetrial-triage" / "reviewed"
+
+    def pick(self, sweep):
+        path = self.repo / "sweep.json"
+        path.write_text(json.dumps(sweep))
+        result = subprocess.run(
+            ["sh", str(REVIEW_PICK), str(path)],
+            cwd=self.repo,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return [json.loads(line) for line in result.stdout.splitlines()]
+
+    def finish(self, draft, live, inline_rc=0, **env):
+        path = self.repo / "draft.json"
+        path.write_text(json.dumps(draft))
+        with tempfile.TemporaryDirectory() as scratch:
+            support.write_executable(Path(scratch) / "gh", FAKE_GH_LIVE)
+            # The stand-in for post-inline.sh logs that it was asked to post.
+            support.write_executable(Path(scratch) / "inline.sh", FAKE_INLINE_LOG)
+            return subprocess.run(
+                ["sh", str(REVIEW_FINISH), "7", str(path)],
+                cwd=self.repo,
+                capture_output=True,
+                text=True,
+                env=os.environ
+                | {
+                    "PATH": f"{scratch}:{os.environ['PATH']}",
+                    "REVIEW_FINISH_INLINE": f"{scratch}/inline.sh",
+                    "FAKE_LIVE": live,
+                    "FAKE_INLINE_LOG": f"{self.repo}/inline.log",
+                    "FAKE_INLINE_RC": str(inline_rc),
+                }
+                | env,
+            )
+
+    def posted(self):
+        log = self.repo / "inline.log"
+        return log.read_text() if log.exists() else ""
+
+    def test_brief_reads_a_crashed_or_empty_status_as_unavailable(self):
+        pick = {
+            "pr": 1,
+            "head": "abc",
+            "title": "T",
+            "why": [],
+            "since": None,
+            "outdated": [],
+            "collide": [],
+        }
+        (self.repo / "pick.json").write_text(json.dumps(pick))
+        for text in ("", "{}", "not json", '{"outcome": null}'):
+            (self.repo / "status.json").write_text(text)
+            result = subprocess.run(
+                [
+                    "sh",
+                    str(REVIEW_BRIEF),
+                    str(self.repo / "pick.json"),
+                    "/s",
+                    str(self.repo / "status.json"),
+                    "1",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn("Outcome/reason/coverage: unavailable.", result.stdout, text)
+
+    def test_pick_hands_the_newest_reviewed_head_to_the_bundle(self):
+        sweep = {
+            "viewer": "maint",
+            "outdated": [],
+            "collide": [],
+            "status": [
+                {
+                    "pr": 1,
+                    "grade": "low",
+                    "head": "h3",
+                    "author": "a",
+                    "title": "t",
+                    "why": [],
+                }
+            ],
+        }
+        self.ledger.parent.mkdir(parents=True)
+        self.ledger.write_text("1 h1\n1 h2\n")
+        self.assertEqual(self.pick(sweep)[0]["since"], "h2")
+
+    def test_brief_names_the_pr_its_history_and_its_collisions(self):
+        pick = {
+            "pr": 519,
+            "head": "abc",
+            "title": "T",
+            "why": ["5 open thread(s)"],
+            "since": "old",
+            "outdated": [{"thread": "T1", "path": "a.js"}],
+            "collide": [{"other": 110, "path": "web/x.js", "context": ["f"]}],
+        }
+        (self.repo / "pick.json").write_text(json.dumps(pick))
+        (self.repo / "status.json").write_text(
+            json.dumps({"outcome": "degraded", "reason": "busy"})
+        )
+        result = subprocess.run(
+            [
+                "sh",
+                str(REVIEW_BRIEF),
+                str(self.repo / "pick.json"),
+                "/s",
+                str(self.repo / "status.json"),
+                "2",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for want in (
+            "PR #519",
+            "head abc",
+            "shared_memory_exit=2",
+            "degraded (busy)",
+            "collides with #110 at web/x.js (f)",
+            "reviewed head: old",
+            "T1 (a.js)",
+        ):
+            self.assertIn(want.lower(), result.stdout.lower())
+
+    def test_pick_skips_graded_up_prs_the_viewers_and_reviewed_heads(self):
+        def row(pr, grade, head, author="someone"):
+            return {
+                "pr": pr,
+                "grade": grade,
+                "head": head,
+                "author": author,
+                "title": f"t{pr}",
+                "why": [],
+            }
+
+        sweep = {
+            "viewer": "maint",
+            "status": [
+                row(1, "low", "h1"),
+                row(2, "high", "h2"),
+                row(3, "blocked", "h3", author="maint"),
+                row(4, "blocked", "h4new"),
+                row(5, "low", "h5"),
+            ],
+            "outdated": [{"pr": 1, "thread": "T1", "path": "a.js"}],
+            "collide": [{"a": 1, "b": 5, "path": "web/x.js", "context": ["f"]}],
+        }
+        self.ledger.parent.mkdir(parents=True)
+        self.ledger.write_text("4 h4old\n5 h5\n")
+        picked = self.pick(sweep)
+        self.assertEqual([p["pr"] for p in picked], [1, 4])
+        self.assertIsNone(picked[0]["since"])
+        self.assertEqual(picked[0]["outdated"], [{"thread": "T1", "path": "a.js"}])
+        self.assertEqual(picked[0]["collide"][0]["other"], 5)
+        self.assertEqual(picked[1]["since"], "h4old")
+
+    def test_finish_records_the_head_only_when_nothing_is_left(self):
+        draft = {"pr": 7, "sha": "abc", "comments": [], "similar": [], "resolve": []}
+        self.assertEqual(self.finish(draft, "abc").returncode, 0)
+        self.assertEqual(self.ledger.read_text(), "7 abc\n")
+
+    def test_finish_refuses_a_moved_head_and_posts_nothing(self):
+        draft = {
+            "pr": 7,
+            "sha": "abc",
+            "comments": [{"path": "a"}],
+            "similar": [],
+            "resolve": [],
+        }
+        self.assertEqual(self.finish(draft, "def").returncode, 3)
+        self.assertEqual(self.posted(), "")
+        self.assertFalse(self.ledger.exists())
+
+    def test_finish_posts_the_inline_comments_and_records_only_after_they_land(self):
+        draft = {
+            "pr": 7,
+            "sha": "abc",
+            "comments": [{"path": "a"}],
+            "similar": [],
+            "resolve": [],
+        }
+        self.assertEqual(self.finish(draft, "abc").returncode, 0)
+        self.assertIn("7 ", self.posted())
+        self.assertEqual(self.ledger.read_text(), "7 abc\n")
+        self.ledger.unlink()
+        result = self.finish(draft, "abc", inline_rc=1)
+        self.assertEqual(result.returncode, 1)
+        self.assertFalse(self.ledger.exists())
+
+    def test_finish_refuses_a_sha_that_would_split_into_other_fields(self):
+        draft = {
+            "pr": 7,
+            "sha": "abc 0 0",
+            "comments": [{"path": "a"}],
+            "similar": [],
+            "resolve": [],
+        }
+        result = self.finish(draft, "abc 0 0")
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(self.posted(), "")
+        self.assertFalse(self.ledger.exists())
+
+    def test_finish_leaves_a_thread_to_resolve_to_the_caller(self):
+        draft = {
+            "pr": 7,
+            "sha": "abc",
+            "comments": [],
+            "similar": [],
+            "resolve": [{"thread": "T1", "path": "a.js", "why": "fixed"}],
+        }
+        result = self.finish(draft, "abc")
+        self.assertEqual(result.returncode, 4)
+        self.assertIn("T1", result.stdout)
+        self.assertFalse(self.ledger.exists())
+
+    def test_finish_refuses_unpostable_notices_before_posting_anything(self):
+        draft = {
+            "pr": 7,
+            "sha": "abc",
+            "comments": [{"path": "a"}],
+            "resolve": [],
+            "similar": [
+                {
+                    "kind": "pr",
+                    "number": 8,
+                    "notice": "see #8",
+                    "other_notice": "see #7",
+                    "other_sha": "h8",
+                }
+            ],
+        }
+        # No SCRATCH for the pair ledger, then a notice that names no thread.
+        for env, similar in (
+            ({"SCRATCH": ""}, draft["similar"]),
+            (
+                {"SCRATCH": str(self.repo)},
+                [draft["similar"][0] | {"notice": "no link"}],
+            ),
+        ):
+            result = self.finish(draft | {"similar": similar}, "abc", **env)
+            self.assertEqual(result.returncode, 2, env)
+            self.assertEqual(self.posted(), "")
+            self.assertFalse(self.ledger.exists())
+
+    def test_finish_refuses_a_malformed_draft_before_recording_anything(self):
+        good = {"pr": 7, "sha": "abc", "comments": [], "similar": [], "resolve": []}
+        for field, value in (
+            ("similar", True),
+            ("comments", "x"),
+            ("pr", 8),
+            ("sha", None),
+        ):
+            result = self.finish(good | {field: value}, "abc")
+            self.assertEqual(result.returncode, 2, field)
+            self.assertFalse(self.ledger.exists(), field)
+
+
+@unittest.skipUnless(shutil.which("jq"), "jq is not installed")
 class ApplyPrActionsTests(unittest.TestCase):
     """apply-pr-actions.sh against a gh that logs every write it is asked for."""
 
@@ -3109,6 +3384,227 @@ class ApplyPrActionsTests(unittest.TestCase):
                     got[("approve", 1)], "already" if status == "queued" else "failed"
                 )
                 self.assertEqual(result.returncode, 0 if status == "queued" else 1)
+
+
+@unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+class PostSimilarTests(unittest.TestCase):
+    """post-similar.sh: both threads read first, heads checked, pairs once."""
+
+    FAKE = FAKE_GH_SIMILAR
+
+    def run_similar(
+        self,
+        views,
+        similar,
+        preposted="",
+        shell="sh",
+        after=None,
+        claimed=None,
+        live=None,
+    ):
+        draft = {
+            "pr": 7,
+            "sha": "h7",
+            "comments": [],
+            "resolve": [],
+            "similar": similar,
+        }
+        with tempfile.TemporaryDirectory() as scratch:
+            scratch = Path(scratch)
+            (scratch / "bin").mkdir()
+            support.write_executable(scratch / "bin" / "gh", self.FAKE)
+            for number, view in views.items():
+                view = {"body": "", "comments": []} | view
+                (scratch / f"{number}.json").write_text(json.dumps(view))
+            (scratch / "draft.json").write_text(json.dumps(draft))
+            (scratch / "similar-posted").write_text(preposted)
+            if claimed:
+                (scratch / f"similar-posted.claim-{claimed}").mkdir()
+            # A push to PR b that lands once a comment on PR a has posted.
+            for (a, b), view in (after or {}).items():
+                (scratch / f"after-{a}-{b}").write_text(json.dumps(view))
+            # A head that moved after its view was read, though the view says h.
+            for number, head in (live or {}).items():
+                (scratch / f"{number}.live").write_text(head + "\n")
+            result = subprocess.run(
+                [shell, str(POST_SIMILAR), "7", str(scratch / "draft.json")],
+                capture_output=True,
+                text=True,
+                env=os.environ
+                | {
+                    "PATH": f"{scratch / 'bin'}:{os.environ['PATH']}",
+                    "FAKE_DIR": str(scratch),
+                    "SCRATCH": str(scratch),
+                },
+            )
+            posted = scratch / "posted"
+            posted = posted.read_text().split() if posted.exists() else []
+            pairs = (scratch / "similar-posted").read_text()
+            # Claims the run left behind, which only a posted pair keeps.
+            self.claims = [c.name for c in scratch.glob("similar-posted.claim-*")]
+            calls = scratch / "calls"
+            self.calls = calls.read_text().splitlines() if calls.exists() else []
+        receipts = [json.loads(line)["result"] for line in result.stdout.splitlines()]
+        return result.returncode, receipts, posted, pairs
+
+    def entry(self, **fields):
+        return {
+            "kind": "pr",
+            "number": 8,
+            "notice": "Overlaps #8.",
+            "other_notice": "Overlaps #7.",
+            "other_sha": "h8",
+        } | fields
+
+    def test_each_thread_is_decided_on_its_own_and_the_pair_recorded(self):
+        views = {
+            7: {"headRefOid": "h7", "comments": [{"body": "see #8"}]},
+            8: {"headRefOid": "h8"},
+        }
+        code, receipts, posted, pairs = self.run_similar(views, [self.entry()])
+        # #7 already links #8, so only the mirror goes to #8.
+        self.assertEqual((code, receipts, posted), (0, ["applied"], ["8"]))
+        self.assertEqual(pairs, "7 8\n")
+
+    def test_a_linked_pair_and_a_pair_already_posted_post_nothing(self):
+        views = {
+            7: {"headRefOid": "h7", "body": "#8"},
+            8: {"headRefOid": "h8", "comments": [{"body": "x #7."}]},
+        }
+        code, receipts, posted, _ = self.run_similar(views, [self.entry()])
+        self.assertEqual((code, receipts, posted), (0, ["linked"], []))
+        views = {7: {"headRefOid": "h7"}, 8: {"headRefOid": "h8"}}
+        code, receipts, posted, _ = self.run_similar(
+            views, [self.entry()], preposted="7 8\n"
+        )
+        self.assertEqual((code, receipts, posted), (0, ["pair"], []))
+
+    def test_a_number_inside_a_longer_one_is_not_a_link(self):
+        views = {7: {"headRefOid": "h7", "body": "closes #80"}, 8: {"headRefOid": "h8"}}
+        _, receipts, posted, _ = self.run_similar(views, [self.entry()])
+        self.assertEqual((receipts, posted), (["applied"], ["7", "8"]))
+
+    def test_a_moved_head_on_either_side_posts_nothing_and_exits_1(self):
+        for moved in (7, 8):
+            views = {7: {"headRefOid": "h7"}, 8: {"headRefOid": "h8"}}
+            views[moved] = {"headRefOid": "new"}
+            code, receipts, posted, pairs = self.run_similar(views, [self.entry()])
+            self.assertEqual((code, receipts, posted, pairs), (1, ["moved"], [], ""))
+            # A pair that leaves without a post gives its claim back.
+            self.assertEqual(self.claims, [], moved)
+
+    def test_an_issue_notice_goes_to_this_pr_only(self):
+        views = {7: {"headRefOid": "h7"}}
+        issue = {"kind": "issue", "number": 5, "notice": "Delivers #5."}
+        code, receipts, posted, _ = self.run_similar(views, [issue])
+        self.assertEqual((code, receipts, posted), (0, ["applied"], ["7"]))
+
+    def test_missing_required_mirror_notice_keeps_the_pair_pending(self):
+        views = {7: {"headRefOid": "h7"}, 8: {"headRefOid": "h8"}}
+        for notice in (None, "", "   "):
+            with self.subTest(notice=notice):
+                code, receipts, posted, pairs = self.run_similar(
+                    views, [self.entry(other_notice=notice)]
+                )
+                self.assertEqual((code, receipts, pairs), (1, ["failed"], ""))
+                self.assertNotIn("8", posted)
+                # A pair that leaves without a post gives its claim back.
+                self.assertEqual(self.claims, [])
+
+    def test_missing_mirror_text_is_allowed_when_other_thread_already_links(self):
+        views = {
+            7: {"headRefOid": "h7"},
+            8: {"headRefOid": "h8", "body": "see #7"},
+        }
+        code, receipts, posted, pairs = self.run_similar(
+            views, [self.entry(other_notice=None)]
+        )
+        self.assertEqual(
+            (code, receipts, posted, pairs), (0, ["applied"], ["7"], "7 8\n")
+        )
+
+    @unittest.skipUnless(shutil.which("dash"), "dash is not installed")
+    def test_the_pair_key_is_the_same_whichever_side_the_draft_is_for(self):
+        # The ledger holds the pair as "3 9"; a draft for PR 9 must find it.
+        views = {7: {"headRefOid": "h7"}, 3: {"headRefOid": "h3"}}
+        entry = self.entry(number=3, notice="Overlaps #3.", other_sha="h3")
+        code, receipts, posted, _ = self.run_similar(views, [entry], preposted="3 7\n")
+        self.assertEqual((code, receipts, posted), (0, ["pair"], []))
+
+    def test_a_draft_whose_notices_do_not_name_the_other_thread_is_refused(self):
+        views = {7: {"headRefOid": "h7"}, 8: {"headRefOid": "h8"}}
+        for fields in ({"notice": "no number"}, {"other_notice": "see #9"}):
+            code, receipts, posted, pairs = self.run_similar(
+                views, [self.entry(**fields)]
+            )
+            self.assertEqual((code, receipts, posted, pairs), (2, [], [], ""), fields)
+
+    def test_a_mirror_owed_but_not_drafted_fails_before_the_first_post(self):
+        views = {7: {"headRefOid": "h7"}, 8: {"headRefOid": "h8"}}
+        code, receipts, posted, pairs = self.run_similar(
+            views, [self.entry(other_notice=None)]
+        )
+        self.assertEqual((code, receipts, posted, pairs), (1, ["failed"], [], ""))
+        self.assertEqual(self.claims, [])
+
+    def test_a_pair_another_finish_holds_is_not_posted_twice(self):
+        views = {7: {"headRefOid": "h7"}, 8: {"headRefOid": "h8"}}
+        code, receipts, posted, _ = self.run_similar(
+            views, [self.entry()], claimed="7-8"
+        )
+        # Held is not posted, so the finish stays pending instead of recording.
+        self.assertEqual((code, receipts, posted), (1, ["held"], []))
+        # The pair is owned before either thread is read: a read taken earlier
+        # would be stale once its owner gave the claim back after a failed post.
+        self.assertEqual(self.calls, [])
+
+    def test_a_push_during_the_first_post_stops_the_mirror_and_frees_the_pair(self):
+        views = {7: {"headRefOid": "h7"}, 8: {"headRefOid": "h8"}}
+        moved = {"body": "", "comments": [], "headRefOid": "new"}
+        for pushed in ((7, 8), (7, 7)):
+            code, receipts, posted, pairs = self.run_similar(
+                views, [self.entry()], after={pushed: moved}
+            )
+            self.assertEqual(
+                (code, receipts, posted, pairs), (1, ["moved"], ["7"], ""), pushed
+            )
+            # Only a pair that posted stays claimed, so a rerun can try again.
+            self.assertEqual(self.claims, [], pushed)
+
+    def test_the_other_head_is_checked_before_the_first_notice_too(self):
+        views = {7: {"headRefOid": "h7"}, 8: {"headRefOid": "h8"}}
+        code, receipts, posted, pairs = self.run_similar(
+            views, [self.entry()], live={8: "new"}
+        )
+        self.assertEqual((code, receipts, posted, pairs), (1, ["moved"], [], ""))
+        # Also when the other thread already links this PR and only this side
+        # would be posted.
+        views[8]["body"] = "see #7"
+        code, receipts, posted, _ = self.run_similar(
+            views, [self.entry(other_notice=None)], live={8: "new"}
+        )
+        self.assertEqual((code, receipts, posted), (1, ["moved"], []))
+
+    def test_a_thread_read_without_its_comments_is_failed_not_unlinked(self):
+        views = {7: {"headRefOid": "h7", "comments": None}, 8: {"headRefOid": "h8"}}
+        code, receipts, posted, _ = self.run_similar(views, [self.entry()])
+        self.assertEqual((code, receipts, posted), (1, ["failed"], []))
+        self.assertEqual(self.claims, [])
+
+    def test_multiline_notices_preserve_json_escapes_under_dash(self):
+        views = {7: {"headRefOid": "h7"}, 8: {"headRefOid": "h8"}}
+        code, receipts, posted, pairs = self.run_similar(
+            views,
+            [
+                self.entry(
+                    notice="first #8\nsecond", other_notice="path \\notes #7\nmore"
+                )
+            ],
+            shell="dash",
+        )
+        self.assertEqual(
+            (code, receipts, posted, pairs), (0, ["applied"], ["7", "8"], "7 8\n")
+        )
 
 
 @unittest.skipUnless(shutil.which("jq"), "jq is not installed")

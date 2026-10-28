@@ -17,30 +17,26 @@ its review is in rather than after the slowest one.
 
 ## Pick the PRs
 
-From the PR sweep's output, the PRs graded `low` or `blocked`, not the
-account's own, minus those whose current head was already reviewed. The ledger
-lives in the git directory, so it survives sessions and is never tracked:
+`review-pick.sh` reads the sweep and prints one JSON object per PR to review:
+the PRs graded `low` or `blocked`, not the viewer's own, minus those whose
+current head is already in the ledger. Each object carries what the brief
+below asks for, so nothing is typed by hand: `since` (the head the ledger last
+recorded for the PR, or null), `outdated` (the thread ids and paths to
+recheck), `collide` (the other PR, the file and the function) and `why`.
 
 ```sh
-ledger="$(git rev-parse --git-common-dir)/codetrial-triage/reviewed"
-mkdir -p "$(dirname "$ledger")" && touch "$ledger"
-jq -r --arg me "$(gh api user --jq .login)" \
-  '.status[] | select(.grade == "low" or .grade == "blocked")
-   | select(.author != $me) | "\(.pr) \(.head)"' "$SCRATCH/sweep.json" |
-  grep -vxF -f "$ledger"
+.claude/skills/codetrial-triage/review-pick.sh "$snap"
 ```
 
-The common git directory is shared by every worktree of the clone, so a sweep
-from a worktree reads the same ledger. A head in the ledger got a full review,
-even when nothing came of it, so reviewing it again only finds the same
-nothing. A push moves the head and brings the PR back; the PR's last line in
-the ledger is then the head the earlier review read, which goes to the bundle
-as `--since`, so the reviewers read the new commits first and the earlier
-comments are not posted again:
-
-```sh
-since=$(awk -v pr="$pr" '$1 == pr { sha = $2 } END { print sha }' "$ledger")
-```
+The ledger lives in the git directory, so it survives sessions and is never
+tracked, and the common git directory is shared by every worktree of the clone.
+A head in the ledger got a full review, even when nothing came of it, so
+reviewing it again only finds the same nothing. A push moves the head and brings
+the PR back with `since` set, which goes to the bundle as `--since`, so the
+reviewers read the new commits first and the earlier comments are not posted
+again. A PR whose only open threads are the maintainer's own, with nothing new
+to say, still gets its review: an empty draft is a result, and recording it is
+what stops the next sweep from reading the same head again.
 
 ## One agent per PR, all in one message
 
@@ -68,6 +64,19 @@ the separate GitHub sweep actions still require their own connectivity.
 Each agent draws local context from this one shared store. Pass the exact status
 path as `$shared_memory_status` and the captured exit as `$shared_memory_exit`;
 these come from the brief, not from an agent's own scratch-directory defaults.
+
+Once that outcome is read, `review-brief.sh` renders each brief below from a
+`review-pick.sh` object, so the prompt is the specified one with the PR's own `since`, outdated threads and
+collisions filled in:
+
+```sh
+.claude/skills/codetrial-triage/review-pick.sh "$snap" | while read -r pick; do
+  printf '%s\n' "$pick" > "$SCRATCH/pick.json"
+  .claude/skills/codetrial-triage/review-brief.sh "$SCRATCH/pick.json" \
+    "$SCRATCH" "$SCRATCH/memory-status.json" "$memory_exit"
+  printf '\n---\n\n'
+done
+```
 
 Launch every agent in a single response, in the background, with the same
 brief filled in per PR. Launch them in the same response that applies the
@@ -178,7 +187,7 @@ each of this PR's entries in outdated, or none>.
 5. Write `$dir/draft.json` as `{"pr": N, "sha": "<head>", "comments": [{path,
    quote, line, start_line?, body, evidence}], "summary": null, "similar": [{"kind":
    "pr" or "issue", "number": M, "notice": "<text>", "other_notice": "<text>"
-   or null}], "resolve": [{"thread": "<id>", "path": "<path>", "why": "<what
+   or null, "other_sha": "<the other PR's head its diff was read at>" for a PR}], "resolve": [{"thread": "<id>", "path": "<path>", "why": "<what
    at the head addresses it>"}]}` and return which reviewers and lenses ran or
    were skipped and why, then each finding as `path:line`, the defect in a
    sentence, and how it was verified, then the questions, each similar match
@@ -210,23 +219,45 @@ finding's `evidence` cites, from the bundle's `head/` (and `gh api
 lines do not bear out. Read the code each `resolve` entry names the same way, and keep only those the head
 bears out and the brief listed as this PR's outdated threads: the sweep
 resolves nothing else. Drop as well any text comments.md would not let
-through. Then post the inline findings:
+through. Then finish the PR with one call. Bind `pr`, `draft` and `sha` for this PR
+first, since the manual steps below use them and a value left over from another
+PR would record the wrong head:
 
 ```sh
-draft="$SCRATCH/pr-$pr/draft.json"
-sha=$(jq -r .sha "$draft")
-.claude/skills/codetrial-review/post-inline.sh "$pr" "$draft"
+pr=<the PR number>; draft="$SCRATCH/pr-$pr/draft.json"; sha=$(jq -r .sha "$draft")
+# Exit 4 is expected, so capture it: a bare call under set -e stops there.
+if .claude/skills/codetrial-triage/review-finish.sh "$pr" "$SCRATCH/pr-$pr/draft.json"; then
+  finish=0
+else
+  finish=$?
+fi
 ```
 
-It places each finding by its quote, posts them as one review, so the author
+It refuses (exit 3) when the head is no longer the draft's `sha`, posts the
+inline findings through `post-inline.sh` when there are any, posts the
+similar-work notices through `post-similar.sh` (below), and appends `$pr $sha`
+to the ledger when nothing is left. `finish` is 0 when the head is recorded and
+4 when work is left, printed for you: a `resolve` thread to verify and resolve
+as below, or a notice that was not posted. After doing it by hand, record the
+head. Anything else (1, 2, 3) leaves the head out of the ledger for the next
+sweep.
+
+`post-inline.sh` places each finding by its quote, posts them as one review, so the author
 gets one notification, and falls back to one comment each only when GitHub
 refuses the review. Its header says what it refuses and drops, and stderr
-names each drop. Only a clean exit permits continuing to the similar-work
+names each drop. Only exit 0 permits continuing to the similar-work
 notices: exit 3 (the head moved) means review the new head, and exit 1 (GitHub
 refused a comment) leaves the head for the next sweep, whose rerun posts only
 what did not land.
 
-Post the similar-work notices right after, as plain comments, since each
+`review-finish.sh` posts the similar-work notices through `post-similar.sh`,
+which does everything below: it reads both threads before posting either,
+skips a thread that already links the other, skips a pair already posted this
+sweep (the `similar-posted` ledger in `$SCRATCH`, so `SCRATCH` must be set), and
+refuses a pair whose head moved, checking the other PR against the draft's
+`other_sha`. The hand commands that follow are the same steps for doing one
+without the script. Post the similar-work notices right after (`draft` and
+`sha` below are the draft's path and its `sha`), as plain comments, since each
 asks the author a question rather than requesting a change: `notice` on this
 PR, and `other_notice` on PR `number`. Check first that this PR's head is still
 `sha` and the other PR's still the one its diff was read at, and skip the pair
@@ -259,7 +290,7 @@ already present). A pair skipped because a head
 moved is not done either. If any read or post fails,
 or the session stops before completion, leave the head out of the ledger so
 the next sweep retries it, checking each thread for posts that already landed.
-After all required posts succeed:
+After all required posts succeed, when `review-finish.sh` exited 4 and you finished the rest by hand:
 
 ```sh
 echo "$pr $sha" >> "$(git rev-parse --git-common-dir)/codetrial-triage/reviewed"
