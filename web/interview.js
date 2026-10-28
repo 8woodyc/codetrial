@@ -196,6 +196,7 @@ import {
 } from "./face-presence.js";
 import {
   COMPILED_LANGUAGES,
+  compilerDiagnosticLocations,
   compiledTestsEnabled,
   harnessAvailability,
   languagesFor,
@@ -497,6 +498,7 @@ const state = {
   phase: "live",
   transcript: null, // createTranscriptView, built in init once nodes exist
   latestSummary: null,
+  latestRunSnapshot: null,
   testStatus: "done",
   runningTests: false,
   candidateCases: [],
@@ -1217,7 +1219,12 @@ function bindEvents() {
       state.latestSummary,
       state.testStatus,
       nodes.hidePassedTests.checked,
+      diagnosticContext(state.latestSummary, state.latestRunSnapshot),
     ).body;
+  });
+  nodes.resultsContent.addEventListener("click", (event) => {
+    const location = event.target.closest("[data-diagnostic-line]");
+    if (location) navigateToDiagnostic(location);
   });
   nodes.languageSelect.addEventListener("change", () =>
     chooseLanguage(nodes.languageSelect.value),
@@ -3644,6 +3651,10 @@ async function runTests() {
   );
 
   state.latestSummary = summary;
+  state.latestRunSnapshot = {
+    code: codeSnapshot,
+    language: languageSnapshot,
+  };
 
   state.testHistory.push({
     runNumber: (state.testHistory.at(-1)?.runNumber ?? 0) + 1,
@@ -3842,6 +3853,7 @@ function removeCandidateCase(index) {
   // announced.
   nodes.candidateCaseStatus.textContent = `${state.candidateCases.length}/${CANDIDATE_CASE_LIMIT} cases ready.`;
   state.latestSummary = null;
+  state.latestRunSnapshot = null;
   state.testStatus = "done"; // the value the page loads with, so no run state outlives the panel it painted
   nodes.resultsLabel.textContent = "Test results";
   // The placeholder web/interview.html ships in #results-content; keep the
@@ -3890,11 +3902,65 @@ function renderResults(summary) {
     summary,
     state.testStatus,
     nodes.hidePassedTests.checked,
+    diagnosticContext(summary, state.latestRunSnapshot),
   );
   nodes.resultsLabel.textContent = label;
   nodes.resultsFilter.hidden =
     Boolean(summary.setupError) || !summary.cases.length;
   nodes.resultsContent.innerHTML = body;
+}
+
+function diagnosticContext(summary, snapshot) {
+  if (
+    !snapshot ||
+    !COMPILED_LANGUAGES.includes(snapshot.language) ||
+    summary.diagnostic?.category !== "other"
+  )
+    return null;
+  const lineCount = snapshot.code.split("\n").length;
+  return {
+    lineCount,
+    locations: compilerDiagnosticLocations(summary.setupError, lineCount),
+  };
+}
+
+function navigateToDiagnostic(location) {
+  const status = nodes.resultsContent.querySelector(
+    "[data-diagnostic-navigation-status]",
+  );
+  const snapshot = state.latestRunSnapshot;
+  if (
+    !snapshot ||
+    currentCode() !== snapshot.code ||
+    state.language !== snapshot.language
+  ) {
+    if (status)
+      status.textContent =
+        "Code or language has changed. Run tests again to navigate to this location.";
+    return;
+  }
+  const line = Number(location.dataset.diagnosticLine);
+  const lines = snapshot.code.split("\n");
+  if (!Number.isSafeInteger(line) || line < 1 || line > lines.length) return;
+  const position = lines
+    .slice(0, line - 1)
+    .reduce((length, text) => length + text.length + 1, 0);
+  nodes.editor.focus();
+  nodes.editor.setSelectionRange(position, position);
+  const style = getComputedStyle(nodes.editor);
+  const lineHeight = Number.parseFloat(style.lineHeight);
+  const paddingTop = Number.parseFloat(style.paddingTop);
+  if (Number.isFinite(lineHeight) && Number.isFinite(paddingTop)) {
+    const rowTop = paddingTop + (line - 1) * lineHeight;
+    nodes.editor.scrollTop = Math.max(
+      0,
+      rowTop - (nodes.editor.clientHeight - lineHeight) / 2,
+    );
+  }
+  nodes.editor.scrollLeft = 0;
+  syncEditorScroll();
+  paintEditor(true);
+  if (status) status.textContent = "";
 }
 
 function addTranscript(speaker, text, final) {

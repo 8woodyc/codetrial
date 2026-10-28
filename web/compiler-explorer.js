@@ -273,6 +273,31 @@ const CLASH = / error: (?:redefinition of |duplicate class: )/;
 export const HARNESS_SIGNATURE_NOTE =
   "The tests call the original function signature; check that it is unchanged.";
 
+/// Find editor positions in diagnostics after remapDiagnostics has translated
+/// them. This deliberately does not subtract the harness offset again.
+export function compilerDiagnosticLocations(text, lineCount) {
+  if (!Number.isSafeInteger(lineCount) || lineCount < 1) return [];
+  const lines = String(text).split("\n");
+  const locations = [];
+  let afterLocation = false;
+  for (let outputLine = 0; outputLine < lines.length; outputLine++) {
+    // javac echoes the source line between its location and caret. Candidate
+    // text can look exactly like a diagnostic, so that excerpt must stay plain.
+    const excerpt =
+      afterLocation && JAVAC_CARET.test(lines[outputLine + 1] ?? "");
+    afterLocation = false;
+    if (excerpt) continue;
+    const included = lines[outputLine].match(INCLUDED_FROM);
+    const location = included ? null : lines[outputLine].match(LOCATION);
+    afterLocation = location !== null;
+    if (!included && (!location || location[2] !== "<source>")) continue;
+    const editorLine = Number(included ? included[2] : location[3]);
+    if (editorLine < 1 || editorLine > lineCount) continue;
+    locations.push({ outputLine, editorLine });
+  }
+  return locations;
+}
+
 /// A position outside the candidate's code has no editor line to give, so it
 /// is named as the harness and its excerpt, code they never wrote, is
 /// dropped. A renamed or retyped function is the usual way there, and the note
@@ -290,7 +315,22 @@ function remapDiagnostics(text, { offset, lineCount }) {
   let harnessError = false;
   let unclosed = false;
   let scope = null;
-  for (const line of text.split("\n")) {
+  let afterLocation = false;
+  const inputLines = text.split("\n");
+  for (let index = 0; index < inputLines.length; index++) {
+    const line = inputLines[index];
+    // javac prints the source excerpt without a gutter, directly between its
+    // location and caret. Only that position tells candidate text such as
+    // `<source>:1:2:` from another location, and a bare `^` in the code from
+    // the caret. Decide before any location parser can change the harness
+    // state.
+    const excerpt =
+      afterLocation && JAVAC_CARET.test(inputLines[index + 1] ?? "");
+    afterLocation = false;
+    if (excerpt) {
+      if (!inHarness) lines.push(line);
+      continue;
+    }
     if (SCOPE.test(line)) {
       lines.push(line);
       scope = lines.length - 1;
@@ -301,15 +341,13 @@ function remapDiagnostics(text, { offset, lineCount }) {
       const [prefix, lead, number] = included;
       const editorLine = Number(number) - offset;
       const rest = line.slice(prefix.length);
-      lines.push(
-        outside(editorLine)
-          ? `${lead}<test harness>${rest}`
-          : `${lead}<source>:${editorLine}${rest}`,
-      );
+      if (outside(editorLine)) lines.push(`${lead}<test harness>${rest}`);
+      else lines.push(`${lead}<source>:${editorLine}${rest}`);
       continue;
     }
     const location = line.match(LOCATION);
     if (location) {
+      afterLocation = true;
       const [prefix, indent, file, number] = location;
       const editorLine = Number(number) - offset;
       inHeader = file !== "<source>";
@@ -356,9 +394,8 @@ function remapDiagnostics(text, { offset, lineCount }) {
       );
       continue;
     }
-    if (inHarness && JAVAC_CARET.test(line)) {
-      lines.pop();
-      continue;
+    if (JAVAC_CARET.test(line)) {
+      if (inHarness) continue;
     }
     lines.push(line);
   }

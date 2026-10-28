@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import {
   ALL_LANGUAGES,
   COMPILED_LANGUAGES,
+  compilerDiagnosticLocations,
   compilerType,
   generateHarness,
   HARNESS_SIGNATURE_NOTE,
@@ -2277,6 +2278,89 @@ const compileError = (lines, editor) =>
     { didExecute: false, stderr: lines.map((text) => ({ text })) },
     editor,
   ).setupError;
+
+test("compiler location parser ignores Java excerpts and keeps include chains", () => {
+  const java = mapCompilerResponse(
+    {
+      didExecute: false,
+      stderr: [
+        { text: "<source>:2: error: cannot find symbol" },
+        { text: "<source>:1:2: candidate source text" },
+        { text: "        ^" },
+      ],
+    },
+    { offset: 0, lineCount: 3 },
+  );
+  assert.equal(
+    java.setupError,
+    [
+      "<source>:2: error: cannot find symbol",
+      "<source>:1:2: candidate source text",
+      "        ^",
+    ].join("\n"),
+  );
+  assert.deepEqual(compilerDiagnosticLocations(java.setupError, 3), [
+    { outputLine: 0, editorLine: 2 },
+  ]);
+
+  const cpp = mapCompilerResponse(
+    {
+      didExecute: false,
+      stderr: [
+        { text: "                 from <source>:5:7:" },
+        { text: "<source>:7:11: required from here" },
+      ],
+    },
+    { offset: 4, lineCount: 3 },
+  );
+  assert.deepEqual(compilerDiagnosticLocations(cpp.setupError, 3), [
+    { outputLine: 0, editorLine: 1 },
+    { outputLine: 1, editorLine: 3 },
+  ]);
+
+  const runtime = mapCompilerResponse(
+    {
+      didExecute: true,
+      code: 1,
+      stderr: [{ text: "<source>:1:2: candidate runtime text" }],
+    },
+    { offset: 0, lineCount: 3 },
+  );
+  assert.equal(runtime.setupError, "<source>:1:2: candidate runtime text");
+  assert.equal(runtime.diagnostic.category, "runtime_signal");
+});
+
+// javac puts a binary-operator error at the operator, so a line holding only
+// `^` echoes as an excerpt that looks like its own caret. The location above
+// it is still a location: remapped for Jim and operable for the candidate.
+test("a Java excerpt that is a bare caret leaves its location remapped", () => {
+  const java = mapCompilerResponse(
+    {
+      didExecute: false,
+      stderr: [
+        {
+          text: "<source>:9: error: bad operand types for binary operator '^'",
+        },
+        { text: "            ^" },
+        { text: "            ^" },
+        { text: "1 error" },
+      ],
+    },
+    { offset: 4, lineCount: 10 },
+  );
+  assert.equal(
+    java.setupError,
+    [
+      "<source>:5: error: bad operand types for binary operator '^'",
+      "            ^",
+      "            ^",
+      "1 error",
+    ].join("\n"),
+  );
+  assert.deepEqual(compilerDiagnosticLocations(java.setupError, 10), [
+    { outputLine: 0, editorLine: 5 },
+  ]);
+});
 
 test("compile errors cite the editor line in C, C++, Java and a class judge", () => {
   const code = ["public class Solution {", "  // first", "  BROKEN", "}"];

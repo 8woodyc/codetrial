@@ -84,12 +84,61 @@ export function finalRunnerStatus(summary, currentStatus) {
   return summary.setupError ? currentStatus : "done";
 }
 
-export function resultsMarkup(summary, status = null, hidePassed = false) {
+const COMPILER_LOCATION =
+  /^([ \t]*(?:(?:In file included from |from )[ \t]*)?)(<source>:(\d+)(?::(\d+))?)(?=:)/;
+
+/// Escaped compiler output with only editor-relative source locations made
+/// operable. The runner supplies the output line and already-remapped editor
+/// line for each verified location; this layer only checks those facts against
+/// the escaped output and code snapshot that produced them.
+export function compilerDiagnosticMarkup(text, context) {
+  const diagnostic = String(text);
+  if (
+    !Number.isSafeInteger(context?.lineCount) ||
+    context.lineCount < 1 ||
+    !Array.isArray(context.locations)
+  )
+    return escapeHtml(diagnostic);
+  const locations = new Map(
+    context.locations
+      .filter(
+        ({ outputLine, editorLine }) =>
+          Number.isSafeInteger(outputLine) &&
+          outputLine >= 0 &&
+          Number.isSafeInteger(editorLine) &&
+          editorLine >= 1 &&
+          editorLine <= context.lineCount,
+      )
+      .map(({ outputLine, editorLine }) => [outputLine, editorLine]),
+  );
+  return diagnostic
+    .split("\n")
+    .map((line, outputLine) => {
+      const editorLine = locations.get(outputLine);
+      const match = line.match(COMPILER_LOCATION);
+      if (!editorLine || !match || Number(match[3]) !== editorLine)
+        return escapeHtml(line);
+      const label = `${match[2]}, go to editor line ${editorLine}`;
+      return (
+        escapeHtml(match[1]) +
+        `<button type="button" class="diagnostic-location" data-diagnostic-line="${editorLine}" aria-label="${escapeHtml(label)}">${escapeHtml(match[2])}</button>` +
+        escapeHtml(line.slice(match[0].length))
+      );
+    })
+    .join("\n");
+}
+
+export function resultsMarkup(
+  summary,
+  status = null,
+  hidePassed = false,
+  diagnosticContext = null,
+) {
   const statusMarkup = runnerStatusMarkup(status);
   if (summary.setupError) {
     return {
       label: "Test results",
-      body: `${statusMarkup}<p class="critical small"><strong>Couldn't run your code</strong></p><pre>${escapeHtml(summary.setupError)}</pre>`,
+      body: `${statusMarkup}<p class="critical small"><strong>Couldn't run your code</strong></p><pre>${compilerDiagnosticMarkup(summary.setupError, diagnosticContext)}</pre>${diagnosticContext === null ? "" : '<p class="muted small" role="status" aria-live="polite" data-diagnostic-navigation-status></p>'}`,
     };
   }
   const caseMarkup = (item) => {

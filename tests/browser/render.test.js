@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
+  compilerDiagnosticMarkup,
   createTranscriptView,
   feedbackMarkup,
   finalRunnerStatus,
@@ -241,6 +242,117 @@ test("results markup reports counts and marks each case", () => {
     /input \[\[2,7\],9\]\nexpected \[0,1\]\ngot \[1,0\]/,
     "input, expected, and got sit on separate lines in that order",
   );
+});
+
+test("compiler diagnostics link only valid remapped candidate locations", () => {
+  const diagnostic = [
+    "<source>:2:17: error: first <name>",
+    "<source>:3: error: second & final",
+    "<source>:0:4: error: zero",
+    "<source>:5:4: error: beyond the snapshot",
+    "<source>:oops: error: malformed",
+    "<test harness>: error: wrapper",
+    "/usr/include/string.h:2:17: note: header",
+    '    2 | puts("<source>:1:2: excerpt text");',
+    "<source>:1:2: candidate source text",
+  ].join("\n");
+  const markup = compilerDiagnosticMarkup(diagnostic, {
+    lineCount: 4,
+    locations: [
+      { outputLine: 0, editorLine: 2 },
+      { outputLine: 1, editorLine: 3 },
+      { outputLine: 2, editorLine: 0 },
+      { outputLine: 3, editorLine: 5 },
+    ],
+  });
+
+  assert.equal((markup.match(/class="diagnostic-location"/g) ?? []).length, 2);
+  assert.match(
+    markup,
+    /data-diagnostic-line="2" aria-label="&lt;source&gt;:2:17, go to editor line 2">&lt;source&gt;:2:17<\/button>/,
+  );
+  assert.match(
+    markup,
+    /data-diagnostic-line="3" aria-label="&lt;source&gt;:3, go to editor line 3">&lt;source&gt;:3<\/button>/,
+  );
+  assert.match(markup, /&lt;source&gt;:0:4: error: zero/);
+  assert.match(markup, /&lt;source&gt;:5:4: error: beyond the snapshot/);
+  assert.match(markup, /&lt;source&gt;:oops: error: malformed/);
+  assert.match(markup, /&lt;test harness&gt;: error: wrapper/);
+  assert.match(markup, /\/usr\/include\/string\.h:2:17: note: header/);
+  assert.match(markup, /&lt;source&gt;:1:2: excerpt text/);
+  assert.match(markup, /&lt;source&gt;:1:2: candidate source text/);
+  assert.match(markup, /first &lt;name&gt;/);
+  assert.match(markup, /second &amp; final/);
+});
+
+test("Java diagnostics without columns remain independently operable", () => {
+  const { body } = resultsMarkup(
+    {
+      setupError: [
+        "<source>:2: error: cannot find symbol",
+        "<source>:4: error: cannot find symbol",
+      ].join("\n"),
+    },
+    "compiling",
+    false,
+    {
+      lineCount: 4,
+      locations: [
+        { outputLine: 0, editorLine: 2 },
+        { outputLine: 1, editorLine: 4 },
+      ],
+    },
+  );
+
+  assert.equal((body.match(/class="diagnostic-location"/g) ?? []).length, 2);
+  assert.match(body, /data-diagnostic-line="2"/);
+  assert.match(body, /data-diagnostic-line="4"/);
+  assert.match(body, /data-diagnostic-navigation-status/);
+});
+
+test("C and C++ diagnostics expose every independently remapped location", () => {
+  const c = compilerDiagnosticMarkup(
+    ["<source>:1:7: error: first", "<source>:3:11: note: second"].join("\n"),
+    {
+      lineCount: 3,
+      locations: [
+        { outputLine: 0, editorLine: 1 },
+        { outputLine: 1, editorLine: 3 },
+      ],
+    },
+  );
+  assert.equal((c.match(/class="diagnostic-location"/g) ?? []).length, 2);
+  assert.match(c, /data-diagnostic-line="1"/);
+  assert.match(c, /data-diagnostic-line="3"/);
+
+  const cpp = compilerDiagnosticMarkup(
+    [
+      "                 from <source>:1:7: error: first",
+      "In file included from <source>:3:11: note: second",
+    ].join("\n"),
+    {
+      lineCount: 3,
+      locations: [
+        { outputLine: 0, editorLine: 1 },
+        { outputLine: 1, editorLine: 3 },
+      ],
+    },
+  );
+  assert.equal((cpp.match(/class="diagnostic-location"/g) ?? []).length, 2);
+  assert.match(cpp, /from <button[^>]+data-diagnostic-line="1"/);
+  assert.match(
+    cpp,
+    /In file included from <button[^>]+data-diagnostic-line="3"/,
+  );
+});
+
+test("setup errors stay escaped and plain without a compiler snapshot", () => {
+  const error = '<source>:1:2: error: unexpected <script>alert("x")</script>';
+  const { body } = resultsMarkup({ setupError: error });
+  assert.doesNotMatch(body, /diagnostic-location|<script>/);
+  assert.match(body, /&lt;source&gt;:1:2/);
+  assert.match(body, /&lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt;/);
 });
 
 test("hiding passed tests preserves failures, observations and original totals", () => {
