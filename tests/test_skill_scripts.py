@@ -34,6 +34,7 @@ SKILLS = ROOT / ".claude" / "skills"
 ISSUE_SWEEP = SKILLS / "codetrial-triage" / "issue-sweep.sh"
 PR_SWEEP = SKILLS / "codetrial-triage" / "pr-sweep.sh"
 SKILL_REFS = ROOT / "scripts" / "check-skill-refs.py"
+APPLY_ACTIONS = SKILLS / "codetrial-triage" / "apply-pr-actions.sh"
 CI_CACHED = SKILLS / "codetrial-verify" / "ci-cached.sh"
 
 # A gh that fails every call, so only a script's own check can refuse first.
@@ -1706,6 +1707,7 @@ POST_INLINE = REVIEW / "post-inline.sh"
 # The PR's head, diff and review threads, and each posted comment echoed back
 # as "posted path:line" in place of its URL.
 FAKE_GH_INLINE = support.stub("skill-scripts/gh-inline.sh")
+FAKE_GH_APPLY = support.stub("skill-scripts/gh-apply.sh")
 FAKE_GH_CACHED = support.stub("skill-scripts/gh-cached.sh")
 FAKE_CI_COUNT = support.stub("skill-scripts/ci-count.sh")
 
@@ -2885,6 +2887,228 @@ Path(sys.argv[-1], 'history.md').write_text('fixture context')
                             "fixture context" in history,
                             context_called and not context_failed,
                         )
+
+
+@unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+class ApplyPrActionsTests(unittest.TestCase):
+    """apply-pr-actions.sh against a gh that logs every write it is asked for."""
+
+    FAKE = FAKE_GH_APPLY
+
+    def sweep(self, **fields):
+        base = {
+            "maintainers_known": True,
+            "prs": [{"number": n, "head": f"h{n}"} for n in (1, 2, 3, 4)],
+            "approve": [
+                self.approval()["approve"][0],
+                self.approval(pr=2, run=12, first_time=False)["approve"][0],
+            ],
+            "rebase": [{"pr": 3, "reason": "conflicts"}],
+            "hide": [
+                {"pr": 3, "id": "IC_3", "by": "maint"},
+                {"pr": 4, "id": "IC_4", "by": "maint"},
+            ],
+        }
+        return json.dumps(base | fields)
+
+    def run_actions(self, sweep, workflows=None, repo=None, hygiene=None, **env):
+        with tempfile.TemporaryDirectory() as scratch:
+            scratch = Path(scratch)
+            (scratch / "bin").mkdir()
+            support.write_executable(scratch / "bin" / "gh", self.FAKE)
+            (scratch / "sweep.json").write_text(sweep)
+            (scratch / "log").write_text("")
+            # A workflow directory the guard reads; None leaves the real one.
+            if workflows is not None:
+                (scratch / "wf").mkdir()
+                for name, text in workflows.items():
+                    (scratch / "wf" / name).write_text(text)
+                env["WORKFLOWS_DIR"] = str(scratch / "wf")
+            # A hygiene.sh stand-in: $1 is the PR, and it prints that PR's result.
+            if hygiene is not None:
+                (scratch / "hygiene.sh").write_text(hygiene)
+                env["APPLY_HYGIENE"] = str(scratch / "hygiene.sh")
+            result = subprocess.run(
+                ["sh", str(APPLY_ACTIONS), str(scratch / "sweep.json")]
+                + ([repo] if repo else [])
+                + (["--hygiene"] if hygiene is not None else []),
+                capture_output=True,
+                text=True,
+                env=os.environ
+                | {
+                    "PATH": f"{scratch / 'bin'}:{os.environ['PATH']}",
+                    "FAKE_LOG": str(scratch / "log"),
+                }
+                | env,
+            )
+            log = (scratch / "log").read_text()
+        receipts = [json.loads(line) for line in result.stdout.splitlines()]
+        return result, {(r["action"], r["pr"]): r["result"] for r in receipts}, log
+
+    def approval(self, **fields):
+        entry = {
+            "pr": 1,
+            "run": 11,
+            "first_time": True,
+            "touches_workflows": False,
+            "files_truncated": False,
+        }
+        return {"approve": [entry | fields]}
+
+    HYGIENE = (
+        'case "$1" in\n'
+        '  1) echo \'{"pr":1,"head":"h1","items":[{"key":"indent"}],"body":"fix"}\' ;;\n'
+        '  2) echo \'{"pr":2,"head":"h2","items":[],"body":""}\' ;;\n'
+        '  3) echo \'{"pr":3,"head":"h3","items":[{"key":"k"}],"body":"old"}\' ;;\n'
+        "  *) exit 1 ;;\n"
+        "esac\n"
+    )
+
+    def test_hygiene_reviews_post_only_a_body_read_at_the_live_head(self):
+        quiet = {"approve": [], "rebase": [], "hide": []}
+        result, got, log = self.run_actions(
+            self.sweep(**quiet), hygiene=self.HYGIENE, FAKE_MOVED="3"
+        )
+        self.assertEqual(
+            got,
+            {
+                ("hygiene", 1): "applied",
+                ("hygiene", 3): "skipped",
+                ("hygiene", 4): "failed",
+            },
+        )
+        # The empty body of PR 2 posts nothing, and a failed read exits 1.
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("pulls/1/reviews -f commit_id=h1", log)
+        self.assertNotIn("pulls/2/reviews", log)
+        self.assertNotIn("pulls/3/reviews", log)
+
+    def test_hygiene_is_off_without_the_flag(self):
+        quiet = {"approve": [], "rebase": [], "hide": []}
+        _, got, log = self.run_actions(self.sweep(**quiet))
+        self.assertEqual((got, "reviews" in log), ({}, False))
+
+    def test_an_approval_needs_each_guard_to_hold(self):
+        for field, value in (
+            ("touches_workflows", True),
+            ("files_truncated", True),
+            ("first_time", False),
+        ):
+            _, got, log = self.run_actions(
+                self.sweep(**self.approval(**{field: value}))
+            )
+            self.assertEqual(got[("approve", 1)], "confirm", field)
+            self.assertNotIn("/approve", log, field)
+
+    def test_a_workflow_on_a_base_token_trigger_confirms_every_approval(self):
+        for trigger in ("pull_request_target", "workflow_run"):
+            _, got, log = self.run_actions(
+                self.sweep(**self.approval()), workflows={"w.yml": f"on: {trigger}\n"}
+            )
+            self.assertEqual(got[("approve", 1)], "confirm", trigger)
+            self.assertNotIn("/approve", log, trigger)
+
+    def test_workflows_that_cannot_be_inspected_confirm_the_approval(self):
+        _, got, _ = self.run_actions(self.sweep(**self.approval()), workflows={})
+        self.assertEqual(got[("approve", 1)], "confirm")
+        _, got, log = self.run_actions(
+            self.sweep(**self.approval()),
+            workflows={"w.yml": "on: push\n"},
+            repo="other/repo",
+        )
+        self.assertEqual(got[("approve", 1)], "confirm")
+        self.assertNotIn("/approve", log)
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads an unreadable file")
+    def test_a_workflow_directory_grep_cannot_read_confirms_the_approval(self):
+        # An unreadable file makes grep exit 2, which is no answer either way.
+        with tempfile.TemporaryDirectory() as wf:
+            unreadable = Path(wf) / "w.yml"
+            unreadable.write_text("on: pull_request\n")
+            unreadable.chmod(0)
+            try:
+                _, got, log = self.run_actions(
+                    self.sweep(**self.approval()), WORKFLOWS_DIR=wf
+                )
+            finally:
+                unreadable.chmod(0o644)
+        self.assertEqual(got[("approve", 1)], "confirm")
+        self.assertNotIn("/approve", log)
+
+    def test_a_hide_with_no_author_evidence_is_left_to_confirm(self):
+        _, got, log = self.run_actions(self.sweep(hide=[{"pr": 4, "id": "IC_4"}]))
+        self.assertEqual(got[("hide", 4)], "confirm")
+        self.assertNotIn("minimizeComment", log)
+
+    def test_clean_workflows_leave_the_approval_to_the_sweep(self):
+        _, got, _ = self.run_actions(
+            self.sweep(**self.approval()), workflows={"w.yml": "on: pull_request\n"}
+        )
+        self.assertEqual(got[("approve", 1)], "applied")
+
+    def test_a_sweep_of_the_wrong_shape_writes_nothing_and_exits_2(self):
+        bad = (
+            self.approval(first_time="false"),
+            {"approve": [{"pr": 1, "run": 11, "first_time": True}]},
+            {"rebase": None},
+            {"rebase": [{"pr": 3}]},
+            {"rebase": [{"pr": 3, "reason": "confict"}]},
+            {"hide": [{"pr": 3}]},
+            {"maintainers_known": None},
+        )
+        for fields in bad:
+            result, got, log = self.run_actions(self.sweep(**fields))
+            self.assertEqual((result.returncode, got), (2, {}), fields)
+            self.assertEqual(log, "", fields)
+
+    def test_applies_what_a_sweep_may_and_leaves_the_rest_to_confirm(self):
+        result, got, log = self.run_actions(self.sweep())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            got,
+            {
+                ("approve", 1): "applied",
+                ("approve", 2): "confirm",
+                ("rebase", 3): "applied",
+                ("hide", 3): "applied",
+                ("hide", 4): "applied",
+            },
+        )
+        self.assertIn("actions/runs/11/approve", log)
+        self.assertNotIn("actions/runs/12/approve", log)
+
+    def test_a_moved_head_posts_nothing_and_keeps_the_old_request_visible(self):
+        result, got, log = self.run_actions(self.sweep(), FAKE_VIEW="CONFLICTING h9")
+        self.assertEqual(got[("rebase", 3)], "skipped")
+        self.assertEqual(got[("hide", 3)], "skipped")
+        self.assertEqual(got[("hide", 4)], "applied")
+        self.assertNotIn("pulls/3/reviews", log)
+        result, got, _ = self.run_actions(self.sweep(), FAKE_VIEW="MERGEABLE h3")
+        self.assertEqual(got[("rebase", 3)], "skipped")
+
+    def test_a_run_approved_meanwhile_is_not_a_failure(self):
+        result, got, _ = self.run_actions(self.sweep(), FAKE_NOT_WAITING="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(got[("approve", 1)], "already")
+
+    def test_unknown_maintainers_require_confirmation_before_hiding(self):
+        result, got, log = self.run_actions(self.sweep(maintainers_known=False))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(got[("hide", 3)], "confirm")
+        self.assertEqual(got[("hide", 4)], "confirm")
+        self.assertNotIn("minimizeComment", log)
+
+    def test_a_run_no_longer_waiting_needs_a_verified_running_status(self):
+        for status in ("queued", "completed", "unread"):
+            with self.subTest(status=status):
+                result, got, log = self.run_actions(
+                    self.sweep(), FAKE_NOT_WAITING="1", FAKE_RUN_STATUS=status
+                )
+                self.assertIn("run view 11", log)
+                self.assertEqual(
+                    got[("approve", 1)], "already" if status == "queued" else "failed"
+                )
+                self.assertEqual(result.returncode, 0 if status == "queued" else 1)
 
 
 @unittest.skipUnless(shutil.which("jq"), "jq is not installed")
