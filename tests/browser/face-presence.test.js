@@ -8,7 +8,7 @@ import {
   createFacePresenceTracker,
   FACE_ASSET_FILES,
   faceAssetUrl,
-  missingFaceAssets,
+  loadFaceAssets,
   faceGeometry,
   facePresenceVerdict,
   normalizeFaceResults,
@@ -372,17 +372,42 @@ test("the files the detector asks for are exactly the vendored ones", () => {
   assert.deepEqual([...FACE_ASSET_FILES].sort(), loaded.sort());
 });
 
-test("a file the server answers 404 is named, and a failed request is not", async () => {
+test("the model download names a 404, tolerates an offline request and reports progress", async () => {
+  const body = (size) => {
+    let sent = false;
+    return {
+      getReader: () => ({
+        read: async () =>
+          sent
+            ? { done: true }
+            : ((sent = true), { done: false, value: new Uint8Array(size) }),
+      }),
+    };
+  };
   const fetchFn = async (url) => {
     if (url.endsWith(".tflite")) return { status: 404 };
     if (url.endsWith(".binarypb")) throw new TypeError("offline");
-    return { status: 200 };
+    return {
+      status: 200,
+      headers: { get: () => "10" },
+      body: body(10),
+    };
   };
-  assert.deepEqual(await missingFaceAssets({ fetchFn }), [
+  const seen = [];
+  const result = await loadFaceAssets({
+    fetchFn,
+    onProgress: (value) => seen.push(value),
+  });
+  assert.deepEqual(result.missing, [
     { file: "face_detection_short_range.tflite", status: 404 },
   ]);
-  assert.deepEqual(
-    await missingFaceAssets({ fetchFn: async () => ({ status: 200 }) }),
-    [],
-  );
+  assert.deepEqual(result.unreachable, ["face_detection_short.binarypb"]);
+  assert.deepEqual(seen.at(-1), { loaded: 50, total: 50 });
+});
+
+test("a complete, reachable model reports nothing wrong", async () => {
+  const result = await loadFaceAssets({
+    fetchFn: async () => ({ status: 200, headers: { get: () => null } }),
+  });
+  assert.deepEqual(result, { missing: [], unreachable: [] });
 });

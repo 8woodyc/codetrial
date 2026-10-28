@@ -103,10 +103,10 @@ globalThis.LivekitClient = {RoomEvent, Room, Track: {Source: {Microphone: "micro
 const detector = `
 export const FACE_SAMPLE_GAP_MS = 5000;
 export const FACE_SAMPLE_UNAVAILABLE = {available: false, count: 0, confidence: 0};
-export async function missingFaceAssets() { return globalThis.missingFaceFiles ?? []; }
+export async function loadFaceAssets({onProgress}) { onProgress({loaded: 5, total: 10}); return globalThis.faceFilesResult ?? {missing: [], unreachable: []}; }
 export async function createFacePresenceDetector() {
   if (globalThis.detectorMissing) return {available: false, reason: "detector_load_failed"};
-  return {available: true, async detect() { return globalThis.faceHang ? new Promise(() => {}) : globalThis.faceSample; }, close() { globalThis.detectorCloses = (globalThis.detectorCloses ?? 0) + 1; }};
+  return {available: true, async detect() { const wait = globalThis.faceFirstDelay ?? 0; globalThis.faceFirstDelay = 0; if (wait) await new Promise((resolve) => setTimeout(resolve, wait)); return globalThis.faceHang ? new Promise(() => {}) : globalThis.faceSample; }, close() { globalThis.detectorCloses = (globalThis.detectorCloses ?? 0) + 1; }};
 }
 `;
 
@@ -122,6 +122,7 @@ async function pageFor(
     reviewMissing = false,
     runnerOutage = false,
     learnerError = false,
+    faceFiles = null,
     runnerBody = null,
     githubSignedIn = null,
     taskOverrides = {},
@@ -141,7 +142,8 @@ async function pageFor(
   const reviewRequests = [];
   const unlocks = [];
   await page.addInitScript(
-    ({ denied }) => {
+    ({ denied, faceFiles }) => {
+      if (faceFiles) globalThis.faceFilesResult = faceFiles;
       globalThis.faceSample = {
         available: true,
         count: 1,
@@ -190,7 +192,7 @@ async function pageFor(
       });
       globalThis.createImageBitmap = async () => ({ close() {} });
     },
-    { denied },
+    { denied, faceFiles },
   );
   await page.route(`**/t/classroom/*`, (route) =>
     route.fulfill({ contentType: "text/html", body: read("web/task.html") }),
@@ -357,6 +359,254 @@ const ended = (page) =>
       .filter((row) => row.topic === "task_end")
       .map((row) => [row.message.outcome, row.message.cause]),
   );
+
+test("task setup and work keep their reading order when the columns stack", async (t) => {
+  const ctx = await pageFor(t, {
+    taskOverrides: {
+      title:
+        "A longer assignment title with a supplied implementation to revise",
+      publicCases: {
+        cases: [
+          { label: "nested delimiters", input: ["([])"], expected: true },
+        ],
+      },
+    },
+  });
+  if (!ctx) return;
+  const { page } = ctx;
+  const fits = () =>
+    page.evaluate(() => {
+      const workspace = document.getElementById("workspace");
+      return (
+        document.documentElement.scrollWidth <= innerWidth &&
+        workspace.scrollWidth <= workspace.clientWidth
+      );
+    });
+  // The first column ends where the second begins when they sit side by side,
+  // and above it when they stack.
+  const layout = async (first, second, direction) => {
+    const [one, two] = await Promise.all(
+      [first, second].map((selector) => page.locator(selector).boundingBox()),
+    );
+    const at = `${first} and ${second} at ${page.viewportSize().width}px`;
+    if (direction === "row")
+      assert.ok(one.x + one.width <= two.x, `${at} do not sit side by side`);
+    else assert.ok(one.y + one.height <= two.y, `${at} do not stack`);
+    assert.equal(await fits(), true, `${at} overflow the page`);
+  };
+  const across = async (first, second, ready = async () => {}) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await layout(first, second, "row");
+    await page.setViewportSize({ width: 901, height: 900 });
+    await layout(first, second, "row");
+    for (const width of [900, 640, 480, 375]) {
+      await page.setViewportSize({ width, height: 900 });
+      await layout(first, second, "column");
+      await ready();
+    }
+  };
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await unlock(page);
+    await across(".rules-panel", ".device-steps");
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await prepare(page, true);
+    await page.click("#start");
+    await page.waitForFunction(() => !document.getElementById("code").disabled);
+    assert.match(
+      await page.locator("#public-cases").textContent(),
+      /nested delimiters/,
+    );
+    await across(".task-reference", ".task-editor", async () =>
+      assert.equal(await page.locator("#run").isEnabled(), true),
+    );
+  } finally {
+    await page.close();
+  }
+});
+
+test("the editor can fill the page and give it back to the brief", async (t) => {
+  const ctx = await pageFor(t);
+  if (!ctx) return;
+  const { page } = ctx;
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await start(page);
+    const toggle = page.locator("#maximize-editor");
+    const width = () =>
+      page.locator("#code").evaluate((box) => box.clientWidth);
+    const split = await width();
+    assert.equal(await toggle.getAttribute("aria-pressed"), "false");
+    assert.equal(await page.locator(".task-reference").isVisible(), true);
+    await toggle.click();
+    assert.equal(await toggle.getAttribute("aria-pressed"), "true");
+    assert.equal(await page.locator(".task-reference").isVisible(), false);
+    assert.ok((await width()) > split * 1.5, "the editor widened");
+    assert.equal(await page.locator("#code").isVisible(), true);
+    assert.equal(
+      await page.evaluate(() => document.activeElement.id),
+      "maximize-editor",
+    );
+    await page.fill("#code", "pass\n");
+    await toggle.click();
+    assert.equal(await toggle.getAttribute("aria-pressed"), "false");
+    assert.equal(await page.locator(".task-reference").isVisible(), true);
+    assert.equal(await page.locator("#code").inputValue(), "pass\n");
+    assert.equal(await page.locator("#run").isEnabled(), true);
+  } finally {
+    await page.close();
+  }
+});
+
+test("the task editor paints syntax colours and line numbers behind the textarea", async (t) => {
+  const ctx = await pageFor(t);
+  if (!ctx) return;
+  const { page } = ctx;
+  try {
+    await start(page);
+    const layer = page.locator(".editor-highlight code");
+    // A trailing newline is painted once more, so the last line keeps its row.
+    const painted = async () => {
+      const value = await page.inputValue("#code");
+      return value.endsWith("\n") ? `${value}\n` : value;
+    };
+    const gutter = page.locator(".editor-lines");
+    // The starter: a comment and a keyword, three lines for a buffer ending in
+    // a newline.
+    await page.waitForFunction(() =>
+      document.querySelector(".editor-highlight code .tok-comment"),
+    );
+    assert.equal(await gutter.textContent(), "1\n2\n3");
+    const colour = (selector) =>
+      page
+        .locator(selector)
+        .first()
+        .evaluate((node) => getComputedStyle(node).color);
+    assert.equal(
+      await colour(".editor-highlight .tok-comment"),
+      "rgb(106, 153, 85)",
+    );
+    // The glyphs the learner sees are the layer's; the textarea's are clear.
+    assert.equal(await colour("#code"), "rgba(0, 0, 0, 0)");
+    // The text is not painted twice: the layer holds exactly the buffer.
+    assert.equal(await layer.textContent(), await painted());
+
+    await page.fill("#code", "def f(x):\n    return 'a' + str(1)\n\n\n");
+    await page.waitForFunction(() =>
+      document.querySelector(".editor-highlight code .tok-string"),
+    );
+    assert.equal(await gutter.textContent(), "1\n2\n3\n4\n5");
+    assert.match(await layer.innerHTML(), /tok-keyword">def</);
+    assert.equal(await layer.textContent(), await painted());
+
+    // A long buffer: the layers follow the textarea's scroll.
+    await page.fill(
+      "#code",
+      Array.from({ length: 120 }, (_, i) => `x${i} = ${i}`).join("\n"),
+    );
+    await page.evaluate(() => {
+      document.getElementById("code").scrollTop = 900;
+    });
+    await page.waitForFunction(
+      () => document.querySelector(".editor-highlight").scrollTop > 0,
+    );
+    assert.deepEqual(
+      await page.evaluate(() => [
+        document.getElementById("code").scrollTop,
+        document.querySelector(".editor-highlight").scrollTop,
+        document.querySelector(".editor-lines").scrollTop,
+      ]),
+      [900, 900, 900],
+    );
+  } finally {
+    await page.close();
+  }
+});
+
+test("the task page keeps the lobby's palette tokens", () => {
+  const tokens = (css) => {
+    const block = css.slice(css.indexOf(":root {"));
+    return new Map(
+      [
+        ...block
+          .slice(0, block.indexOf("\n}"))
+          .matchAll(/^\s+(--[\w-]+):\s*([^;]+);/gm),
+      ].map((match) => [match[1], match[2].trim()]),
+    );
+  };
+  const lobby = tokens(read("web/styles.css"));
+  const task = tokens(read("web/task.css"));
+  const shared = [...task.keys()].filter((name) => lobby.has(name));
+  for (const name of [
+    "--page",
+    "--surface",
+    "--ink",
+    "--sub",
+    "--muted",
+    "--hairline",
+    "--accent",
+    "--accent-fill",
+    "--accent-deep",
+    "--control-border",
+    "--step-surface",
+    "--selected-surface",
+  ])
+    assert.ok(shared.includes(name), `${name} is not shared`);
+  for (const name of shared)
+    assert.equal(task.get(name), lobby.get(name), name);
+});
+
+test("the learning review groups feedback under readable headings", async (t) => {
+  const feedback = JSON.parse(
+    read("tests/fixtures/task-review.json"),
+  ).cases.find((row) => row.name === "validated review").payload;
+  const ctx = await pageFor(t, { completedReview: feedback });
+  if (!ctx) return;
+  const { page } = ctx;
+  try {
+    await start(page);
+    await page.click("#finish");
+    await page.click("#confirm-finish");
+    await page.evaluate(
+      (feedback) => globalThis.taskHarness.publish("task_review", feedback),
+      feedback,
+    );
+    await page
+      .locator("#review-content h3")
+      .first()
+      .waitFor({ state: "visible" });
+    const labels = {
+      reasoningParticipation: "Reasoning participation",
+      implementationOwnership: "Implementation ownership",
+      testingAndDiagnosis: "Testing and diagnosis",
+      revisionAndImprovement: "Revision and improvement",
+    };
+    const { dimensions, gaps, nextActions } = feedback.taskAssessment;
+    const expected = [
+      ...Object.entries(dimensions).map(([name, row]) => [
+        labels[name],
+        `${row.rating ?? "Insufficient evidence"}. ${row.reason}`,
+      ]),
+      ["Gaps", gaps.join(" ")],
+      ["Next actions", nextActions.join(" ")],
+    ];
+    assert.deepEqual(
+      await page
+        .locator("#review-content .review-item")
+        .evaluateAll((rows) =>
+          rows.map((row) => [
+            row.querySelector("h3").textContent,
+            row.querySelector("p").textContent,
+          ]),
+        ),
+      expected,
+    );
+    assert.equal(await page.locator("#export-review").isEnabled(), true);
+    assert.equal(await page.locator("#export-code").isEnabled(), true);
+  } finally {
+    await page.close();
+  }
+});
 
 test("device sign-in, then the PIN unlocks the set at the linked site and version", async (t) => {
   const ctx = await pageFor(t, { signedIn: false });
@@ -733,24 +983,60 @@ test("a keyboard glance shorter than the threshold never ends the attempt", asyn
 });
 
 test("a server without the face detector files says which are missing", async (t) => {
-  const ctx = await pageFor(t);
+  const ctx = await pageFor(t, {
+    faceFiles: {
+      missing: [
+        { file: "face_detection_short_range.tflite", status: 404 },
+        { file: "face_detection_solution_wasm_bin.wasm", status: 404 },
+      ],
+      unreachable: [],
+    },
+  });
   if (!ctx) return;
   const { page } = ctx;
   try {
     await unlock(page);
     await page.check("#acknowledge");
-    await page.evaluate(() => {
-      globalThis.detectorMissing = true;
-      globalThis.missingFaceFiles = [
-        { file: "face_detection_short_range.tflite", status: 404 },
-        { file: "face_detection_solution_wasm_bin.wasm", status: 404 },
-      ];
-    });
     await page.click("#devices");
-    const message = await page.locator("#message-text").textContent();
-    assert.match(message, /face_detection_short_range\.tflite/);
-    assert.match(message, /face_detection_solution_wasm_bin\.wasm/);
-    assert.match(message, /fetch-vendor\.sh/);
+    for (const place of ["#message-text", "#detector-status"]) {
+      const text = await page.locator(place).textContent();
+      assert.match(text, /face_detection_short_range\.tflite/);
+      assert.match(text, /face_detection_solution_wasm_bin\.wasm/);
+      assert.match(text, /fetch-vendor\.sh/);
+    }
+  } finally {
+    await page.close();
+  }
+});
+
+test("the face model's download and start are shown, and calibration waits for them", async (t) => {
+  const ctx = await pageFor(t);
+  if (!ctx) return;
+  const { page } = ctx;
+  try {
+    assert.match(
+      await page.locator("#detector-status").textContent(),
+      /model downloaded|Downloading the face model/,
+    );
+    await unlock(page);
+    await page.check("#acknowledge");
+    await page.evaluate(() => (globalThis.faceFirstDelay = 9000));
+    await page.click("#devices");
+    await page.waitForFunction(() =>
+      /Starting the face detector/.test(
+        document.getElementById("detector-status").textContent,
+      ),
+    );
+    assert.equal(await page.locator("#calibrate").isDisabled(), true);
+    await page.clock.runFor(9500);
+    await page.waitForFunction(() =>
+      /Face detector ready/.test(
+        document.getElementById("detector-status").textContent,
+      ),
+    );
+    await page.waitForFunction(
+      () => !document.getElementById("calibrate").disabled,
+    );
   } finally {
     await page.close();
   }
@@ -1037,6 +1323,18 @@ test("the calculator works inside the workspace", async (t) => {
     await page.fill("#calculator-input", "(17 + 4) * 2 ^ 3");
     await page.locator("#calculator button").click();
     assert.equal(await page.locator("#calculator-result").textContent(), "168");
+    await page.fill("#calculator-input", "sin(30)");
+    await page.locator("#calculator button").click();
+    assert.equal(
+      await page.locator("#calculator-result").textContent(),
+      "-0.988031624093",
+    );
+    await page.selectOption("#calculator-angle", "deg");
+    await page.locator("#calculator button").click();
+    assert.equal(await page.locator("#calculator-result").textContent(), "0.5");
+    await page.fill("#calculator-input", "exp(1) - e");
+    await page.locator("#calculator button").click();
+    assert.equal(await page.locator("#calculator-result").textContent(), "0");
     await page.fill("#calculator-input", "alert(1)");
     await page.locator("#calculator button").click();
     assert.match(

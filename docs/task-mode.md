@@ -373,8 +373,11 @@ After unlock, before anything is timed, the learner prepares:
    learner ticks an acknowledgement, recorded with the time and the rules.
 2. **Devices.** Microphone and camera permission is granted now, so no prompt
    can appear mid-attempt. The same tracks are kept for the whole attempt.
-   A server that lacks the face detector's files is named in the error, with
-   the script that fetches them, instead of the detector being called silent.
+   The face model is downloaded as the page opens, with a progress bar, and
+   started when the camera is allowed; the page says when it is ready, and
+   Calibrate waits for it. A server that lacks the model's files is named in
+   the message, with the script that fetches them, and an offline download is
+   reported as that and not as a missing model.
 3. **Calibration.** About twenty seconds with the face detector running: the
    learner looks at the screen, then types a given line into a text field (a
    calibration in which it was not typed is refused). The phase ends once the
@@ -625,11 +628,20 @@ itself as locally generated learning feedback.
 
 ## Workspace
 
+The editor paints the interview editor's syntax colours, line numbers, indent
+guides and bracket match behind its textarea, in the language the learner chose.
 Besides the editor, the workspace provides a calculator, so arithmetic never
-needs another tab or app, and keeps the rules, the countdown, connection
-status and help inside the fullscreen view. Credential repair, sign-in and
-device selection happen only before Start. CodeTrial stops monitoring before it
-leaves fullscreen itself at the end of an attempt.
+needs another tab or app. It evaluates one expression with `+ - * / // %`,
+`^` for powers, `pi`, `e`, and the functions `sin cos tan asin acos atan
+atan2 sinh cosh tanh exp ln log log2 sqrt cbrt pow hypot min max abs floor
+ceil round deg rad`. A selector sets whether trigonometric functions take and
+return radians or degrees, and in degrees the multiples of 90 are exact. A
+button above the editor gives it the whole page, and hides the brief and the
+public cases, until it is pressed again; the code is the same either way. The
+workspace keeps the rules, the countdown, connection status and help inside the
+fullscreen view. Credential repair, sign-in and device selection happen only
+before Start. CodeTrial stops monitoring before it leaves fullscreen itself at
+the end of an attempt.
 
 ## Runtime and delivery bounds
 

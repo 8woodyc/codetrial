@@ -39,25 +39,52 @@ export const FACE_ASSET_FILES = [
   "face_detection_solution_wasm_bin.wasm",
 ];
 
-/// The detector files the server does not have, with the status it answered.
-/// A request that did not complete says nothing about the file and is not
-/// listed: an offline learner is not told the server lacks a model.
-export async function missingFaceAssets({
+/// Fetches every detector file, so the model is downloaded and cached before
+/// the first detection needs it, and reports what is wrong with the ones that
+/// cannot be had. `missing` holds the files the server answered 404 for, and
+/// `unreachable` those a request did not complete for: an offline learner is
+/// not told the server lacks a model. `onProgress` gets the bytes read so far
+/// and the total the responses announced, which grows as headers arrive.
+export async function loadFaceAssets({
   fetchFn = globalThis.fetch,
   baseUrl = FACE_VENDOR_BASE,
+  onProgress = () => {},
 } = {}) {
   const missing = [];
+  const unreachable = [];
+  let loaded = 0;
+  let total = 0;
   await Promise.all(
     FACE_ASSET_FILES.map(async (file) => {
       try {
-        const response = await fetchFn(faceAssetUrl(file, baseUrl), {
-          method: "HEAD",
-        });
-        if (response.status === 404) missing.push({ file, status: 404 });
-      } catch {}
+        const response = await fetchFn(faceAssetUrl(file, baseUrl));
+        if (response.status === 404) {
+          missing.push({ file, status: 404 });
+          return;
+        }
+        total += Number(response.headers?.get?.("content-length")) || 0;
+        onProgress({ loaded, total });
+        const reader = response.body?.getReader?.();
+        if (!reader) {
+          loaded += (await response.arrayBuffer?.())?.byteLength ?? 0;
+        } else {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            loaded += value.byteLength;
+            onProgress({ loaded, total });
+          }
+        }
+      } catch {
+        unreachable.push(file);
+      }
     }),
   );
-  return missing.sort((a, b) => a.file.localeCompare(b.file));
+  onProgress({ loaded, total });
+  return {
+    missing: missing.sort((a, b) => a.file.localeCompare(b.file)),
+    unreachable: unreachable.sort(),
+  };
 }
 
 // The most confident face's box and keypoints, in frame-relative units, for

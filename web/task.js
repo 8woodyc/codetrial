@@ -28,14 +28,15 @@ import {
 import {
   FACE_SAMPLE_UNAVAILABLE,
   createFacePresenceDetector,
-  missingFaceAssets,
+  loadFaceAssets,
 } from "./face-presence.js";
 import {
   calibrate,
   createLookAwayMonitor,
   MIN_PHASE_SAMPLES,
 } from "./look-away.js";
-import { evaluate } from "./calculator.js";
+import { evaluate, formatResult } from "./calculator.js";
+import { mountEditorView } from "./editor-view.js";
 import { CONSTRAINTS } from "./devices.js";
 import { videoTrackReady } from "./audio-check.js";
 import { COMPILED_LANGUAGES } from "./compiler-explorer.js";
@@ -62,6 +63,8 @@ const query = new URLSearchParams(location.search);
 const site = query.get("site") ?? "";
 const version = Number(query.get("version"));
 let task, state, room, review;
+// The editor's syntax colours and line numbers, behind the textarea.
+let editorView;
 let revisionId = "initial";
 // The language chosen for this attempt: the task's first until the learner
 // picks another, and fixed once a room is joined for it.
@@ -101,6 +104,9 @@ let recoveryTimer;
 let acknowledgedAt = null;
 let media = null;
 let detector = null;
+// Whether the detector has answered once, which is the model loaded and
+// running and not only downloaded.
+let faceReady = false;
 let calibration = null;
 let calibrating = false;
 let monitorTimer = null;
@@ -356,6 +362,7 @@ async function loadTask() {
   $("public-cases").replaceChildren();
   $("brief").replaceChildren();
   $("code").value = "";
+  editorView?.paint();
   let loaded;
   try {
     loaded = await api(
@@ -426,6 +433,7 @@ function chooseLanguage(value) {
   language = value;
   $("language").value = value;
   $("code").value = task.starterCode[value];
+  editorView?.paint();
   $("code-label").textContent = `${languageLabel(value)} implementation`;
   $("compiled-note").hidden = !COMPILED_LANGUAGES.includes(value);
   $("target").replaceChildren(
@@ -482,15 +490,49 @@ $("acknowledge").onchange = () => {
   if (!acknowledgedAt) $("start").disabled = true;
   $("devices").disabled = !acknowledgedAt || Boolean(media);
   $("calibrate").disabled =
-    !acknowledgedAt || !media || !task || Boolean(room) || calibrating;
+    !acknowledgedAt ||
+    !media ||
+    !faceReady ||
+    !task ||
+    Boolean(room) ||
+    calibrating;
 };
+
+/// How long the first detection may take. It starts the model, which takes
+/// seconds on a slow machine.
+const DETECTOR_START_MS = 30000;
+
+function detectorStatus(text, percent = null) {
+  $("detector-status").textContent = text;
+  const bar = $("detector-progress");
+  bar.hidden = percent === null;
+  if (percent !== null) bar.value = percent;
+}
+
+// The model is downloaded as the page opens, with its progress shown, so the
+// learner can tell a download in progress from one that failed before they
+// spend the calibration on it.
+detectorStatus("Downloading the face model…", 0);
+const faceFiles = loadFaceAssets({
+  onProgress: ({ loaded, total }) =>
+    detectorStatus(
+      "Downloading the face model…",
+      total ? Math.min(99, Math.floor((loaded / total) * 100)) : 0,
+    ),
+}).then((result) => {
+  detectorStatus(
+    faceFilesProblem(result) || "Face model downloaded. Allow the camera next.",
+  );
+  return result;
+});
 
 /// What to tell a learner when the server lacks the detector's files, which no
 /// amount of retrying fixes and which "not answering" would send them to retry.
-async function faceFilesProblem() {
-  const missing = await missingFaceAssets();
-  return missing.length
-    ? `This server is missing face detector files (${missing.map(({ file }) => file).join(", ")}). Ask whoever runs it to run scripts/fetch-vendor.sh, then reload the page.`
+function faceFilesProblem({ missing, unreachable }) {
+  if (missing.length)
+    return `This server is missing face detector files (${missing.map(({ file }) => file).join(", ")}). Ask whoever runs it to run scripts/fetch-vendor.sh, then reload the page.`;
+  return unreachable.length
+    ? `The face model could not be downloaded (${unreachable.join(", ")}). Check the connection, then reload the page.`
     : "";
 }
 
@@ -515,20 +557,41 @@ $("devices").onclick = async () => {
     // The calibration needs keypoints; a browser's native detector gives
     // only a count.
     detector?.close?.();
+    faceReady = false;
+    const problem = faceFilesProblem(await faceFiles);
+    if (problem) throw { code: "calibration_required", message: problem };
+    detectorStatus("Starting the face detector…");
     detector = await createFacePresenceDetector({ native: false });
     if (!detector?.available)
       throw {
         code: "calibration_required",
         message:
-          (await faceFilesProblem()) ||
           "The face detector could not start. Reload the page and try again.",
       };
+    // The first detection starts the model, so it is taken now: the learner
+    // is told when the detector is running, not only when it was fetched.
+    let timer;
+    const first = await Promise.race([
+      detector.detect($("preview")).catch(() => FACE_SAMPLE_UNAVAILABLE),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(null), DETECTOR_START_MS);
+      }),
+    ]).finally(() => clearTimeout(timer));
+    if (!first?.available)
+      throw {
+        code: "calibration_required",
+        message:
+          "The face detector downloaded but is not answering. Reload the page and try again.",
+      };
+    faceReady = true;
+    detectorStatus("Face detector ready.");
     $("devices").disabled = true;
     $("calibrate").disabled = !task || !acknowledgedAt;
   } catch (value) {
     media?.getTracks().forEach((track) => track.stop());
     media = null;
     $("devices").disabled = false;
+    if (value?.code === "calibration_required") detectorStatus(value.message);
     error(
       value?.code
         ? value
@@ -615,8 +678,7 @@ $("calibrate").onclick = async () => {
         result.reason === "too_few_samples"
           ? `The camera gave fewer than ${MIN_PHASE_SAMPLES} samples. Check it is not used elsewhere, then calibrate again.`
           : result.reason === "detector_unavailable"
-            ? (await faceFilesProblem()) ||
-              "The face detector is not answering. Reload the page and try again."
+            ? "The face detector is not answering. Reload the page and try again."
             : "Your face was not steadily in view. Face the camera with good light in front of you, then calibrate again.";
       return;
     }
@@ -1007,6 +1069,7 @@ function stopMonitoring() {
     media = null;
     detector?.close?.();
     detector = null;
+    faceReady = false;
     beepContext?.close().catch(() => {});
     beepContext = null;
   }
@@ -1429,11 +1492,28 @@ $("thinking").onchange = () =>
     error,
   );
 
+editorView = mountEditorView({
+  stack: $("code").closest(".editor-stack"),
+  editor: $("code"),
+  language: () => language,
+});
+
+// The brief and cases beside the editor, or the editor alone across the page.
+// The button stays on screen in both views, so focus never leaves it.
+$("maximize-editor").onclick = () => {
+  const maximized =
+    $("maximize-editor").getAttribute("aria-pressed") !== "true";
+  $("maximize-editor").setAttribute("aria-pressed", String(maximized));
+  $("task-grid").dataset.maximized = String(maximized);
+};
+
 $("calculator").onsubmit = (event) => {
   event.preventDefault();
   try {
-    $("calculator-result").textContent = String(
-      evaluate($("calculator-input").value),
+    $("calculator-result").textContent = formatResult(
+      evaluate($("calculator-input").value, {
+        angle: $("calculator-angle").value,
+      }),
     );
   } catch (value) {
     $("calculator-result").textContent = value.message;
@@ -1442,6 +1522,12 @@ $("calculator").onsubmit = (event) => {
 
 // --- The result --------------------------------------------------------------
 
+const DIMENSION_LABELS = {
+  reasoningParticipation: "Reasoning participation",
+  implementationOwnership: "Implementation ownership",
+  testingAndDiagnosis: "Testing and diagnosis",
+  revisionAndImprovement: "Revision and improvement",
+};
 function renderReview(value, awaitingResult = false) {
   value = taskReviewForDisplay(value);
   clearError();
@@ -1474,17 +1560,29 @@ function renderReview(value, awaitingResult = false) {
     return;
   }
   if (!value.taskAssessment?.dimensions) return;
+  function appendFeedback(label, text) {
+    const section = document.createElement("section");
+    section.className = "review-item";
+    const heading = document.createElement("h3");
+    heading.textContent = label;
+    const p = document.createElement("p");
+    p.textContent = text;
+    section.append(heading, p);
+    container.append(section);
+  }
   for (const [name, dimension] of Object.entries(
     value.taskAssessment.dimensions,
   )) {
-    const p = document.createElement("p");
-    p.textContent = `${name}: ${dimension.rating ?? "Insufficient evidence"}. ${dimension.reason}`;
-    container.append(p);
+    appendFeedback(
+      DIMENSION_LABELS[name] ?? name,
+      `${dimension.rating ?? "Insufficient evidence"}. ${dimension.reason}`,
+    );
   }
-  for (const field of ["gaps", "nextActions"]) {
-    const p = document.createElement("p");
-    p.textContent = `${field}: ${value.taskAssessment[field].join(" ")}`;
-    container.append(p);
+  for (const [field, label] of [
+    ["gaps", "Gaps"],
+    ["nextActions", "Next actions"],
+  ]) {
+    appendFeedback(label, value.taskAssessment[field].join(" "));
   }
 }
 $("new-attempt").onclick = () => {

@@ -6,17 +6,61 @@
 /// Characters one expression may hold.
 export const MAX_EXPRESSION_LENGTH = 200;
 
+const RADIANS_PER_DEGREE = Math.PI / 180;
+
+/// A trigonometric function of an angle in the mode's unit. In degrees the
+/// multiples of 90 are exact, so `cos(90)` is 0 and `tan(90)` is refused,
+/// where radians would give 6e-17 and 1.6e16.
+function trigonometric(name, exact, direct) {
+  return (angle, argument) => {
+    if (angle === "deg" && argument % 90 === 0) {
+      const quarter = (((argument / 90) % 4) + 4) % 4;
+      const value = exact[quarter];
+      if (value === undefined)
+        throw new Error(`${name} is undefined at ${argument} degrees`);
+      return value;
+    }
+    const radians = angle === "deg" ? argument * RADIANS_PER_DEGREE : argument;
+    return direct(radians);
+  };
+}
+
+/// A function of one or more numbers: how many, and what it returns, given
+/// the angle unit as its first argument.
 const FUNCTIONS = {
-  sqrt: Math.sqrt,
-  abs: Math.abs,
-  ln: Math.log,
-  log: Math.log10,
-  log2: Math.log2,
-  floor: Math.floor,
-  ceil: Math.ceil,
-  round: Math.round,
+  sqrt: [1, (_, x) => Math.sqrt(x)],
+  cbrt: [1, (_, x) => Math.cbrt(x)],
+  abs: [1, (_, x) => Math.abs(x)],
+  exp: [1, (_, x) => Math.exp(x)],
+  ln: [1, (_, x) => Math.log(x)],
+  log: [1, (_, x) => Math.log10(x)],
+  log2: [1, (_, x) => Math.log2(x)],
+  floor: [1, (_, x) => Math.floor(x)],
+  ceil: [1, (_, x) => Math.ceil(x)],
+  round: [1, (_, x) => Math.round(x)],
+  sin: [1, trigonometric("sin", [0, 1, 0, -1], Math.sin)],
+  cos: [1, trigonometric("cos", [1, 0, -1, 0], Math.cos)],
+  tan: [1, trigonometric("tan", [0, undefined, 0, undefined], Math.tan)],
+  asin: [1, (angle, x) => fromRadians(angle, Math.asin(x))],
+  acos: [1, (angle, x) => fromRadians(angle, Math.acos(x))],
+  atan: [1, (angle, x) => fromRadians(angle, Math.atan(x))],
+  atan2: [2, (angle, y, x) => fromRadians(angle, Math.atan2(y, x))],
+  sinh: [1, (_, x) => Math.sinh(x)],
+  cosh: [1, (_, x) => Math.cosh(x)],
+  tanh: [1, (_, x) => Math.tanh(x)],
+  pow: [2, (_, x, y) => x ** y],
+  hypot: [2, (_, x, y) => Math.hypot(x, y)],
+  min: [2, (_, x, y) => Math.min(x, y)],
+  max: [2, (_, x, y) => Math.max(x, y)],
+  deg: [1, (_, x) => x / RADIANS_PER_DEGREE],
+  rad: [1, (_, x) => x * RADIANS_PER_DEGREE],
 };
 const CONSTANTS = { pi: Math.PI, e: Math.E };
+
+/// An angle that came back from an inverse function, in the mode's unit.
+function fromRadians(angle, radians) {
+  return angle === "deg" ? radians / RADIANS_PER_DEGREE : radians;
+}
 
 function tokenize(text) {
   const tokens = [];
@@ -39,10 +83,23 @@ function tokenize(text) {
   return tokens;
 }
 
+/// A result as the calculator shows it. An integer up to 2^53, which a double
+/// holds exactly, is shown whole, so `2^50` is not rounded; anything else keeps
+/// fifteen significant digits, so `sin(30)` in degrees reads 0.5 and not
+/// 0.49999999999999994.
+export function formatResult(value) {
+  if (Number.isInteger(value) && Math.abs(value) <= 2 ** 53)
+    return String(value);
+  return String(Number(value.toPrecision(15)));
+}
+
 /// The value of `text`, an arithmetic expression: numbers, `+ - * / // %`,
 /// `^` or `**` for powers, parentheses, `pi`, `e`, and the functions above.
-/// Throws an Error that names what was wrong.
-export function evaluate(text) {
+/// `angle` is the unit trigonometric functions take and return, "rad" or
+/// "deg". Throws an Error that names what was wrong.
+export function evaluate(text, { angle = "rad" } = {}) {
+  if (angle !== "rad" && angle !== "deg")
+    throw new Error("The angle unit is rad or deg");
   if (typeof text !== "string" || !text.trim())
     throw new Error("Enter an expression");
   if (text.length > MAX_EXPRESSION_LENGTH)
@@ -101,9 +158,15 @@ export function evaluate(text) {
       if (Object.hasOwn(CONSTANTS, token.name)) return CONSTANTS[token.name];
       if (Object.hasOwn(FUNCTIONS, token.name)) {
         if (!take("(")) throw new Error(`${token.name} needs parentheses`);
-        const value = expression();
+        const [arity, apply] = FUNCTIONS[token.name];
+        const values = [expression()];
+        while (take(",")) values.push(expression());
         if (!take(")")) throw new Error("A parenthesis is not closed");
-        return FUNCTIONS[token.name](value);
+        if (values.length !== arity)
+          throw new Error(
+            `${token.name} takes ${arity} argument${arity === 1 ? "" : "s"}`,
+          );
+        return apply(angle, ...values);
       }
       throw new Error(`Unknown name "${token.name}"`);
     }

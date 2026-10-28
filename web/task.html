@@ -11,7 +11,7 @@
   <body>
     <main id="workspace">
       <header>
-        <a href="/">CodeTrial</a><span id="phase">Task setup</span
+        <a class="brand" href="/">CodeTrial</a><span id="phase">Task setup</span
         ><time id="clock"></time>
       </header>
       <section id="message" role="status" hidden>
@@ -22,7 +22,7 @@
       <section id="signin" hidden>
         <h1>Sign in</h1>
         <p>Sign in with GitHub so your result names you.</p>
-        <button id="device-start">Sign in with GitHub</button>
+        <button id="device-start" class="primary">Sign in with GitHub</button>
         <div id="device-code" hidden>
           <p>
             Open <a id="device-link" target="_blank" rel="noopener"></a> and
@@ -51,107 +51,180 @@
               maxlength="6"
               autocomplete="off"
               required /></label
-          ><button>Unlock</button>
+          ><button class="primary">Unlock</button>
         </form>
       </section>
 
       <section id="prepare" hidden>
         <h1 id="prepare-title"></h1>
-        <label
-          >Task
-          <select id="task-picker"></select
-        ></label>
-        <label id="language-choice" hidden
-          >Language
-          <select id="language"></select
-        ></label>
+        <div class="assignment-fields">
+          <label
+            >Task
+            <select id="task-picker"></select
+          ></label>
+          <label id="language-choice" hidden
+            >Language
+            <select id="language"></select
+          ></label>
+        </div>
         <p id="language-note" hidden>
           C, C++ and Java runs are compiled on Compiler Explorer, so your code
           and the task's public test cases leave this computer when you run
           tests.
         </p>
-        <h2>Rules</h2>
-        <ul id="rules"></ul>
-        <p id="not-detected"></p>
-        <label
-          ><input type="checkbox" id="acknowledge" /> I have read these rules
-          and accept them.</label
-        >
-        <h2>Microphone and camera</h2>
-        <button id="devices" disabled>Allow microphone and camera</button>
-        <video id="preview" muted playsinline hidden></video>
-        <h2>Calibration</h2>
-        <p id="calibration-step">
-          Calibration measures how you normally sit, so glancing at the keyboard
-          never counts as looking away.
-        </p>
-        <input
-          id="calibration-line"
-          aria-label="Calibration typing line"
-          autocomplete="off"
-          spellcheck="false"
-          hidden
-        />
-        <button id="calibrate" disabled>Calibrate</button>
-        <p id="calibration-result" role="status"></p>
-        <button id="start" disabled>Start in fullscreen</button>
+        <div class="prepare-grid">
+          <section
+            class="setup-panel rules-panel"
+            aria-labelledby="rules-title"
+          >
+            <h2 id="rules-title">Rules</h2>
+            <ul id="rules"></ul>
+            <p id="not-detected"></p>
+            <label
+              ><input type="checkbox" id="acknowledge" /> I have read these
+              rules and accept them.</label
+            >
+          </section>
+          <div class="device-steps">
+            <section class="setup-panel" aria-labelledby="devices-title">
+              <h2 id="devices-title">Microphone and camera</h2>
+              <button id="devices" disabled>Allow microphone and camera</button>
+              <progress
+                id="detector-progress"
+                max="100"
+                aria-labelledby="detector-status"
+                hidden
+              ></progress>
+              <p id="detector-status" role="status"></p>
+              <video id="preview" muted playsinline hidden></video>
+            </section>
+            <section class="setup-panel" aria-labelledby="calibration-title">
+              <h2 id="calibration-title">Calibration</h2>
+              <p id="calibration-step">
+                Calibration measures how you normally sit, so glancing at the
+                keyboard never counts as looking away.
+              </p>
+              <input
+                id="calibration-line"
+                aria-label="Calibration typing sample"
+                aria-describedby="calibration-step"
+                autocomplete="off"
+                spellcheck="false"
+                hidden
+              />
+              <button id="calibrate" disabled>Calibrate</button>
+              <p id="calibration-result" role="status"></p>
+            </section>
+            <div class="start-row">
+              <button id="start" class="primary" disabled>
+                Start in fullscreen
+              </button>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section id="task" hidden>
         <h1 id="title"></h1>
         <div id="countdown" role="alert" hidden></div>
-        <div id="brief"></div>
-        <p id="contract"></p>
-        <h2>Public cases</h2>
-        <ul id="public-cases" aria-label="Public cases"></ul>
-        <ul id="checks" aria-label="Understanding checks"></ul>
-        <label
-          >Completion target
-          <select id="target">
-            <option value="">Whole task</option>
-          </select></label
-        >
-        <label for="code" id="code-label">Python implementation</label
-        ><textarea
-          id="code"
-          maxlength="32000"
-          spellcheck="false"
-          aria-describedby="code-keys"
-          disabled
-        ></textarea>
-        <p id="code-keys">
-          Tab indents. Press F2, then Tab, to move out of the editor.
-        </p>
-        <p id="compiled-note" hidden>
-          Runs are compiled on Compiler Explorer; your code and the public test
-          cases leave this computer.
-        </p>
-        <nav aria-label="Task controls">
-          <button id="run" disabled>Run public tests</button
-          ><button id="hint" disabled>Hint</button
-          ><button id="discuss" disabled>Discuss this revision</button
-          ><button id="finish" disabled>Finish</button>
-        </nav>
-        <label><input type="checkbox" id="thinking" />Thinking quietly</label>
-        <form id="calculator" aria-label="Calculator">
-          <label
-            >Calculator
-            <input id="calculator-input" autocomplete="off" spellcheck="false"
-          /></label>
-          <button>=</button>
-          <output id="calculator-result"></output>
-        </form>
-        <p>
-          Learner-reported practice evidence; these results are not formal
-          grades.
-        </p>
-        <pre id="results" role="status" aria-live="polite"></pre>
+        <div class="task-grid" id="task-grid">
+          <div class="task-reference">
+            <div id="brief"></div>
+            <p id="contract"></p>
+            <h2>Public cases</h2>
+            <ul id="public-cases" aria-label="Public cases"></ul>
+            <ul id="checks" aria-label="Understanding checks"></ul>
+          </div>
+          <div class="task-editor">
+            <label
+              >Completion target
+              <select id="target">
+                <option value="">Whole task</option>
+              </select></label
+            >
+            <div class="editor-bar">
+              <label for="code" id="code-label">Python implementation</label>
+              <button
+                id="maximize-editor"
+                type="button"
+                aria-pressed="false"
+                aria-controls="task-grid"
+              >
+                Maximize code editor
+              </button>
+            </div>
+            <!-- The textarea stays the source of truth and keeps native
+                 editing; the two layers behind it only paint the line numbers
+                 and the syntax colours. -->
+            <div class="editor-stack">
+              <pre class="editor-lines" aria-hidden="true"></pre>
+              <pre
+                class="editor-highlight"
+                aria-hidden="true"
+              ><code></code></pre>
+              <textarea
+                id="code"
+                maxlength="32000"
+                spellcheck="false"
+                aria-describedby="code-keys"
+                disabled
+              ></textarea>
+            </div>
+            <p id="code-keys">
+              Tab indents. Press F2, then Tab, to move out of the editor.
+            </p>
+            <p id="compiled-note" hidden>
+              Runs are compiled on Compiler Explorer; your code and the public
+              test cases leave this computer.
+            </p>
+            <nav aria-label="Task controls">
+              <button id="run" class="primary" disabled>Run public tests</button
+              ><button id="hint" disabled>Hint</button
+              ><button id="discuss" disabled>Discuss this revision</button
+              ><button id="finish" disabled>Finish</button>
+            </nav>
+            <label
+              ><input type="checkbox" id="thinking" />Thinking quietly</label
+            >
+            <form id="calculator" aria-label="Calculator">
+              <label
+                >Calculator
+                <input
+                  id="calculator-input"
+                  autocomplete="off"
+                  spellcheck="false"
+                  aria-describedby="calculator-help"
+              /></label>
+              <label class="calculator-angle"
+                >Angle unit
+                <select id="calculator-angle">
+                  <option value="rad">Radians</option>
+                  <option value="deg">Degrees</option>
+                </select></label
+              >
+              <button>=</button>
+              <output id="calculator-result"></output>
+            </form>
+            <p id="calculator-help">
+              Functions: sin cos tan asin acos atan atan2 sinh cosh tanh exp ln
+              log log2 sqrt cbrt pow hypot min max abs floor ceil round deg rad.
+              Constants: pi, e. Power: ^ or **.
+            </p>
+            <p>
+              Learner-reported practice evidence; these results are not formal
+              grades.
+            </p>
+            <pre id="results" role="status" aria-live="polite"></pre>
+          </div>
+        </div>
         <ul id="rules-reminder" aria-label="Rules"></ul>
       </section>
-      <dialog id="confirm">
-        <p>Finish and freeze this revision for your Learning review?</p>
+      <dialog id="confirm" aria-labelledby="confirm-title">
+        <p id="confirm-title">
+          Finish and freeze this revision for your Learning review?
+        </p>
         <button id="cancel-finish">Keep working</button
-        ><button id="confirm-finish">Finish task</button>
+        ><button id="confirm-finish" class="primary">Finish task</button>
       </dialog>
 
       <section id="review" hidden>
@@ -162,9 +235,11 @@
           This result was generated by CodeTrial on this computer; it is
           learning feedback, not a secure grade.
         </p>
-        <button id="new-attempt">Start a new attempt</button>
-        <button id="export-review">Download result</button
-        ><button id="export-code">Download code</button>
+        <div class="review-actions">
+          <button id="new-attempt">Start a new attempt</button>
+          <button id="export-review">Download result</button
+          ><button id="export-code">Download code</button>
+        </div>
       </section>
     </main>
     <script type="module" src="/task.js"></script>
