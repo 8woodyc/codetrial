@@ -39,6 +39,8 @@ REVIEW_FINISH = SKILLS / "codetrial-triage" / "review-finish.sh"
 APPLY_ACTIONS = SKILLS / "codetrial-triage" / "apply-pr-actions.sh"
 POST_SIMILAR = SKILLS / "codetrial-triage" / "post-similar.sh"
 CI_CACHED = SKILLS / "codetrial-verify" / "ci-cached.sh"
+EXPERIENCE_CLOSE = SKILLS / "codetrial-review" / "experience-close.sh"
+FEEDBACK_BUNDLE = SKILLS / "codetrial-contribute" / "feedback-bundle.sh"
 REVIEW_BRIEF = SKILLS / "codetrial-triage" / "review-brief.sh"
 
 # A gh that fails every call, so only a script's own check can refuse first.
@@ -1713,6 +1715,7 @@ POST_INLINE = REVIEW / "post-inline.sh"
 FAKE_GH_INLINE = support.stub("skill-scripts/gh-inline.sh")
 FAKE_GH_APPLY = support.stub("skill-scripts/gh-apply.sh")
 FAKE_GH_SIMILAR = support.stub("skill-scripts/gh-similar.sh")
+FAKE_GH_FEEDBACK = support.stub("skill-scripts/gh-feedback.sh")
 FAKE_GH_CACHED = support.stub("skill-scripts/gh-cached.sh")
 FAKE_GH_LIVE = support.stub("skill-scripts/gh-live.sh")
 FAKE_INLINE_LOG = support.stub("skill-scripts/inline-log.sh")
@@ -3722,6 +3725,239 @@ class CiCachedTests(unittest.TestCase):
         results, _, stored = self.run_cached(["a"], repos=("a/b",), ci_fails=True)
         self.assertNotEqual(results[0].returncode, 0)
         self.assertEqual((results[0].stdout, stored), ("", 0))
+
+
+@unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+class ExperienceCloseTests(unittest.TestCase):
+    """experience-close.sh fills the fixed fields and refuses an unstated outcome."""
+
+    HEAD = "a" * 40
+
+    def close(self, fields, head=None, same_path=False):
+        with tempfile.TemporaryDirectory() as scratch:
+            scratch = Path(scratch)
+            output = scratch / "out"
+            output.mkdir()
+            source = (
+                output / "experience.json" if same_path else scratch / "fields.json"
+            )
+            source.write_text(json.dumps(fields))
+            # A record command that echoes the report it was handed.
+            (scratch / "memory.py").write_text(
+                "import sys\nprint(open(sys.argv[sys.argv.index('--report') + 1]).read())\n"
+                "print([a[8:] for a in sys.argv if a.startswith('--skill=')][0], file=sys.stderr)\n"
+            )
+            result = subprocess.run(
+                [
+                    "sh",
+                    str(EXPERIENCE_CLOSE),
+                    str(source),
+                    head or self.HEAD,
+                ],
+                capture_output=True,
+                text=True,
+                env=os.environ
+                | {
+                    "SCRATCH": str(output),
+                    "EXPERIENCE_MEMORY": str(scratch / "memory.py"),
+                },
+            )
+        return result
+
+    def test_fills_the_fixed_fields_and_keeps_the_invocations_own(self):
+        fields = {
+            "outcome": "complete",
+            "skills_used": ["codetrial-triage"],
+            "coverage": "Swept 17 PRs.",
+            "questions": [{"q": "x"}],
+        }
+        result = self.close(fields)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["head"], self.HEAD)
+        self.assertEqual(report["schema_version"], 1)
+        self.assertEqual(report["findings"], [])
+        self.assertEqual(report["questions"], [{"q": "x"}])
+        self.assertIn("codetrial-triage", result.stderr)
+
+    def test_a_report_that_does_not_state_its_outcome_is_refused(self):
+        base = {"outcome": "complete", "skills_used": ["s"], "coverage": "c"}
+        for drop in ("outcome", "skills_used", "coverage"):
+            result = self.close({k: v for k, v in base.items() if k != drop})
+            self.assertEqual(result.returncode, 2, drop)
+        self.assertEqual(self.close(base, head="abc123").returncode, 2)
+        self.assertEqual(self.close(base | {"coverage": "  \n"}).returncode, 2)
+        self.assertEqual(self.close(base, head="z" * 40).returncode, 2)
+        self.assertEqual(self.close(base | {"outcome": "done"}).returncode, 2)
+
+    def test_fixed_fields_cannot_override_the_examined_head_or_schema(self):
+        result = self.close(
+            {
+                "outcome": "complete",
+                "skills_used": ["codetrial-review"],
+                "coverage": "local diff",
+                "head": "b" * 40,
+                "schema_version": 99,
+            }
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["head"], self.HEAD)
+        self.assertEqual(report["schema_version"], 1)
+
+    def test_an_existing_report_can_be_used_as_the_fields_file(self):
+        result = self.close(
+            {"outcome": "complete", "skills_used": ["s"], "coverage": "kept"},
+            same_path=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["coverage"], "kept")
+        self.assertEqual(report["head"], self.HEAD)
+
+
+@unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+class FeedbackBundleTests(unittest.TestCase):
+    """feedback-bundle.sh refetches a cut thread and never reads a failure as empty."""
+
+    FAKE = FAKE_GH_FEEDBACK
+
+    def run_bundle(self, env=(), bulk=0):
+        def node(author, body):
+            return {"id": body, "author": {"login": author}, "body": body, "url": "u"}
+
+        page = {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "nodes": [
+                                {
+                                    "id": "T1",
+                                    "isResolved": False,
+                                    "isOutdated": False,
+                                    "path": "a.js",
+                                    "line": 3,
+                                    "originalLine": 3,
+                                    "comments": {
+                                        "pageInfo": {"hasNextPage": True},
+                                        "nodes": [node("m", "first")],
+                                    },
+                                },
+                                {
+                                    "id": "T2",
+                                    "isResolved": True,
+                                    "isOutdated": True,
+                                    "path": "b.js",
+                                    "line": None,
+                                    "originalLine": 9,
+                                    "comments": {
+                                        "pageInfo": {"hasNextPage": False},
+                                        "nodes": [node("m", "done")],
+                                    },
+                                },
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+        rest = {
+            "data": {
+                "node": {
+                    "comments": {
+                        "nodes": [
+                            node("m", "first"),
+                            node("a", "reply" + "x" * bulk),
+                            node("m", "last"),
+                        ]
+                    }
+                }
+            }
+        }
+        pr = {"number": 7, "url": "u", "headRefOid": "h", "comments": [], "reviews": []}
+        with tempfile.TemporaryDirectory() as scratch:
+            scratch = Path(scratch)
+            (scratch / "bin").mkdir()
+            support.write_executable(scratch / "bin" / "gh", self.FAKE)
+            for name, value in (("pr", pr), ("threads", page), ("thread", rest)):
+                (scratch / f"{name}.json").write_text(json.dumps(value))
+            return subprocess.run(
+                ["sh", str(FEEDBACK_BUNDLE), "7"],
+                capture_output=True,
+                text=True,
+                env=os.environ
+                | {
+                    "PATH": f"{scratch / 'bin'}:{os.environ['PATH']}",
+                    "FAKE_DIR": str(scratch),
+                }
+                | dict(env),
+            )
+
+    def test_a_cut_thread_is_refetched_whole_and_open_requests_are_listed(self):
+        result = self.run_bundle()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        out = json.loads(result.stdout)
+        first = out["threads"][0]
+        self.assertEqual(
+            [c["body"] for c in first["comments"]], ["first", "reply", "last"]
+        )
+        self.assertTrue(out["complete"])
+        self.assertEqual([t["id"] for t in out["open"]], ["T1"])
+
+    def test_a_refetched_thread_past_the_argument_limit_still_makes_a_bundle(self):
+        # Two megabytes is past what one argument can carry on every platform
+        # this runs on, which a thread of many long replies can reach.
+        result = self.run_bundle(bulk=2_000_000)
+        self.assertEqual(result.returncode, 0, result.stderr[-200:])
+        out = json.loads(result.stdout)
+        self.assertEqual(len(out["threads"][0]["comments"][1]["body"]), 2_000_005)
+        self.assertTrue(out["complete"])
+
+    def test_a_thread_that_cannot_be_refetched_marks_the_bundle_incomplete(self):
+        out = json.loads(self.run_bundle({"FAKE_NO_THREAD": "1"}).stdout)
+        self.assertFalse(out["complete"])
+        self.assertFalse(out["threads"][0]["complete"])
+
+    def test_no_sign_in_is_an_error_not_an_empty_pull_request(self):
+        result = self.run_bundle({"FAKE_NO_AUTH": "1"})
+        self.assertEqual((result.returncode, result.stdout), (1, ""))
+
+
+class BadArgumentTests(unittest.TestCase):
+    """Every new script's header says a bad argument exits 2, not just fails."""
+
+    def test_a_missing_or_malformed_argument_exits_2_before_any_call(self):
+        scripts = (
+            APPLY_ACTIONS,
+            POST_SIMILAR,
+            REVIEW_BRIEF,
+            REVIEW_FINISH,
+            REVIEW_PICK,
+            EXPERIENCE_CLOSE,
+            FEEDBACK_BUNDLE,
+        )
+        with tempfile.TemporaryDirectory() as scratch:
+            support.write_executable(Path(scratch) / "gh", FAKE_GH_FAILS)
+            env = os.environ | {
+                "PATH": f"{scratch}:{os.environ['PATH']}",
+                "SCRATCH": scratch,
+            }
+            for script in scripts:
+                for args in ([], ["not-a-number"]):
+                    for shell in ("sh", "bash"):
+                        result = subprocess.run(
+                            [shell, str(script), *args],
+                            capture_output=True,
+                            text=True,
+                            env=env,
+                            cwd=ROOT,
+                        )
+                        self.assertEqual(
+                            result.returncode,
+                            2,
+                            (script.name, args, shell, result.stderr),
+                        )
 
 
 if __name__ == "__main__":

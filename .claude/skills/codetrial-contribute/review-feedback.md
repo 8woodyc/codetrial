@@ -6,6 +6,19 @@ every thread and confirming the result. A request only to review or summarize a
 PR stays read-only. When the user names a subset of comments, address that
 subset; "address all the feedback" is the whole list, not a prompt to ask which.
 
+`feedback-bundle.sh` does all of the fetching below in one call and prints the
+reviews, the top-level comments, every thread with all of its replies and the
+unresolved ones as `open`:
+
+```sh
+.claude/skills/codetrial-contribute/feedback-bundle.sh "$pr" > "$SCRATCH/feedback-$pr.json"
+```
+
+It exits 1 on an unreadable GitHub (never an empty PR), and `complete` false
+means a thread could not be read to its end: report that thread as unread, not
+as addressed. After a push, rerun it and compare `open` and `reviews`. The raw
+queries it wraps are below for a single call by hand.
+
 Run `gh auth status` first, so an access failure is reported as unreviewed
 feedback rather than as a PR with none. Top-level comments and reviews come from
 `gh pr view`; inline threads need their own query, with the ids and URLs that

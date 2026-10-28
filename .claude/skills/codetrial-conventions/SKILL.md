@@ -109,7 +109,8 @@ case arrays. Incomplete work records its limits and next checks, not a successfu
 review. Review bundle preparation now automates pinned begin and bounded private
 experience context; review closeout explicitly runs `review-lifecycle.py finish`
 and retains durable pending data for an explicit retry on failure. Other skills
-still explicitly use `experience record`, including combined invocations. There
+close with `experience-close.sh`, a wrapper over `experience record` that fills
+only the fixed fields, including combined invocations. There
 is no universal automatic hook or finalizer. Keep failed record attempts and
 diagnostics and disclose them rather than claiming durable storage. This local write authorizes no GitHub write.
 
