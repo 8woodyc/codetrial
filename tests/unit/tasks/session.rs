@@ -1765,3 +1765,108 @@ async fn a_frozen_revision_takes_the_slot_of_a_run_still_pending() {
             .is_err()
     );
 }
+
+/// Only a nudge after the learner changed their code asks Jim to look at it;
+/// before that it only invites them to explain, as it always did.
+#[tokio::test]
+async fn a_nudge_after_an_edit_asks_jim_to_look_at_the_code() {
+    let idle = default_number("nudgeIdleSeconds");
+    let mut untouched = working().await;
+    let invitation = untouched.tick(100 + idle, false).unwrap();
+    assert!(!invitation.contains("read_editor"), "{invitation}");
+
+    let mut edited = working().await;
+    edited.acknowledge_edit("edit-1", "x = 1\n", 101).unwrap();
+    // Idle counts from the edit.
+    assert!(edited.tick(101 + idle - 1, false).is_none());
+    let review = edited.tick(101 + idle, false).unwrap();
+    assert!(review.contains("read_editor"), "{review}");
+    assert!(review.contains("never give the corrected line"), "{review}");
+}
+
+/// Editing back to the starter is no change worth a look, and code Jim has
+/// looked at is not looked at twice.
+#[tokio::test]
+async fn jim_is_not_sent_to_look_at_the_same_code_twice() {
+    let idle = default_number("nudgeIdleSeconds");
+    let interval = default_number("nudgeIntervalSeconds");
+    let starter = working().await.current.code;
+    let mut session = working().await;
+    session.acknowledge_edit("edit-1", &starter, 101).unwrap();
+    assert!(
+        !session
+            .tick(101 + idle, false)
+            .unwrap()
+            .contains("read_editor")
+    );
+
+    let mut session = working().await;
+    session.acknowledge_edit("edit-1", "x = 1\n", 101).unwrap();
+    let first = 101 + idle;
+    assert!(session.tick(first, false).unwrap().contains("read_editor"));
+    // Idle again and the interval is up, but nothing changed.
+    let second = first + interval;
+    assert!(!session.tick(second, false).unwrap().contains("read_editor"));
+    // A new edit, and the same pause after it, earns another look.
+    session
+        .acknowledge_edit("edit-2", "x = 2\n", second + 1)
+        .unwrap();
+    let third = second + 1 + interval.max(idle);
+    assert!(session.tick(third, false).unwrap().contains("read_editor"));
+}
+
+/// An attempt has a few looks at the code, then only invitations.
+#[tokio::test]
+async fn the_looks_at_the_code_run_out() {
+    let idle = default_number("nudgeIdleSeconds");
+    let interval = default_number("nudgeIntervalSeconds");
+    let looks = default_number("codeReviewNudges");
+    assert!(looks >= 1);
+    let mut session = working().await;
+    let mut now = 101;
+    // One more than the looks, and all inside the attempt's work time.
+    for round in 0..looks + 1 {
+        session
+            .acknowledge_edit(&format!("edit-{round}"), &format!("x = {round}\n"), now)
+            .unwrap();
+        now += interval.max(idle);
+        let nudge = session.tick(now, false).unwrap();
+        assert_eq!(
+            nudge.contains("read_editor"),
+            round < looks,
+            "round {round}"
+        );
+    }
+}
+
+/// A nudge is not spent on a page that is away: the room would drop it, and a
+/// look at the code would be used up with nobody there to hear it.
+#[tokio::test]
+async fn nothing_is_nudged_while_the_page_is_away() {
+    let idle = default_number("nudgeIdleSeconds");
+    let mut session = working().await;
+    session.acknowledge_edit("edit-1", "x = 1\n", 101).unwrap();
+    session.page_left();
+    assert!(session.tick(101 + idle, false).is_none());
+    assert_eq!(session.code_review_nudges, 0);
+    session.page_returned();
+
+    // Back, the learner gets the whole idle time before the first nudge, and
+    // the code is still owed its look then.
+    assert!(session.tick(101 + idle, false).is_none());
+    let review = session.tick(101 + 2 * idle, false).unwrap();
+    assert!(review.contains("read_editor"), "{review}");
+}
+
+/// A finished drawing is activity: a learner sketching quietly is not idle.
+#[tokio::test]
+async fn a_noted_activity_restarts_the_idle_time() {
+    let idle = default_number("nudgeIdleSeconds");
+    let mut session = working().await;
+    session.note_activity(100 + idle - 1);
+    assert!(session.tick(100 + idle, false).is_none());
+    assert!(session.tick(100 + idle - 1 + idle, false).is_some());
+    // Never backwards: an older note changes nothing.
+    session.note_activity(1);
+    assert!(session.tick(100 + 2 * idle, false).is_none());
+}

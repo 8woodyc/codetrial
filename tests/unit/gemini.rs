@@ -141,6 +141,7 @@ async fn the_task_interviewer_is_offered_exactly_the_tools_its_session_answers()
         [
             "read_editor",
             "record_task_check",
+            "read_board",
             "request_targeted_followup"
         ]
     );
@@ -153,6 +154,12 @@ async fn the_task_interviewer_is_offered_exactly_the_tools_its_session_answers()
                     .is_some(),
                 "{tool}"
             );
+        }
+
+        // The room loop answers `read_board`: it holds the drawing, which the
+        // session never sees.
+        if tool["name"] == TOOL_READ_BOARD {
+            continue;
         }
         let answer = session.answer_tool(tool["name"].as_str().unwrap(), &json!({}));
         assert_ne!(answer, json!({"error": "tool unavailable in task mode"}));

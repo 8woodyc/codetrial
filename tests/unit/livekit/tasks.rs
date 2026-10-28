@@ -608,3 +608,23 @@ async fn the_wrap_up_request_names_the_check_s_question() {
     assert!(request.contains(session.task.exercise.check_question(&id).unwrap()));
     assert!(request.starts_with("Ask only this wrap-up question"));
 }
+
+/// Jim can look at a whiteboard drawing, and only through the room loop: the
+/// session has no board, so it never answers `read_board` itself.
+#[tokio::test]
+async fn jim_may_read_the_whiteboard_but_the_session_does_not_answer_for_it() {
+    let tools = crate::gemini::task_tool_declarations();
+    let names: Vec<_> = tools
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&TOOL_READ_BOARD), "{names:?}");
+    let mut session = TaskSession::new(admitted().await, 100);
+    session.start(100);
+    assert_eq!(
+        session.answer_tool(TOOL_READ_BOARD, &json!({})),
+        json!({"error": "tool unavailable in task mode"})
+    );
+}

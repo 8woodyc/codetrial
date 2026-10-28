@@ -186,6 +186,40 @@
             <label
               ><input type="checkbox" id="thinking" />Thinking quietly</label
             >
+            <details id="task-board" class="example-board" hidden>
+              <summary>Whiteboard</summary>
+              <div
+                class="board-toolbar"
+                role="toolbar"
+                aria-label="Whiteboard tools"
+              >
+                <div data-tools role="group" aria-label="Drawing tool"></div>
+                <div
+                  data-colors
+                  class="board-pens"
+                  role="group"
+                  aria-label="Pen colour"
+                ></div>
+                <button type="button" data-action="undo">Undo</button>
+                <button
+                  type="button"
+                  data-action="clear"
+                  title="Undo restores a cleared drawing"
+                >
+                  Clear
+                </button>
+              </div>
+              <div class="example-surface">
+                <canvas
+                  width="1600"
+                  height="1000"
+                  aria-label="Whiteboard drawing"
+                ></canvas>
+              </div>
+              <p role="status">
+                Sketch while you explain, then ask Jim to look at it.
+              </p>
+            </details>
             <form id="calculator" aria-label="Calculator">
               <label
                 >Calculator

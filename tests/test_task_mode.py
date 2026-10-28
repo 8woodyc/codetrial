@@ -117,6 +117,7 @@ class TaskSidecarTests(unittest.TestCase):
             "wrapUpChecks",
             "nudgeIdleSeconds",
             "nudgeIntervalSeconds",
+            "codeReviewNudges",
             "pinDigits",
             "taskBytes",
             "setBytes",

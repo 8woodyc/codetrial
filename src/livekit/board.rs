@@ -96,6 +96,13 @@ pub(super) struct BoardSnapshot {
     checkpoint: Option<&'static str>,
 }
 
+impl BoardSnapshot {
+    /// How many strokes the browser counted on this board.
+    pub(super) fn strokes(&self) -> u32 {
+        self.strokes
+    }
+}
+
 /// One image handed to the report model, with the words that precede it in the
 /// multimodal request.
 pub(super) struct ReportBoard {
@@ -140,6 +147,20 @@ impl Board {
         }
     }
 
+    /// A board for a room that shows it to the model only when asked, which is
+    /// how a task room uses it: nothing is sent unprompted, and none of it is
+    /// kept for a report.
+    pub(super) fn example() -> Self {
+        let mut board = Self::new();
+        board.example = true;
+        board
+    }
+
+    /// Whether any board has arrived.
+    pub(super) fn has_board(&self) -> bool {
+        self.latest.is_some()
+    }
+
     /// The end the reader tasks write finished boards to.
     pub(super) fn sender(&self) -> Sender<BoardSnapshot> {
         self.tx.clone()
@@ -164,7 +185,9 @@ impl Board {
         self.settle_pending(state, Duration::from_millis(100)).await;
     }
 
-    async fn settle_pending(&mut self, state: &mut RuntimeState, wait: Duration) {
+    /// The boards that finished arriving, taken after waiting up to `wait` for
+    /// streams still being read; the wait ends the moment none is.
+    pub(super) async fn arrived(&mut self, wait: Duration) -> Vec<BoardSnapshot> {
         let deadline = tokio::time::Instant::now() + wait;
         let mut arrived = Vec::new();
         loop {
@@ -181,7 +204,11 @@ impl Board {
                 () = tokio::time::sleep_until(deadline) => break,
             }
         }
-        for snapshot in arrived {
+        arrived
+    }
+
+    async fn settle_pending(&mut self, state: &mut RuntimeState, wait: Duration) {
+        for snapshot in self.arrived(wait).await {
             record(self, state, snapshot);
         }
     }
@@ -446,9 +473,23 @@ pub(super) fn record(board: &mut Board, state: &mut RuntimeState, snapshot: Boar
             board.checkpoints.push((label, snapshot.bytes.clone()));
         }
     }
-    board.latest = Some(snapshot.bytes);
-    board.unsent = true;
+    hold(board, snapshot.bytes);
     changed
+}
+
+/// Takes in a board for a room that has no interview state to count it in, and
+/// says whether it differs from the last. What `record` does to the board
+/// itself, so a board held here is the one `resend` shows.
+pub(super) fn keep(board: &mut Board, snapshot: BoardSnapshot) -> bool {
+    let changed = board.latest.as_deref() != Some(snapshot.bytes.as_slice());
+    hold(board, snapshot.bytes);
+    changed
+}
+
+/// Makes `bytes` the board `read_board` and the next send will show.
+fn hold(board: &mut Board, bytes: Vec<u8>) {
+    board.latest = Some(bytes);
+    board.unsent = true;
 }
 
 /// Shows Gemini the newest board if it has not seen it and the interval allows.

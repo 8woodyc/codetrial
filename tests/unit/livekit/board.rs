@@ -638,3 +638,62 @@ async fn an_explicit_read_bounds_an_unfinished_upload() {
     board.settle_for_read(&mut state).await;
     assert!((Duration::from_millis(100)..=Duration::from_millis(101)).contains(&start.elapsed()));
 }
+
+/// A task room has no interview state to count a board in, so it keeps one
+/// directly, and the board it holds is the one `read_board` shows. An example
+/// board is never sent unprompted and never reaches a report.
+#[tokio::test(start_paused = true)]
+async fn a_task_room_keeps_a_board_for_read_board_alone() {
+    let mut board = Board::example();
+    assert!(!board.has_board());
+    assert!(board.report_boards().is_empty());
+
+    assert!(keep(&mut board, snapshot(1)), "the first board is new");
+    assert!(!keep(&mut board, snapshot(1)), "the same picture is not");
+    assert!(keep(&mut board, snapshot(2)));
+    assert!(board.has_board());
+    assert_eq!(board.latest.as_deref(), Some(&[0xff, 0xd8, 2][..]));
+    assert!(board.report_boards().is_empty(), "never judged");
+
+    // Nothing is sent because it arrived, however long it has waited.
+    let (mut session, mut frames) = live_session().await;
+    send_if_due(
+        &mut board,
+        &mut session,
+        Instant::now() + Duration::from_secs(60),
+    )
+    .await
+    .unwrap();
+    assert!(frames.try_recv().is_err());
+    // Asked for, it goes out, however recently it did.
+    resend(&mut board, &mut session).await.unwrap();
+    assert!(next_frame(&mut frames).await.contains("image"));
+}
+
+/// `read_board` waits for a board still being read, and only that long.
+#[tokio::test(start_paused = true)]
+async fn the_boards_that_arrived_include_one_still_being_read() {
+    let mut board = Board::example();
+    board.sender().try_send(snapshot(1)).unwrap();
+    let permit = Arc::clone(&board.readers).try_acquire_owned().unwrap();
+    let tx = board.sender();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        tx.send(snapshot(2)).await.unwrap();
+        drop(permit);
+    });
+    let arrived = board.arrived(Duration::from_millis(100)).await;
+    assert_eq!(
+        arrived
+            .iter()
+            .map(BoardSnapshot::strokes)
+            .collect::<Vec<_>>(),
+        [1, 2]
+    );
+
+    // A reader that never finishes costs the wait and no more.
+    let _stuck = Arc::clone(&board.readers).try_acquire_owned().unwrap();
+    let started = tokio::time::Instant::now();
+    assert!(board.arrived(Duration::from_millis(100)).await.is_empty());
+    assert_eq!(started.elapsed(), Duration::from_millis(100));
+}

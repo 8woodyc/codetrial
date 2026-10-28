@@ -569,6 +569,17 @@ failure, not a failed case. Results are learner-reported practice evidence.
 `activeTargetId`, and `outcome` (null until the attempt
 ends, then `completed`, `invalid` or `interrupted` with its cause and time).
 
+`board_image` (client to runtime, a byte stream): the learner's whiteboard
+drawing as a JPEG of at most the interview whiteboard's size, with the stroke
+count the page counted as an attribute. It is the interview's example drawing,
+sent once the drawing has been still for a moment, and the runtime reads it
+off the stream with the interview's bounds on size, time, concurrent readers
+and sender. A drawing is held for the attempt and shown to Jim only when Jim
+calls `read_board`, which the model does when the learner refers to it; it is
+never sent unprompted, never kept for the review or the export, and never
+evidence for a check, a hint or a rating. Asked before any drawing exists,
+`read_board` answers that nothing is drawn.
+
 `task_review` (runtime to client): the result described under Capture and
 Learning review, sent once when the attempt is finalized. A page that lost its
 room retrieves the same object from `/api/task-reviews/{room}`.
@@ -626,6 +637,37 @@ Bounded report repair exhausts to feedback unavailable, never to a partial or
 leaked review. The export is the result above, final code included, and names
 itself as locally generated learning feedback.
 
+The learner is shown no hiring outcome, verdict or recommendation, in the
+page or in the review, and keeps the review to read later: it stays in the
+page after the attempt and the export carries it.
+
+## Jim during work
+
+Jim guides the learner through REACTO in order: repeat the task, walk an
+example with an edge case, state the algorithm and its cost, code it, test by
+predicting before running, then optimize. He names the step, moves on only
+when the learner has done the current one, and invites back a skipped step
+with a question instead of doing it for them.
+
+The learner talks to Jim throughout. Jim may be asked to restate or explain
+the task and to clarify it, and answers from the brief, the contract and the
+clarifications in the public projection alone, in plain words and small
+pieces; where the task says nothing he says so and asks which part is unclear.
+He never invents a requirement and never confirms, corrects or completes the
+learner's answer. A hint is a different thing: the platform serves one rung at
+a time on request, and explaining the task is not one.
+
+Jim also looks at the learner's code, so a reminder is a matter of the
+platform's timing and not the model's. After `nudgeIdleSeconds` without
+activity, and no oftener than every `nudgeIntervalSeconds`, the platform sends
+Jim one nudge; it is held while the learner speaks or has ticked Thinking
+quietly. If the learner has changed the code since the starter and since the
+last such look, the nudge asks Jim to read the editor and raise at most one
+reminder or question: where to look and what kind of problem, never the
+corrected line, code or the answer. The attempt has at most `codeReviewNudges`
+of these. Every other nudge only invites the learner to explain their
+reasoning, and silence is not an assessment.
+
 ## Workspace
 
 The editor paints the interview editor's syntax colours, line numbers, indent
@@ -636,12 +678,19 @@ needs another tab or app. It evaluates one expression with `+ - * / // %`,
 atan2 sinh cosh tanh exp ln log log2 sqrt cbrt pow hypot min max abs floor
 ceil round deg rad`. A selector sets whether trigonometric functions take and
 return radians or degrees, and in degrees the multiples of 90 are exact. A
+result shows fifteen significant digits, except an integer up to 2^53, which
+is shown whole. A
 button above the editor gives it the whole page, and hides the brief and the
 public cases, until it is pressed again; the code is the same either way. The
 workspace keeps the rules, the countdown, connection status and help inside the
 fullscreen view. Credential repair, sign-in and device selection happen only
 before Start. CodeTrial stops monitoring before it leaves fullscreen itself at
 the end of an attempt.
+
+A whiteboard below the editor is the interview's example drawing: pens, an
+eraser, undo and clear. What is drawn on it leaves the browser only as the
+`board_image` stream described under the wire protocol, and the interviewer
+sees it only when the learner refers to it.
 
 ## Runtime and delivery bounds
 

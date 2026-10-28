@@ -488,6 +488,92 @@ nav {
 #finish {
   margin-left: auto;
 }
+/* The whiteboard is the interview's example drawing, so it takes the same
+   markup and the same pens; these are its rules on this page's tokens. */
+.example-board {
+  margin: 1.25rem 0;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.example-board summary {
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+.example-board p {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  color: var(--sub);
+  font-size: 0.8125rem;
+}
+.board-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+}
+.board-toolbar button {
+  min-height: 2.75rem;
+}
+[data-tools] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.example-tool-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  padding: 0.5rem;
+}
+.example-tool-icon svg {
+  width: 1.5rem;
+  height: 1.5rem;
+  flex-shrink: 0;
+}
+.board-tool[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* The pens sit on a strip of the board's own white, so each swatch looks like
+   the ink it draws; on the dark toolbar the black pen could not be found. */
+.board-pens {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.2rem 0.35rem;
+  border-radius: 999px;
+  background: #ffffff;
+}
+.board-color {
+  width: 1.5rem;
+  height: 1.5rem;
+  min-height: 0;
+  padding: 0;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.board-color[aria-pressed="true"] {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.example-surface {
+  height: 16rem;
+  overflow: auto;
+  background: #ffffff;
+}
+.example-surface canvas {
+  display: block;
+  width: 100%;
+  min-width: 32rem;
+  aspect-ratio: 1600 / 1000;
+  cursor: crosshair;
+  touch-action: none;
+}
 #calculator {
   display: flex;
   flex-wrap: wrap;

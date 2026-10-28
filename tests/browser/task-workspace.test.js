@@ -68,7 +68,7 @@ class Room {
   this.handlers = {};
   this.options = options;
   const owner = this;
-  this.localParticipant = {async publishTrack(track, options) { (globalThis.publishedTracks ??= []).push({track, options, roomOptions: owner.options}); }, async publishData(payload, options) {
+  this.localParticipant = {async publishTrack(track, options) { (globalThis.publishedTracks ??= []).push({track, options, roomOptions: owner.options}); }, async streamBytes(options) { const stream = {options, bytes: 0, closed: false}; globalThis.taskHarness.boards.push(stream); return {async write(chunk) { stream.bytes += chunk.byteLength; }, async close() { stream.closed = true; }}; }, async publishData(payload, options) {
    const message = JSON.parse(new TextDecoder().decode(payload));
    const h = globalThis.taskHarness;
    h.messages.push({topic: options.topic, message});
@@ -88,7 +88,7 @@ class Room {
    h.publish();
   }};
   globalThis.oldTaskHarness = globalThis.taskHarness;
-  globalThis.taskHarness = {messages: [], disconnect() { owner.handlers.disconnected?.(); }, agentLeaves() { owner.handlers.participantDisconnected?.({identity: "task-agent-room-1"}); }, state: ${JSON.stringify(JSON.parse(read("tests/fixtures/task-state.json")).cases[0].payload)}, publish(topic = "task_state", value = null) { this.state.seq++; owner.handlers.data?.(new TextEncoder().encode(JSON.stringify(value ?? this.state)), {identity: "task-agent-room-1"}, null, topic); }};
+  globalThis.taskHarness = {messages: [], boards: [], disconnect() { owner.handlers.disconnected?.(); }, agentLeaves() { owner.handlers.participantDisconnected?.({identity: "task-agent-room-1"}); }, state: ${JSON.stringify(JSON.parse(read("tests/fixtures/task-state.json")).cases[0].payload)}, publish(topic = "task_state", value = null) { this.state.seq++; owner.handlers.data?.(new TextEncoder().encode(JSON.stringify(value ?? this.state)), {identity: "task-agent-room-1"}, null, topic); }};
  }
  on(topic, callback) {this.handlers[topic] = callback;}
  async connect() { if (globalThis.snapshotOnConnect) globalThis.taskHarness.publish(); }
@@ -353,6 +353,16 @@ async function start(page) {
   await page.waitForFunction(() => !document.getElementById("code").disabled);
 }
 
+/// One stroke across the open whiteboard.
+async function drawStroke(page) {
+  await page.locator("#task-board canvas").scrollIntoViewIfNeeded();
+  const canvas = await page.locator("#task-board canvas").boundingBox();
+  await page.mouse.move(canvas.x + 40, canvas.y + 40);
+  await page.mouse.down();
+  await page.mouse.move(canvas.x + 120, canvas.y + 90, { steps: 4 });
+  await page.mouse.up();
+}
+
 const ended = (page) =>
   page.evaluate(() =>
     globalThis.taskHarness.messages
@@ -453,6 +463,60 @@ test("the editor can fill the page and give it back to the brief", async (t) => 
     assert.equal(await page.locator(".task-reference").isVisible(), true);
     assert.equal(await page.locator("#code").inputValue(), "pass\n");
     assert.equal(await page.locator("#run").isEnabled(), true);
+  } finally {
+    await page.close();
+  }
+});
+
+test("a whiteboard drawing reaches the room once it settles", async (t) => {
+  const ctx = await pageFor(t);
+  if (!ctx) return;
+  const { page } = ctx;
+  try {
+    await start(page);
+    const boards = () => page.evaluate(() => globalThis.taskHarness.boards);
+    assert.deepEqual(await boards(), []);
+    await page.locator("#task-board summary").click();
+    await drawStroke(page);
+    // The drawing is sent after it has been still for a moment.
+    await page.clock.runFor(1100);
+    await page.waitForFunction(() => globalThis.taskHarness.boards.length > 0);
+    const [sent] = await boards();
+    assert.equal(sent.options.topic, "board_image");
+    assert.equal(sent.options.mimeType, "image/jpeg");
+    assert.equal(sent.options.totalSize, sent.bytes);
+    assert.ok(Number(sent.options.attributes.strokes) >= 1);
+    assert.equal(sent.closed, true);
+    assert.match(
+      await page
+        .locator("#task-board [role=status]:not(.board-text-error)")
+        .textContent(),
+      /ready for Jim/,
+    );
+    // Nothing the drawing does is a message about the task.
+    assert.deepEqual(await ended(page), []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("the whiteboard stops taking ink when the attempt is frozen", async (t) => {
+  const ctx = await pageFor(t);
+  if (!ctx) return;
+  const { page } = ctx;
+  try {
+    await start(page);
+    await page.locator("#task-board summary").click();
+    await drawStroke(page);
+    const undo = page.locator("#task-board [data-action=undo]");
+    const clear = page.locator("#task-board [data-action=clear]");
+    assert.equal(await undo.isEnabled(), true);
+    assert.equal(await clear.isEnabled(), true);
+    await page.click("#finish");
+    await page.click("#confirm-finish");
+    await page.waitForFunction(() => document.getElementById("code").disabled);
+    assert.equal(await undo.isEnabled(), false);
+    assert.equal(await clear.isEnabled(), false);
   } finally {
     await page.close();
   }
@@ -560,6 +624,9 @@ test("the learning review groups feedback under readable headings", async (t) =>
   const feedback = JSON.parse(
     read("tests/fixtures/task-review.json"),
   ).cases.find((row) => row.name === "validated review").payload;
+  // A verdict a review should never carry is not drawn even if one arrives.
+  feedback.hireRecommendation = "hire";
+  feedback.taskAssessment.recommendation = "strong hire";
   const ctx = await pageFor(t, { completedReview: feedback });
   if (!ctx) return;
   const { page } = ctx;
@@ -600,6 +667,10 @@ test("the learning review groups feedback under readable headings", async (t) =>
           ]),
         ),
       expected,
+    );
+    assert.doesNotMatch(
+      await page.locator("#review").innerText(),
+      /hire|hiring|recommend/i,
     );
     assert.equal(await page.locator("#export-review").isEnabled(), true);
     assert.equal(await page.locator("#export-code").isEnabled(), true);
@@ -1327,9 +1398,10 @@ test("the calculator works inside the workspace", async (t) => {
     await page.locator("#calculator button").click();
     assert.equal(
       await page.locator("#calculator-result").textContent(),
-      "-0.988031624093",
+      "-0.988031624092862",
     );
     await page.selectOption("#calculator-angle", "deg");
+    assert.equal(await page.locator("#calculator-result").textContent(), "");
     await page.locator("#calculator button").click();
     assert.equal(await page.locator("#calculator-result").textContent(), "0.5");
     await page.fill("#calculator-input", "exp(1) - e");

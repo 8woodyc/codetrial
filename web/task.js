@@ -11,6 +11,7 @@ import {
   taskEndPayload,
   taskThinkingPayload,
   taskEditPayload,
+  boardStreamOptions,
   formatTime,
   countdown as timeLeft,
   languageLabel,
@@ -36,6 +37,7 @@ import {
   MIN_PHASE_SAMPLES,
 } from "./look-away.js";
 import { evaluate, formatResult } from "./calculator.js";
+import { mountExampleBoard } from "./example-board.js";
 import { mountEditorView } from "./editor-view.js";
 import { CONSTRAINTS } from "./devices.js";
 import { videoTrackReady } from "./audio-check.js";
@@ -63,6 +65,8 @@ const query = new URLSearchParams(location.search);
 const site = query.get("site") ?? "";
 const version = Number(query.get("version"));
 let task, state, room, review;
+// The whiteboard, mounted once the page is loaded; `lock` repaints it.
+let board;
 // The editor's syntax colours and line numbers, behind the textarea.
 let editorView;
 let revisionId = "initial";
@@ -1208,6 +1212,7 @@ function editorLocked() {
 }
 function lock() {
   const locked = editorLocked();
+  board?.refresh();
   // A Finish confirmed after the attempt ended would act on nothing.
   if (
     $("confirm").open &&
@@ -1498,6 +1503,39 @@ editorView = mountEditorView({
   language: () => language,
 });
 
+// The whiteboard: the interview's example drawing, so Jim can read what a
+// learner sketched while explaining. The picture goes to the room as a byte
+// stream once the drawing settles; Jim looks at it only when the learner
+// refers to it, and it is never evidence.
+let boardSequence = 0;
+async function publishBoard(blob, strokes) {
+  if (!room || !blob) return false;
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  boardSequence += 1;
+  const writer = await room.localParticipant.streamBytes(
+    boardStreamOptions(boardSequence, strokes, bytes.byteLength),
+  );
+  try {
+    await writer.write(bytes);
+  } catch (value) {
+    // A writer left open keeps the agent's reader, and one of its few slots,
+    // open.
+    await writer.close().catch(() => {});
+    throw value;
+  }
+  await writer.close();
+  return true;
+}
+// The drawing is not part of a code capture, so a Run, Hint or Discuss in
+// flight does not take the pen from the learner; only the attempt's end does.
+const boardLocked = () =>
+  ["ending", "lost", "done"].includes(attempt) || taskLocked(state);
+board = mountExampleBoard($("task-board"), {
+  locked: boardLocked,
+  publish: publishBoard,
+  connected: () => Boolean(room),
+});
+
 // The brief and cases beside the editor, or the editor alone across the page.
 // The button stays on screen in both views, so focus never leaves it.
 $("maximize-editor").onclick = () => {
@@ -1506,6 +1544,15 @@ $("maximize-editor").onclick = () => {
   $("maximize-editor").setAttribute("aria-pressed", String(maximized));
   $("task-grid").dataset.maximized = String(maximized);
 };
+
+// A result belongs to the expression and the unit it was computed from.
+for (const [id, event] of [
+  ["calculator-angle", "onchange"],
+  ["calculator-input", "oninput"],
+])
+  $(id)[event] = () => {
+    $("calculator-result").textContent = "";
+  };
 
 $("calculator").onsubmit = (event) => {
   event.preventDefault();

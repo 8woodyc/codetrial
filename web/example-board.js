@@ -129,7 +129,7 @@ export function mountExampleBoard(
     previewShared = false;
     edited = true;
     noteActivity();
-    record(ops);
+    record?.(ops);
     dirty = true;
     paint();
     schedule();

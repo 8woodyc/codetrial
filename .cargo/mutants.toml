@@ -1,7 +1,7 @@
 # Functions the mutation gate cannot judge, because `cargo test` cannot reach
 # them. Matched against the mutant names that `cargo mutants --list` prints.
 #
-# EXCLUSIONS: 90
+# EXCLUSIONS: 92
 #
 # That number is checked by `scripts/test.sh`, so adding an entry means editing
 # this line too. The point is not the count, it is that the list only ever grows
@@ -313,7 +313,8 @@
 # mode, and its I/O is excluded for the same reason: `run` joins a LiveKit room,
 # and the `TaskRoom` handlers listed below (`on_data`, `on_room_event`,
 # `on_tick`, `recover`, `ask_wrap_up`, `on_audio_frame`, `publish_state`,
-# `settle_page_loss`, `serve`, `send_or_queue`, `deliver_review`, `close`) each
+# `settle_page_loss`, `serve`, `send_or_queue`, `deliver_review`, `close`,
+# `keep_board`, `read_board`) each
 # take the room or the Gemini socket and answer by publishing or sending, so
 # none of them runs without a LiveKit server. `fail_setup` is `run`'s two
 # setup failures lifted into one helper, so it shares `run`'s entry. `publish`,
@@ -325,6 +326,10 @@
 # `TaskSession::page_left` and `page_returned` (the page leaving and joining),
 # `page_loss`, `settle_loss`, `review_without_model`, `mutes_on_departure`,
 # `wrap_up_request`, `wrap_up_due` and `speaking`, each tested in tests/unit.
+# `read_board` and `keep_board` are the whiteboard's share of that: one puts the
+# drawing on the Gemini socket and the other files it beside the room's state,
+# and what they use is tested apart, in `Board::keep`, `arrived`, `hold` and
+# `has_board`, and `TaskSession::note_activity`.
 #
 # Keep this list short and each entry justified. An entry that is really "we
 # never got around to testing this" belongs in a test, not here.
@@ -415,6 +420,8 @@ exclude_re = [
     "TaskRoom<'_>::send_or_queue",
     "TaskRoom<'_>::deliver_review",
     "TaskRoom<'_>::close",
+    "TaskRoom<'_>::keep_board",
+    "TaskRoom<'_>::read_board",
     "^src/livekit/tasks\\.rs:\\d+:\\d+: (replace (run|fail_setup) |.* in (run|fail_setup)$)",
     "^src/livekit/tasks\\.rs:\\d+:\\d+: (replace publish(_error)? |.* in publish(_error)?$)",
     "^src/livekit/tasks\\.rs:\\d+:\\d+: replace silence_output ",
