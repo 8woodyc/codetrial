@@ -34,7 +34,11 @@ outcome=$(jq -er '(.outcome | strings)
     + (if (.reason | type) == "string" then " (\(.reason))" else "" end)
     + (if (.status.documents | type) == "number"
        then "; \(.status.documents) documents indexed" else "" end)' "$status" 2> /dev/null) \
-    || outcome=unavailable
+    || outcome=
+
+# jq 1.6 exits 0 with no output on an empty file, where later versions fail, so
+# an empty result is read as unavailable here and not by its exit status.
+[ -n "$outcome" ] || outcome=unavailable
 
 jq -r --arg repo "$repo" --arg scratch "$scratch" --arg status "$status" \
     --arg code "$code" --arg outcome "$outcome" '
