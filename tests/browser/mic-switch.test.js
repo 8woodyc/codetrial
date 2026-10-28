@@ -762,8 +762,9 @@ test("the Mic button leaves the publication's flag alone", async () => {
   const sender = new FakePublished(track);
   const inFlightCalls = [];
   const scope = {
-    state: { micEnabled: false, localUserStream: stream },
-    nodes: { mic: { textContent: "" } },
+    state: { phase: "live", micEnabled: false, localUserStream: stream },
+    nodes: { mic: { setAttribute() {} } },
+    paintMicrophoneState() {},
     publishedMicrophone: () => sender,
     microphoneSwitch: () => ({
       setEnabled: (enabled) => inFlightCalls.push(enabled),
@@ -780,7 +781,6 @@ test("the Mic button leaves the publication's flag alone", async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(scope.state.micEnabled, true);
   assert.equal(track.enabled, true);
-  assert.equal(scope.nodes.mic.textContent, "Mic on");
 
   await toggleMicrophone();
   await new Promise((resolve) => setTimeout(resolve, 0));

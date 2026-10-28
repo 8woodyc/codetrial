@@ -3050,6 +3050,32 @@ body:not([data-recording]) .replay-detail > :not(header) {
   min-height: 2rem;
 }
 
+#mic.is-muted,
+.mic-muted-status {
+  border: 1px solid var(--danger-ink);
+  background: var(--alert-tint);
+  color: var(--alert-ink);
+}
+
+.mic-muted-icon {
+  width: 1rem;
+  height: 1rem;
+  margin-right: 0.375rem;
+  vertical-align: middle;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.mic-muted-status {
+  border-radius: 999px;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
 .pill-button[aria-pressed="true"] {
   border-color: var(--accent);
   color: var(--ink);
