@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::session::Phase;
-use super::{TaskError, bounded_text, default_number, default_value, identifier, invalid};
+use super::{
+    EXPLAINERS, TaskError, bounded_text, default_number, default_value, identifier, invalid,
+};
 
 /// One downloaded task, shared by every attempt at it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -180,6 +182,10 @@ pub struct Sidecar {
     /// than the default, never more. Absent, the page's default applies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub optimization: Option<String>,
+    /// What the page shows beside the brief, by name: each is built into the
+    /// page, so a package can name one and cannot supply its own.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub explainers: Vec<String>,
 }
 
 fn default_languages() -> Vec<String> {
@@ -283,6 +289,9 @@ impl TaskRecord {
                 if value.get("optimization").is_some_and(Value::is_null) {
                     return Err(invalid("invalid compiler optimization"));
                 }
+                if value.get("explainers").is_some_and(Value::is_null) {
+                    return Err(invalid("invalid explainers"));
+                }
                 serde_json::from_value::<Sidecar>(value.clone())
                     .map_err(|_| invalid("invalid sidecar fields or types"))?
             }
@@ -300,6 +309,7 @@ impl TaskRecord {
                 rubric_profile: "task-engagement-v1".to_owned(),
                 languages: default_languages(),
                 optimization: None,
+                explainers: Vec::new(),
             },
         };
         validate_sidecar(&sidecar, &starters, &hints)?;
@@ -515,6 +525,11 @@ fn validate_sidecar(
                 .any(|language| matches!(language.as_str(), "c" | "cpp")))
     {
         return Err(invalid("invalid compiler optimization"));
+    }
+    if sidecar.explainers.iter().enumerate().any(|(index, name)| {
+        !EXPLAINERS.contains(&name.as_str()) || sidecar.explainers[..index].contains(name)
+    }) {
+        return Err(invalid("explainers are known, distinct names"));
     }
     let mut ids = HashSet::new();
     let mut markers = HashSet::new();

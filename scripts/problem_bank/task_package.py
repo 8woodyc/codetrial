@@ -306,6 +306,7 @@ def preview(package, task_id):
             if "optimization" in sidecar
             else {}
         ),
+        **({"explainers": sidecar["explainers"]} if "explainers" in sidecar else {}),
         "publicCases": entry["judge"],
         "requiredCases": [labels.index(label) for label in sidecar["requiredCases"]],
         "completionTargets": sidecar["completionTargets"],

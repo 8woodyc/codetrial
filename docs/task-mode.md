@@ -95,6 +95,7 @@ below and rejects unknown fields; nested objects are closed too.
 | `rubricProfile`       | Literal `task-engagement-v1`                        |
 | `languages`           | Optional; 1..5 distinct languages, default `python` |
 | `optimization`        | Optional; `O0` or `O1`, needs C or C++              |
+| `explainers`          | Optional; 1.. distinct names the page builds in     |
 
 Set, target and check IDs match `[a-z][a-z0-9-]{0,63}`. Task record IDs also
 permit an initial digit, preserving catalog IDs such as `3sum`. Target IDs and
@@ -129,6 +130,15 @@ sets it when the cost of its code is the point, so the compiler does not hide
 it; the page says so beside the compile notice, and the candidate's source has
 no way to change it. Absent, the default applies. It needs C or C++ in
 `languages`, since the other languages take no such flag.
+
+`explainers` names what the page shows beside the brief to make the task easier
+to picture. The only one is `cube`, a 2x2x2 cube the learner can turn: a 3D
+view to drag round, the same cube unfolded, buttons and a notation box for
+turns, and the position code the cube is in, with what each of its digits
+says. Each explainer is built into the page, so a package names one and cannot
+supply its own; an unknown or repeated name is refused, and absent, nothing is
+shown. The cube's code is the default task's: seven cubie digits, then seven
+twist digits, with the up-left-front corner held fixed.
 
 Required cases resolve by exact **source judge label**, before variant renames,
 not by index or fuzzy matching. Each label must resolve to exactly one case.
@@ -686,6 +696,14 @@ workspace keeps the rules, the countdown, connection status and help inside the
 fullscreen view. Credential repair, sign-in and device selection happen only
 before Start. CodeTrial stops monitoring before it leaves fullscreen itself at
 the end of an attempt.
+
+A task that names the `cube` explainer shows the cube under its contract,
+open, with the brief. It is drawn from one model, so every view agrees: the
+3D view, the unfolded net and the position code are the same cube, and a turn
+of any face of it, a notation such as `[R, D] B2`, or a code typed from the
+public cases changes all three. The model is checked against the solver's own
+turn tables. Turning is the learner's own; nothing the cube does is sent to
+the runtime, Jim or the review.
 
 A whiteboard below the editor is the interview's example drawing: pens, an
 eraser, undo and clear. What is drawn on it leaves the browser only as the

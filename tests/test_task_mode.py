@@ -277,6 +277,20 @@ class TaskSidecarTests(unittest.TestCase):
             ):
                 validate(data)
 
+    def test_a_task_may_name_the_explainers_the_page_builds_in(self):
+        data = fixture()
+        self.assertNotIn("explainers", validate(data))
+        data["sidecar"]["explainers"] = ["cube"]
+        self.assertEqual(validate(data)["explainers"], ["cube"])
+        # A package names one and cannot supply its own, or name one twice.
+        for bad in ([], ["cube", "cube"], ["maze"], ["Cube"], "cube", None, [1]):
+            data["sidecar"]["explainers"] = bad
+            with (
+                self.subTest(bad=bad),
+                self.assertRaisesRegex(ValueError, "explainers are a list"),
+            ):
+                validate(data)
+
     def test_a_compiled_language_needs_the_types_its_harness_is_built_from(self):
         data = fixture()
         data["sidecar"]["languages"] = ["python", "cpp"]

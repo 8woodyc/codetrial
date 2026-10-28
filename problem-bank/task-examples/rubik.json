@@ -132,7 +132,8 @@
     "entry": "minimumTurns",
     "brief": [
       "Our puzzle service answers 2x2x2 cube questions: given a scrambled position, how few turns does the best solution need? A teammate wrote a solver that searches the whole cube and answers a query from the table it builds. It is correct, but it takes too long and too much memory for the service, and the compiler service reports its run as timed out.",
-      "Starting from that solver, make minimumTurns(code) in C finish within the compiler service's time limit, counting each turn of the right, back or down face as one. Every case must still pass: a faster solver that changes an answer is worse than a slow one."
+      "Starting from that solver, make minimumTurns(code) in C finish within the compiler service's time limit, counting each turn of the right, back or down face as one. Every case must still pass: a faster solver that changes an answer is worse than a slow one.",
+      "The cube below can be turned. A 2x2x2 cube has six faces, up, down, left, right, front and back, and eight corner cubies. A letter turns that face a quarter turn clockwise as you look at it, so R is the right face; R' turns it back and R2 is a half turn. Hold the up-left-front corner still and only the right, back and down faces turn here. The position code names, for the seven other places in a fixed order, the cubie there and then its twist plus one, so turn the cube and watch the digits change, or type a code from the public cases to see its position."
     ],
     "contract": "minimumTurns(code) receives a valid 14-digit position code, seven cubie digits 1 to 7 followed by seven twist digits 1 to 3, and returns the fewest turns of the right, back and down faces, each quarter, half or counterclockwise quarter turn counting as one, that restore the solved position 12345671111111. The result is between 0 and 11. It is called once for each position, many times in one process, and the whole run has to finish within the compiler service's time limit.",
     "examples": [
@@ -231,6 +232,9 @@
     "languages": [
       "c"
     ],
-    "optimization": "O1"
+    "optimization": "O1",
+    "explainers": [
+      "cube"
+    ]
   }
 }

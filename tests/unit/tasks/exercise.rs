@@ -817,6 +817,41 @@ fn a_task_may_lower_the_compiler_optimization_and_never_raise_it() {
     }
 }
 
+/// A task may name what the page shows beside its brief, from the page's own
+/// list, each once; it cannot supply one.
+#[test]
+fn a_task_may_name_the_explainers_the_page_builds_in() {
+    let explainers = |value: Value| {
+        let mut row = fixture("customized");
+        row["sidecar"]["explainers"] = value;
+        record(&row).map(|record| record.sidecar().explainers.clone())
+    };
+    assert!(
+        record(&fixture("customized"))
+            .unwrap()
+            .sidecar()
+            .explainers
+            .is_empty()
+    );
+    assert_eq!(explainers(json!(["cube"])).unwrap(), ["cube"]);
+    for bad in [json!(["maze"]), json!(["Cube"]), json!(["cube", "cube"])] {
+        assert_eq!(
+            explainers(bad.clone()),
+            Err(invalid("explainers are known, distinct names")),
+            "{bad}"
+        );
+    }
+    assert_eq!(explainers(Value::Null), Err(invalid("invalid explainers")));
+    // Not a list of text: refused where the sidecar's types are.
+    for bad in [json!("cube"), json!([1])] {
+        assert_eq!(
+            explainers(bad.clone()),
+            Err(invalid("invalid sidecar fields or types")),
+            "{bad}"
+        );
+    }
+}
+
 #[test]
 fn a_compiled_language_needs_the_types_its_harness_is_built_from() {
     let mut row = fixture("customized");

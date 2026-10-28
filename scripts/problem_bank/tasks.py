@@ -25,8 +25,12 @@ SIDECAR_KEYS = {
     "rubricProfile",
 }
 # Optional: a sidecar without `languages` allows the default language alone,
-# and one without `optimization` runs compiled code at the page's default.
-OPTIONAL_SIDECAR_KEYS = {"languages", "optimization"}
+# one without `optimization` runs compiled code at the page's default, and one
+# without `explainers` offers the learner nothing beside the brief.
+OPTIONAL_SIDECAR_KEYS = {"languages", "optimization", "explainers"}
+# What the task page can show beside a brief; each is built into the page, so a
+# package names one and cannot supply its own.
+EXPLAINERS = ("cube",)
 # Less optimization than the default, never more; only C and C++ take the flag.
 OPTIMIZATIONS = ("O0", "O1")
 OPTIMIZED_LANGS = {"c", "cpp"}
@@ -153,6 +157,14 @@ def validated_sidecar(
         or not OPTIMIZED_LANGS & set(languages)
     ):
         raise ValueError("optimization is O0 or O1 and needs C or C++")
+    if "explainers" in sidecar and (
+        type(sidecar["explainers"]) is not list
+        or not sidecar["explainers"]
+        or any(type(value) is not str for value in sidecar["explainers"])
+        or len(set(sidecar["explainers"])) != len(sidecar["explainers"])
+        or any(value not in EXPLAINERS for value in sidecar["explainers"])
+    ):
+        raise ValueError("explainers are a list of known, distinct names")
     if "c" in languages and judge["kind"] == "class":
         raise ValueError("C runs only function judges")
     if (

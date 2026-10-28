@@ -2,6 +2,7 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { launchChromium, read, startStaticServer } from "./source.js";
+import { apply, parseAlgorithm, positionCode, solved } from "../../web/cube.js";
 
 let browser, server, base;
 before(async () => {
@@ -582,6 +583,148 @@ test("the task editor paints syntax colours and line numbers behind the textarea
       ]),
       [900, 900, 900],
     );
+  } finally {
+    await page.close();
+  }
+});
+
+test("a task that names the cube explainer offers a cube to turn", async (t) => {
+  const plain = await pageFor(t);
+  if (!plain) return;
+  try {
+    await start(plain.page);
+    // A task that names no explainer has no cube on its page.
+    assert.equal(await plain.page.locator("#cube-explorer").isVisible(), false);
+    assert.equal(await plain.page.locator(".cube-scene").count(), 0);
+  } finally {
+    await plain.page.close();
+  }
+
+  const ctx = await pageFor(t, { taskOverrides: { explainers: ["cube"] } });
+  const { page } = ctx;
+  const expected = (text) =>
+    positionCode(apply(solved(), parseAlgorithm(text)));
+  const code = () => page.locator(".cube-code-value").textContent();
+  const places = () =>
+    page
+      .locator(".cube-places tr")
+      .evaluateAll((rows) =>
+        rows.map((row) =>
+          [...row.children].map((cell) => cell.textContent).join(" "),
+        ),
+      );
+  try {
+    await page.setViewportSize({ width: 1400, height: 1000 });
+    await start(page);
+    await page.locator("#cube-explorer").waitFor({ state: "visible" });
+    assert.equal(await code(), "12345671111111");
+    assert.deepEqual(await places(), [
+      "Place URF DRF DFL URB DRB DBL UBL",
+      "Cubie 1 2 3 4 5 6 7",
+      "Twist + 1 1 1 1 1 1 1 1",
+    ]);
+    // 8 cubies, each a black body of six squares and three stickers.
+    assert.equal(await page.locator(".cube-cubie").count(), 8);
+    assert.equal(await page.locator(".cube-sticker").count(), 24);
+
+    // A turn swings its layer and lands on the code the solver's tables give.
+    await page
+      .getByRole("button", { name: "R: right face, clockwise" })
+      .click();
+    await page.locator(".cube-layer").waitFor({ state: "attached" });
+    await page.waitForFunction(
+      () =>
+        document.querySelector(".cube-code-value").textContent !==
+        "12345671111111",
+    );
+    assert.equal(await code(), "25314672313211");
+    assert.equal(await code(), expected("R"));
+    assert.match(
+      await page.locator(".cube-history").textContent(),
+      /Moves so far: R$/,
+    );
+    assert.equal(await page.locator(".cube-layer").count(), 0);
+
+    // Notation, in the order asked.
+    await page.fill(".cube-algorithm input", "[R, D] B2");
+    await page.press(".cube-algorithm input", "Enter");
+    await page.waitForFunction(
+      (text) =>
+        document.querySelector(".cube-history").textContent.endsWith(text),
+      "R D R' D' B2",
+    );
+    assert.equal(await code(), expected("R [R, D] B2"));
+    // An algorithm it cannot read is said so, and changes nothing.
+    const before = await code();
+    await page.fill(".cube-algorithm input", "R X");
+    await page.click(".cube-algorithm button[type=submit]");
+    assert.match(
+      await page.locator(".cube-status").textContent(),
+      /Cannot read "X"/,
+    );
+    assert.equal(await code(), before);
+
+    // A code from the public cases shows its position; a bad one says why.
+    await page.fill(".cube-load input", "21653471111312");
+    await page.click(".cube-load button");
+    assert.equal(await code(), "21653471111312");
+    assert.equal(await page.locator(".cube-status").textContent(), "");
+    await page.fill(".cube-load input", "12345671111112");
+    await page.click(".cube-load button");
+    assert.match(
+      await page.locator(".cube-status").textContent(),
+      /multiple of three/,
+    );
+    assert.equal(await code(), "21653471111312");
+
+    // The same cube unfolded, and each cubie's number on it.
+    const views = page.locator(".cube-views button");
+    assert.equal(await views.nth(0).getAttribute("aria-pressed"), "true");
+    await views.nth(1).click();
+    assert.equal(await views.nth(1).getAttribute("aria-pressed"), "true");
+    assert.equal(await page.locator(".cube-scene").isVisible(), false);
+    assert.equal(await page.locator(".cube-net rect").count(), 24);
+    // One label for each face.
+    assert.equal(await page.locator(".cube-net text").count(), 6);
+    await page.locator(".cube-option input").check();
+    // And a digit on the one up or down sticker of each of the eight cubies.
+    assert.equal(await page.locator(".cube-net text").count(), 6 + 8);
+    await views.nth(0).click();
+    assert.equal(await page.locator(".cube-scene").isVisible(), true);
+
+    // Reset is the solved cube, and looking round does not turn it.
+    await page.getByRole("button", { name: "Back to the solved cube" }).click();
+    assert.equal(await code(), "12345671111111");
+    const tilt = () => page.locator(".cube-pivot").getAttribute("style");
+    const first = await tilt();
+    await page.locator(".cube-scene").focus();
+    await page.keyboard.press("ArrowRight");
+    assert.notEqual(await tilt(), first);
+    assert.equal(await code(), "12345671111111");
+  } finally {
+    await page.close();
+  }
+});
+
+test("the cube turns at once for a reader who asks for less motion", async (t) => {
+  const ctx = await pageFor(t, { taskOverrides: { explainers: ["cube"] } });
+  if (!ctx) return;
+  const { page } = ctx;
+  try {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await start(page);
+    await page
+      .getByRole("button", { name: "R: right face, clockwise" })
+      .click();
+    // Nothing swings: the state is there by the next frame.
+    await page.waitForFunction(
+      () =>
+        document.querySelector(".cube-code-value").textContent ===
+        "25314672313211",
+      null,
+      { timeout: 1000 },
+    );
+    assert.equal(await page.locator(".cube-layer").count(), 0);
   } finally {
     await page.close();
   }

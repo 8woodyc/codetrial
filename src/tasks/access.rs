@@ -480,6 +480,9 @@ impl TaskService {
         if let Some(level) = &record.sidecar().optimization {
             view["optimization"] = json!(level);
         }
+        if !record.sidecar().explainers.is_empty() {
+            view["explainers"] = json!(record.sidecar().explainers);
+        }
         Ok(view)
     }
 

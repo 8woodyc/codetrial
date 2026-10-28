@@ -39,6 +39,7 @@ import {
 import { evaluate, formatResult } from "./calculator.js";
 import { mountExampleBoard } from "./example-board.js";
 import { mountEditorView } from "./editor-view.js";
+import { mountCubeView } from "./cube-view.js";
 import { CONSTRAINTS } from "./devices.js";
 import { videoTrackReady } from "./audio-check.js";
 import { COMPILED_LANGUAGES } from "./compiler-explorer.js";
@@ -69,6 +70,8 @@ let task, state, room, review;
 let board;
 // The editor's syntax colours and line numbers, behind the textarea.
 let editorView;
+// The cube a task may offer to turn, once one has.
+let cubeMounted;
 let revisionId = "initial";
 // The language chosen for this attempt: the task's first until the learner
 // picks another, and fixed once a room is joined for it.
@@ -385,6 +388,10 @@ async function loadTask() {
   $("title").textContent = task.title;
   $("prepare-title").textContent = task.title;
   $("contract").textContent = task.contract;
+  // A task may offer a cube to turn, mounted the first time one does.
+  if (task.explainers?.includes("cube"))
+    cubeMounted ??= mountCubeView($("cube-explorer"));
+  $("cube-explorer").hidden = !task.explainers?.includes("cube");
   $("public-cases").replaceChildren(
     ...(task.publicCases?.cases ?? []).map((row, index) => {
       const li = document.createElement("li");

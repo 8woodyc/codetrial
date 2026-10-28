@@ -79,6 +79,8 @@ async fn the_public_task_carries_its_rules_and_nothing_private() {
     assert_eq!(task["rules"]["durationMin"], 15);
     assert_eq!(task["rules"]["lookAwaySeconds"], 8);
     assert_eq!(task["rules"]["closesAt"], Value::Null);
+    // A task that names no explainers offers the page nothing to build in.
+    assert!(task.get("explainers").is_none());
     assert!(
         task["contract"]
             .as_str()

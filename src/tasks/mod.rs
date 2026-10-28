@@ -18,6 +18,10 @@ pub use exercise::{Exercise, TaskRecord};
 /// starters for and the task page can run.
 pub const LANGUAGES: [&str; 5] = ["python", "javascript", "c", "cpp", "java"];
 
+/// What a task may ask the page to show beside its brief. Each is built into
+/// the page; `scripts/problem_bank/tasks.py` keeps the same list.
+pub const EXPLAINERS: [&str; 1] = ["cube"];
+
 /// The languages the page compiles on Compiler Explorer rather than running
 /// in the browser. A server with it turned off cannot run them.
 pub const COMPILED_LANGUAGES: [&str; 3] = ["c", "cpp", "java"];
