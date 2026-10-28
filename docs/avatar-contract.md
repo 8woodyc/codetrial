@@ -319,14 +319,38 @@ in the cost column for a borrowed mascot.
 ### Captions
 
 `#captions-bar` lives inside `#jim-stage`, under the avatar. It grows to fit
-its text, with `max-height: min(40vh, 20rem)` and scrolling as a backstop.
+its text, with `max-height: min(40vh, 20rem)`, and scrolls once a Jim turn
+outgrows that height. Its head, `.captions-head`, holds the "Live CC:" label
+and the Unclear button and is sticky on the bar's own surface, so a bar pinned
+to the end of a long turn still shows both without the candidate scrolling up.
 
-A completed Jim turn is displayed in full, without `CAPTION_MAX_CHARS`
-truncation or an idle timeout. It stays until the candidate's next transcribed
-speech or an edit that changes the code text. Speech replaces it with the
-candidate's caption; a code text change hides the bar. Clicking or focusing
-the editor and switching languages preserve Jim's caption. A new Jim turn
-replaces the previous one and starts at the top of the caption bar.
+A Jim turn is never windowed: from the first revealed character to the last,
+the bar holds the whole turn so far, so a long question keeps its opening
+sentence while the rest is still typing out. A completed Jim turn is displayed
+in full, without `CAPTION_MAX_CHARS` truncation or an idle timeout. It stays
+until the candidate's next transcribed speech or an edit that changes the code
+text. Speech replaces it with the candidate's caption; a code text change hides
+the bar. Clicking or focusing the editor and switching languages preserve Jim's
+caption. A new Jim turn replaces the previous one.
+
+While a Jim turn reveals, the bar follows its newest words. Only the
+candidate's scrolling changes that: scrolling up to reread stops the follow,
+and scrolling back to the end resumes it, with or without a tick in between.
+The bar's own size does not: a bar that shrinks under the reveal, as it does
+when the ending wait opens, grows taller under a candidate who stopped the
+follow, or hides after idling out keeps the follow it had.
+
+The bar's last resting position is recorded by each tick and by the scroll
+listener. A later position counts as the candidate's scroll unless the
+browser's clamp explains it: the smaller of the recorded position and the
+bar's current bottom, which is also where a bar that shrank, grew taller or hid
+ends up. Jim's own ticks therefore never read as a scroll, and a candidate's
+scroll still counts when its event is queued behind Jim's next tick, because
+the tick checks the bar before writing. While the bar holds the candidate's
+caption, nothing done to it changes Jim's follow, including the clamp when it
+replaces Jim's text. Every new turn follows from its first tick, wherever the
+candidate left the last one and even if that scroll's event is still queued,
+and that first tick puts a short opening at the top.
 
 Keeping the last turn lets the candidate reread a hint or follow-up question
 while thinking, without switching away from the problem. The Transcript tab
@@ -346,9 +370,9 @@ Jim captions reveal gradually, even after final text arrives, because
 generation can finish while audio is still queued. An edit during the reveal
 is remembered for that Jim segment: its final text finishes revealing, then
 the bar hides without another edit. While revealing, Jim captions keep the
-`CAPTION_MAX_CHARS` window and `CAPTION_IDLE_HIDE_MS` timeout, refreshed by
-pacing updates. Candidate captions keep their 160-character window and 12 s
-timeout. The "Listening..." placeholder also keeps its 12 s timeout.
+`CAPTION_IDLE_HIDE_MS` timeout, refreshed by pacing updates. Candidate captions
+keep their 160-character window and 12 s timeout. The "Listening..."
+placeholder also keeps its 12 s timeout.
 
 A stream with `lk.transcription_final` set to `"true"` must be read
 successfully to its end before its turn can be retained. Once the reveal
@@ -368,12 +392,20 @@ Jim's segment.
 `node --test tests/browser/avatar.test.js tests/browser/captions.test.js`
 covers avatar behavior with a fake clock, a fake mount, and a fake model.
 Caption tests use a fake clock and actual page functions to cover retention,
-dismissal, final-stream handling, and editor input. These checks cannot see
-WebGL, a canvas, or a layout, and no assertion in them should claim to.
+dismissal, final-stream handling, and editor input, and a bar laid out like
+`#captions-bar` (clamped, hideable, optionally with the fractional bottom of a
+zoomed page, and queuing a scroll event for every change of scrollTop, whoever
+caused it) to cover when the reveal follows. These checks
+cannot see WebGL, a canvas, or a layout, and no assertion in them should claim
+to.
 
 `node --test tests/browser/editor-pipeline.test.js` runs Chromium against the
 interview page. It checks caption retention during editor focus, caret
-movement, and language switches, plus scroll reset between Jim turns.
+movement, and language switches, plus a long reveal following its newest
+words, a candidate's scroll position surviving an update to the same turn, a
+new turn following its reveal after the last one was left midway, a tick that
+runs in the same task as a candidate's scroll leaving it in place, and the head
+staying in view while the bar is pinned to the end of a long turn.
 
 `BROWSER_CHECK_FLOW=avatar ./scripts/browser-check.sh` is the only check that
 runs the renderer. It asserts the mount leaves `loading` and then asserts

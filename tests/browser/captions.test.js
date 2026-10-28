@@ -5,15 +5,15 @@ import { MAX_UNCLEAR_LINES } from "../../web/lib.js";
 
 let captionCopies = 0;
 
-async function setupCaptions(t) {
+async function setupCaptions(t, { scrollable = false, subpixel = 0 } = {}) {
   // Caption state is module-level, so each case imports a fresh copy.
   const captions = await import(
     `../../web/captions.js?copy=${++captionCopies}`
   );
-  const nodes = {
-    captionsText: { textContent: "" },
-    captionsBar: { hidden: true },
-  };
+  const nodes = { captionsText: { textContent: "" } };
+  nodes.captionsBar = scrollable
+    ? layoutBar(nodes, subpixel)
+    : { hidden: true };
   captions.initCaptions({ nodes });
   t.mock.timers.enable({ apis: ["setTimeout"] });
   return { captions, nodes };
@@ -128,6 +128,15 @@ test("a finished interviewer turn is shown in full", async (t) => {
   t.mock.timers.tick(300);
   assert.equal(nodes.captionsText.textContent, `[Jim]: ${text.slice(0, 16)}`);
 
+  // Past 160 characters the reveal must keep the opening, not slide a window.
+  for (let ticks = 0; ticks < text.length; ticks++) {
+    assert.ok(
+      nodes.captionsText.textContent.startsWith(`[Jim]: ${text.slice(0, 16)}`),
+      `the opening was cut: ${nodes.captionsText.textContent}`,
+    );
+    if (nodes.captionsText.textContent === `[Jim]: ${text}`) break;
+    t.mock.timers.tick(300);
+  }
   finishJim(t, nodes, text);
 
   // Later ticks must neither trim nor hide the retained turn.
@@ -135,6 +144,381 @@ test("a finished interviewer turn is shown in full", async (t) => {
   assert.equal(nodes.captionsText.textContent, `[Jim]: ${text}`);
   t.mock.timers.tick(60000);
   assert.equal(nodes.captionsBar.hidden, false);
+});
+
+// A bar laid out the way the browser lays out #captions-bar: content one pixel
+// per character, a viewport of `clientHeight`, and no scroll position while
+// hidden. As in the browser, every change of scrollTop queues one scroll
+// event for the next frame, whoever caused it: a write, or the clamp when the
+// text gets shorter. `scrollTo` is the candidate, whose event runs at once
+// unless queued.
+// `subpixel` is how far past, or when negative short of, the whole-pixel
+// bottom a zoomed browser lets an overflowing bar scroll, while scrollHeight
+// and clientHeight stay whole.
+function layoutBar(nodes, subpixel) {
+  let top = 0;
+  let hidden = true;
+  let clientHeight = 100;
+  let pending = false;
+  let words = "";
+  const listeners = [];
+  const height = () => (hidden ? 0 : Math.max(clientHeight, words.length));
+  const bottom = () =>
+    height() > clientHeight ? height() - clientHeight + subpixel : 0;
+  const frame = () => {
+    if (!pending) return;
+    pending = false;
+    for (const listener of listeners) listener();
+  };
+  const move = (value) => {
+    const before = top;
+    top = hidden ? 0 : Math.min(Math.max(0, value), bottom());
+    if (top !== before && !hidden && !pending) {
+      pending = true;
+      setTimeout(frame, 16);
+    }
+  };
+  nodes.captionsText = {
+    get textContent() {
+      return words;
+    },
+    set textContent(value) {
+      words = value;
+      move(top);
+    },
+  };
+  return {
+    get clientHeight() {
+      return clientHeight;
+    },
+    set clientHeight(value) {
+      clientHeight = value;
+      move(top);
+    },
+    get scrollHeight() {
+      return height();
+    },
+    get scrollTop() {
+      return top;
+    },
+    set scrollTop(value) {
+      move(value);
+    },
+    get hidden() {
+      return hidden;
+    },
+    set hidden(value) {
+      hidden = value;
+      if (hidden) {
+        top = 0;
+        pending = false;
+      }
+    },
+    addEventListener(type, listener) {
+      if (type === "scroll") listeners.push(listener);
+    },
+    // A candidate scroll's event can also wait for the next frame, as it does
+    // when the scroll lands just before one of Jim's ticks.
+    scrollTo(value, { queued = false } = {}) {
+      move(value);
+      if (!queued) frame();
+    },
+  };
+}
+
+function atEnd(bar) {
+  return bar.scrollTop + bar.clientHeight >= bar.scrollHeight;
+}
+
+const LONG_JIM_TURN =
+  "Count each value before you pair it with its complement. ".repeat(6);
+
+test("a long interviewer reveal follows its newest words", async (t) => {
+  const { captions, nodes } = await setupCaptions(t, { scrollable: true });
+
+  captions.updateCaptions("interviewer", LONG_JIM_TURN, "jim-1", {
+    final: true,
+  });
+  finishJim(t, nodes, LONG_JIM_TURN);
+
+  assert.ok(nodes.captionsBar.scrollTop > 0, "the turn must overflow");
+  assert.ok(atEnd(nodes.captionsBar), "the reveal must reach the end");
+});
+
+test("a candidate rereading Jim's opening is not pulled down", async (t) => {
+  const { captions, nodes } = await setupCaptions(t, { scrollable: true });
+
+  captions.updateCaptions("interviewer", LONG_JIM_TURN, "jim-1", {
+    final: true,
+  });
+  for (let ticks = 0; ticks < 20; ticks++) t.mock.timers.tick(300);
+  assert.ok(nodes.captionsBar.scrollTop > 0, "the reveal must overflow first");
+
+  nodes.captionsBar.scrollTo(0);
+  finishJim(t, nodes, LONG_JIM_TURN);
+  assert.equal(nodes.captionsBar.scrollTop, 0);
+});
+
+test("a candidate scrolling back to the end resumes the follow", async (t) => {
+  const { captions, nodes } = await setupCaptions(t, { scrollable: true });
+  const bar = nodes.captionsBar;
+
+  captions.updateCaptions("interviewer", LONG_JIM_TURN, "jim-1", {
+    final: true,
+  });
+  for (let ticks = 0; ticks < 20; ticks++) t.mock.timers.tick(300);
+  bar.scrollTo(0);
+  t.mock.timers.tick(300);
+  bar.scrollTo(bar.scrollHeight);
+
+  finishJim(t, nodes, LONG_JIM_TURN);
+  assert.ok(atEnd(bar), "the reveal must follow again from the end");
+});
+
+test("scrolling up and back down between ticks resumes the follow", async (t) => {
+  const { captions, nodes } = await setupCaptions(t, { scrollable: true });
+  const bar = nodes.captionsBar;
+  const opening = LONG_JIM_TURN.slice(0, 200);
+
+  // Caught up and waiting for more, so no tick runs between the two scrolls.
+  captions.updateCaptions("interviewer", opening, "jim-1");
+  finishJim(t, nodes, opening);
+  t.mock.timers.tick(16);
+  const bottom = bar.scrollTop;
+  bar.scrollTo(0);
+  bar.scrollTo(bar.scrollHeight);
+  assert.equal(bar.scrollTop, bottom, "back exactly where the tick left it");
+
+  captions.updateCaptions("interviewer", LONG_JIM_TURN, "jim-1", {
+    final: true,
+  });
+  finishJim(t, nodes, LONG_JIM_TURN);
+  assert.ok(atEnd(bar), "the growth after scrolling back must be followed");
+});
+
+test("a taller bar does not restart a follow the candidate stopped", async (t) => {
+  const { captions, nodes } = await setupCaptions(t, { scrollable: true });
+  const bar = nodes.captionsBar;
+  const opening = LONG_JIM_TURN.slice(0, 200);
+
+  captions.updateCaptions("interviewer", opening, "jim-1");
+  finishJim(t, nodes, opening);
+  t.mock.timers.tick(16);
+  bar.scrollTo(bar.scrollTop - 10);
+
+  // A resize, or the compact card's cap lifting, clamps the bar to its new
+  // bottom without the candidate scrolling.
+  bar.clientHeight = 130;
+  t.mock.timers.tick(16);
+  assert.ok(atEnd(bar), "the clamp must land the bar on its new bottom");
+  const clamped = bar.scrollTop;
+
+  captions.updateCaptions("interviewer", LONG_JIM_TURN, "jim-1", {
+    final: true,
+  });
+  finishJim(t, nodes, LONG_JIM_TURN);
+  assert.equal(bar.scrollTop, clamped, "the reveal must not pull them down");
+});
+
+test("a taller zoomed bar does not restart a follow the candidate stopped", async (t) => {
+  const { captions, nodes } = await setupCaptions(t, {
+    scrollable: true,
+    subpixel: 0.375,
+  });
+  const bar = nodes.captionsBar;
+  const opening = LONG_JIM_TURN.slice(0, 200);
+
+  captions.updateCaptions("interviewer", opening, "jim-1");
+  finishJim(t, nodes, opening);
+  t.mock.timers.tick(16);
+  bar.scrollTo(bar.scrollTop - 10);
+
+  bar.clientHeight = 130;
+  t.mock.timers.tick(16);
+  const clamped = bar.scrollTop;
+  assert.notEqual(clamped, Math.trunc(clamped), "the clamp must be fractional");
+
+  captions.updateCaptions("interviewer", LONG_JIM_TURN, "jim-1", {
+    final: true,
+  });
+  finishJim(t, nodes, LONG_JIM_TURN);
+  assert.equal(bar.scrollTop, clamped, "the reveal must not pull them down");
+});
+
+test("a zoomed bar that stops short of its end still resumes the follow", async (t) => {
+  const { captions, nodes } = await setupCaptions(t, {
+    scrollable: true,
+    subpixel: -0.375,
+  });
+  const bar = nodes.captionsBar;
+  const opening = LONG_JIM_TURN.slice(0, 200);
+  const short = () => bar.scrollHeight - bar.clientHeight - bar.scrollTop;
+
+  captions.updateCaptions("interviewer", opening, "jim-1");
+  finishJim(t, nodes, opening);
+  t.mock.timers.tick(16);
+  bar.scrollTo(0);
+  bar.scrollTo(bar.scrollHeight);
+  assert.ok(short() > 0, "the bar must stop short of its whole-pixel end");
+
+  captions.updateCaptions("interviewer", LONG_JIM_TURN, "jim-1", {
+    final: true,
+  });
+  finishJim(t, nodes, LONG_JIM_TURN);
+  assert.ok(short() < 1, "the growth after scrolling back must be followed");
+});
+
+test("a scroll of the last turn still queued does not stop the next one", async (t) => {
+  const { captions, nodes } = await setupCaptions(t, { scrollable: true });
+  const bar = nodes.captionsBar;
+  const next = "Then scan the array and check the boundary cases. ".repeat(6);
+
+  captions.updateCaptions("interviewer", LONG_JIM_TURN, "jim-1", {
+    final: true,
+  });
+  finishJim(t, nodes, LONG_JIM_TURN);
+  t.mock.timers.tick(16);
+  // The next turn arrives before the frame that would dispatch this scroll.
+  bar.scrollTo(bar.scrollTop / 2, { queued: true });
+
+  captions.updateCaptions("interviewer", next, "jim-2", { final: true });
+  finishJim(t, nodes, next);
+  assert.ok(atEnd(bar), "the next turn must follow from its first tick");
+});
+
+test("a caption bar that shrinks mid reveal keeps following", async (t) => {
+  const { captions, nodes } = await setupCaptions(t, { scrollable: true });
+  const bar = nodes.captionsBar;
+
+  captions.updateCaptions("interviewer", LONG_JIM_TURN, "jim-1", {
+    final: true,
+  });
+  for (let ticks = 0; ticks < 20; ticks++) t.mock.timers.tick(300);
+  assert.ok(bar.scrollTop > 0, "the reveal must overflow first");
+
+  // The ending wait cuts the bar to 4.5rem without the candidate scrolling,
+  // before the event the last follow queued has run.
+  bar.clientHeight = 30;
+  assert.ok(!atEnd(bar), "the shrink must leave the bar short of its end");
+  t.mock.timers.tick(16);
+
+  finishJim(t, nodes, LONG_JIM_TURN);
+  assert.ok(atEnd(bar), "the newest words must stay in view");
+});
+
+test("a live turn that grows after its bar idled out still follows", async (t) => {
+  const { captions, nodes } = await setupCaptions(t, { scrollable: true });
+  const bar = nodes.captionsBar;
+  const opening = LONG_JIM_TURN.slice(0, 200);
+
+  captions.updateCaptions("interviewer", opening, "jim-1");
+  finishJim(t, nodes, opening);
+  t.mock.timers.tick(12000);
+  assert.equal(bar.hidden, true, "a live turn must idle out");
+
+  // The tick that reopens the bar already reveals past what it can hold.
+  captions.updateCaptions("interviewer", LONG_JIM_TURN, "jim-1", {
+    final: true,
+  });
+  assert.equal(bar.hidden, false);
+  assert.ok(atEnd(bar), "the tick that reopens the bar must follow");
+  finishJim(t, nodes, LONG_JIM_TURN);
+  assert.ok(atEnd(bar), "the reveal must follow once the bar is shown");
+});
+
+test("a candidate who stopped the follow keeps it stopped past an idle bar", async (t) => {
+  const { captions, nodes } = await setupCaptions(t, { scrollable: true });
+  const bar = nodes.captionsBar;
+  const opening = LONG_JIM_TURN.slice(0, 200);
+
+  captions.updateCaptions("interviewer", opening, "jim-1");
+  finishJim(t, nodes, opening);
+  bar.scrollTo(0);
+  t.mock.timers.tick(12000);
+  assert.equal(bar.hidden, true, "a live turn must idle out");
+
+  // Hiding drops the position, which the candidate did not move.
+  captions.updateCaptions("interviewer", LONG_JIM_TURN, "jim-1", {
+    final: true,
+  });
+  finishJim(t, nodes, LONG_JIM_TURN);
+  assert.equal(bar.scrollTop, 0, "the reopened turn must not follow");
+});
+
+test("a new Jim turn follows after the last one was left mid scroll", async (t) => {
+  const { captions, nodes } = await setupCaptions(t, { scrollable: true });
+  const bar = nodes.captionsBar;
+  const next = "Then scan the array and check the boundary cases. ".repeat(6);
+
+  captions.updateCaptions("interviewer", LONG_JIM_TURN, "jim-1", {
+    final: true,
+  });
+  finishJim(t, nodes, LONG_JIM_TURN);
+  bar.scrollTo(bar.scrollTop / 2);
+
+  captions.updateCaptions("interviewer", next, "jim-2", { final: true });
+  finishJim(t, nodes, next);
+  assert.ok(atEnd(bar), "the next turn must follow its own reveal");
+});
+
+test("a candidate caption does not restart a follow the candidate stopped", async (t) => {
+  const { captions, nodes } = await setupCaptions(t, { scrollable: true });
+  const bar = nodes.captionsBar;
+
+  // The candidate is speaking when Jim's live turn starts, so a longer copy of
+  // their segment pauses Jim instead of retiring him.
+  captions.updateCaptions("you", "I will", "you-1");
+  captions.updateCaptions("interviewer", LONG_JIM_TURN, "jim-1");
+  for (let ticks = 0; ticks < 30; ticks++) t.mock.timers.tick(300);
+  bar.scrollTo(bar.scrollTop / 2);
+  assert.ok(bar.scrollTop > 0, "the candidate must stop midway");
+
+  // Their short caption clamps the bar to its top, which is also its end.
+  captions.updateCaptions("you", "I will count each value first.", "you-1");
+  t.mock.timers.tick(16);
+
+  captions.updateCaptions("interviewer", LONG_JIM_TURN, "jim-1");
+  t.mock.timers.tick(300);
+  assert.ok(!atEnd(bar), "the resumed reveal must not jump to the end");
+});
+
+test("a candidate scroll queued behind Jim's tick still stops the follow", async (t) => {
+  const { captions, nodes } = await setupCaptions(t, { scrollable: true });
+  const bar = nodes.captionsBar;
+
+  captions.updateCaptions("interviewer", LONG_JIM_TURN, "jim-1", {
+    final: true,
+  });
+  for (let ticks = 0; ticks < 20; ticks++) t.mock.timers.tick(300);
+  // Let the last follow's own event run, then scroll a moment before the next
+  // tick, so the tick runs while the candidate's event is still queued.
+  t.mock.timers.tick(16);
+  t.mock.timers.tick(283);
+  bar.scrollTo(0, { queued: true });
+
+  finishJim(t, nodes, LONG_JIM_TURN);
+  assert.equal(bar.scrollTop, 0, "the tick must not write over the scroll");
+});
+
+test("scrolling the candidate's own caption leaves Jim's follow alone", async (t) => {
+  const { captions, nodes } = await setupCaptions(t, { scrollable: true });
+  const bar = nodes.captionsBar;
+  const reply = "I will count each value first and then pair them. ".repeat(2);
+
+  captions.updateCaptions("you", "I will", "you-1");
+  captions.updateCaptions("interviewer", LONG_JIM_TURN, "jim-1");
+  for (let ticks = 0; ticks < 30; ticks++) t.mock.timers.tick(300);
+
+  // In the ending wait's short bar the candidate's caption overflows too, and
+  // they scroll it, not Jim's turn.
+  bar.clientHeight = 30;
+  captions.updateCaptions("you", reply, "you-1");
+  t.mock.timers.tick(16);
+  bar.scrollTo(0);
+
+  captions.updateCaptions("interviewer", LONG_JIM_TURN, "jim-1");
+  finishJim(t, nodes, LONG_JIM_TURN);
+  assert.ok(atEnd(bar), "Jim's resumed reveal must still follow");
 });
 
 test("a finished interviewer turn outlives idle timers", async (t) => {
