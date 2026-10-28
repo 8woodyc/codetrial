@@ -47,7 +47,10 @@ everything that needs only their output in parallel: the no-ask actions in
 [pulls.md](pulls.md), `hygiene.sh` for every open PR, one review agent per low
 or blocked PR from [review-prs.md](review-prs.md), and the issue body, comment
 and search reads below. Each PR's review is verified and posted the moment it lands, and the
-report waits only for the last of them.
+report waits only for the last of them. The agents run in the background and
+announce themselves when done: do not poll their output files or sleep-loop,
+handle each PR when its notification arrives, and say in one line what is still
+running if a long wait leaves the user without news.
 
 How work moves on this tracker (who the maintainers are, how a PR is scoped,
 what the one-line review requests mean) is in

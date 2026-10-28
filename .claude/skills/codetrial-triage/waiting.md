@@ -32,8 +32,12 @@ neither a reminder nor a first answer on the issue (#370 and #385 sat in
   still has the build and the log it will ask for.
 - `waiting`: a maintainer spoke last and the reporter has not commented or
   edited the body since. Read that comment first. A correction or a note carried
-  over from another thread is not a question; neither is "see if PR #N resolves
-  this", which is a request to the maintainer and belongs under `linked`. When a
+  over from another thread is not a question, and neither is an acceptance
+  ("Go ahead", "Accepted as scoped") on an issue the commenter then assigned:
+  that opens a claim, so the entry is handled under `claimed` and gets no
+  `waiting` reminder (#330 sat in overdue `waiting` after "Go ahead"). Neither
+  is "see if PR #N resolves this", which is a request to the maintainer and
+  belongs under `linked`. When a
   maintainer comment in the thread is already the reminder
   [SKILL.md](SKILL.md#draft-the-notice-the-other-thread-needs) shapes, the deadline
   it names governs, even when a later maintainer comment rescoped the request
