@@ -527,14 +527,14 @@ async function runCompilerExplorer(
 
 // The JavaScript runner's worker, as source rather than a file: it becomes a
 // blob URL below, which `script-src 'self' blob:` allows and which keeps the
-// runner from being fetchable on its own. Hoisted to module scope because it
-// interpolates nothing and never has; leaving it inside runWorker made a
-// 23-line function read as a 278-line one.
+// runner from being fetchable on its own. Hoisted to module scope; its only
+// interpolation is the shared module-level expansion limit, so no value from
+// runWorker is needed to keep the budget enforced.
 const JS_RUNNER_SOURCE = `
     self.onmessage = (event) => {
       // \`name\` is the one \`runWorker\` checked and bound in the prelude, sent
       // rather than re-derived so the message names what was looked up.
-      const { spec, name, maxQuadTreeNodes } = event.data;
+      const { spec, name } = event.data;
       const sanitize = (value) => {
         const normalized = value === undefined ? null : value;
         try { return JSON.parse(JSON.stringify(normalized)); } catch { return String(normalized); }
@@ -689,7 +689,7 @@ const JS_RUNNER_SOURCE = `
         const visit = (node) => {
           if (!node) return;
           if (ancestors.has(node)) throw new TypeError("Returned tree must not contain a cycle.");
-          if (rows.length >= maxQuadTreeNodes) throw new TypeError("Returned quad tree must not expand to more than " + maxQuadTreeNodes + " nodes.");
+          if (rows.length >= ${MAX_QUAD_TREE_NODES}) throw new TypeError("Returned quad tree must not expand to more than ${MAX_QUAD_TREE_NODES} nodes.");
           ancestors.add(node);
           const isLeaf = Boolean(node.isLeaf);
           rows.push([isLeaf ? 1 : 0, isLeaf && node.val ? 1 : (isLeaf ? 0 : 1)]);
@@ -872,7 +872,7 @@ function runWorker(code, spec) {
         new Error(event.message || "Worker crashed while running your code."),
       );
     };
-    worker.postMessage({ spec, name, maxQuadTreeNodes: MAX_QUAD_TREE_NODES });
+    worker.postMessage({ spec, name });
   });
 }
 
