@@ -2678,13 +2678,13 @@ table.phase-scores {
   margin-right: auto;
 }
 .board-text-controls > button {
-  height: 30px;
+  min-height: 30px;
   padding: 0 8px;
   border: 1px solid var(--paper-edge);
   border-radius: 4px;
   background: var(--paper);
   color: var(--paper-ink);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 500;
 }
 .board-text-controls .board-text-confirm {
