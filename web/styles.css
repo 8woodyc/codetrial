@@ -3790,6 +3790,12 @@ body:not([data-recording]) .replay-detail > :not(header) {
   align-items: start;
 }
 
+/* Stretch only while every card is closed; an open picker or form would make
+   one card far taller than the rest. */
+.setup-grid:not(:has(details[open])) {
+  align-items: stretch;
+}
+
 .setup-panel,
 .lobby .recent-performance,
 .lobby .history {
@@ -3884,7 +3890,9 @@ body:not([data-recording]) .replay-detail > :not(header) {
 .lobby .editor-options-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, max-content));
-  gap: 0.25rem 1rem;
+  /* 0.75rem keeps both columns on one line in this card at 1280px beside a
+     scrollbar. */
+  gap: 0.25rem 0.75rem;
 }
 
 .lobby .editor-options-row legend {
@@ -3919,6 +3927,7 @@ body:not([data-recording]) .replay-detail > :not(header) {
 .session-panel .format-choices {
   display: grid;
   gap: 0.5rem;
+  --group-step: 0.5rem;
 }
 
 /* The grid gap above already spaces these from the mode buttons and from each
@@ -3926,6 +3935,11 @@ body:not([data-recording]) .replay-detail > :not(header) {
    alone, would double it. */
 .session-panel .format-choices > .duration-note {
   margin-top: 0;
+}
+
+/* Settings, not choices: a step apart from the buttons. */
+.session-panel .format-choices > .session-choice-group + .duration-note {
+  margin-top: var(--group-step);
 }
 
 .session-choice-group {
@@ -4305,6 +4319,7 @@ body:not([data-recording]) .replay-detail > :not(header) {
      margins above. */
   .session-panel .format-choices {
     gap: 0.25rem;
+    --group-step: 0;
   }
 
   /* On a short screen the narrow Start column makes the billing notice wrap
