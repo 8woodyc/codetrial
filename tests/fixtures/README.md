@@ -17,6 +17,12 @@ only thing in the repo that crosses that boundary.
 | `control.json` | `drawingActivityPayload`, `thinkingPayload`, `yieldTurnPayload`, `timeWarningPayload`, `endInterviewPayload`, `retryReportPayload`, `skipReportPayload` | `apply_control`, `recovery_request`, `skip_request` |
 | `test-results.json` | `testPayload` | `apply_test_results` |
 | `integrity-chain.json` | `integrityEventPayload` | `apply_integrity` |
+| `task-action.json`, `task-edit.json`, `task-revision.json`, `task-run.json`, `task-start.json`, `task-end.json`, `task-connected.json`, `task-thinking.json` | `taskActionPayload`, `taskEditPayload`, `taskRevisionPayload`, `taskRunPayload`, `taskStartPayload`, `taskEndPayload`, `taskConnectedPayload`, `taskThinkingPayload` in `web/lib.js` | the typed messages `TaskSession::receive` parses, checked in `tests/unit/tasks/session.rs` |
+| `task-state.json`, `task-error.json`, `task-review.json` | written by the generator; the Rust side that must agree is `TaskSession::snapshot` (state), `ErrorMessage` (error) and `tasks::report` (review) | `web/task.js`, driven from these files by `tests/browser/task-workspace.test.js` and `task-controller.test.js`; Rust reads them in `tests/unit/tasks/session.rs` and `report.rs` |
+
+`tests/fixtures/task-mode/` is not wire data: it is the packaged task set, its
+encrypted package and the patches both the server and the packaging tool must
+refuse, shared by the Rust and Python tests.
 
 ## Regenerating
 

@@ -1476,7 +1476,7 @@ fn host_of(authority: &str) -> &str {
 /// Parsed rather than prefix-matched. The prefix version this replaced rejected
 /// every hostname beginning `fc` or `fd`, which includes `facebook.com`, and
 /// let `[::ffff:127.0.0.1]` straight through.
-fn is_unreachable_host(host: &str) -> bool {
+pub(crate) fn is_unreachable_host(host: &str) -> bool {
     // One trailing dot, which is the fully qualified spelling of the same name.
     // `localhost.` resolves to loopback like `localhost` does.
     let host = host.strip_suffix('.').unwrap_or(host).to_ascii_lowercase();

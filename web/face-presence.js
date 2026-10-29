@@ -25,17 +25,119 @@ export function faceAssetUrl(file, baseUrl = FACE_VENDOR_BASE) {
   return `${baseUrl}${file}`;
 }
 
+// Every file the detector asks the server for, by MediaPipe's own names. The
+// four binaries are fetched at build time and not committed, so a checkout
+// that never ran `scripts/fetch-vendor.sh` serves a 404 for each of them, which
+// the detector can only report as not answering.
+export const FACE_ASSET_FILES = [
+  "face_detection.js",
+  "face_detection_short.binarypb",
+  "face_detection_short_range.tflite",
+  "face_detection_solution_simd_wasm_bin.js",
+  "face_detection_solution_simd_wasm_bin.wasm",
+  "face_detection_solution_wasm_bin.js",
+  "face_detection_solution_wasm_bin.wasm",
+];
+
+/// Fetches every detector file, so the model is downloaded and cached before
+/// the first detection needs it, and reports what is wrong with the ones that
+/// cannot be had. `missing` holds the files the server answered 404 for, and
+/// `unreachable` those a request did not complete for: an offline learner is
+/// not told the server lacks a model. `onProgress` gets the bytes read so far
+/// and the total the responses announced, which grows as headers arrive.
+export async function loadFaceAssets({
+  fetchFn = globalThis.fetch,
+  baseUrl = FACE_VENDOR_BASE,
+  onProgress = () => {},
+} = {}) {
+  const missing = [];
+  const unreachable = [];
+  let loaded = 0;
+  let total = 0;
+  await Promise.all(
+    FACE_ASSET_FILES.map(async (file) => {
+      try {
+        const response = await fetchFn(faceAssetUrl(file, baseUrl));
+        if (response.status === 404) {
+          missing.push({ file, status: 404 });
+          return;
+        }
+        total += Number(response.headers?.get?.("content-length")) || 0;
+        onProgress({ loaded, total });
+        const reader = response.body?.getReader?.();
+        if (!reader) {
+          loaded += (await response.arrayBuffer?.())?.byteLength ?? 0;
+        } else {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            loaded += value.byteLength;
+            onProgress({ loaded, total });
+          }
+        }
+      } catch {
+        unreachable.push(file);
+      }
+    }),
+  );
+  onProgress({ loaded, total });
+  return {
+    missing: missing.sort((a, b) => a.file.localeCompare(b.file)),
+    unreachable: unreachable.sort(),
+  };
+}
+
+// The most confident face's box and keypoints, in frame-relative units, for
+// the task workspace's look-away rule; null when there is no face or the
+// detector gives no geometry. Nothing else about the face is kept.
+export function faceGeometry(detections, score) {
+  let best = null;
+  for (const detection of detections) {
+    if (!best || score(detection) > score(best)) best = detection;
+  }
+  const box = best?.boundingBox;
+  if (
+    !box ||
+    !["xCenter", "yCenter", "width", "height"].every((key) =>
+      Number.isFinite(box[key]),
+    )
+  )
+    return null;
+  // All or none: the head-down measure reads eyes, nose and mouth by
+  // position, so dropping one bad point would shift the rest into the wrong
+  // places. Without them the measure falls back to the box.
+  const points = Array.isArray(best.landmarks) ? best.landmarks : [];
+  const landmarks = points.every(
+    (point) => Number.isFinite(point?.x) && Number.isFinite(point?.y),
+  )
+    ? points.map((point) => [point.x, point.y])
+    : [];
+  return {
+    box: [box.xCenter, box.yCenter, box.width, box.height],
+    landmarks,
+  };
+}
+
+// The twin of `normalize` in `face-worker.js`; change both together.
 export function normalizeFaceResults(results = {}) {
   const detections = Array.isArray(results.detections)
     ? results.detections
     : [];
-  const confidence = detections.reduce((best, detection) => {
-    const score = Array.isArray(detection.score)
+  const score = (detection) => {
+    const value = Array.isArray(detection.score)
       ? detection.score[0]
       : detection.score;
-    return Math.max(best, Number.isFinite(score) ? score : 0);
-  }, 0);
-  return { count: detections.length, confidence };
+    return Number.isFinite(value) ? value : 0;
+  };
+  const confidence = detections.reduce(
+    (best, detection) => Math.max(best, score(detection)),
+    0,
+  );
+  return {
+    count: detections.length,
+    confidence,
+    face: faceGeometry(detections, score),
+  };
 }
 
 /// Whether the preflight camera step may pass, given one detector sample.
@@ -148,10 +250,13 @@ export async function createFacePresenceDetector({
   loadScript = defaultLoadScript,
   baseUrl = FACE_VENDOR_BASE,
   Detector = null,
+  // `false` skips the browser's own detector, which reports a count but no
+  // face geometry.
+  native = true,
 } = {}) {
   try {
     const NativeFaceDetector = scope.FaceDetector;
-    if (!Detector && typeof NativeFaceDetector === "function") {
+    if (!Detector && native && typeof NativeFaceDetector === "function") {
       const detector = new NativeFaceDetector({ fastMode: true });
       return {
         available: true,
@@ -239,6 +344,7 @@ function createWorkerFaceDetector(scope) {
             available: true,
             count: result.count,
             confidence: result.confidence,
+            face: result.face ?? null,
           }
         : FACE_SAMPLE_UNAVAILABLE,
     );

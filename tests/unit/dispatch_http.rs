@@ -246,6 +246,8 @@ impl Probe {
                 providers: vec![provider],
             },
             probe_provider_quota: false,
+            tasks: None,
+            task_mode_requested: false,
         };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());

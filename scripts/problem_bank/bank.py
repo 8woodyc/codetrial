@@ -249,7 +249,10 @@ STARTER_LANGS = {
 
 
 def validated_problems(source: Path = SOURCE) -> list[dict]:
-    problems = read_json(source)
+    return validated_problem_data(read_json(source))
+
+
+def validated_problem_data(problems: object, sequels: bool = True) -> list[dict]:
     if not isinstance(problems, list):
         raise RuntimeError("problem bank must be a JSON array")
     require_valid_origins(problems)
@@ -286,6 +289,8 @@ def validated_problems(source: Path = SOURCE) -> list[dict]:
         cleaned = [topic.strip() for topic in topics if named(topic)]
         if len(cleaned) != len(topics) or len(set(cleaned)) != len(cleaned):
             raise RuntimeError(f"{problem_id}: topics must be non-empty and unique")
+    if not sequels:
+        return problems
     # Exactly one level up, so the lobby can offer a sequel as the next step
     # without ever skipping Medium on the way from Easy to Hard.
     levels = {"Easy": 0, "Medium": 1, "Hard": 2}

@@ -114,6 +114,12 @@ fn static_candidates(path: &str) -> Option<Vec<String>> {
         .collect::<Vec<_>>()
         .join("/");
 
+    // Matched on the path as sent: the page reads its set and task from
+    // `location.pathname`, so a doubled slash it would misread is no task.
+    if super::tasks::task_page(path).is_some() {
+        return Some(vec!["task.html".to_owned()]);
+    }
+
     if clean.is_empty() {
         return Some(vec!["index.html".to_string()]);
     }
@@ -155,6 +161,19 @@ pub(crate) async fn web_static_handler(
     } else {
         header::HeaderMap::new()
     };
+
+    // Where task mode is on, the home address is the default task: the learner
+    // asked for task mode and has no assignment link to open, so what they get
+    // is the task the program ships. The lobby is still at `/index.html`.
+    if state.config.tasks.is_some()
+        && matches!(method, Method::GET | Method::HEAD)
+        && uri.path().trim_matches('/').is_empty()
+    {
+        return axum::response::Redirect::temporary(
+            &crate::tasks::access::Assignment::built_in_path(),
+        )
+        .into_response();
+    }
 
     // Candidate order outranks store order: an exact embedded match must beat
     // the disk index fallback. Disk-root existence is cached until restart.
