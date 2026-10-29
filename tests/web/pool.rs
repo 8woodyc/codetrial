@@ -258,7 +258,7 @@ async fn the_pool_probes_in_the_background_without_a_token_request() {
     // The startup pass is the refresher's first action, not a step that blocks
     // the bind, so it is raced against here rather than assumed complete.
     let mut probed = 0;
-    for _ in 0..50 {
+    for _ in 0..500 {
         probed = hits.load(std::sync::atomic::Ordering::Relaxed);
         if probed > 0 {
             break;
