@@ -11,6 +11,7 @@ import {
   harnessGap,
   harnessLineOffset,
   mapCompilerResponse,
+  MAX_QUAD_TREE_NODES,
 } from "./compiler-explorer.js";
 import { DIAGNOSTIC, checkAnswer, renderValue } from "./lib.js";
 
@@ -545,9 +546,9 @@ async function runCompilerExplorer(
 
 // The JavaScript runner's worker, as source rather than a file: it becomes a
 // blob URL below, which `script-src 'self' blob:` allows and which keeps the
-// runner from being fetchable on its own. Hoisted to module scope because it
-// interpolates nothing and never has; leaving it inside runWorker made a
-// 23-line function read as a 278-line one.
+// runner from being fetchable on its own. Hoisted to module scope; its only
+// interpolation is the shared module-level expansion limit, so no value from
+// runWorker is needed to keep the budget enforced.
 const JS_RUNNER_SOURCE = `
     self.onmessage = (event) => {
       // \`name\` is the one \`runWorker\` checked and bound in the prelude, sent
@@ -686,9 +687,13 @@ const JS_RUNNER_SOURCE = `
         return values;
       };
       const nextTreeToLevels = (root) => {
-        const levels = [], queue = root ? [root] : [];
+        const levels = [], queue = root ? [root] : [], seen = new Set();
         while (queue.length) {
           const levelNodes = queue.splice(0);
+          for (const node of levelNodes) {
+            if (seen.has(node)) throw new TypeError("Returned tree must not reach a node twice.");
+            seen.add(node);
+          }
           levels.push(levelNodes.map((node) => node.val));
           for (let i = 0; i < levelNodes.length; i++) {
             if (levelNodes[i].next !== (levelNodes[i + 1] || null)) throw new TypeError("next pointers do not match the tree level order.");
@@ -699,9 +704,12 @@ const JS_RUNNER_SOURCE = `
         return levels;
       };
       const quadTreeToPreorder = (root) => {
-        const rows = [];
+        const rows = [], ancestors = new Set();
         const visit = (node) => {
           if (!node) return;
+          if (ancestors.has(node)) throw new TypeError("Returned tree must not contain a cycle.");
+          if (rows.length >= ${MAX_QUAD_TREE_NODES}) throw new TypeError("Returned quad tree must not expand to more than ${MAX_QUAD_TREE_NODES} nodes.");
+          ancestors.add(node);
           const isLeaf = Boolean(node.isLeaf);
           rows.push([isLeaf ? 1 : 0, isLeaf && node.val ? 1 : (isLeaf ? 0 : 1)]);
           if (!isLeaf) {
@@ -710,6 +718,7 @@ const JS_RUNNER_SOURCE = `
             visit(node.bottomLeft);
             visit(node.bottomRight);
           }
+          ancestors.delete(node);
         };
         visit(root);
         return rows;
@@ -1021,9 +1030,14 @@ def _tree_to_array(root):
 def _next_tree_to_levels(root):
     levels = []
     queue = [root] if root is not None else []
+    seen = set()
     while queue:
         level_nodes = queue
         queue = []
+        for node in level_nodes:
+            if id(node) in seen:
+                raise TypeError("Returned tree must not reach a node twice.")
+            seen.add(id(node))
         levels.append([node.val for node in level_nodes])
         for index, node in enumerate(level_nodes):
             expected_next = level_nodes[index + 1] if index + 1 < len(level_nodes) else None
@@ -1037,9 +1051,16 @@ def _next_tree_to_levels(root):
 
 def _quad_tree_to_preorder(root):
     rows = []
+    ancestors = set()
+    # Valid bank trees have bounded depth; very deep malformed chains raise RecursionError instead of the cycle or expansion error.
     def visit(node):
         if node is None:
             return
+        if id(node) in ancestors:
+            raise TypeError("Returned tree must not contain a cycle.")
+        if len(rows) >= ${MAX_QUAD_TREE_NODES}:
+            raise TypeError("Returned quad tree must not expand to more than ${MAX_QUAD_TREE_NODES} nodes.")
+        ancestors.add(id(node))
         is_leaf = bool(getattr(node, "isLeaf", False))
         rows.append([1 if is_leaf else 0, 1 if (not is_leaf or getattr(node, "val", False)) else 0])
         if not is_leaf:
@@ -1047,6 +1068,7 @@ def _quad_tree_to_preorder(root):
             visit(getattr(node, "topRight", None))
             visit(getattr(node, "bottomLeft", None))
             visit(getattr(node, "bottomRight", None))
+        ancestors.remove(id(node))
     visit(root)
     return rows
 

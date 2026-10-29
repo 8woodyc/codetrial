@@ -10,6 +10,8 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
+import { runInNewContext } from "node:vm";
+import { MAX_QUAD_TREE_NODES } from "../../web/compiler-explorer.js";
 import { failFetchWith, functionBody, read } from "./source.js";
 import { testPayload } from "../../web/lib.js";
 import { parseCandidateCase, runBrowserTests } from "../../web/runners.js";
@@ -730,20 +732,62 @@ test("the runner evaluates no string, so the page needs no unsafe-eval", () => {
   );
 });
 
-// Hoisting the runner source to module scope is only correct while it reads
-// nothing from a caller. The day it needs a value from runWorker, it has to go
-// back inside or take a parameter, and this is what says so.
-test("the hoisted runner source interpolates nothing", () => {
+// Module-level constants are safe here; values local to runWorker are not.
+test("the hoisted runner source only interpolates the module expansion limit", () => {
   const start = runners.indexOf("const JS_RUNNER_SOURCE = `");
   assert.notEqual(start, -1, "JS_RUNNER_SOURCE is gone from web/runners.js");
   const source = runners.slice(start, runners.indexOf("\n  `;\n", start));
 
   assert.match(source, /self\.onmessage/, "it has to still be a worker");
   assert.doesNotMatch(
-    source,
+    source.replaceAll("${MAX_QUAD_TREE_NODES}", ""),
     /\$\{/,
     "an interpolation here would read from a scope it no longer has",
   );
+});
+
+test("the JavaScript worker enforces its budget with only spec and name", () => {
+  const start = runners.indexOf("const JS_RUNNER_SOURCE = `");
+  const end = runners.indexOf("\n  `;\n", start) + "\n  `;".length;
+  const workerSource = runInNewContext(
+    runners.slice(start, end) + "\nJS_RUNNER_SOURCE;",
+    { MAX_QUAD_TREE_NODES },
+  );
+  const leaf = { isLeaf: true, val: true };
+  let root = leaf;
+  for (let depth = 0; depth < 6; depth++) {
+    root = {
+      isLeaf: false,
+      topLeft: root,
+      topRight: root,
+      bottomLeft: root,
+      bottomRight: root,
+    };
+  }
+  const overLimit = { isLeaf: false, topLeft: root };
+  let response;
+  const self = {
+    __codetrialEntry: (large) => (large ? overLimit : leaf),
+    postMessage: (message) => (response = message),
+  };
+  runInNewContext(workerSource, { self, performance });
+  self.onmessage({
+    data: {
+      name: "buildTiles",
+      spec: {
+        kind: "function",
+        outputType: "quadTree",
+        cases: [{ input: [true] }, { input: [false] }],
+      },
+    },
+  });
+  assert.equal(response.results.length, 2);
+  assert.equal(
+    response.results[0].error,
+    "Returned quad tree must not expand to more than 5461 nodes.",
+  );
+  assert.equal(response.results[1].error, undefined);
+  assert.equal(JSON.stringify(response.results[1].actual), "[[1,1]]");
 });
 
 test("execution infrastructure failures allow tracing but candidate failures do not", async (t) => {
