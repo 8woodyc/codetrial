@@ -2362,10 +2362,12 @@ table.phase-scores {
   background-image: linear-gradient(var(--accent), var(--accent));
 }
 
-/* Forced colors drop a gradient, which would leave a focused divider with
-   nothing to show where it is, so there it takes the ring it gave up. */
+/* Forced colors drop a gradient or a fill, which would leave a focused divider
+   or drawer handle with nothing to show where it is, so there it takes the
+   ring it gave up. */
 @media (forced-colors: active) {
-  .splitter:focus-visible {
+  .splitter:focus-visible,
+  .drawer-resizer:focus-visible {
     outline: 2px solid Highlight;
     outline-offset: -2px;
   }
