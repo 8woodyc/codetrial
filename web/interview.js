@@ -507,6 +507,7 @@ const state = {
   runningTests: false,
   candidateCases: [],
   candidateCaseAddition: null,
+  candidateCaseEdit: null,
   testHistory: [],
   /// The judge's first input, shown as the Add a case placeholder unless the
   /// worked examples are hidden: it is a worked case in its own right.
@@ -641,6 +642,7 @@ const nodes = {
   candidateCaseInput: document.querySelector("#candidate-case-input"),
   candidateCaseExpected: document.querySelector("#candidate-case-expected"),
   candidateCaseAdd: document.querySelector("#candidate-case-add"),
+  candidateCaseCancel: document.querySelector("#candidate-case-cancel"),
   candidateCaseStatus: document.querySelector("#candidate-case-status"),
   candidateCaseList: document.querySelector("#candidate-case-list"),
   resultsLabel: document.querySelector("#results-label"),
@@ -1158,10 +1160,24 @@ function bindEvents() {
     if (event.repeat || !editorOptions.execution) return;
     if (nodes.audioCheck.hidden && !codingClosed()) nodes.run.click();
   });
-  nodes.candidateCaseAdd.addEventListener(
-    "click",
-    () => void addCandidateCase(),
-  );
+  nodes.candidateCaseAdd.addEventListener("click", () => {
+    if (state.candidateCaseEdit) {
+      void saveCandidateCaseEdit();
+    } else {
+      void addCandidateCase();
+    }
+  });
+
+  nodes.candidateCaseCancel.addEventListener("click", () => {
+    if (state.candidateCaseEdit?.saving) return;
+    cancelCandidateCaseEdit();
+  });
+
+  nodes.candidateCaseList.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-edit-case]");
+    if (!button || button.disabled) return;
+    startCandidateCaseEdit(Number(button.dataset.editCase));
+  });
   // One delegated listener for the whole list, registered once here rather
   // than in renderCandidateCases: the list element survives every render, so
   // registering there would stack a handler per render and one click would
@@ -3926,6 +3942,31 @@ async function addCandidateCase() {
   }
 }
 
+function candidateCaseFromForm(spec) {
+  let field = nodes.candidateCaseInput;
+  try {
+    const input = parseCandidateCase(spec, field.value);
+    field = nodes.candidateCaseExpected;
+    const expectedText = field.value.trim();
+    const expected = expectedText ? JSON.parse(expectedText) : undefined;
+
+    if (
+      expectedText &&
+      spec.checker === "palindrome" &&
+      typeof expected !== "string"
+    ) {
+      throw new Error(
+        "A palindrome expectation must be a string, or leave it blank to observe the result.",
+      );
+    }
+
+    return { input, ...(expectedText ? { expected } : {}) };
+  } catch (error) {
+    field.focus();
+    throw error;
+  }
+}
+
 async function addCandidateCaseNow() {
   if (state.candidateCases.length >= CANDIDATE_CASE_LIMIT) {
     nodes.candidateCaseStatus.textContent = `You can add up to ${CANDIDATE_CASE_LIMIT} cases.`;
@@ -3937,15 +3978,7 @@ async function addCandidateCaseNow() {
       nodes.candidateCaseStatus.textContent = "The interview has ended.";
       return "refused";
     }
-    const input = parseCandidateCase(spec, nodes.candidateCaseInput.value);
-    const expectedText = nodes.candidateCaseExpected.value.trim();
-    const expected = expectedText ? JSON.parse(expectedText) : undefined;
-    if (expected === null && spec.checker === "palindrome") {
-      throw new Error(
-        "A palindrome expectation must be a string, or leave it blank to observe the result.",
-      );
-    }
-    const testCase = { input, ...(expectedText ? { expected } : {}) };
+    const testCase = candidateCaseFromForm(spec);
     state.candidateCases.push(testCase);
     writeStored(
       candidateCaseStorageKey,
@@ -3963,12 +3996,157 @@ async function addCandidateCaseNow() {
   }
 }
 
+function invalidateCandidateCaseResults() {
+  state.latestSummary = null;
+  state.latestRunSnapshot = null;
+  state.testStatus = "done";
+  nodes.resultsLabel.textContent = "Test results";
+  nodes.resultsFilter.hidden = true;
+  // Keep the initial placeholder in web/interview.html identical.
+  nodes.resultsContent.innerHTML =
+    '<p class="muted small">Run the test cases any time - Jim sees your results too.</p>';
+}
+
+async function saveCandidateCaseEdit() {
+  const edit = state.candidateCaseEdit;
+  if (!edit || edit.saving || state.candidateCaseAddition) return;
+
+  if (state.runningTests || state.phase !== "live" || codingClosed()) {
+    nodes.candidateCaseStatus.textContent = "Cases cannot be edited right now.";
+    return;
+  }
+
+  edit.saving = true;
+  nodes.candidateCaseAdd.disabled = true;
+  nodes.candidateCaseCancel.disabled = true;
+  let saved = false;
+  let judgeLoaded = false;
+  let retryLoad = false;
+
+  try {
+    const spec = await loadJudge(problem.page);
+    judgeLoaded = true;
+
+    if (state.candidateCaseEdit !== edit) return;
+
+    if (
+      state.runningTests ||
+      state.phase !== "live" ||
+      codingClosed() ||
+      !state.candidateCases[edit.index]
+    ) {
+      nodes.candidateCaseStatus.textContent =
+        "Cases cannot be edited right now.";
+      return;
+    }
+
+    const replacement = candidateCaseFromForm(spec);
+    state.candidateCases[edit.index] = replacement;
+
+    writeStored(
+      candidateCaseStorageKey,
+      JSON.stringify(state.candidateCases),
+      strict ? null : tabStorage,
+    );
+
+    invalidateCandidateCaseResults();
+    saved = true;
+  } catch (error) {
+    if (state.candidateCaseEdit === edit) {
+      nodes.candidateCaseStatus.textContent = String(error.message || error);
+      retryLoad = !judgeLoaded;
+    }
+  } finally {
+    edit.saving = false;
+    nodes.candidateCaseAdd.disabled = false;
+    nodes.candidateCaseCancel.disabled = false;
+  }
+
+  if (retryLoad && state.candidateCaseEdit === edit) {
+    nodes.candidateCaseAdd.focus();
+  }
+
+  if (saved && state.candidateCaseEdit === edit) {
+    cancelCandidateCaseEdit();
+    nodes.candidateCaseStatus.textContent = `Case ${edit.index + 1} updated.`;
+  }
+}
+
+function startCandidateCaseEdit(index) {
+  if (state.phase !== "live" || codingClosed()) {
+    nodes.candidateCaseStatus.textContent = "Cases cannot be edited right now.";
+    return;
+  }
+  if (state.runningTests || state.candidateCaseAddition) {
+    nodes.candidateCaseStatus.textContent =
+      "Wait for the current operation to finish before editing a case.";
+    return;
+  }
+  if (state.candidateCaseEdit) {
+    nodes.candidateCaseStatus.textContent =
+      "Save or cancel the current edit first.";
+    return;
+  }
+  const testCase = state.candidateCases[index];
+  if (!testCase) return;
+
+  state.candidateCaseEdit = {
+    index,
+    inputDraft: nodes.candidateCaseInput.value,
+    expectedDraft: nodes.candidateCaseExpected.value,
+  };
+
+  nodes.candidateCaseInput.value = JSON.stringify(testCase.input);
+  nodes.candidateCaseExpected.value = Object.hasOwn(testCase, "expected")
+    ? JSON.stringify(testCase.expected)
+    : "";
+  nodes.candidateCaseAdd.textContent = "Save changes";
+  nodes.candidateCaseCancel.hidden = false;
+  nodes.candidateCase.open = true;
+
+  renderCandidateCases();
+  updateRunAvailability();
+  nodes.candidateCaseStatus.textContent = `Editing case ${index + 1}.`;
+  nodes.candidateCaseInput.focus();
+}
+
+function cancelCandidateCaseEdit({
+  restoreDraft = true,
+  returnFocus = true,
+} = {}) {
+  const edit = state.candidateCaseEdit;
+  if (!edit) return;
+
+  state.candidateCaseEdit = null;
+  nodes.candidateCaseInput.value = restoreDraft ? edit.inputDraft : "";
+  nodes.candidateCaseExpected.value = restoreDraft ? edit.expectedDraft : "";
+  nodes.candidateCaseAdd.textContent = "Add case";
+  nodes.candidateCaseCancel.hidden = true;
+
+  renderCandidateCases();
+  updateRunAvailability();
+  nodes.candidateCaseStatus.textContent = "Edit canceled.";
+
+  if (returnFocus) {
+    const button = nodes.candidateCaseList.querySelector(
+      `[data-edit-case="${edit.index}"]`,
+    );
+    (button || nodes.candidateCaseAdd).focus();
+  }
+}
+
 function renderCandidateCases() {
+  const editing = state.candidateCaseEdit !== null;
+
   nodes.candidateCaseList.innerHTML = state.candidateCases
-    .map(
-      (testCase, index) =>
-        `<li><span>Your case ${index + 1}: ${escapeHtml(JSON.stringify(testCase.input))}</span> <button type="button" data-remove-case="${index}" aria-label="Remove case ${index + 1}">Remove</button></li>`,
-    )
+    .map((testCase, index) => {
+      const expected = Object.hasOwn(testCase, "expected")
+        ? escapeHtml(JSON.stringify(testCase.expected))
+        : "Not specified";
+      const disabled = editing ? " disabled" : "";
+
+      return `<li><span>Your case ${index + 1}: ${escapeHtml(JSON.stringify(testCase.input))}</span> <span>Expected: ${expected}</span> <button type="button" data-edit-case="${index}" aria-label="Edit case ${index + 1}"${disabled}>Edit</button> <button type="button" data-remove-case="${index}" aria-label="Remove case ${index + 1}"${disabled}>Remove</button></li>`;
+    })
     .join("");
   // An empty list announces nothing, so a page that never had a case keeps
   // the live region blank; removeCandidateCase writes the count itself, which
@@ -3979,6 +4157,10 @@ function renderCandidateCases() {
 }
 
 function clearCandidateCases() {
+  cancelCandidateCaseEdit({
+    restoreDraft: false,
+    returnFocus: false,
+  });
   writeStored(candidateCaseStorageKey, "", tabStorage);
   state.candidateCases = [];
   renderCandidateCases();
@@ -3992,6 +4174,11 @@ function clearCandidateCases() {
 /// the interviewer already holds from the run's topics.tests payload, which
 /// nothing here republishes or recalls.
 function removeCandidateCase(index) {
+  if (state.candidateCaseEdit) {
+    nodes.candidateCaseStatus.textContent =
+      "Save or cancel the current edit before removing a case.";
+    return;
+  }
   // A run in flight is iterating the array it captured at start, and its
   // completion repaints the results panel and publishes it, so a removal taken
   // now is undone a moment later with results that still name the removed
@@ -4016,14 +4203,7 @@ function removeCandidateCase(index) {
   // removal path writes the count itself and a removal down to zero is still
   // announced.
   nodes.candidateCaseStatus.textContent = `${state.candidateCases.length}/${CANDIDATE_CASE_LIMIT} cases ready.`;
-  state.latestSummary = null;
-  state.latestRunSnapshot = null;
-  state.testStatus = "done"; // the value the page loads with, so no run state outlives the panel it painted
-  nodes.resultsLabel.textContent = "Test results";
-  // The placeholder web/interview.html ships in #results-content; keep the
-  // sentence identical.
-  nodes.resultsFilter.hidden = true;
-  nodes.resultsContent.innerHTML = `<p class="muted small">Run the test cases any time - Jim sees your results too.</p>`;
+  invalidateCandidateCaseResults();
   const remaining =
     nodes.candidateCaseList.querySelectorAll("[data-remove-case]");
   (
@@ -4041,6 +4221,7 @@ function updateRunAvailability() {
   nodes.restoreStarter.disabled = restoreOff;
   if (restoreOff) clearRestoreStatus();
   nodes.run.disabled =
+    state.candidateCaseEdit !== null ||
     !editorOptions.execution ||
     (strict && !state.connected) ||
     state.runningTests ||

@@ -313,12 +313,12 @@ test("Java locations without columns use the pending run snapshot and newer runs
       "}",
     ].join("\n");
     await replaceCode(page, firstCode);
-    const compilerRequest = page.waitForRequest(
-      (request) => request.url().includes("/api/compiler/"),
-      { timeout: 5000 },
-    );
-    await page.click("#run-tests");
-    await compilerRequest;
+    await Promise.all([
+      page.waitForRequest((request) =>
+        request.url().includes("/api/compiler/"),
+      ),
+      page.click("#run-tests"),
+    ]);
     const changedCode = firstCode.replace(
       "    int first = missing_first;",
       "    // edited while compiling\n    int first = missing_first;",
@@ -381,6 +381,7 @@ test("Java locations without columns use the pending run snapshot and newer runs
     assert.equal(afterLanguageMismatch.end, beforeLanguageMismatch.end);
     assert.deepEqual(errors, []);
   } finally {
+    release();
     await page.close();
   }
 });
