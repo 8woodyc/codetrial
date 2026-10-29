@@ -748,6 +748,7 @@ nav {
   font-size: 0.875rem;
 }
 #calculator {
+  --field-min: 8rem;
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
@@ -758,10 +759,10 @@ nav {
 #calculator label {
   margin: 0;
   flex: 1;
-  min-width: min(100%, 160px);
+  min-width: min(100%, var(--field-min));
 }
 #calculator label.calculator-angle {
-  flex: 0 1 9rem;
+  flex: 0 1 var(--field-min);
 }
 #calculator output {
   font: 0.9375rem/1.5 var(--font-mono);
