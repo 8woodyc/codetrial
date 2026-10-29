@@ -1,7 +1,7 @@
 {
   "page": "carousel-slot-shift",
   "title": "Carousel Slot Shift",
-  "source": "Rotate Array",
+  "source": "189. Rotate Array",
   "difficulty": "Medium",
   "brief": [
     "A storefront homepage shows featured items in a fixed ring of slots. Every campaign tick, merchandising advances the carousel so each item moves several slots toward the end, and items that fall off the end wrap around to the front.",

@@ -1,7 +1,7 @@
 {
   "page": "backend-pool-sampler",
   "title": "Backend Pool Sampler",
-  "source": "Insert Delete GetRandom O(1)",
+  "source": "380. Insert Delete GetRandom O(1)",
   "difficulty": "Medium",
   "brief": [
     "Our load balancer keeps a pool of backend server ids. Servers join and leave constantly, and for every incoming request the balancer picks a backend uniformly at random from whoever is in the pool right now. All three operations sit on the request path, so none of them can slow down as the pool grows.",

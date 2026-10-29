@@ -1,7 +1,7 @@
 {
   "page": "ledger-cancellation-groups",
   "title": "Ledger Cancellation Groups",
-  "source": "3Sum",
+  "source": "15. 3Sum",
   "difficulty": "Medium",
   "brief": [
     "Our ledger service records balance adjustments as signed integers. Before the books close, auditors want to review every group of three adjustments that cancel each other out exactly.",

@@ -1,7 +1,7 @@
 {
   "page": "odometer-digit-chains",
   "title": "Odometer Digit Chains",
-  "source": "Add Two Numbers",
+  "source": "2. Add Two Numbers",
   "difficulty": "Medium",
   "brief": [
     "A fleet telemetry unit stores very large distance counters as chains of single decimal digits, with the least significant digit at the head of the chain, because that is the digit that changes most often. The server needs to combine two such counters into one.",

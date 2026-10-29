@@ -1,7 +1,7 @@
 {
   "page": "firmware-buffer-splice",
   "title": "Firmware Buffer Splice",
-  "source": "Merge Sorted Array",
+  "source": "88. Merge Sorted Array",
   "difficulty": "Easy",
   "brief": [
     "A sensor controller keeps readings in a preallocated buffer sorted in ascending order. A second probe delivers its own sorted batch, and the firmware has to fold that batch into the main buffer without allocating another one.",

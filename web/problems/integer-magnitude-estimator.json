@@ -1,7 +1,7 @@
 {
   "page": "integer-magnitude-estimator",
   "title": "Integer Magnitude Estimator",
-  "source": "Sqrt(x)",
+  "source": "69. Sqrt(x)",
   "difficulty": "Easy",
   "brief": [
     "A microcontroller without a floating point unit computes signal energy readings as integers, and the display shows the magnitude as the whole-number root of the energy. We need that value using integer arithmetic only.",

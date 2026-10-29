@@ -1,7 +1,7 @@
 {
   "page": "faulty-sensor-grid-blanking",
   "title": "Faulty Sensor Grid Blanking",
-  "source": "Set Matrix Zeroes",
+  "source": "73. Set Matrix Zeroes",
   "difficulty": "Medium",
   "brief": [
     "A floor-mounted pressure sensor grid is wired by row buses and column buses. When any sensor reads exactly 0, both buses it sits on are considered faulty, and every reading on that row and that column must be blanked to 0 before the data is published.",

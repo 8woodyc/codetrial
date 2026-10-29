@@ -1,7 +1,7 @@
 {
   "page": "hop-depth-signal-means",
   "title": "Hop Depth Signal Means",
-  "source": "Average of Levels in Binary Tree",
+  "source": "637. Average of Levels in Binary Tree",
   "difficulty": "Easy",
   "brief": [
     "A field sensor network relays data through a tree of stations, each forwarding to at most two stations below it. Every station reports a signal reading, and the dashboard shows the mean reading for all stations that are the same number of hops from the gateway.",

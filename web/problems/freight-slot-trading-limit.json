@@ -1,7 +1,7 @@
 {
   "page": "freight-slot-trading-limit",
   "title": "Freight Slot Trading Limit",
-  "source": "Best Time to Buy and Sell Stock IV",
+  "source": "188. Best Time to Buy and Sell Stock IV",
   "difficulty": "Hard",
   "brief": [
     "A freight broker trades container slot contracts on a daily market, holding at most one contract at a time. Risk management caps how many round trips of buying a contract and later selling it the desk may make over a quarter.",

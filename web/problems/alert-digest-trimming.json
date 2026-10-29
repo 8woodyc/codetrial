@@ -1,7 +1,7 @@
 {
   "page": "alert-digest-trimming",
   "title": "Alert Digest Trimming",
-  "source": "Remove Duplicates from Sorted Array II",
+  "source": "80. Remove Duplicates from Sorted Array II",
   "difficulty": "Medium",
   "brief": [
     "Our on-call digest lists incident codes sorted in ascending order. Pages for the same code get noisy, so the digest keeps at most two entries per code, and the trimming runs inside the existing array to avoid extra allocations.",

@@ -1,7 +1,7 @@
 {
   "page": "outline-snapshot-duplicator",
   "title": "Outline Snapshot Duplicator",
-  "source": "Copy List with Random Pointer",
+  "source": "138. Copy List with Random Pointer",
   "difficulty": "Medium",
   "brief": [
     "Our document editor stores an outline as a chain of Node objects. Each node has a value, a next field pointing at the following section, and a random field that is a cross reference to any section in the same outline, or to nothing. Before a risky bulk edit, we take a snapshot so the user can roll back.",

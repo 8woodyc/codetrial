@@ -1,7 +1,7 @@
 {
   "page": "telemetry-reading-dedupe",
   "title": "Telemetry Reading Dedupe",
-  "source": "Remove Duplicates from Sorted Array",
+  "source": "26. Remove Duplicates from Sorted Array",
   "difficulty": "Easy",
   "brief": [
     "A weather station logs temperature readings sorted in ascending order before uploading them. The uplink is expensive, so the firmware wants each distinct reading sent only once, and it has no room for a second buffer.",

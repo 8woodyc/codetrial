@@ -1,7 +1,7 @@
 {
   "page": "hostname-rename-chain",
   "title": "Hostname Rename Chain",
-  "source": "Word Ladder",
+  "source": "127. Word Ladder",
   "difficulty": "Hard",
   "brief": [
     "Our infrastructure team renames hosts gradually. A rename may change exactly one letter of a hostname, and every intermediate name must already be reserved in the registry so that DNS stays valid throughout.",

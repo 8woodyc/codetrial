@@ -1,7 +1,7 @@
 {
   "page": "grid-segment-net-yield",
   "title": "Grid Segment Net Yield",
-  "source": "Binary Tree Maximum Path Sum",
+  "source": "124. Binary Tree Maximum Path Sum",
   "difficulty": "Hard",
   "brief": [
     "A regional power grid is laid out as a tree of substations, where each substation connects to at most two downstream substations. Every substation has a net energy score: positive if it generates more than it draws, negative otherwise.",

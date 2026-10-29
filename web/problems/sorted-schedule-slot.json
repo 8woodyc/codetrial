@@ -1,7 +1,7 @@
 {
   "page": "sorted-schedule-slot",
   "title": "Sorted Schedule Slot",
-  "source": "Search Insert Position",
+  "source": "35. Search Insert Position",
   "difficulty": "Easy",
   "brief": [
     "A job scheduler keeps the run times of queued jobs in a sorted array. When a new job comes in, the scheduler needs to know where its run time sits: either the position of an identical existing time, or the position it would take so the array stays sorted.",

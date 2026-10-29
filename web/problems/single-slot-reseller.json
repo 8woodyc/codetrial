@@ -1,7 +1,7 @@
 {
   "page": "single-slot-reseller",
   "title": "Single Slot Reseller",
-  "source": "Best Time to Buy and Sell Stock II",
+  "source": "122. Best Time to Buy and Sell Stock II",
   "difficulty": "Medium",
   "brief": [
     "A reseller rents one warehouse slot that fits a single pallet. Using a price forecast for that product, they can buy a pallet, hold it, sell it, and buy again later as often as they like, but the slot holds only one pallet at a time.",

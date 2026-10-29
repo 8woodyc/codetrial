@@ -25,8 +25,9 @@ Medium one and a Medium problem a Hard one. The card generator writes it onto
 the card by page name, so no problem id reaches the page.
 
 An imported LeetCode exercise keeps `title` and published `examples` in
-`problems.json`, belongs to `scripts/top-interview-150.json`, and is checked
-against the study plan. An original exercise sets `"origin": "original"`,
+`problems.json`, and carries its LeetCode number (filled by `fetch.py`). It
+belongs to `scripts/top-interview-150.json`, and is checked against the
+study plan. An original exercise sets `"origin": "original"`,
 has no published `title` or `examples`, and stays outside that plan. Its
 candidate page and `web/problem-pages.json` deliberately omit `source`.
 
@@ -63,6 +64,13 @@ source file to fix; do not edit generated output to silence them.
   `an original problem has no published title or examples`, and `an imported
   problem needs its published title` come from `problems.json` identity and
   origin checks.
+- `number must be a positive integer` ensures the LeetCode number is valid.
+- `an imported problem needs its LeetCode number` means an imported catalog
+  entry is missing `number`; add its official LeetCode number in `problems.json`.
+- `duplicate number` means two catalog entries share a LeetCode number;
+  correct the `number` field in `problems.json`.
+- `original exercises cannot have a number` means an original exercise
+  carries a LeetCode number; remove its `number` field.
 - `missing rubric`, `unknown difficulty`, and `topics must contain 1..8
   values` (or `topics must be non-empty and unique`) name required problem
   metadata.

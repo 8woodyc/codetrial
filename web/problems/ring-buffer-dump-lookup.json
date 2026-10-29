@@ -1,7 +1,7 @@
 {
   "page": "ring-buffer-dump-lookup",
   "title": "Ring Buffer Dump Lookup",
-  "source": "Search in Rotated Sorted Array",
+  "source": "33. Search in Rotated Sorted Array",
   "difficulty": "Medium",
   "brief": [
     "An embedded logger keeps unique, increasing sequence numbers in a ring buffer. When it crashes, the buffer is dumped from its first physical slot rather than from the write pointer, so the dump is in ascending order except that it starts partway through and wraps around.",

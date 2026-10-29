@@ -1,7 +1,7 @@
 {
   "page": "template-delimiter-audit",
   "title": "Template Delimiter Audit",
-  "source": "Valid Parentheses",
+  "source": "20. Valid Parentheses",
   "difficulty": "Easy",
   "brief": [
     "Our templating engine lets authors wrap expressions in three kinds of delimiters: round, square and curly. Before a template is saved, a lint step strips everything except the delimiters and checks that the author opened and closed them properly.",

@@ -1,7 +1,7 @@
 {
   "page": "firmware-signature-scan",
   "title": "Firmware Signature Scan",
-  "source": "Find the Index of the First Occurrence in a String",
+  "source": "28. Find the Index of the First Occurrence in a String",
   "difficulty": "Easy",
   "brief": [
     "Our update verifier scans firmware images, encoded here as strings of lowercase letters, for a known signature before flashing a device. The flashing tool needs to know where the signature begins.",

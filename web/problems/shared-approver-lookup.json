@@ -1,7 +1,7 @@
 {
   "page": "shared-approver-lookup",
   "title": "Shared Approver Lookup",
-  "source": "Lowest Common Ancestor of a Binary Tree",
+  "source": "236. Lowest Common Ancestor of a Binary Tree",
   "difficulty": "Medium",
   "brief": [
     "Our expense tool models the approval chain as a tree: each person has at most two direct reports. When a request involves two employees, it has to be signed by the most junior person who sits above both of them, and an employee counts as sitting above themselves.",

@@ -1429,12 +1429,7 @@ fn generated_problem_metadata_exposes_no_private_rubric() {
 
         // The whole page but the one field that names the published title on
         // purpose, shown small beside the scenario; nothing else is exempt.
-        assert_eq!(
-            public["source"].as_str(),
-            problem.source_title(),
-            "{}",
-            problem.id
-        );
+        assert_eq!(public["source"].as_str(), problem.source, "{}", problem.id);
         let mut scenario = public.clone();
         scenario
             .as_object_mut()

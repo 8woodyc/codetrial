@@ -1,7 +1,7 @@
 {
   "page": "migration-run-order",
   "title": "Migration Run Order",
-  "source": "Course Schedule II",
+  "source": "210. Course Schedule II",
   "difficulty": "Medium",
   "brief": [
     "Our database migration runner needs to apply a batch of schema migrations. Some migrations depend on others having run first, and the runner must pick an order that respects every dependency.",

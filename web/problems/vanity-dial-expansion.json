@@ -1,7 +1,7 @@
 {
   "page": "vanity-dial-expansion",
   "title": "Vanity Dial Expansion",
-  "source": "Letter Combinations of a Phone Number",
+  "source": "17. Letter Combinations of a Phone Number",
   "difficulty": "Medium",
   "brief": [
     "A marketing team is choosing vanity numbers for a hotline. Given the digits a customer would dial, their tool lists every letter string those keys could spell on a standard telephone keypad, so the strings can be checked against brand words.",

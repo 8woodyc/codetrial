@@ -97,7 +97,11 @@ for (const saveOrder of [
         chunks.push(chunk);
       const markdown = Buffer.concat(chunks).toString("utf8");
       assert.match(markdown, /^# Interview Report/);
-      assert.match(markdown, /Original problem: \[Two Sum\]/);
+      assert.ok(
+        markdown.includes(
+          String.raw`Original problem: [1\. Two Sum](https://leetcode.com/problems/two-sum/)`,
+        ),
+      );
       assert.equal(await download.failure(), null);
       assert.equal(downloads.length, 1);
       await page.waitForFunction(

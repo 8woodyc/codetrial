@@ -200,6 +200,8 @@ pub fn interview_contract_json() -> serde_json::Value {
 pub struct Problem {
     pub id: &'static str,
     pub title: &'static str,
+    /// The published title with its LeetCode number, if imported.
+    pub source: Option<&'static str>,
     pub difficulty: &'static str,
     pub summary: &'static str,
     pub optimal: &'static str,

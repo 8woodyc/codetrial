@@ -2,753 +2,753 @@
   "valid-parentheses": {
     "page": "template-delimiter-audit",
     "title": "Template Delimiter Audit",
-    "source": "Valid Parentheses"
+    "source": "20. Valid Parentheses"
   },
   "two-sum": {
     "page": "chargeback-pair-match",
     "title": "Chargeback Pair Match",
-    "source": "Two Sum",
+    "source": "1. Two Sum",
     "default": true
   },
   "merge-sorted-array": {
     "page": "firmware-buffer-splice",
     "title": "Firmware Buffer Splice",
-    "source": "Merge Sorted Array"
+    "source": "88. Merge Sorted Array"
   },
   "remove-element": {
     "page": "muted-alert-filter",
     "title": "Muted Alert Filter",
-    "source": "Remove Element"
+    "source": "27. Remove Element"
   },
   "remove-duplicates-from-sorted-array": {
     "page": "telemetry-reading-dedupe",
     "title": "Telemetry Reading Dedupe",
-    "source": "Remove Duplicates from Sorted Array"
+    "source": "26. Remove Duplicates from Sorted Array"
   },
   "remove-duplicates-from-sorted-array-ii": {
     "page": "alert-digest-trimming",
     "title": "Alert Digest Trimming",
-    "source": "Remove Duplicates from Sorted Array II"
+    "source": "80. Remove Duplicates from Sorted Array II"
   },
   "majority-element": {
     "page": "replica-quorum-version",
     "title": "Replica Quorum Version",
-    "source": "Majority Element"
+    "source": "169. Majority Element"
   },
   "rotate-array": {
     "page": "carousel-slot-shift",
     "title": "Carousel Slot Shift",
-    "source": "Rotate Array"
+    "source": "189. Rotate Array"
   },
   "best-time-to-buy-and-sell-stock": {
     "page": "single-resale-window",
     "title": "Single Resale Window",
-    "source": "Best Time to Buy and Sell Stock"
+    "source": "121. Best Time to Buy and Sell Stock"
   },
   "best-time-to-buy-and-sell-stock-ii": {
     "page": "single-slot-reseller",
     "title": "Single Slot Reseller",
-    "source": "Best Time to Buy and Sell Stock II"
+    "source": "122. Best Time to Buy and Sell Stock II"
   },
   "jump-game": {
     "page": "relay-chain-reachability",
     "title": "Relay Chain Reachability",
-    "source": "Jump Game"
+    "source": "55. Jump Game"
   },
   "jump-game-ii": {
     "page": "drone-pad-hopping",
     "title": "Drone Pad Hopping",
-    "source": "Jump Game II"
+    "source": "45. Jump Game II"
   },
   "h-index": {
     "page": "package-impact-score",
     "title": "Package Impact Score",
-    "source": "H-Index"
+    "source": "274. H-Index"
   },
   "insert-delete-getrandom-o1": {
     "page": "backend-pool-sampler",
     "title": "Backend Pool Sampler",
-    "source": "Insert Delete GetRandom O(1)"
+    "source": "380. Insert Delete GetRandom O(1)"
   },
   "product-of-array-except-self": {
     "page": "pipeline-stage-gains",
     "title": "Pipeline Stage Gains",
-    "source": "Product of Array Except Self"
+    "source": "238. Product of Array Except Self"
   },
   "gas-station": {
     "page": "circular-route-charging",
     "title": "Circular Route Charging",
-    "source": "Gas Station"
+    "source": "134. Gas Station"
   },
   "candy": {
     "page": "shift-crew-bonus-points",
     "title": "Shift Crew Bonus Points",
-    "source": "Candy"
+    "source": "135. Candy"
   },
   "trapping-rain-water": {
     "page": "terrain-runoff-pooling",
     "title": "Terrain Runoff Pooling",
-    "source": "Trapping Rain Water"
+    "source": "42. Trapping Rain Water"
   },
   "roman-to-integer": {
     "page": "archive-volume-numbers",
     "title": "Archive Volume Numbers",
-    "source": "Roman to Integer"
+    "source": "13. Roman to Integer"
   },
   "integer-to-roman": {
     "page": "film-credits-year-stamp",
     "title": "Film Credits Year Stamp",
-    "source": "Integer to Roman"
+    "source": "12. Integer to Roman"
   },
   "length-of-last-word": {
     "page": "autocomplete-token-width",
     "title": "Autocomplete Token Width",
-    "source": "Length of Last Word"
+    "source": "58. Length of Last Word"
   },
   "longest-common-prefix": {
     "page": "metric-namespace-root",
     "title": "Metric Namespace Root",
-    "source": "Longest Common Prefix"
+    "source": "14. Longest Common Prefix"
   },
   "reverse-words-in-a-string": {
     "page": "backwards-caption-repair",
     "title": "Backwards Caption Repair",
-    "source": "Reverse Words in a String"
+    "source": "151. Reverse Words in a String"
   },
   "zigzag-conversion": {
     "page": "bouncing-print-head",
     "title": "Bouncing Print Head",
-    "source": "Zigzag Conversion"
+    "source": "6. Zigzag Conversion"
   },
   "find-the-index-of-the-first-occurrence-in-a-string": {
     "page": "firmware-signature-scan",
     "title": "Firmware Signature Scan",
-    "source": "Find the Index of the First Occurrence in a String"
+    "source": "28. Find the Index of the First Occurrence in a String"
   },
   "text-justification": {
     "page": "thermal-receipt-layout",
     "title": "Thermal Receipt Layout",
-    "source": "Text Justification"
+    "source": "68. Text Justification"
   },
   "valid-palindrome": {
     "page": "mirror-phrase-contest-filter",
     "title": "Mirror Phrase Contest Filter",
-    "source": "Valid Palindrome"
+    "source": "125. Valid Palindrome"
   },
   "is-subsequence": {
     "page": "ordered-event-trace-check",
     "title": "Ordered Event Trace Check",
-    "source": "Is Subsequence"
+    "source": "392. Is Subsequence"
   },
   "container-with-most-water": {
     "page": "billboard-pole-banner",
     "title": "Billboard Pole Banner",
-    "source": "Container With Most Water"
+    "source": "11. Container With Most Water"
   },
   "two-sum-ii-input-array-is-sorted": {
     "page": "gift-card-bundle-pair",
     "title": "Gift Card Bundle Pair",
-    "source": "Two Sum II - Input Array Is Sorted"
+    "source": "167. Two Sum II - Input Array Is Sorted"
   },
   "3sum": {
     "page": "ledger-cancellation-groups",
     "title": "Ledger Cancellation Groups",
-    "source": "3Sum"
+    "source": "15. 3Sum"
   },
   "happy-number": {
     "page": "firmware-checksum-settling",
     "title": "Firmware Checksum Settling",
-    "source": "Happy Number"
+    "source": "202. Happy Number"
   },
   "longest-substring-without-repeating-characters": {
     "page": "distinct-keystroke-stretch",
     "title": "Distinct Keystroke Stretch",
-    "source": "Longest Substring Without Repeating Characters"
+    "source": "3. Longest Substring Without Repeating Characters"
   },
   "minimum-window-substring": {
     "page": "required-marker-span",
     "title": "Required Marker Span",
-    "source": "Minimum Window Substring"
+    "source": "76. Minimum Window Substring"
   },
   "substring-with-concatenation-of-all-words": {
     "page": "packet-chunk-block-offsets",
     "title": "Packet Chunk Block Offsets",
-    "source": "Substring with Concatenation of All Words"
+    "source": "30. Substring with Concatenation of All Words"
   },
   "minimum-size-subarray-sum": {
     "page": "shortest-upload-batch",
     "title": "Shortest Upload Batch",
-    "source": "Minimum Size Subarray Sum"
+    "source": "209. Minimum Size Subarray Sum"
   },
   "valid-sudoku": {
     "page": "puzzle-grid-save-check",
     "title": "Puzzle Grid Save Check",
-    "source": "Valid Sudoku"
+    "source": "36. Valid Sudoku"
   },
   "spiral-matrix": {
     "page": "led-panel-ring-scan",
     "title": "LED Panel Ring Scan",
-    "source": "Spiral Matrix"
+    "source": "54. Spiral Matrix"
   },
   "rotate-image": {
     "page": "sensor-frame-quarter-turn",
     "title": "Sensor Frame Quarter Turn",
-    "source": "Rotate Image"
+    "source": "48. Rotate Image"
   },
   "set-matrix-zeroes": {
     "page": "faulty-sensor-grid-blanking",
     "title": "Faulty Sensor Grid Blanking",
-    "source": "Set Matrix Zeroes"
+    "source": "73. Set Matrix Zeroes"
   },
   "game-of-life": {
     "page": "microbe-culture-tick",
     "title": "Microbe Culture Tick",
-    "source": "Game of Life"
+    "source": "289. Game of Life"
   },
   "ransom-note": {
     "page": "marquee-letter-tiles",
     "title": "Marquee Letter Tiles",
-    "source": "Ransom Note"
+    "source": "383. Ransom Note"
   },
   "isomorphic-strings": {
     "page": "anonymizer-substitution-audit",
     "title": "Anonymizer Substitution Audit",
-    "source": "Isomorphic Strings"
+    "source": "205. Isomorphic Strings"
   },
   "word-pattern": {
     "page": "log-line-shape-template",
     "title": "Log Line Shape Template",
-    "source": "Word Pattern"
+    "source": "290. Word Pattern"
   },
   "valid-anagram": {
     "page": "scrambled-label-match",
     "title": "Scrambled Label Match",
-    "source": "Valid Anagram"
+    "source": "242. Valid Anagram"
   },
   "group-anagrams": {
     "page": "letter-rack-clusters",
     "title": "Letter Rack Clusters",
-    "source": "Group Anagrams"
+    "source": "49. Group Anagrams"
   },
   "contains-duplicate-ii": {
     "page": "recent-card-repeat-alert",
     "title": "Recent Card Repeat Alert",
-    "source": "Contains Duplicate II"
+    "source": "219. Contains Duplicate II"
   },
   "longest-consecutive-sequence": {
     "page": "allocated-port-block",
     "title": "Allocated Port Block",
-    "source": "Longest Consecutive Sequence"
+    "source": "128. Longest Consecutive Sequence"
   },
   "summary-ranges": {
     "page": "rack-slot-range-labels",
     "title": "Rack Slot Range Labels",
-    "source": "Summary Ranges"
+    "source": "228. Summary Ranges"
   },
   "insert-interval": {
     "page": "room-booking-busy-blocks",
     "title": "Room Booking Busy Blocks",
-    "source": "Insert Interval"
+    "source": "57. Insert Interval"
   },
   "minimum-number-of-arrows-to-burst-balloons": {
     "page": "batch-health-check-windows",
     "title": "Batch Health Check Windows",
-    "source": "Minimum Number of Arrows to Burst Balloons"
+    "source": "452. Minimum Number of Arrows to Burst Balloons"
   },
   "simplify-path": {
     "page": "upload-location-normalizer",
     "title": "Upload Location Normalizer",
-    "source": "Simplify Path"
+    "source": "71. Simplify Path"
   },
   "min-stack": {
     "page": "tentative-bid-ledger",
     "title": "Tentative Bid Ledger",
-    "source": "Min Stack"
+    "source": "155. Min Stack"
   },
   "evaluate-reverse-polish-notation": {
     "page": "pricing-rule-bytecode",
     "title": "Pricing Rule Bytecode",
-    "source": "Evaluate Reverse Polish Notation"
+    "source": "150. Evaluate Reverse Polish Notation"
   },
   "basic-calculator": {
     "page": "budget-sheet-formulas",
     "title": "Budget Sheet Formulas",
-    "source": "Basic Calculator"
+    "source": "224. Basic Calculator"
   },
   "linked-list-cycle": {
     "page": "workflow-handoff-loop",
     "title": "Workflow Handoff Loop",
-    "source": "Linked List Cycle"
+    "source": "141. Linked List Cycle"
   },
   "add-two-numbers": {
     "page": "odometer-digit-chains",
     "title": "Odometer Digit Chains",
-    "source": "Add Two Numbers"
+    "source": "2. Add Two Numbers"
   },
   "merge-two-sorted-lists": {
     "page": "replica-event-interleave",
     "title": "Replica Event Interleave",
-    "source": "Merge Two Sorted Lists"
+    "source": "21. Merge Two Sorted Lists"
   },
   "copy-list-with-random-pointer": {
     "page": "outline-snapshot-duplicator",
     "title": "Outline Snapshot Duplicator",
-    "source": "Copy List with Random Pointer"
+    "source": "138. Copy List with Random Pointer"
   },
   "reverse-linked-list-ii": {
     "page": "playlist-segment-flip",
     "title": "Playlist Segment Flip",
-    "source": "Reverse Linked List II"
+    "source": "92. Reverse Linked List II"
   },
   "reverse-nodes-in-k-group": {
     "page": "radio-frame-batching",
     "title": "Radio Frame Batching",
-    "source": "Reverse Nodes in k-Group"
+    "source": "25. Reverse Nodes in k-Group"
   },
   "remove-nth-node-from-end-of-list": {
     "page": "activity-feed-retraction",
     "title": "Activity Feed Retraction",
-    "source": "Remove Nth Node From End of List"
+    "source": "19. Remove Nth Node From End of List"
   },
   "remove-duplicates-from-sorted-list-ii": {
     "page": "single-scan-badge-filter",
     "title": "Single Scan Badge Filter",
-    "source": "Remove Duplicates from Sorted List II"
+    "source": "82. Remove Duplicates from Sorted List II"
   },
   "rotate-list": {
     "page": "playlist-tail-wraparound",
     "title": "Playlist Tail Wraparound",
-    "source": "Rotate List"
+    "source": "61. Rotate List"
   },
   "partition-list": {
     "page": "print-queue-triage",
     "title": "Print Queue Triage",
-    "source": "Partition List"
+    "source": "86. Partition List"
   },
   "lru-cache": {
     "page": "edge-thumbnail-store",
     "title": "Edge Thumbnail Store",
-    "source": "LRU Cache"
+    "source": "146. LRU Cache"
   },
   "maximum-depth-of-binary-tree": {
     "page": "fraud-rule-worst-case",
     "title": "Fraud Rule Worst Case",
-    "source": "Maximum Depth of Binary Tree"
+    "source": "104. Maximum Depth of Binary Tree"
   },
   "same-tree": {
     "page": "staging-drift-check",
     "title": "Staging Drift Check",
-    "source": "Same Tree"
+    "source": "100. Same Tree"
   },
   "invert-binary-tree": {
     "page": "right-to-left-layout",
     "title": "Right To Left Layout",
-    "source": "Invert Binary Tree"
+    "source": "226. Invert Binary Tree"
   },
   "symmetric-tree": {
     "page": "kiosk-panel-mirror-audit",
     "title": "Kiosk Panel Mirror Audit",
-    "source": "Symmetric Tree"
+    "source": "101. Symmetric Tree"
   },
   "construct-binary-tree-from-preorder-and-inorder-traversal": {
     "page": "crash-dump-index-rebuild",
     "title": "Crash Dump Index Rebuild",
-    "source": "Construct Binary Tree from Preorder and Inorder Traversal"
+    "source": "105. Construct Binary Tree from Preorder and Inorder Traversal"
   },
   "construct-binary-tree-from-inorder-and-postorder-traversal": {
     "page": "query-parse-cache-restore",
     "title": "Query Parse Cache Restore",
-    "source": "Construct Binary Tree from Inorder and Postorder Traversal"
+    "source": "106. Construct Binary Tree from Inorder and Postorder Traversal"
   },
   "populating-next-right-pointers-in-each-node-ii": {
     "page": "org-chart-row-navigation",
     "title": "Org Chart Row Navigation",
-    "source": "Populating Next Right Pointers in Each Node II"
+    "source": "117. Populating Next Right Pointers in Each Node II"
   },
   "flatten-binary-tree-to-linked-list": {
     "page": "screen-reader-menu-chain",
     "title": "Screen Reader Menu Chain",
-    "source": "Flatten Binary Tree to Linked List"
+    "source": "114. Flatten Binary Tree to Linked List"
   },
   "path-sum": {
     "page": "dungeon-route-budget",
     "title": "Dungeon Route Budget",
-    "source": "Path Sum"
+    "source": "112. Path Sum"
   },
   "sum-root-to-leaf-numbers": {
     "page": "menu-extension-checksum",
     "title": "Menu Extension Checksum",
-    "source": "Sum Root to Leaf Numbers"
+    "source": "129. Sum Root to Leaf Numbers"
   },
   "binary-tree-maximum-path-sum": {
     "page": "grid-segment-net-yield",
     "title": "Grid Segment Net Yield",
-    "source": "Binary Tree Maximum Path Sum"
+    "source": "124. Binary Tree Maximum Path Sum"
   },
   "binary-search-tree-iterator": {
     "page": "ordered-index-cursor",
     "title": "Ordered Index Cursor",
-    "source": "Binary Search Tree Iterator"
+    "source": "173. Binary Search Tree Iterator"
   },
   "count-complete-tree-nodes": {
     "page": "heap-slot-census",
     "title": "Heap Slot Census",
-    "source": "Count Complete Tree Nodes"
+    "source": "222. Count Complete Tree Nodes"
   },
   "lowest-common-ancestor-of-a-binary-tree": {
     "page": "shared-approver-lookup",
     "title": "Shared Approver Lookup",
-    "source": "Lowest Common Ancestor of a Binary Tree"
+    "source": "236. Lowest Common Ancestor of a Binary Tree"
   },
   "binary-tree-right-side-view": {
     "page": "collapsed-panel-labels",
     "title": "Collapsed Panel Labels",
-    "source": "Binary Tree Right Side View"
+    "source": "199. Binary Tree Right Side View"
   },
   "average-of-levels-in-binary-tree": {
     "page": "hop-depth-signal-means",
     "title": "Hop Depth Signal Means",
-    "source": "Average of Levels in Binary Tree"
+    "source": "637. Average of Levels in Binary Tree"
   },
   "binary-tree-level-order-traversal": {
     "page": "rollout-wave-planner",
     "title": "Rollout Wave Planner",
-    "source": "Binary Tree Level Order Traversal"
+    "source": "102. Binary Tree Level Order Traversal"
   },
   "binary-tree-zigzag-level-order-traversal": {
     "page": "serpentine-tier-sweep",
     "title": "Serpentine Tier Sweep",
-    "source": "Binary Tree Zigzag Level Order Traversal"
+    "source": "103. Binary Tree Zigzag Level Order Traversal"
   },
   "minimum-absolute-difference-in-bst": {
     "page": "tightest-channel-spacing",
     "title": "Tightest Channel Spacing",
-    "source": "Minimum Absolute Difference in BST"
+    "source": "530. Minimum Absolute Difference in BST"
   },
   "kth-smallest-element-in-a-bst": {
     "page": "latency-rank-query",
     "title": "Latency Rank Query",
-    "source": "Kth Smallest Element in a BST"
+    "source": "230. Kth Smallest Element in a BST"
   },
   "validate-binary-search-tree": {
     "page": "restored-index-integrity",
     "title": "Restored Index Integrity",
-    "source": "Validate Binary Search Tree"
+    "source": "98. Validate Binary Search Tree"
   },
   "number-of-islands": {
     "page": "copper-pad-continuity",
     "title": "Copper Pad Continuity",
-    "source": "Number of Islands"
+    "source": "200. Number of Islands"
   },
   "surrounded-regions": {
     "page": "sealed-air-pocket-backfill",
     "title": "Sealed Air Pocket Backfill",
-    "source": "Surrounded Regions"
+    "source": "130. Surrounded Regions"
   },
   "clone-graph": {
     "page": "sandbox-topology-replica",
     "title": "Sandbox Topology Replica",
-    "source": "Clone Graph"
+    "source": "133. Clone Graph"
   },
   "evaluate-division": {
     "page": "lab-unit-converter",
     "title": "Lab Unit Converter",
-    "source": "Evaluate Division"
+    "source": "399. Evaluate Division"
   },
   "course-schedule": {
     "page": "onboarding-track-feasibility",
     "title": "Onboarding Track Feasibility",
-    "source": "Course Schedule"
+    "source": "207. Course Schedule"
   },
   "course-schedule-ii": {
     "page": "migration-run-order",
     "title": "Migration Run Order",
-    "source": "Course Schedule II"
+    "source": "210. Course Schedule II"
   },
   "snakes-and-ladders": {
     "page": "portal-dice-race",
     "title": "Portal Dice Race",
-    "source": "Snakes and Ladders"
+    "source": "909. Snakes and Ladders"
   },
   "minimum-genetic-mutation": {
     "page": "approved-sequence-edits",
     "title": "Approved Sequence Edits",
-    "source": "Minimum Genetic Mutation"
+    "source": "433. Minimum Genetic Mutation"
   },
   "word-ladder": {
     "page": "hostname-rename-chain",
     "title": "Hostname Rename Chain",
-    "source": "Word Ladder"
+    "source": "127. Word Ladder"
   },
   "implement-trie-prefix-tree": {
     "page": "command-palette-index",
     "title": "Command Palette Index",
-    "source": "Implement Trie (Prefix Tree)"
+    "source": "208. Implement Trie (Prefix Tree)"
   },
   "design-add-and-search-words-data-structure": {
     "page": "crossword-pattern-matcher",
     "title": "Crossword Pattern Matcher",
-    "source": "Design Add and Search Words Data Structure"
+    "source": "211. Design Add and Search Words Data Structure"
   },
   "word-search-ii": {
     "page": "letter-grid-tracer",
     "title": "Letter Grid Tracer",
-    "source": "Word Search II"
+    "source": "212. Word Search II"
   },
   "letter-combinations-of-a-phone-number": {
     "page": "vanity-dial-expansion",
     "title": "Vanity Dial Expansion",
-    "source": "Letter Combinations of a Phone Number"
+    "source": "17. Letter Combinations of a Phone Number"
   },
   "combinations": {
     "page": "canary-host-selection",
     "title": "Canary Host Selection",
-    "source": "Combinations"
+    "source": "77. Combinations"
   },
   "permutations": {
     "page": "startup-order-sweep",
     "title": "Startup Order Sweep",
-    "source": "Permutations"
+    "source": "46. Permutations"
   },
   "combination-sum": {
     "page": "freight-pallet-loadouts",
     "title": "Freight Pallet Loadouts",
-    "source": "Combination Sum"
+    "source": "39. Combination Sum"
   },
   "n-queens-ii": {
     "page": "interference-free-towers",
     "title": "Interference Free Towers",
-    "source": "N-Queens II"
+    "source": "52. N-Queens II"
   },
   "generate-parentheses": {
     "page": "nesting-fuzzer-corpus",
     "title": "Nesting Fuzzer Corpus",
-    "source": "Generate Parentheses"
+    "source": "22. Generate Parentheses"
   },
   "word-search": {
     "page": "letter-panel-tracing",
     "title": "Letter Panel Tracing",
-    "source": "Word Search"
+    "source": "79. Word Search"
   },
   "convert-sorted-array-to-binary-search-tree": {
     "page": "sensor-calibration-index",
     "title": "Sensor Calibration Index",
-    "source": "Convert Sorted Array to Binary Search Tree"
+    "source": "108. Convert Sorted Array to Binary Search Tree"
   },
   "merge-intervals": {
     "page": "maintenance-window-consolidation",
     "title": "Maintenance Window Consolidation",
-    "source": "Merge Intervals"
+    "source": "56. Merge Intervals"
   },
   "longest-palindromic-substring": {
     "page": "mirrored-tag-segment",
     "title": "Mirrored Tag Segment",
-    "source": "Longest Palindromic Substring"
+    "source": "5. Longest Palindromic Substring"
   },
   "search-insert-position": {
     "page": "sorted-schedule-slot",
     "title": "Sorted Schedule Slot",
-    "source": "Search Insert Position"
+    "source": "35. Search Insert Position"
   },
   "plus-one": {
     "page": "serial-counter-advance",
     "title": "Serial Counter Advance",
-    "source": "Plus One"
+    "source": "66. Plus One"
   },
   "add-binary": {
     "page": "wide-register-arithmetic",
     "title": "Wide Register Arithmetic",
-    "source": "Add Binary"
+    "source": "67. Add Binary"
   },
   "single-number": {
     "page": "unmatched-badge-scan",
     "title": "Unmatched Badge Scan",
-    "source": "Single Number"
+    "source": "136. Single Number"
   },
   "palindrome-number": {
     "page": "symmetric-lottery-tickets",
     "title": "Symmetric Lottery Tickets",
-    "source": "Palindrome Number"
+    "source": "9. Palindrome Number"
   },
   "climbing-stairs": {
     "page": "robot-stride-plans",
     "title": "Robot Stride Plans",
-    "source": "Climbing Stairs"
+    "source": "70. Climbing Stairs"
   },
   "sqrtx": {
     "page": "integer-magnitude-estimator",
     "title": "Integer Magnitude Estimator",
-    "source": "Sqrt(x)"
+    "source": "69. Sqrt(x)"
   },
   "factorial-trailing-zeroes": {
     "page": "arrangement-count-suffix",
     "title": "Arrangement Count Suffix",
-    "source": "Factorial Trailing Zeroes"
+    "source": "172. Factorial Trailing Zeroes"
   },
   "house-robber": {
     "page": "highway-billboard-leasing",
     "title": "Highway Billboard Leasing",
-    "source": "House Robber"
+    "source": "198. House Robber"
   },
   "maximum-subarray": {
     "page": "trading-streak-report",
     "title": "Trading Streak Report",
-    "source": "Maximum Subarray"
+    "source": "53. Maximum Subarray"
   },
   "coin-change": {
     "page": "kiosk-token-payout",
     "title": "Kiosk Token Payout",
-    "source": "Coin Change"
+    "source": "322. Coin Change"
   },
   "longest-increasing-subsequence": {
     "page": "benchmark-progress-chain",
     "title": "Benchmark Progress Chain",
-    "source": "Longest Increasing Subsequence"
+    "source": "300. Longest Increasing Subsequence"
   },
   "search-a-2d-matrix": {
     "page": "paged-catalog-lookup",
     "title": "Paged Catalog Lookup",
-    "source": "Search a 2D Matrix"
+    "source": "74. Search a 2D Matrix"
   },
   "find-peak-element": {
     "page": "signal-crest-locator",
     "title": "Signal Crest Locator",
-    "source": "Find Peak Element"
+    "source": "162. Find Peak Element"
   },
   "find-minimum-in-rotated-sorted-array": {
     "page": "shifted-price-snapshot",
     "title": "Shifted Price Snapshot",
-    "source": "Find Minimum in Rotated Sorted Array"
+    "source": "153. Find Minimum in Rotated Sorted Array"
   },
   "minimum-path-sum": {
     "page": "conveyor-grid-routing",
     "title": "Conveyor Grid Routing",
-    "source": "Minimum Path Sum"
+    "source": "64. Minimum Path Sum"
   },
   "unique-paths-ii": {
     "page": "picking-robot-floor-plan",
     "title": "Picking Robot Floor Plan",
-    "source": "Unique Paths II"
+    "source": "63. Unique Paths II"
   },
   "word-break": {
     "page": "hashtag-vocabulary-splitter",
     "title": "Hashtag Vocabulary Splitter",
-    "source": "Word Break"
+    "source": "139. Word Break"
   },
   "number-of-1-bits": {
     "page": "permission-flag-counter",
     "title": "Permission Flag Counter",
-    "source": "Number of 1 Bits"
+    "source": "191. Number of 1 Bits"
   },
   "single-number-ii": {
     "page": "replica-write-audit",
     "title": "Replica Write Audit",
-    "source": "Single Number II"
+    "source": "137. Single Number II"
   },
   "bitwise-and-of-numbers-range": {
     "page": "address-block-shared-bits",
     "title": "Address Block Shared Bits",
-    "source": "Bitwise AND of Numbers Range"
+    "source": "201. Bitwise AND of Numbers Range"
   },
   "triangle": {
     "page": "mine-level-descent",
     "title": "Mine Level Descent",
-    "source": "Triangle"
+    "source": "120. Triangle"
   },
   "edit-distance": {
     "page": "scanner-code-reconciliation",
     "title": "Scanner Code Reconciliation",
-    "source": "Edit Distance"
+    "source": "72. Edit Distance"
   },
   "maximal-square": {
     "page": "rooftop-panel-footprint",
     "title": "Rooftop Panel Footprint",
-    "source": "Maximal Square"
+    "source": "221. Maximal Square"
   },
   "maximum-sum-circular-subarray": {
     "page": "orbital-energy-window",
     "title": "Orbital Energy Window",
-    "source": "Maximum Sum Circular Subarray"
+    "source": "918. Maximum Sum Circular Subarray"
   },
   "search-in-rotated-sorted-array": {
     "page": "ring-buffer-dump-lookup",
     "title": "Ring Buffer Dump Lookup",
-    "source": "Search in Rotated Sorted Array"
+    "source": "33. Search in Rotated Sorted Array"
   },
   "kth-largest-element-in-an-array": {
     "page": "rating-leaderboard-cutoff",
     "title": "Rating Leaderboard Cutoff",
-    "source": "Kth Largest Element in an Array"
+    "source": "215. Kth Largest Element in an Array"
   },
   "find-first-and-last-position-of-element-in-sorted-array": {
     "page": "log-timestamp-span",
     "title": "Log Timestamp Span",
-    "source": "Find First and Last Position of Element in Sorted Array"
+    "source": "34. Find First and Last Position of Element in Sorted Array"
   },
   "powx-n": {
     "page": "compound-growth-factor",
     "title": "Compound Growth Factor",
-    "source": "Pow(x, n)"
+    "source": "50. Pow(x, n)"
   },
   "interleaving-string": {
     "page": "shared-buffer-keystroke-audit",
     "title": "Shared Buffer Keystroke Audit",
-    "source": "Interleaving String"
+    "source": "97. Interleaving String"
   },
   "best-time-to-buy-and-sell-stock-iii": {
     "page": "spot-capacity-round-trips",
     "title": "Spot Capacity Round Trips",
-    "source": "Best Time to Buy and Sell Stock III"
+    "source": "123. Best Time to Buy and Sell Stock III"
   },
   "best-time-to-buy-and-sell-stock-iv": {
     "page": "freight-slot-trading-limit",
     "title": "Freight Slot Trading Limit",
-    "source": "Best Time to Buy and Sell Stock IV"
+    "source": "188. Best Time to Buy and Sell Stock IV"
   },
   "sort-list": {
     "page": "firmware-event-chain-ordering",
     "title": "Firmware Event Chain Ordering",
-    "source": "Sort List"
+    "source": "148. Sort List"
   },
   "median-of-two-sorted-arrays": {
     "page": "twin-sensor-midpoint-reading",
     "title": "Twin Sensor Midpoint Reading",
-    "source": "Median of Two Sorted Arrays"
+    "source": "4. Median of Two Sorted Arrays"
   },
   "max-points-on-a-line": {
     "page": "survey-stake-alignment",
     "title": "Survey Stake Alignment",
-    "source": "Max Points on a Line"
+    "source": "149. Max Points on a Line"
   },
   "reverse-bits": {
     "page": "serial-link-word-mirror",
     "title": "Serial Link Word Mirror",
-    "source": "Reverse Bits"
+    "source": "190. Reverse Bits"
   },
   "ipo": {
     "page": "studio-contract-bankroll",
     "title": "Studio Contract Bankroll",
-    "source": "IPO"
+    "source": "502. IPO"
   },
   "find-k-pairs-with-smallest-sums": {
     "page": "flight-combo-fare-shortlist",
     "title": "Flight Combo Fare Shortlist",
-    "source": "Find K Pairs with Smallest Sums"
+    "source": "373. Find K Pairs with Smallest Sums"
   },
   "merge-k-sorted-lists": {
     "page": "shard-result-consolidation",
     "title": "Shard Result Consolidation",
-    "source": "Merge k Sorted Lists"
+    "source": "23. Merge k Sorted Lists"
   },
   "find-median-from-data-stream": {
     "page": "live-clock-offset-monitor",
     "title": "Live Clock Offset Monitor",
-    "source": "Find Median from Data Stream"
+    "source": "295. Find Median from Data Stream"
   },
   "construct-quad-tree": {
     "page": "terrain-mask-tiling",
     "title": "Terrain Mask Tiling",
-    "source": "Construct Quad Tree"
+    "source": "427. Construct Quad Tree"
   },
   "fixed-capacity-ring-buffer": {
     "page": "bounded-event-queue",

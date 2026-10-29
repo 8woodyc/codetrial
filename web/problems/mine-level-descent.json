@@ -1,7 +1,7 @@
 {
   "page": "mine-level-descent",
   "title": "Mine Level Descent",
-  "source": "Triangle",
+  "source": "120. Triangle",
   "difficulty": "Medium",
   "brief": [
     "A mining simulation models a shaft as a stack of levels: the top level has one chamber, and each level below has one more chamber than the level above it. Crossing a chamber costs energy, and some chambers have supply caches that give energy back, shown as negative costs.",

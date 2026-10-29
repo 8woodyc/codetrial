@@ -1,7 +1,7 @@
 {
   "page": "firmware-checksum-settling",
   "title": "Firmware Checksum Settling",
-  "source": "Happy Number",
+  "source": "202. Happy Number",
   "difficulty": "Easy",
   "brief": [
     "A legacy firmware tool derives a device code by taking a positive integer, replacing it with the sum of the squares of its decimal digits, and repeating on the result. For example 23 becomes 4 + 9 = 13. Codes whose process eventually lands on 1 are treated as stable.",

@@ -1,7 +1,7 @@
 {
   "page": "terrain-mask-tiling",
   "title": "Terrain Mask Tiling",
-  "source": "Construct Quad Tree",
+  "source": "427. Construct Quad Tree",
   "difficulty": "Medium",
   "brief": [
     "A mapping service stores land and water masks as square grids of 0s and 1s whose side is a power of two. To save space, it compresses each mask into a four-way tree: a square region where every cell has the same value becomes a single leaf, and any other region is split into four equal quarters.",

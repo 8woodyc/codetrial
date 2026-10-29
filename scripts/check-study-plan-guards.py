@@ -53,6 +53,7 @@ def scaffold_failures(gen: object) -> list:
     produces cases that look plausible and pair the wrong inputs.
     """
     detail = {
+        "questionFrontendId": "92",
         "difficulty": "Medium",
         "codeSnippets": [
             {"langSlug": "python3", "code": "class Solution:\n    pass\n"},

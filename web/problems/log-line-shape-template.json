@@ -1,7 +1,7 @@
 {
   "page": "log-line-shape-template",
   "title": "Log Line Shape Template",
-  "source": "Word Pattern",
+  "source": "290. Word Pattern",
   "difficulty": "Easy",
   "brief": [
     "Our log classifier describes the shape of a message with a short template of letters, one letter per word. A template like abba means the first and last words are the same, the middle two are the same as each other, and those two words differ.",

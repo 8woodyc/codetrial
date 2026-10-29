@@ -1,7 +1,7 @@
 {
   "page": "collapsed-panel-labels",
   "title": "Collapsed Panel Labels",
-  "source": "Binary Tree Right Side View",
+  "source": "199. Binary Tree Right Side View",
   "difficulty": "Medium",
   "brief": [
     "Our design tool draws dependency trees row by row, with each node's children placed below it, left child before right. When the panel collapses into a narrow sidebar, the tool shows only the node nearest the right edge of each row.",

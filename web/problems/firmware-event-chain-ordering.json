@@ -1,7 +1,7 @@
 {
   "page": "firmware-event-chain-ordering",
   "title": "Firmware Event Chain Ordering",
-  "source": "Sort List",
+  "source": "148. Sort List",
   "difficulty": "Medium",
   "brief": [
     "A microcontroller keeps pending events in a singly linked chain of nodes, where each node has a priority value val and a next link. Before a scheduling pass, the firmware needs the chain ordered by priority, and there is no random access into the chain.",

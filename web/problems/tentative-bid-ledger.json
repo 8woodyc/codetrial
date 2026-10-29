@@ -1,7 +1,7 @@
 {
   "page": "tentative-bid-ledger",
   "title": "Tentative Bid Ledger",
-  "source": "Min Stack",
+  "source": "155. Min Stack",
   "difficulty": "Medium",
   "brief": [
     "An auction desk tool keeps traders' tentative bids in a last-in, first-out ledger: new bids go on top, and undo removes the most recent one. Traders also want to see the lowest bid currently in the ledger at any moment, and that display refreshes after every action.",

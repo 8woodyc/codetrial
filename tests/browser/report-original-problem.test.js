@@ -40,7 +40,7 @@ test("ending an interview shows the original problem below the report title", as
     await page.locator("#end").click();
     const link = page.locator("#report-modal h2 + .report-original-problem a");
     await link.waitFor();
-    assert.equal(await link.textContent(), "Two Sum");
+    assert.equal(await link.textContent(), "1. Two Sum");
     assert.equal(
       await link.getAttribute("href"),
       "https://leetcode.com/problems/two-sum/",
@@ -125,7 +125,7 @@ test("a late original-problem lookup cannot put recording A's link on B", async 
     pendingMap.resolve();
     const link = page.locator("#replay-report .report-original-problem a");
     await link.waitFor();
-    assert.equal(await link.textContent(), "Valid Parentheses");
+    assert.equal(await link.textContent(), "20. Valid Parentheses");
     assert.equal(
       await link.getAttribute("href"),
       "https://leetcode.com/problems/valid-parentheses/",

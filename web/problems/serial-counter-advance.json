@@ -1,7 +1,7 @@
 {
   "page": "serial-counter-advance",
   "title": "Serial Counter Advance",
-  "source": "Plus One",
+  "source": "66. Plus One",
   "difficulty": "Easy",
   "brief": [
     "Our ticketing system issues serial numbers that are far too long for any integer type, so each serial is stored as a list of decimal digits with the most significant digit first. When a ticket is issued the counter moves to the next serial.",

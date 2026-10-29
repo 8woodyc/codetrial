@@ -1,7 +1,7 @@
 {
   "page": "crash-dump-index-rebuild",
   "title": "Crash Dump Index Rebuild",
-  "source": "Construct Binary Tree from Preorder and Inorder Traversal",
+  "source": "105. Construct Binary Tree from Preorder and Inorder Traversal",
   "difficulty": "Medium",
   "brief": [
     "When our indexing service crashes, it writes out its in-memory binary tree as two flat logs of node ids, because the tree pointers themselves are lost. In the first log each node is written before everything in its left subtree, which is written before everything in its right subtree. In the second log each node is written after everything in its left subtree and before everything in its right subtree.",

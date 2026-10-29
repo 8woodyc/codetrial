@@ -1,7 +1,7 @@
 {
   "page": "relay-chain-reachability",
   "title": "Relay Chain Reachability",
-  "source": "Jump Game",
+  "source": "55. Jump Game",
   "difficulty": "Medium",
   "brief": [
     "A pipeline monitoring system places relays in a line along a pipe. Each relay's transmitter has a range, measured in relays ahead, and a message starts at the first relay and must be forwarded until it arrives at the last one.",

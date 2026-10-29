@@ -1,7 +1,7 @@
 {
   "page": "startup-order-sweep",
   "title": "Startup Order Sweep",
-  "source": "Permutations",
+  "source": "46. Permutations",
   "difficulty": "Medium",
   "brief": [
     "Our integration harness boots a handful of services, each identified by an integer id. A race condition only shows up for certain boot orders, so we want to run the suite once for every possible order.",

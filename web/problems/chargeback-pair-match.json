@@ -1,7 +1,7 @@
 {
   "page": "chargeback-pair-match",
   "title": "Chargeback Pair Match",
-  "source": "Two Sum",
+  "source": "1. Two Sum",
   "difficulty": "Easy",
   "brief": [
     "Our payments team handles disputes where a customer says two separate transactions on their statement together make up one disputed charge. Support needs to locate those two transactions quickly.",

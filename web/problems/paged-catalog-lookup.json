@@ -1,7 +1,7 @@
 {
   "page": "paged-catalog-lookup",
   "title": "Paged Catalog Lookup",
-  "source": "Search a 2D Matrix",
+  "source": "74. Search a 2D Matrix",
   "difficulty": "Medium",
   "brief": [
     "A product catalog keeps its item ids split into fixed-size pages. Within a page the ids increase, and every page starts with an id larger than the last id on the previous page. The storefront needs to check quickly whether an id is in the catalog.",

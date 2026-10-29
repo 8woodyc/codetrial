@@ -1,7 +1,7 @@
 {
   "page": "print-queue-triage",
   "title": "Print Queue Triage",
-  "source": "Partition List",
+  "source": "86. Partition List",
   "difficulty": "Medium",
   "brief": [
     "A shared print server holds pending jobs as a chain of ListNode entries, each carrying a size score. At peak time the server lets small jobs jump ahead: every job with a score below a threshold should be moved ahead of every job whose score is not.",

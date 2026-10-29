@@ -186,6 +186,8 @@ class TaskAuthoringTests(unittest.TestCase):
             # source out of what the learner reads still apply to the copy.
             _, notes = new_task(bank, "two-sum", "pair-sum")
             problems = {row["id"]: row for row in bank_file(bank, "problems")}
+            self.assertEqual(problems["two-sum"]["number"], 1)
+            self.assertEqual(problems["pair-sum"]["number"], 1)
             self.assertEqual(problems["pair-sum"].get("origin", "leetcode"), "leetcode")
             self.assertIn("title", problems["pair-sum"])
             self.assertTrue(any("catalog" in note for note in notes))

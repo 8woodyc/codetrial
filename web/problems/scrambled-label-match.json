@@ -1,7 +1,7 @@
 {
   "page": "scrambled-label-match",
   "title": "Scrambled Label Match",
-  "source": "Valid Anagram",
+  "source": "242. Valid Anagram",
   "difficulty": "Easy",
   "brief": [
     "A warehouse scanner sometimes reads the letters of a product code out of order when a label is creased. Before flagging a mismatch, the inventory service checks whether the scanned code could simply be the expected code with its letters shuffled.",

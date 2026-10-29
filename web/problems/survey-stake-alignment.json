@@ -1,7 +1,7 @@
 {
   "page": "survey-stake-alignment",
   "title": "Survey Stake Alignment",
-  "source": "Max Points on a Line",
+  "source": "149. Max Points on a Line",
   "difficulty": "Hard",
   "brief": [
     "A land surveyor drives stakes at integer coordinates across a site. To plan a straight fence that uses as many existing stakes as possible, the planning tool needs the largest number of stakes that lie exactly on one straight line.",

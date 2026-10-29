@@ -21,19 +21,36 @@ export function filterProblems(
     searchBy = "scenario",
   } = {},
 ) {
-  const needle = query.trim().toLowerCase();
-  return problems.filter(
-    (problem) =>
-      (!difficulties.size || difficulties.has(problem.difficulty)) &&
-      (!topic || problem.topics.includes(topic)) &&
-      (!needle ||
-        (
-          (searchBy === "leetcode" ? problem.leetcodeTitle : problem.title) ??
-          ""
-        )
-          .toLowerCase()
-          .includes(needle)),
-  );
+  const trimmedQuery = query.trim();
+  const needle = trimmedQuery.toLowerCase();
+
+  // "20", "20.", "#20" and "020" all name problem 20.
+  const number =
+    searchBy === "leetcode"
+      ? trimmedQuery.match(/^#?0*(\d+)\.?$/)?.[1]
+      : undefined;
+
+  return problems.filter((problem) => {
+    if (difficulties.size && !difficulties.has(problem.difficulty))
+      return false;
+    if (topic && !problem.topics.includes(topic)) return false;
+    if (!needle) return true;
+
+    if (searchBy === "leetcode") {
+      const leetcodeTitle = problem.leetcodeTitle ?? "";
+      if (number) {
+        const publishedTitle = leetcodeTitle.replace(/^\d+\. /, "");
+        return (
+          leetcodeTitle.startsWith(`${number}. `) ||
+          publishedTitle.toLowerCase().includes(number)
+        );
+      }
+      return leetcodeTitle.toLowerCase().includes(needle);
+    } else {
+      const title = problem.title ?? "";
+      return title.toLowerCase().includes(needle);
+    }
+  });
 }
 
 const ASSESSED = new Set(["HIRE", "NO_HIRE"]);

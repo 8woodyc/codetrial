@@ -1,7 +1,7 @@
 {
   "page": "single-scan-badge-filter",
   "title": "Single Scan Badge Filter",
-  "source": "Remove Duplicates from Sorted List II",
+  "source": "82. Remove Duplicates from Sorted List II",
   "difficulty": "Medium",
   "brief": [
     "Building security exports badge scans as a chain of ListNode badge IDs sorted in ascending order. Any badge that was scanned more than once in the window is flagged as a possible cloned badge and dropped from the report entirely, so the report only contains badges that were scanned exactly once.",

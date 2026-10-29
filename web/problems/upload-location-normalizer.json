@@ -1,7 +1,7 @@
 {
   "page": "upload-location-normalizer",
   "title": "Upload Location Normalizer",
-  "source": "Simplify Path",
+  "source": "71. Simplify Path",
   "difficulty": "Medium",
   "brief": [
     "Our file sync client accepts absolute locations typed by users and scripts, and they come in messy: doubled slashes, trailing slashes, and the usual Unix . and .. components. Before we use a location as a cache key, we need one canonical spelling for it.",

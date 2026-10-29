@@ -1,7 +1,7 @@
 {
   "page": "heap-slot-census",
   "title": "Heap Slot Census",
-  "source": "Count Complete Tree Nodes",
+  "source": "222. Count Complete Tree Nodes",
   "difficulty": "Medium",
   "brief": [
     "A distributed priority queue stores its entries in a tree of slots that is always kept complete: every level is full except possibly the bottom one, whose slots are packed toward the left with no gaps. Each slot lives on a storage node, so walking the tree is not free.",

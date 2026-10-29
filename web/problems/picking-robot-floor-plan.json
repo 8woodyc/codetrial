@@ -1,7 +1,7 @@
 {
   "page": "picking-robot-floor-plan",
   "title": "Picking Robot Floor Plan",
-  "source": "Unique Paths II",
+  "source": "63. Unique Paths II",
   "difficulty": "Medium",
   "brief": [
     "Our warehouse floor is laid out as a grid of bays, and some bays are taken up by shelving. A picking robot starts in the top-left bay and has to reach the loading dock in the bottom-right bay, and it can only ever move one bay east or one bay south.",

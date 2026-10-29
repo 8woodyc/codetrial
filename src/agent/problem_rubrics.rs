@@ -7,6 +7,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "valid-parentheses",
         title: "Valid Parentheses",
+        source: Some("20. Valid Parentheses"),
         difficulty: "Easy",
         summary: "Given a string of only '()[]{}', return whether the brackets are valid: every open bracket is closed by the same type, in the correct order.",
         optimal: "Single pass with a stack: push open brackets, and on a close bracket check the top of the stack matches; valid iff the stack is empty at the end. O(n) time, O(n) space.",
@@ -15,6 +16,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "two-sum",
         title: "Two Sum",
+        source: Some("1. Two Sum"),
         difficulty: "Easy",
         summary: "Given an array of integers `nums` and an integer `target`, return the indices of the two numbers that add up to `target`. Exactly one solution exists and the same element may not be used twice.",
         optimal: "One-pass hash map: for each value, check whether (target - value) was already seen; O(n) time, O(n) space. Brute force is O(n^2).",
@@ -23,6 +25,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "merge-sorted-array",
         title: "Merge Sorted Array",
+        source: Some("88. Merge Sorted Array"),
         difficulty: "Easy",
         summary: "Given two sorted arrays where `nums1` has trailing empty slots, merge `nums2` into `nums1` in place so `nums1` ends sorted.",
         optimal: "Work backward from the initialized tails of `nums1` and `nums2`, writing the larger value into the last open slot. This avoids shifting and runs in O(m+n) time with O(1) extra space.",
@@ -31,6 +34,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "remove-element",
         title: "Remove Element",
+        source: Some("27. Remove Element"),
         difficulty: "Easy",
         summary: "Given an array and a target value, remove all target occurrences in place and return how many elements remain; only the kept prefix matters.",
         optimal: "Use a write pointer: scan every value, copy non-target values into the next kept slot, and return the write count. O(n) time, O(1) extra space.",
@@ -39,6 +43,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "remove-duplicates-from-sorted-array",
         title: "Remove Duplicates from Sorted Array",
+        source: Some("26. Remove Duplicates from Sorted Array"),
         difficulty: "Easy",
         summary: "Given a sorted array, compact it in place so each distinct value appears once and return the length of that unique prefix.",
         optimal: "Keep a write pointer for the next unique slot and copy a value only when it differs from the previous kept value. O(n) time, O(1) extra space.",
@@ -47,6 +52,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "remove-duplicates-from-sorted-array-ii",
         title: "Remove Duplicates from Sorted Array II",
+        source: Some("80. Remove Duplicates from Sorted Array II"),
         difficulty: "Medium",
         summary: "Given a sorted array, compact it in place so each distinct value appears at most twice and return the length of the kept prefix.",
         optimal: "Scan left to right with a write pointer; keep a value when fewer than two copies are already in the written prefix, commonly by checking `nums[write - 2] != value`. O(n) time, O(1) extra space.",
@@ -55,6 +61,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "majority-element",
         title: "Majority Element",
+        source: Some("169. Majority Element"),
         difficulty: "Easy",
         summary: "Given an array where one value appears more than half the time, return that majority value.",
         optimal: "Boyer-Moore voting keeps one candidate and a counter, canceling different values as it scans. Because a majority is guaranteed, the final candidate is the answer. O(n) time, O(1) space.",
@@ -63,6 +70,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "rotate-array",
         title: "Rotate Array",
+        source: Some("189. Rotate Array"),
         difficulty: "Medium",
         summary: "Given an array and k, rotate the array to the right by k steps in place.",
         optimal: "Reduce k modulo n, then reverse the whole array, reverse the first k elements, and reverse the remaining suffix. O(n) time, O(1) extra space.",
@@ -71,6 +79,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "best-time-to-buy-and-sell-stock",
         title: "Best Time to Buy and Sell Stock",
+        source: Some("121. Best Time to Buy and Sell Stock"),
         difficulty: "Easy",
         summary: "Given daily prices, choose one buy day and one later sell day to maximize profit, or return 0 if every sale loses money.",
         optimal: "Scan once while tracking the lowest price seen so far and the best profit from selling today. O(n) time, O(1) space.",
@@ -79,6 +88,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "best-time-to-buy-and-sell-stock-ii",
         title: "Best Time to Buy and Sell Stock II",
+        source: Some("122. Best Time to Buy and Sell Stock II"),
         difficulty: "Medium",
         summary: "Given daily prices, make any number of non-overlapping buy-sell transactions to maximize total profit.",
         optimal: "Add every positive day-to-day price increase. This is equivalent to buying before each rising run and selling at its peak. O(n) time, O(1) space.",
@@ -87,6 +97,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "jump-game",
         title: "Jump Game",
+        source: Some("55. Jump Game"),
         difficulty: "Medium",
         summary: "Given maximum jump lengths from each index, return whether index 0 can reach the last index.",
         optimal: "Scan while tracking the farthest reachable index; if the scan index ever exceeds it, return false, otherwise extend it and succeed once the end is reachable. O(n) time, O(1) space.",
@@ -95,6 +106,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "jump-game-ii",
         title: "Jump Game II",
+        source: Some("45. Jump Game II"),
         difficulty: "Medium",
         summary: "Given reachable maximum jump lengths from each index, return the minimum number of jumps needed to reach the last index.",
         optimal: "Greedy level scan: track the end of the current jump window and the farthest index reachable from it; when the scan reaches the window end, take one jump and advance the window. O(n) time, O(1) space.",
@@ -103,6 +115,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "h-index",
         title: "H-Index",
+        source: Some("274. H-Index"),
         difficulty: "Medium",
         summary: "Given citation counts for a researcher's papers, return the largest h such that at least h papers have h or more citations.",
         optimal: "Sort dependents descending and find the last position where dependents[i] >= i+1, or use buckets capped at n for O(n). Sorting is O(n log n) time and O(1) to O(n) space depending on language.",
@@ -111,6 +124,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "insert-delete-getrandom-o1",
         title: "Insert Delete GetRandom O(1)",
+        source: Some("380. Insert Delete GetRandom O(1)"),
         difficulty: "Medium",
         summary: "Design an integer set with insert, remove, and getRandom, each expected O(1), with getRandom choosing uniformly among current values.",
         optimal: "Store values in an array plus a hash map from value to index. Insert appends, remove swaps the removed value with the last array item and updates its index before popping, and getRandom indexes the array. O(1) expected time.",
@@ -119,6 +133,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "product-of-array-except-self",
         title: "Product of Array Except Self",
+        source: Some("238. Product of Array Except Self"),
         difficulty: "Medium",
         summary: "Given nums, return an array where each position contains the product of every other value, without using division.",
         optimal: "Write prefix products into the output, then scan from the right with a running suffix product and multiply it into each slot. O(n) time, O(1) extra space beyond the output.",
@@ -127,6 +142,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "gas-station",
         title: "Gas Station",
+        source: Some("134. Gas Station"),
         difficulty: "Medium",
         summary: "Given gas and travel costs around a circular route, return a starting station that can complete the circuit, or -1 if none exists.",
         optimal: "If total pickup is less than total drain, no solution exists. Otherwise scan once with a running tank; whenever it drops below zero, the next station becomes the only possible new start. O(n) time, O(1) space.",
@@ -135,6 +151,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "candy",
         title: "Candy",
+        source: Some("135. Candy"),
         difficulty: "Hard",
         summary: "Given child ratings in a line, assign the fewest candies so every child has at least one and higher-rated neighbors get more.",
         optimal: "Two passes: left-to-right enforces increases from the left, right-to-left enforces increases from the right, summing the max requirement per child. O(n) time and O(n) space; slope counting can reduce space.",
@@ -143,6 +160,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "trapping-rain-water",
         title: "Trapping Rain Water",
+        source: Some("42. Trapping Rain Water"),
         difficulty: "Hard",
         summary: "Given bar heights, compute the total water trapped between bars after raining.",
         optimal: "Use two pointers with left and right maxima: advance the side with the lower max and add trapped water there. O(n) time, O(1) space. Prefix/suffix max arrays are also acceptable at O(n) space.",
@@ -151,6 +169,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "roman-to-integer",
         title: "Roman to Integer",
+        source: Some("13. Roman to Integer"),
         difficulty: "Easy",
         summary: "Given a valid Roman numeral string, return its integer value.",
         optimal: "Scan left to right with a symbol-value map. If a symbol is smaller than the next symbol, subtract it; otherwise add it. O(n) time and O(1) space because the symbol set is fixed.",
@@ -159,6 +178,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "integer-to-roman",
         title: "Integer to Roman",
+        source: Some("12. Integer to Roman"),
         difficulty: "Medium",
         summary: "Given an integer from 1 to 3999, return its Roman numeral representation.",
         optimal: "Greedily append symbols from largest to smallest, including subtractive entries like CM, XC, and IV in the table. O(1) time for the bounded range and O(1) extra space outside the output.",
@@ -167,6 +187,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "length-of-last-word",
         title: "Length of Last Word",
+        source: Some("58. Length of Last Word"),
         difficulty: "Easy",
         summary: "Given a string containing words and spaces, return the length of the final word.",
         optimal: "Skip trailing spaces from the end, then count characters backward until the next space or the beginning. O(n) time in the worst case and O(1) space.",
@@ -175,6 +196,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "longest-common-prefix",
         title: "Longest Common Prefix",
+        source: Some("14. Longest Common Prefix"),
         difficulty: "Easy",
         summary: "Given an array of strings, return the longest prefix shared by every string, or the empty string if none exists.",
         optimal: "Keep a candidate prefix and shrink it until every string starts with it, or compare characters column by column until a mismatch. O(total characters inspected) time and O(1) extra space outside the returned prefix.",
@@ -183,6 +205,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "reverse-words-in-a-string",
         title: "Reverse Words in a String",
+        source: Some("151. Reverse Words in a String"),
         difficulty: "Medium",
         summary: "Given a string of words separated by spaces, return the words in reverse order with exactly one space between them.",
         optimal: "Split into non-empty words, reverse their order, and join with single spaces. O(n) time and O(n) space; in-place reversal is possible in mutable languages if asked.",
@@ -191,6 +214,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "zigzag-conversion",
         title: "Zigzag Conversion",
+        source: Some("6. Zigzag Conversion"),
         difficulty: "Medium",
         summary: "Given a string and row count, place characters along a down-and-up zigzag path and read the rows in order.",
         optimal: "Append each character to its current row while walking the row index down and up between the bounds. O(n) time and O(n) space for row buffers. Return the original string immediately when rowCount is 1 or at least the string length.",
@@ -199,6 +223,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "find-the-index-of-the-first-occurrence-in-a-string",
         title: "Find the Index of the First Occurrence in a String",
+        source: Some("28. Find the Index of the First Occurrence in a String"),
         difficulty: "Easy",
         summary: "Given haystack and needle strings, return the first index where needle appears in haystack, or -1 if it does not appear.",
         optimal: "For interview purposes, a clear scan checking each possible start is acceptable at O(n*m) for these constraints; KMP or another linear string-matching algorithm is the deeper optimization if asked.",
@@ -207,6 +232,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "text-justification",
         title: "Text Justification",
+        source: Some("68. Text Justification"),
         difficulty: "Hard",
         summary: "Given words and a maximum width, pack words into lines and distribute spaces so each line has exactly that width.",
         optimal: "Greedily pack as many words as fit per line. For non-final lines, divide spaces across gaps with earlier gaps receiving extras; for final or single-word lines, left-justify and pad the right. O(total output size) time.",
@@ -215,6 +241,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "valid-palindrome",
         title: "Valid Palindrome",
+        source: Some("125. Valid Palindrome"),
         difficulty: "Easy",
         summary: "Given a string, decide whether its alphanumeric characters form a palindrome when compared case-insensitively.",
         optimal: "Use two pointers from both ends, skipping non-alphanumeric characters and comparing lowercase forms. O(n) time and O(1) space.",
@@ -223,6 +250,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "is-subsequence",
         title: "Is Subsequence",
+        source: Some("392. Is Subsequence"),
         difficulty: "Easy",
         summary: "Given strings s and t, decide whether s can be formed by deleting zero or more characters from t without changing order.",
         optimal: "Walk t with one pointer into s, advancing the s pointer only on matches. When the pointer reaches the end of s, it is a subsequence. O(|t|) time and O(1) space.",
@@ -231,6 +259,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "container-with-most-water",
         title: "Container With Most Water",
+        source: Some("11. Container With Most Water"),
         difficulty: "Medium",
         summary: "Given line heights, choose two positions that maximize width times the shorter height.",
         optimal: "Use two pointers at the ends. Record each area, then move the pointer at the shorter height because only a taller boundary can compensate for reduced width. O(n) time and O(1) space.",
@@ -239,6 +268,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "two-sum-ii-input-array-is-sorted",
         title: "Two Sum II - Input Array Is Sorted",
+        source: Some("167. Two Sum II - Input Array Is Sorted"),
         difficulty: "Medium",
         summary: "Given a sorted 1-indexed integer array and a target, return the two indices whose values add to the target.",
         optimal: "Use left and right pointers. If the sum is too small, move left; if too large, move right; otherwise return 1-indexed positions. O(n) time and O(1) space.",
@@ -247,6 +277,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "3sum",
         title: "3Sum",
+        source: Some("15. 3Sum"),
         difficulty: "Medium",
         summary: "Given an integer array, return all unique triplets whose values sum to zero.",
         optimal: "Sort the array, fix one number, and use a two-pointer sweep for the remaining pair while skipping duplicate fixed and pointer values. O(n^2) time and O(1) extra space outside the output.",
@@ -255,6 +286,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "happy-number",
         title: "Happy Number",
+        source: Some("202. Happy Number"),
         difficulty: "Easy",
         summary: "Repeatedly replace a positive integer by the sum of squared digits and decide whether the sequence reaches 1.",
         optimal: "Detect cycles with a set or Floyd's slow/fast pointers over the digit-square transform. Reaching 1 means happy; revisiting a value means not happy. O(log n) per transform and bounded sequence length.",
@@ -263,6 +295,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "longest-substring-without-repeating-characters",
         title: "Longest Substring Without Repeating Characters",
+        source: Some("3. Longest Substring Without Repeating Characters"),
         difficulty: "Medium",
         summary: "Given a string, return the length of the longest contiguous substring with no repeated characters.",
         optimal: "Maintain a sliding window and a map from character to most recent index. When a duplicate appears inside the current window, move the left boundary just past its previous index. O(n) time and O(min(n, alphabet)) space.",
@@ -271,6 +304,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "minimum-window-substring",
         title: "Minimum Window Substring",
+        source: Some("76. Minimum Window Substring"),
         difficulty: "Hard",
         summary: "Given strings s and t, return the shortest substring of s that contains every character required by t, including duplicates.",
         optimal: "Count required characters from t, expand the right edge until all requirements are met, then shrink the left edge while preserving validity. Track the best valid window. O(|s| + |t|) time and O(alphabet) space.",
@@ -279,6 +313,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "substring-with-concatenation-of-all-words",
         title: "Substring with Concatenation of All Words",
+        source: Some("30. Substring with Concatenation of All Words"),
         difficulty: "Hard",
         summary: "Given a string and equal-length words, return every start index where a substring concatenates all words exactly once in any order.",
         optimal: "Use word-length aligned sliding windows. For each offset, count fixed-size word chunks, shrink when a count exceeds what is required, and record starts when the window holds all words. O(n * word length) substring work, usually described as O(n) chunk scans.",
@@ -287,6 +322,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "minimum-size-subarray-sum",
         title: "Minimum Size Subarray Sum",
+        source: Some("209. Minimum Size Subarray Sum"),
         difficulty: "Medium",
         summary: "Given a target and positive integers, return the smallest contiguous subarray length with sum at least the target, or 0 if none exists.",
         optimal: "Use a sliding window because all numbers are positive: expand right to grow the sum, then shrink left while the sum still meets the target. O(n) time and O(1) space. Prefix sums with binary search are also valid at O(n log n).",
@@ -295,6 +331,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "valid-sudoku",
         title: "Valid Sudoku",
+        source: Some("36. Valid Sudoku"),
         difficulty: "Medium",
         summary: "Given a 9 x 9 partially filled Sudoku board, return whether every filled row, column, and 3 x 3 box contains no repeated digit.",
         optimal: "Scan all 81 cells, skip '.', and track seen digits for each row, column, and box. A duplicate in any unit makes the board invalid. O(1) time and space because the board size is fixed.",
@@ -303,6 +340,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "spiral-matrix",
         title: "Spiral Matrix",
+        source: Some("54. Spiral Matrix"),
         difficulty: "Medium",
         summary: "Given an m x n matrix, return its values in clockwise spiral order starting from the top-left corner.",
         optimal: "Maintain top, bottom, left, and right boundaries. Traverse the current top row, right column, bottom row, and left column while tightening bounds and guarding single remaining rows or columns. O(m*n) time and O(1) extra space besides the output.",
@@ -311,6 +349,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "rotate-image",
         title: "Rotate Image",
+        source: Some("48. Rotate Image"),
         difficulty: "Medium",
         summary: "Given an n x n matrix, rotate it 90 degrees clockwise in place.",
         optimal: "Either transpose across the main diagonal then reverse every row, or rotate four cells at a time layer by layer. Both run in O(n^2) time and O(1) extra space.",
@@ -319,6 +358,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "set-matrix-zeroes",
         title: "Set Matrix Zeroes",
+        source: Some("73. Set Matrix Zeroes"),
         difficulty: "Medium",
         summary: "Given an m x n matrix, if any original cell is zero, set that cell's entire row and column to zero in place.",
         optimal: "Use the first row and first column as marker storage, plus two booleans for whether they originally contained zero. Mark rows and columns from the interior, zero marked interiors, then handle the first row and column. O(m*n) time and O(1) extra space.",
@@ -327,6 +367,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "game-of-life",
         title: "Game of Life",
+        source: Some("289. Game of Life"),
         difficulty: "Medium",
         summary: "Given a board of 0/1 cells, update it in place to the next generation of the classic cellular automaton using all eight neighbors and simultaneous updates.",
         optimal: "Encode transitional states in place, such as live-to-dead and dead-to-live sentinel values, while neighbor counts read the original live/dead state. Then make a final pass to collapse sentinels to 0 or 1. O(m*n) time and O(1) extra space.",
@@ -335,6 +376,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "ransom-note",
         title: "Ransom Note",
+        source: Some("383. Ransom Note"),
         difficulty: "Easy",
         summary: "Given message and tiles strings, return whether message can be built from the characters of tiles using each character of tiles at most once.",
         optimal: "Count the characters of tiles, then consume counts for each character of message, failing when a needed count is missing. With lowercase letters, a fixed 26-slot array is enough. O(n + m) time and O(1) space.",
@@ -343,6 +385,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "isomorphic-strings",
         title: "Isomorphic Strings",
+        source: Some("205. Isomorphic Strings"),
         difficulty: "Easy",
         summary: "Given equal-length strings s and t, return whether each character in s can be replaced consistently to produce t with a one-to-one mapping.",
         optimal: "Track mappings in both directions while scanning: s char to t char and t char back to s char. Any conflicting existing mapping fails. O(n) time and O(alphabet) space.",
@@ -351,6 +394,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "word-pattern",
         title: "Word Pattern",
+        source: Some("290. Word Pattern"),
         difficulty: "Easy",
         summary: "Given a pattern string and a space-separated sentence, return whether pattern characters and words have a one-to-one correspondence.",
         optimal: "Split the sentence into words, reject length mismatches, then scan with maps in both directions from pattern character to word and word to pattern character. O(n) time and space for the words and maps.",
@@ -359,6 +403,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "valid-anagram",
         title: "Valid Anagram",
+        source: Some("242. Valid Anagram"),
         difficulty: "Easy",
         summary: "Given strings s and t, return whether they contain exactly the same characters with the same multiplicities, regardless of order.",
         optimal: "Reject different lengths, then count characters from one string and decrement with the other. For lowercase English letters, a 26-slot array is enough; sorting both strings is simpler at O(n log n).",
@@ -367,6 +412,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "group-anagrams",
         title: "Group Anagrams",
+        source: Some("49. Group Anagrams"),
         difficulty: "Medium",
         summary: "Given a list of strings, return groups where each group contains strings that are anagrams of one another.",
         optimal: "Build a hash map keyed by each word's sorted characters or by its 26-count signature, appending each original word to that key's group. O(total characters log word length) with sorted keys, or O(total characters) with count keys.",
@@ -375,6 +421,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "contains-duplicate-ii",
         title: "Contains Duplicate II",
+        source: Some("219. Contains Duplicate II"),
         difficulty: "Easy",
         summary: "Given nums and k, return whether the same value appears at two different indices whose absolute difference is at most k.",
         optimal: "Track the most recent index for each value in a hash map; when a value repeats, check the distance before updating the index. O(n) time and O(n) space. A sliding set of the last k values also works.",
@@ -383,6 +430,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "longest-consecutive-sequence",
         title: "Longest Consecutive Sequence",
+        source: Some("128. Longest Consecutive Sequence"),
         difficulty: "Medium",
         summary: "Given an unsorted array, return the length of the longest consecutive integer run, regardless of the values' positions in the array.",
         optimal: "Insert all values into a hash set. Only start counting from a value when value - 1 is absent, then walk upward until the run ends. Each value is visited at most once across starts, so this is O(n) time and O(n) space.",
@@ -391,6 +439,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "summary-ranges",
         title: "Summary Ranges",
+        source: Some("228. Summary Ranges"),
         difficulty: "Easy",
         summary: "Given a sorted unique array, compress each maximal consecutive run into either a single number string or a start->end range string.",
         optimal: "Scan once with a start index for the current run. When the next value is not current + 1 or the array ends, emit either the single value or start->end, then begin the next run. O(n) time and O(1) extra space besides output.",
@@ -399,6 +448,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "insert-interval",
         title: "Insert Interval",
+        source: Some("57. Insert Interval"),
         difficulty: "Medium",
         summary: "Given sorted non-overlapping intervals and a new interval, insert it and merge overlaps to return sorted non-overlapping coverage.",
         optimal: "Append all intervals ending before the new interval, merge every interval starting before or at the new interval's end, append the merged interval, then append the rest. O(n) time and O(n) output space.",
@@ -407,6 +457,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "minimum-number-of-arrows-to-burst-balloons",
         title: "Minimum Number of Arrows to Burst Balloons",
+        source: Some("452. Minimum Number of Arrows to Burst Balloons"),
         difficulty: "Medium",
         summary: "Given balloon intervals on an x-axis, return the fewest arrow positions needed so every interval contains at least one arrow.",
         optimal: "Sort by interval end, shoot at the earliest possible end, and start a new arrow only when the next balloon starts after the current arrow position. O(n log n) time and O(1) extra space after sorting.",
@@ -415,6 +466,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "simplify-path",
         title: "Simplify Path",
+        source: Some("71. Simplify Path"),
         difficulty: "Medium",
         summary: "Given an absolute Unix-style path, return its canonical simplified form with single slashes, no '.' segments, and resolved '..' segments.",
         optimal: "Split on '/', use a stack of directory names, skip empty segments and '.', pop for '..' when possible, and join with leading '/'. O(n) time and O(n) space.",
@@ -423,6 +475,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "min-stack",
         title: "Min Stack",
+        source: Some("155. Min Stack"),
         difficulty: "Medium",
         summary: "Design a stack supporting push, pop, top, and getMin, where getMin returns the current minimum value and every operation is O(1).",
         optimal: "Keep a normal value stack plus a second stack storing the minimum at each depth or storing value/count pairs for minima. Push and pop update both stacks so getMin reads the current minimum directly.",
@@ -431,6 +484,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "evaluate-reverse-polish-notation",
         title: "Evaluate Reverse Polish Notation",
+        source: Some("150. Evaluate Reverse Polish Notation"),
         difficulty: "Medium",
         summary: "Given a valid Reverse Polish Notation token list, evaluate it using integer arithmetic with division truncating toward zero.",
         optimal: "Use a stack of integers. Push operands; for an operator, pop right then left operands, apply the operation, and push the result. O(n) time and O(n) space.",
@@ -439,6 +493,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "basic-calculator",
         title: "Basic Calculator",
+        source: Some("224. Basic Calculator"),
         difficulty: "Hard",
         summary: "Given a valid arithmetic expression string containing nonnegative integers, '+', '-', parentheses, and spaces, evaluate and return its integer value.",
         optimal: "Scan once while building multi-digit numbers and tracking the current sign. Use a stack of prior result/sign pairs when entering parentheses, or use recursive descent over parenthesized subexpressions. O(n) time and O(n) space.",
@@ -447,6 +502,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "linked-list-cycle",
         title: "Linked List Cycle",
+        source: Some("141. Linked List Cycle"),
         difficulty: "Easy",
         summary: "Given the head of a singly linked list, determine whether following next pointers ever revisits a node.",
         optimal: "Use Floyd's slow and fast pointers: move slow one step and fast two steps, returning true if they meet and false if fast reaches the end. O(n) time and O(1) space.",
@@ -455,6 +511,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "add-two-numbers",
         title: "Add Two Numbers",
+        source: Some("2. Add Two Numbers"),
         difficulty: "Medium",
         summary: "Given two non-empty linked lists storing digits in reverse order, add the represented numbers and return the sum in the same linked-list format.",
         optimal: "Walk both lists together with a carry, appending sum % 10 to a dummy-tail result and carrying sum / 10. Continue while either list or carry remains. O(max(m,n)) time and output space.",
@@ -463,6 +520,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "merge-two-sorted-lists",
         title: "Merge Two Sorted Lists",
+        source: Some("21. Merge Two Sorted Lists"),
         difficulty: "Easy",
         summary: "Given two sorted linked lists, merge their nodes into one sorted linked list and return its head.",
         optimal: "Use a dummy head and tail pointer, repeatedly attach the smaller current node, then append the remaining suffix. O(m+n) time and O(1) extra space if nodes are reused.",
@@ -471,6 +529,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "copy-list-with-random-pointer",
         title: "Copy List with Random Pointer",
+        source: Some("138. Copy List with Random Pointer"),
         difficulty: "Medium",
         summary: "Given a linked list whose nodes have next and random pointers, return a deep copy with the same values and pointer relationships.",
         optimal: "Use a hash map from original node to copied node, then wire each copy's next and random pointers from the map. O(n) time and O(n) space. The interleaving-node approach is also O(n) time with O(1) extra space.",
@@ -479,6 +538,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "reverse-linked-list-ii",
         title: "Reverse Linked List II",
+        source: Some("92. Reverse Linked List II"),
         difficulty: "Medium",
         summary: "Given the head of a singly linked list and one-based positions left and right, reverse only the nodes in that span and return the head.",
         optimal: "Use a dummy node so reversing from position one needs no special case. Walk to the node before left, then splice each following node to the front of the span until right is reached. O(n) time and O(1) extra space.",
@@ -487,6 +547,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "reverse-nodes-in-k-group",
         title: "Reverse Nodes in k-Group",
+        source: Some("25. Reverse Nodes in k-Group"),
         difficulty: "Hard",
         summary: "Given a linked list and k, reverse nodes in complete groups of k while leaving a final short group unchanged.",
         optimal: "Use a dummy node and group predecessor. For each group, first verify k nodes exist, reverse exactly that block in place, reconnect it, and advance to the next group. O(n) time and O(1) extra space.",
@@ -495,6 +556,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "remove-nth-node-from-end-of-list",
         title: "Remove Nth Node From End of List",
+        source: Some("19. Remove Nth Node From End of List"),
         difficulty: "Medium",
         summary: "Given a linked list head, remove the nth node from the end and return the modified head.",
         optimal: "Use a dummy node and two pointers. Advance fast n steps, then move fast and slow together until fast reaches the tail; slow.next is the node to remove. O(n) time and O(1) space.",
@@ -503,6 +565,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "remove-duplicates-from-sorted-list-ii",
         title: "Remove Duplicates from Sorted List II",
+        source: Some("82. Remove Duplicates from Sorted List II"),
         difficulty: "Medium",
         summary: "Given a sorted linked list, delete every value that appears more than once so only originally unique values remain.",
         optimal: "Use a dummy node before head and scan groups of equal values. If a group has duplicates, skip the whole group; otherwise keep it and advance the predecessor. O(n) time and O(1) space.",
@@ -511,6 +574,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "rotate-list",
         title: "Rotate List",
+        source: Some("61. Rotate List"),
         difficulty: "Medium",
         summary: "Given a linked list head and integer k, rotate the list right by k places and return the new head.",
         optimal: "Compute length and tail, reduce k modulo length, connect tail to head temporarily, then break the cycle at length - k steps to form the rotated list. O(n) time and O(1) space.",
@@ -519,6 +583,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "partition-list",
         title: "Partition List",
+        source: Some("86. Partition List"),
         difficulty: "Medium",
         summary: "Given a linked list and x, reorder nodes so values less than x come first while preserving relative order inside both partitions.",
         optimal: "Build two chains with dummy heads: one for nodes less than x and one for nodes greater than or equal to x, then terminate the second chain and concatenate. O(n) time and O(1) extra node space.",
@@ -527,6 +592,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "lru-cache",
         title: "LRU Cache",
+        source: Some("146. LRU Cache"),
         difficulty: "Medium",
         summary: "Design a data structure implementing a Least Recently Used cache with a fixed capacity. get(key) returns the value or -1; put(key, value) inserts or updates and evicts the least recently used entry when over capacity. Both operations should run in O(1) average time.",
         optimal: "Hash map pointing into a doubly linked list (or an ordered dict): map for O(1) lookup, list for O(1) recency reordering and eviction from the tail. Both get and put must refresh recency.",
@@ -535,6 +601,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "maximum-depth-of-binary-tree",
         title: "Maximum Depth of Binary Tree",
+        source: Some("104. Maximum Depth of Binary Tree"),
         difficulty: "Easy",
         summary: "Given a binary tree root, return the number of nodes on the longest root-to-leaf path.",
         optimal: "Use DFS recursion returning 1 + max(left depth, right depth), with 0 for null nodes. Iterative BFS level counting is also O(n). O(n) time and O(h) recursion stack.",
@@ -543,6 +610,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "same-tree",
         title: "Same Tree",
+        source: Some("100. Same Tree"),
         difficulty: "Easy",
         summary: "Given two binary tree roots, determine whether both trees have identical structure and node values.",
         optimal: "Traverse both trees together. Two null nodes match; exactly one null node fails; otherwise values must match and both child pairs must match. O(n) time and O(h) stack.",
@@ -551,6 +619,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "invert-binary-tree",
         title: "Invert Binary Tree",
+        source: Some("226. Invert Binary Tree"),
         difficulty: "Easy",
         summary: "Given a binary tree root, swap every node's left and right children and return the root.",
         optimal: "DFS or BFS over every node, swapping left and right children in place, then return the original root. O(n) time and O(h) recursion stack or O(w) queue space.",
@@ -559,6 +628,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "symmetric-tree",
         title: "Symmetric Tree",
+        source: Some("101. Symmetric Tree"),
         difficulty: "Easy",
         summary: "Given a binary tree root, decide whether the left and right halves are mirror images in both structure and value.",
         optimal: "Compare node pairs from the outside inward: left.left with right.right and left.right with right.left. Recursion or a queue both run in O(n) time with O(h) stack or O(w) queue space.",
@@ -567,6 +637,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "construct-binary-tree-from-preorder-and-inorder-traversal",
         title: "Construct Binary Tree from Preorder and Inorder Traversal",
+        source: Some("105. Construct Binary Tree from Preorder and Inorder Traversal"),
         difficulty: "Medium",
         summary: "Given preorder and inorder traversal arrays with unique values, reconstruct the binary tree and return its root.",
         optimal: "Preorder gives each subtree root first. Use a value-to-index map for inorder, then recursively split left and right ranges while advancing through preorder. O(n) time and O(n) space.",
@@ -575,6 +646,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "construct-binary-tree-from-inorder-and-postorder-traversal",
         title: "Construct Binary Tree from Inorder and Postorder Traversal",
+        source: Some("106. Construct Binary Tree from Inorder and Postorder Traversal"),
         difficulty: "Medium",
         summary: "Given inorder and postorder traversal arrays with unique values, reconstruct the binary tree and return its root.",
         optimal: "Postorder gives each subtree root last. Use an inorder index map and consume postorder from the end, building right before left so the traversal order lines up. O(n) time and O(n) space.",
@@ -583,6 +655,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "populating-next-right-pointers-in-each-node-ii",
         title: "Populating Next Right Pointers in Each Node II",
+        source: Some("117. Populating Next Right Pointers in Each Node II"),
         difficulty: "Medium",
         summary: "Given any binary tree, set each node's next pointer to its neighbor on the same level, or null for the rightmost node.",
         optimal: "Walk one level using existing next pointers while building the next level with a dummy head and tail pointer. This uses O(1) extra space beyond the traversal variables and O(n) time. A queue-based BFS is acceptable if space constraints are discussed.",
@@ -591,6 +664,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "flatten-binary-tree-to-linked-list",
         title: "Flatten Binary Tree to Linked List",
+        source: Some("114. Flatten Binary Tree to Linked List"),
         difficulty: "Medium",
         summary: "Given a binary tree root, mutate it into a right-child-only chain in preorder traversal order.",
         optimal: "Use reverse preorder recursion with a previous pointer, or splice each left subtree between the node and its right subtree. O(n) time; O(h) stack for recursion or O(1) extra space for iterative splicing.",
@@ -599,6 +673,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "path-sum",
         title: "Path Sum",
+        source: Some("112. Path Sum"),
         difficulty: "Easy",
         summary: "Given a binary tree root and target sum, decide whether any root-to-leaf path adds up exactly to the target.",
         optimal: "DFS subtracts each node value from the remaining target and succeeds only at a leaf when the remainder equals the leaf value. O(n) time and O(h) recursion stack; iterative stack is equivalent.",
@@ -607,6 +682,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "sum-root-to-leaf-numbers",
         title: "Sum Root to Leaf Numbers",
+        source: Some("129. Sum Root to Leaf Numbers"),
         difficulty: "Medium",
         summary: "Given a binary tree whose node values are digits, sum the numbers represented by every root-to-leaf path.",
         optimal: "DFS carries the current number as current * 10 + node.val and adds it only at leaves. O(n) time and O(h) recursion stack; iterative stack with accumulated values is equivalent.",
@@ -615,6 +691,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "binary-tree-maximum-path-sum",
         title: "Binary Tree Maximum Path Sum",
+        source: Some("124. Binary Tree Maximum Path Sum"),
         difficulty: "Hard",
         summary: "Given a non-empty binary tree, return the maximum sum over any connected path with no repeated node.",
         optimal: "Postorder DFS returns the best one-sided gain to the parent while updating a global answer with node.val plus positive left and right gains. O(n) time and O(h) stack.",
@@ -623,6 +700,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "binary-search-tree-iterator",
         title: "Binary Search Tree Iterator",
+        source: Some("173. Binary Search Tree Iterator"),
         difficulty: "Medium",
         summary: "Design an iterator over a BST that returns values in ascending order and reports whether another value is available.",
         optimal: "Maintain a stack of the path to the next smallest node. Push all left descendants initially and after each next() on the popped node's right child. next() and hasNext() are amortized O(1), with O(h) space.",
@@ -631,6 +709,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "count-complete-tree-nodes",
         title: "Count Complete Tree Nodes",
+        source: Some("222. Count Complete Tree Nodes"),
         difficulty: "Medium",
         summary: "Given a complete binary tree root, return the number of nodes in the tree.",
         optimal: "Compare leftmost and rightmost heights to detect perfect subtrees in O(log n), otherwise recurse into children. This gives O(log^2 n) time and O(log n) stack on complete trees; plain traversal is O(n).",
@@ -639,6 +718,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "lowest-common-ancestor-of-a-binary-tree",
         title: "Lowest Common Ancestor of a Binary Tree",
+        source: Some("236. Lowest Common Ancestor of a Binary Tree"),
         difficulty: "Medium",
         summary: "Given a binary tree root and two nodes in the tree, return the deepest node that has both targets in its subtree.",
         optimal: "DFS returns the current node if it matches either target, otherwise returns a non-null child result. If both sides return non-null, the current node is the LCA. O(n) time and O(h) stack.",
@@ -647,6 +727,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "binary-tree-right-side-view",
         title: "Binary Tree Right Side View",
+        source: Some("199. Binary Tree Right Side View"),
         difficulty: "Medium",
         summary: "Given a binary tree root, return the rightmost visible value at each depth.",
         optimal: "Use BFS level order and record the last node of each level, or DFS visiting right before left and record the first node seen at each depth. O(n) time and O(w) queue or O(h) stack.",
@@ -655,6 +736,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "average-of-levels-in-binary-tree",
         title: "Average of Levels in Binary Tree",
+        source: Some("637. Average of Levels in Binary Tree"),
         difficulty: "Easy",
         summary: "Given a binary tree root, return the average node value at each depth from top to bottom.",
         optimal: "BFS by level, accumulating sum and count for each row, then append sum / count. DFS with per-depth sums and counts is equivalent. O(n) time and O(w) queue or O(h) stack.",
@@ -663,6 +745,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "binary-tree-level-order-traversal",
         title: "Binary Tree Level Order Traversal",
+        source: Some("102. Binary Tree Level Order Traversal"),
         difficulty: "Medium",
         summary: "Given a binary tree root, return node values grouped by level from top to bottom and left to right.",
         optimal: "Use a queue and process one level size at a time, appending values in encounter order. O(n) time and O(w) space.",
@@ -671,6 +754,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "binary-tree-zigzag-level-order-traversal",
         title: "Binary Tree Zigzag Level Order Traversal",
+        source: Some("103. Binary Tree Zigzag Level Order Traversal"),
         difficulty: "Medium",
         summary: "Given a binary tree root, return level-order values while alternating each level's output direction.",
         optimal: "BFS by level with a direction flag, reversing each row or filling a deque/indexed row from the correct side. O(n) time and O(w) space.",
@@ -679,6 +763,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "minimum-absolute-difference-in-bst",
         title: "Minimum Absolute Difference in BST",
+        source: Some("530. Minimum Absolute Difference in BST"),
         difficulty: "Easy",
         summary: "Given a BST root, return the smallest absolute difference between any pair of node values.",
         optimal: "Inorder traversal visits values sorted. Track the previous value and the best adjacent difference. O(n) time and O(h) stack.",
@@ -687,6 +772,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "kth-smallest-element-in-a-bst",
         title: "Kth Smallest Element in a BST",
+        source: Some("230. Kth Smallest Element in a BST"),
         difficulty: "Medium",
         summary: "Given a BST root and one-indexed k, return the kth smallest node value.",
         optimal: "Inorder traversal yields sorted values. Stop when the kth value is reached, either recursively with a counter or iteratively with a stack. O(h + k) time and O(h) space.",
@@ -695,6 +781,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "validate-binary-search-tree",
         title: "Validate Binary Search Tree",
+        source: Some("98. Validate Binary Search Tree"),
         difficulty: "Medium",
         summary: "Given a binary tree root, determine whether every node satisfies strict BST ordering against all ancestors.",
         optimal: "DFS with open lower and upper bounds, or inorder traversal requiring a strictly increasing sequence. O(n) time and O(h) stack.",
@@ -703,6 +790,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "number-of-islands",
         title: "Number of Islands",
+        source: Some("200. Number of Islands"),
         difficulty: "Medium",
         summary: "Given an m x n grid of '1' (land) and '0' (water), count the islands. An island is a group of adjacent land cells connected horizontally or vertically (not diagonally).",
         optimal: "Scan every cell; when you hit unvisited land, increment the count and flood-fill (DFS/BFS) to sink the whole island. O(m*n) time. Marking visited by mutating the grid in place is fine if the candidate calls it out.",
@@ -711,6 +799,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "surrounded-regions",
         title: "Surrounded Regions",
+        source: Some("130. Surrounded Regions"),
         difficulty: "Medium",
         summary: "Given a board of 'X' and 'O', flip every 'O' region fully enclosed by 'X' while preserving any 'O' connected to the border.",
         optimal: "Start from border 'O' cells and mark all connected safe cells with DFS/BFS. Then scan the board: flip unmarked 'O' cells to 'X' and restore safe marks. O(m*n) time and O(m*n) worst-case space, or O(1) extra besides recursion if mutating marks count as in-place.",
@@ -719,6 +808,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "clone-graph",
         title: "Clone Graph",
+        source: Some("133. Clone Graph"),
         difficulty: "Medium",
         summary: "Given a node in an undirected graph, return a deep copy of every reachable node and edge.",
         optimal: "Traverse with DFS or BFS while keeping a map from original node to cloned node. Create each clone once, then wire cloned neighbors through the map. O(V+E) time and O(V) space.",
@@ -727,6 +817,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "evaluate-division",
         title: "Evaluate Division",
+        source: Some("399. Evaluate Division"),
         difficulty: "Medium",
         summary: "Given division equations and values, answer ratio queries or return -1.0 when variables are unknown or disconnected.",
         optimal: "Build a weighted bidirectional graph where a/b has weight value and b/a has reciprocal weight. For each query, DFS/BFS from numerator to denominator multiplying edge weights. Weighted union-find is also strong. O(E+Q*(V+E)) for search, or near O((E+Q)*alpha(V)) with union-find.",
@@ -735,6 +826,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "course-schedule",
         title: "Course Schedule",
+        source: Some("207. Course Schedule"),
         difficulty: "Medium",
         summary: "Given course count and prerequisite pairs, decide whether every course can be completed.",
         optimal: "Model requirements as a directed graph and detect whether it has a cycle. Kahn's algorithm with indegrees or DFS coloring both run in O(V+E) time and O(V+E) space.",
@@ -743,6 +835,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "course-schedule-ii",
         title: "Course Schedule II",
+        source: Some("210. Course Schedule II"),
         difficulty: "Medium",
         summary: "Given course count and prerequisite pairs, return any valid order to complete all courses, or an empty array if impossible.",
         optimal: "Run topological sort. Kahn's algorithm appends zero-indegree courses while removing outgoing edges; DFS postorder with cycle coloring also works. Return all courses only when no cycle is found. O(V+E) time and O(V+E) space.",
@@ -751,6 +844,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "snakes-and-ladders",
         title: "Snakes and Ladders",
+        source: Some("909. Snakes and Ladders"),
         difficulty: "Medium",
         summary: "Given a square board with boustrophedon numbering and shortcut jumps, return the fewest die rolls to reach the final square, or -1 if it cannot be reached.",
         optimal: "Convert square numbers to board coordinates using the alternating row direction, then BFS from square 1 over die rolls 1 through 6. Apply at most one snake or ladder per move and mark visited destinations. O(n^2) time and space.",
@@ -759,6 +853,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "minimum-genetic-mutation",
         title: "Minimum Genetic Mutation",
+        source: Some("433. Minimum Genetic Mutation"),
         difficulty: "Medium",
         summary: "Given start and end genes plus a bank of valid genes, return the minimum number of one-character mutations needed to reach the end gene.",
         optimal: "Treat each gene listed in approved as a graph node, connecting two genes that differ by one character. BFS from current to target gives the shortest mutation count. Generate neighbors by trying A/C/G/T at each position or by scanning the small approved array. O(B^2 * L) or O(B * L * 4) depending on neighbor generation.",
@@ -767,6 +862,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "word-ladder",
         title: "Word Ladder",
+        source: Some("127. Word Ladder"),
         difficulty: "Hard",
         summary: "Given a begin word, an end word, and a word list, return the word count in the shortest one-letter-at-a-time transformation sequence.",
         optimal: "Run BFS over words, changing one position at a time and checking membership in an unvisited word set, or precompute wildcard buckets. Count levels as number of words in the sequence. O(N * L * alphabet) with direct generation, plus set lookups.",
@@ -775,6 +871,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "implement-trie-prefix-tree",
         title: "Implement Trie (Prefix Tree)",
+        source: Some("208. Implement Trie (Prefix Tree)"),
         difficulty: "Medium",
         summary: "Implement a trie supporting insert, exact word search, and prefix search for lowercase words.",
         optimal: "Store children per character at each node and a boolean end-of-word marker. insert creates nodes along the path; search requires the final node to be marked as a complete word; startsWith only requires the path to exist. O(L) per operation.",
@@ -783,6 +880,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "design-add-and-search-words-data-structure",
         title: "Design Add and Search Words Data Structure",
+        source: Some("211. Design Add and Search Words Data Structure"),
         difficulty: "Medium",
         summary: "Design a word dictionary supporting addWord and search, where search patterns may contain '.' as a single-letter wildcard.",
         optimal: "Use a trie. addWord inserts characters and marks the final node. search runs DFS over the pattern, branching across children when it sees '.', and only accepts complete word endings. O(L) for literal searches and worst-case branching for wildcard-heavy patterns.",
@@ -791,6 +889,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "word-search-ii",
         title: "Word Search II",
+        source: Some("212. Word Search II"),
         difficulty: "Hard",
         summary: "Given a board and a list of words, return every listed word that can be formed by walking adjacent board cells without reusing a cell in one word.",
         optimal: "Build a trie from words, then DFS from each board cell through matching trie edges. Mark cells visited during the current path, emit each found word once, and optionally prune exhausted trie branches. O(m*n*4^L) worst case, greatly reduced by trie pruning.",
@@ -799,6 +898,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "letter-combinations-of-a-phone-number",
         title: "Letter Combinations of a Phone Number",
+        source: Some("17. Letter Combinations of a Phone Number"),
         difficulty: "Medium",
         summary: "Given digits 2 through 9, return all strings represented by the phone keypad letter mapping.",
         optimal: "Backtrack over the digit string, appending each mapped character for the current digit and emitting a combination when all digits are consumed. O(product of choices) time and output space.",
@@ -807,6 +907,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "combinations",
         title: "Combinations",
+        source: Some("77. Combinations"),
         difficulty: "Medium",
         summary: "Given n and k, return every size-k group of distinct numbers chosen from 1 through n.",
         optimal: "Backtrack from a start value, append choices in increasing order, and stop when the path length reaches k. Prune when not enough values remain. Output size dominates; auxiliary stack is O(k).",
@@ -815,6 +916,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "permutations",
         title: "Permutations",
+        source: Some("46. Permutations"),
         difficulty: "Medium",
         summary: "Given distinct integers, return every possible ordering of the array.",
         optimal: "Backtrack by choosing each unused value for the current position, or swap in place from the current index onward. Emit a copy when the permutation is complete. O(n*n!) time including output and O(n) recursion state.",
@@ -823,6 +925,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "combination-sum",
         title: "Combination Sum",
+        source: Some("39. Combination Sum"),
         difficulty: "Medium",
         summary: "Given distinct candidates and a target, return all unique combinations that sum to the target, allowing each candidate to be reused.",
         optimal: "Sort or index candidates and backtrack with a remaining target. At each step either reuse the current candidate or move forward, keeping choices nondecreasing to avoid duplicate combinations. Output size dominates.",
@@ -831,6 +934,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "n-queens-ii",
         title: "N-Queens II",
+        source: Some("52. N-Queens II"),
         difficulty: "Hard",
         summary: "Given n, count the distinct ways to place n queens on an n by n board so no two queens attack each other.",
         optimal: "Backtrack row by row, tracking occupied columns and both diagonal families in sets or bit masks. Try each free column for the current row and count complete placements. Bit masks keep the state compact; the search space is still exponential.",
@@ -839,6 +943,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "generate-parentheses",
         title: "Generate Parentheses",
+        source: Some("22. Generate Parentheses"),
         difficulty: "Medium",
         summary: "Given n pairs of parentheses, return every balanced string that uses exactly those n opening and n closing parentheses.",
         optimal: "Backtrack over the output string, adding '(' while opens remain and ')' only when it would not exceed the number of opens already placed. Emit when length reaches 2n. Output size is the nth Catalan number.",
@@ -847,6 +952,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "word-search",
         title: "Word Search",
+        source: Some("79. Word Search"),
         difficulty: "Medium",
         summary: "Given a character grid and a word, return whether the word can be formed by walking adjacent horizontal or vertical cells without reusing a cell.",
         optimal: "Start DFS from each cell matching the first character. During a path, mark the cell visited, search the four neighbors for the next character, then restore the mark before returning. O(m*n*4^L) worst case.",
@@ -855,6 +961,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "convert-sorted-array-to-binary-search-tree",
         title: "Convert Sorted Array to Binary Search Tree",
+        source: Some("108. Convert Sorted Array to Binary Search Tree"),
         difficulty: "Easy",
         summary: "Given a strictly increasing array, build a height-balanced binary search tree containing the same values.",
         optimal: "Choose the middle array value as the root, recursively build left and right subtrees from the two halves, and return the root. Either middle choice for even lengths is valid if every subtree remains height-balanced. O(n) time and O(log n) recursion depth for balanced splits.",
@@ -863,6 +970,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "merge-intervals",
         title: "Merge Intervals",
+        source: Some("56. Merge Intervals"),
         difficulty: "Medium",
         summary: "Given an array of [start, end] intervals, merge all overlapping intervals and return the non-overlapping result sorted by start.",
         optimal: "Sort by start, then sweep once: extend the current merged interval while the next start <= current end, otherwise emit and restart. O(n log n) time for the sort, O(n) space for the output.",
@@ -871,6 +979,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "longest-palindromic-substring",
         title: "Longest Palindromic Substring",
+        source: Some("5. Longest Palindromic Substring"),
         difficulty: "Medium",
         summary: "Given a string s, return the longest substring of s that is a palindrome.",
         optimal: "Expand around center over all 2n-1 centers (odd and even), tracking the best window; O(n^2) time, O(1) space. DP table is also acceptable at O(n^2)/O(n^2). Manacher's O(n) is a bonus, not expected.",
@@ -879,6 +988,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "search-insert-position",
         title: "Search Insert Position",
+        source: Some("35. Search Insert Position"),
         difficulty: "Easy",
         summary: "Find where target belongs in a sorted distinct array, returning an existing index or the insertion point.",
         optimal: "Binary search for the first index whose value is greater than or equal to target; return the left boundary after the loop. O(log n) time, O(1) space.",
@@ -887,6 +997,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "plus-one",
         title: "Plus One",
+        source: Some("66. Plus One"),
         difficulty: "Easy",
         summary: "Add one to an integer represented as decimal digits and return the resulting digit array.",
         optimal: "Walk from the last digit leftward, turning trailing 9s into 0s until a digit can be incremented; if every digit was 9, prepend 1. O(n) time, O(1) extra space besides any required output growth.",
@@ -895,6 +1006,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "add-binary",
         title: "Add Binary",
+        source: Some("67. Add Binary"),
         difficulty: "Easy",
         summary: "Add two binary strings and return their sum as a binary string.",
         optimal: "Scan both strings from right to left with a carry, append each sum bit, then reverse the built result. O(n + m) time and output space.",
@@ -903,6 +1015,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "single-number",
         title: "Single Number",
+        source: Some("136. Single Number"),
         difficulty: "Easy",
         summary: "Find the only integer that appears once when every other integer in the array appears exactly twice.",
         optimal: "XOR every value together. Duplicate pairs cancel to zero and zero XOR the unique value leaves that value. O(n) time, O(1) space.",
@@ -911,6 +1024,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "palindrome-number",
         title: "Palindrome Number",
+        source: Some("9. Palindrome Number"),
         difficulty: "Easy",
         summary: "Return whether an integer reads the same forward and backward, with negative values rejected.",
         optimal: "Reject negatives and trailing-zero nonzero values, then reverse half of the digits and compare it with the remaining half. O(log n) time, O(1) space.",
@@ -919,6 +1033,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "climbing-stairs",
         title: "Climbing Stairs",
+        source: Some("70. Climbing Stairs"),
         difficulty: "Easy",
         summary: "Count how many ways to climb n steps when each move takes either one or two steps.",
         optimal: "This is the Fibonacci recurrence: ways(n) = ways(n-1) + ways(n-2). Iterate with two rolling counts from the base cases. O(n) time, O(1) space.",
@@ -927,6 +1042,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "sqrtx",
         title: "Sqrt(x)",
+        source: Some("69. Sqrt(x)"),
         difficulty: "Easy",
         summary: "Return the integer square root of a non-negative integer, rounded down.",
         optimal: "Binary search the largest integer r such that r * r <= x, using division or a wider type to avoid overflow. O(log x) time, O(1) space.",
@@ -935,6 +1051,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "factorial-trailing-zeroes",
         title: "Factorial Trailing Zeroes",
+        source: Some("172. Factorial Trailing Zeroes"),
         difficulty: "Medium",
         summary: "Count how many trailing zeroes appear in n factorial without constructing the factorial.",
         optimal: "Each trailing zero comes from a factor pair of 2 and 5, and 5s are rarer. Sum n/5 + n/25 + n/125 + ... until the divisor exceeds n. O(log_5 n) time, O(1) space.",
@@ -943,6 +1060,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "house-robber",
         title: "House Robber",
+        source: Some("198. House Robber"),
         difficulty: "Medium",
         summary: "Choose non-adjacent houses to maximize the robbed amount from a row of non-negative values.",
         optimal: "Dynamic programming with two rolling values: for each house, choose max(skip current, rob current plus best before previous). O(n) time, O(1) space.",
@@ -951,6 +1069,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "maximum-subarray",
         title: "Maximum Subarray",
+        source: Some("53. Maximum Subarray"),
         difficulty: "Medium",
         summary: "Find the largest sum of any non-empty contiguous subarray.",
         optimal: "Kadane's algorithm scans once, keeping the best subarray sum ending at the current index and the best sum seen overall. O(n) time, O(1) space.",
@@ -959,6 +1078,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "coin-change",
         title: "Coin Change",
+        source: Some("322. Coin Change"),
         difficulty: "Medium",
         summary: "Return the fewest coins needed to make an amount from given denominations, or -1 if impossible.",
         optimal: "Use bottom-up dynamic programming where dp[a] is the fewest tokens needed for amount a. For each amount and coin, relax dp[a] from dp[a - coin] + 1. O(amount * tokens) time, O(amount) space.",
@@ -967,6 +1087,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "longest-increasing-subsequence",
         title: "Longest Increasing Subsequence",
+        source: Some("300. Longest Increasing Subsequence"),
         difficulty: "Medium",
         summary: "Return the length of the longest strictly increasing subsequence while preserving input order.",
         optimal: "Maintain tails where tails[len] is the smallest possible ending value of an increasing subsequence of that length; binary search replacement positions for O(n log n) time and O(n) space. O(n^2) DP is acceptable for the listed constraints.",
@@ -975,6 +1096,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "search-a-2d-matrix",
         title: "Search a 2D Matrix",
+        source: Some("74. Search a 2D Matrix"),
         difficulty: "Medium",
         summary: "Search for a target in a matrix whose rows form one globally sorted sequence.",
         optimal: "Treat the m by n matrix as a flat sorted array and binary search indexes 0..m*n-1, mapping mid to row mid/n and column mid%n. O(log(mn)) time, O(1) space.",
@@ -983,6 +1105,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "find-peak-element",
         title: "Find Peak Element",
+        source: Some("162. Find Peak Element"),
         difficulty: "Medium",
         summary: "Return an index whose value is greater than its neighbors, treating positions outside the array as negative infinity.",
         optimal: "Binary search on the slope: if nums[mid] < nums[mid + 1], a peak exists to the right; otherwise one exists at mid or to the left. O(log n) time, O(1) space.",
@@ -991,6 +1114,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "find-minimum-in-rotated-sorted-array",
         title: "Find Minimum in Rotated Sorted Array",
+        source: Some("153. Find Minimum in Rotated Sorted Array"),
         difficulty: "Medium",
         summary: "Find the smallest value in a unique sorted array that may have been rotated.",
         optimal: "Binary search against the rightmost value: when levels[mid] > levels[right], the minimum is to the right; otherwise it is at mid or to the left. O(log n) time, O(1) space.",
@@ -999,6 +1123,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "minimum-path-sum",
         title: "Minimum Path Sum",
+        source: Some("64. Minimum Path Sum"),
         difficulty: "Medium",
         summary: "Find the minimum sum along a path from the top-left to bottom-right of a non-negative grid, moving only right or down.",
         optimal: "Dynamic programming over the grid: each cell's best cost is its value plus the minimum of the best cost from above or left. O(mn) time and O(n) space with a rolling row.",
@@ -1007,6 +1132,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "unique-paths-ii",
         title: "Unique Paths II",
+        source: Some("63. Unique Paths II"),
         difficulty: "Medium",
         summary: "Count right-and-down paths through a grid from start to finish while avoiding obstacle cells.",
         optimal: "Dynamic programming: blocked cells contribute zero paths, and open cells receive paths from the top and left neighbors. O(mn) time and O(n) space with a rolling row.",
@@ -1015,6 +1141,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "word-break",
         title: "Word Break",
+        source: Some("139. Word Break"),
         difficulty: "Medium",
         summary: "Decide whether a string can be segmented into one or more dictionary words, reusing dictionary words as needed.",
         optimal: "Use dynamic programming where dp[i] says the prefix s[..i] can be segmented; for each reachable prefix, test dictionary words or previous split points with a word set. O(n^2) substring checks in the common form.",
@@ -1023,6 +1150,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "number-of-1-bits",
         title: "Number of 1 Bits",
+        source: Some("191. Number of 1 Bits"),
         difficulty: "Easy",
         summary: "Count how many bits are set to 1 in the binary representation of an integer.",
         optimal: "Use Brian Kernighan's trick: repeatedly clear the lowest set bit with n &= n - 1 and count iterations. O(number of set bits) time, O(1) space.",
@@ -1031,6 +1159,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "single-number-ii",
         title: "Single Number II",
+        source: Some("137. Single Number II"),
         difficulty: "Medium",
         summary: "Find the only integer that appears once when every other integer appears exactly three times.",
         optimal: "Track bit counts modulo 3, either per bit or with two bitmask states for bits seen once and twice. The remaining modulo-1 bits form the answer. O(n) time, O(1) space.",
@@ -1039,6 +1168,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "bitwise-and-of-numbers-range",
         title: "Bitwise AND of Numbers Range",
+        source: Some("201. Bitwise AND of Numbers Range"),
         difficulty: "Medium",
         summary: "Compute the bitwise AND of every number in the inclusive range from left to right.",
         optimal: "Find the common binary prefix of left and right by shifting both right until equal, then shift the prefix back. O(log right) time, O(1) space.",
@@ -1047,6 +1177,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "triangle",
         title: "Triangle",
+        source: Some("120. Triangle"),
         difficulty: "Medium",
         summary: "Find the minimum top-to-bottom path sum through a triangle, moving only to adjacent positions in the next row.",
         optimal: "Use bottom-up dynamic programming: start from the last row and fold upward, replacing each cell with its value plus the cheaper of its two children. O(n^2) time and O(n) space.",
@@ -1055,6 +1186,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "edit-distance",
         title: "Edit Distance",
+        source: Some("72. Edit Distance"),
         difficulty: "Medium",
         summary: "Compute the minimum insertions, deletions, and replacements needed to transform one word into another.",
         optimal: "Dynamic programming over prefixes: dp[i][j] is the fewest edits between word1[..i] and word2[..j]. Matching characters copy the diagonal; otherwise take one plus min(insert, delete, replace). O(mn) time and O(n) space with a rolling row.",
@@ -1063,6 +1195,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "maximal-square",
         title: "Maximal Square",
+        source: Some("221. Maximal Square"),
         difficulty: "Medium",
         summary: "Find the area of the largest all-1 square in a binary character matrix.",
         optimal: "Dynamic programming: for a 1 cell, its largest square side is 1 plus the minimum of top, left, and top-left neighbor sides; track the largest side and return side squared. O(mn) time and O(n) space with a rolling row.",
@@ -1071,6 +1204,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "maximum-sum-circular-subarray",
         title: "Maximum Sum Circular Subarray",
+        source: Some("918. Maximum Sum Circular Subarray"),
         difficulty: "Medium",
         summary: "Find the largest sum of a non-empty contiguous segment when the array is considered circular.",
         optimal: "Compute the best non-wrapping subarray with Kadane's algorithm and the best wrapping subarray as total sum minus the minimum subarray. If all values are negative, return the non-wrapping best. O(n) time, O(1) space.",
@@ -1079,6 +1213,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "search-in-rotated-sorted-array",
         title: "Search in Rotated Sorted Array",
+        source: Some("33. Search in Rotated Sorted Array"),
         difficulty: "Medium",
         summary: "Return the index of a target in a unique sorted array that may have been rotated, or -1 if absent.",
         optimal: "Binary search while identifying which half is sorted at each step, then keep the half that can contain target. O(log n) time, O(1) space.",
@@ -1087,6 +1222,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "kth-largest-element-in-an-array",
         title: "Kth Largest Element in an Array",
+        source: Some("215. Kth Largest Element in an Array"),
         difficulty: "Medium",
         summary: "Return the kth value in descending order from an unsorted array, counting duplicate values as separate positions.",
         optimal: "Use Quickselect for expected O(n) time by partitioning around the target index, or maintain a size-k min-heap for O(n log k). Sorting is simpler at O(n log n) and acceptable only if performance pressure is low.",
@@ -1095,6 +1231,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "find-first-and-last-position-of-element-in-sorted-array",
         title: "Find First and Last Position of Element in Sorted Array",
+        source: Some("34. Find First and Last Position of Element in Sorted Array"),
         difficulty: "Medium",
         summary: "Return the first and last positions of a target in a sorted array, or [-1, -1] if it is absent.",
         optimal: "Run two binary searches: one for the first index with value >= target and one for the first index with value > target, then validate the range. O(log n) time, O(1) space.",
@@ -1103,6 +1240,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "powx-n",
         title: "Pow(x, n)",
+        source: Some("50. Pow(x, n)"),
         difficulty: "Medium",
         summary: "Compute x raised to an integer exponent n, including negative exponents.",
         optimal: "Use exponentiation by squaring, converting n to a wider signed value before negating it for negative exponents. O(log |n|) time, O(1) space.",
@@ -1111,6 +1249,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "interleaving-string",
         title: "Interleaving String",
+        source: Some("97. Interleaving String"),
         difficulty: "Medium",
         summary: "Decide whether s3 can be built from all characters of s1 and s2 while preserving each source string's order.",
         optimal: "Use dynamic programming where dp[i][j] means s3[..i+j] can be formed from s1[..i] and s2[..j]. O(mn) time and O(n) space with a rolling row.",
@@ -1119,6 +1258,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "best-time-to-buy-and-sell-stock-iii",
         title: "Best Time to Buy and Sell Stock III",
+        source: Some("123. Best Time to Buy and Sell Stock III"),
         difficulty: "Hard",
         summary: "Maximize profit from at most two stock transactions while holding at most one share at a time.",
         optimal: "Track four states while scanning prices: best after first buy, first sell, second buy, and second sell. O(n) time, O(1) space.",
@@ -1127,6 +1267,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "best-time-to-buy-and-sell-stock-iv",
         title: "Best Time to Buy and Sell Stock IV",
+        source: Some("188. Best Time to Buy and Sell Stock IV"),
         difficulty: "Hard",
         summary: "Maximize stock profit with at most k buy-sell transactions and no overlapping holdings.",
         optimal: "Use dynamic programming over transaction count with buy[t] and sell[t] states, plus the unlimited-transactions shortcut when k is at least half the number of days. O(nk) time, O(k) space.",
@@ -1135,6 +1276,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "sort-list",
         title: "Sort List",
+        source: Some("148. Sort List"),
         difficulty: "Medium",
         summary: "Sort a singly linked list in ascending order and return the new head.",
         optimal: "Use merge sort on the linked list: split with slow/fast pointers, recursively sort halves, and merge sorted lists by rewiring nodes. O(n log n) time and O(log n) recursion stack, or O(1) extra space with bottom-up merge sort.",
@@ -1143,6 +1285,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "median-of-two-sorted-arrays",
         title: "Median of Two Sorted Arrays",
+        source: Some("4. Median of Two Sorted Arrays"),
         difficulty: "Hard",
         summary: "Return the middle value, or the mean of the two middle values, of two sorted arrays taken together as one sorted sequence.",
         optimal: "Binary search the partition point in the smaller array so the left partition contains half the values and every left value is <= every right value. O(log min(m, n)) time, O(1) space.",
@@ -1151,6 +1294,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "max-points-on-a-line",
         title: "Max Points on a Line",
+        source: Some("149. Max Points on a Line"),
         difficulty: "Hard",
         summary: "Find the largest number of given 2D points that lie on a single straight line.",
         optimal: "For each anchor point, count normalized slopes to every later point using dx and dy divided by their gcd, with a canonical sign for vertical, horizontal, and negative slopes. O(n^2) time, O(n) space per anchor.",
@@ -1159,6 +1303,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "reverse-bits",
         title: "Reverse Bits",
+        source: Some("190. Reverse Bits"),
         difficulty: "Easy",
         summary: "Reverse the 32-bit representation of an integer and return the resulting value.",
         optimal: "Iterate exactly 32 times, shifting the answer left, adding the current low bit, and shifting the input right. O(32) time and O(1) space.",
@@ -1167,6 +1312,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "ipo",
         title: "IPO",
+        source: Some("502. IPO"),
         difficulty: "Hard",
         summary: "Choose up to k affordable projects to maximize final capital, where each chosen project's profit is added to available capital.",
         optimal: "Sort projects by required[i], push the payouts[i] of each newly affordable project into a max-heap as available cash grows, and repeatedly take the largest value in the heap. O(n log n + k log n) time.",
@@ -1175,6 +1321,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "find-k-pairs-with-smallest-sums",
         title: "Find K Pairs with Smallest Sums",
+        source: Some("373. Find K Pairs with Smallest Sums"),
         difficulty: "Medium",
         summary: "Return k pairs drawn from two sorted arrays whose sums are smallest, or all pairs if fewer exist.",
         optimal: "Use a min-heap seeded with the first pair from each relevant row, then pop the smallest pair and push the next pair from that same row. O(k log min(k, m)) time.",
@@ -1183,6 +1330,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "merge-k-sorted-lists",
         title: "Merge k Sorted Lists",
+        source: Some("23. Merge k Sorted Lists"),
         difficulty: "Hard",
         summary: "Merge an array of sorted linked lists into one sorted linked list.",
         optimal: "Use a min-heap keyed by node value, seeded with each non-empty list head, repeatedly popping the smallest node and pushing its next node. O(n log k) time, O(k) space. Divide-and-conquer pairwise merge is also O(n log k).",
@@ -1191,6 +1339,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "find-median-from-data-stream",
         title: "Find Median from Data Stream",
+        source: Some("295. Find Median from Data Stream"),
         difficulty: "Hard",
         summary: "Design a data structure that accepts numbers from a stream and returns the current median.",
         optimal: "Maintain two heaps: a max-heap for the lower half and a min-heap for the upper half. Rebalance so their sizes differ by at most one, then read the median from one or both heap tops. addNum is O(log n), findMedian is O(1).",
@@ -1199,6 +1348,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "construct-quad-tree",
         title: "Construct Quad Tree",
+        source: Some("427. Construct Quad Tree"),
         difficulty: "Medium",
         summary: "Given an n by n binary grid, build a quad tree whose leaves represent uniform square regions.",
         optimal: "Use recursive divide and conquer. For each square, scan until a different value is found; if all cells match, return a leaf. Otherwise split into four equal quadrants in top-left, top-right, bottom-left, bottom-right order. With n <= 64, direct uniform scans are simple and fast enough.",
@@ -1207,6 +1357,7 @@ pub const PROBLEM_RUBRICS: &[Problem] = &[
     Problem {
         id: "fixed-capacity-ring-buffer",
         title: "Bounded Event Queue",
+        source: None,
         difficulty: "Medium",
         summary: "Design a fixed-capacity FIFO buffer that accepts and removes values in constant time without shifting stored elements.",
         optimal: "Use a fixed array with head, tail, and count. Write at tail and advance modulo capacity, read at head and advance modulo capacity, and use count to distinguish empty from full. Each method is O(1).",

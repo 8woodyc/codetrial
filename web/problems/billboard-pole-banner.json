@@ -1,7 +1,7 @@
 {
   "page": "billboard-pole-banner",
   "title": "Billboard Pole Banner",
-  "source": "Container With Most Water",
+  "source": "11. Container With Most Water",
   "difficulty": "Medium",
   "brief": [
     "A billboard contractor has surveyed a row of support poles standing one metre apart and recorded each pole's height. A rectangular banner can be strung between any two poles: it is as wide as the distance between them and can only be as tall as the shorter of the two.",

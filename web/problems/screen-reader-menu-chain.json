@@ -1,7 +1,7 @@
 {
   "page": "screen-reader-menu-chain",
   "title": "Screen Reader Menu Chain",
-  "source": "Flatten Binary Tree to Linked List",
+  "source": "114. Flatten Binary Tree to Linked List",
   "difficulty": "Medium",
   "brief": [
     "Our settings app stores its menu as a binary tree of TreeNode objects. For screen reader mode we reuse the same nodes as a single chain: each menu item is followed by all of its left submenu, then all of its right submenu, and the chain is linked through the right field only.",

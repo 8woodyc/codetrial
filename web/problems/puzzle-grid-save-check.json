@@ -1,7 +1,7 @@
 {
   "page": "puzzle-grid-save-check",
   "title": "Puzzle Grid Save Check",
-  "source": "Valid Sudoku",
+  "source": "36. Valid Sudoku",
   "difficulty": "Medium",
   "brief": [
     "Our puzzle app lets players save a half-finished number-placement grid. Before saving, the backend rejects grids where the player has already broken a placement rule: the grid is 9 by 9, split into nine 3 by 3 blocks, and no digit from 1 to 9 may appear twice in the same row, the same column or the same block.",

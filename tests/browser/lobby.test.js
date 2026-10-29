@@ -1750,7 +1750,7 @@ lobbyTest(
     await page.waitForFunction(() =>
       document
         .querySelector("#problem-filter-summary")
-        .textContent.includes("matching LeetCode title"),
+        .textContent.includes("matching LeetCode number or title"),
     );
     assert.equal(
       await page.locator(`[data-problem="${chosen}"]`).isVisible(),
@@ -1758,6 +1758,23 @@ lobbyTest(
     );
     assert.equal(await sourceCheckbox.isChecked(), false);
     assert.equal((await snapshot(page)).card, originalRecommendation);
+
+    await page.fill("#problem-search", "20");
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#problem-filter-summary")
+        .textContent.includes("matching LeetCode number or title"),
+    );
+    assert.equal(
+      await page.locator(`[data-problem="${EASY[1]}"]`).isVisible(),
+      true,
+      "Valid Parentheses (ID 20) should be visible when searching for 20",
+    );
+    assert.equal(
+      await page.locator(`[data-problem="${chosen}"]`).isVisible(),
+      false,
+      "Two Sum (ID 1) should be hidden when searching for 20",
+    );
 
     await page
       .locator('[name="problem-search-mode"][value="scenario"]')
@@ -1939,7 +1956,7 @@ lobbyTest(
       await page.waitForFunction(
         () =>
           document.querySelector("#problem-filter-summary").textContent ===
-          "Loading LeetCode titles...",
+          "Loading LeetCode titles and numbers...",
       );
 
       // The grid is hidden, and its card.hidden flags have not been refreshed.
@@ -1955,7 +1972,7 @@ lobbyTest(
       await page.waitForFunction(() =>
         document
           .querySelector("#problem-filter-summary")
-          .textContent.includes("matching LeetCode title"),
+          .textContent.includes("matching LeetCode number or title"),
       );
       const state = await snapshot(page);
       assert.notEqual(state.card, easyArray);
@@ -1998,7 +2015,7 @@ lobbyTest(
       await page.waitForFunction(
         () =>
           document.querySelector("#problem-filter-summary").textContent ===
-          "Loading LeetCode titles...",
+          "Loading LeetCode titles and numbers...",
       );
       assert.equal(
         await page.locator(".problem-card:visible").count(),
@@ -2011,7 +2028,7 @@ lobbyTest(
       await page.waitForFunction(() =>
         document
           .querySelector("#problem-filter-summary")
-          .textContent.includes("matching LeetCode title"),
+          .textContent.includes("matching LeetCode number or title"),
       );
       assert.equal(
         await page.locator(".problem-grid").evaluate((grid) => !grid.hidden),
@@ -2097,7 +2114,7 @@ lobbyTest(
       await page.waitForFunction(
         () =>
           document.querySelector("#problem-filter-summary").textContent ===
-          "Loading LeetCode titles...",
+          "Loading LeetCode titles and numbers...",
       );
       assert.equal(await page.locator(".problem-card:visible").count(), 0);
 
@@ -2118,7 +2135,7 @@ lobbyTest(
       await page.waitForFunction(() =>
         document
           .querySelector("#problem-filter-summary")
-          .textContent.includes("matching LeetCode title"),
+          .textContent.includes("matching LeetCode number or title"),
       );
     } finally {
       releaseMap();
@@ -2134,7 +2151,7 @@ lobbyTest(
     );
     await lobby(page);
     await page.click("details.problem-picker summary");
-    await page.fill("#problem-search", "Two Sum");
+    await page.fill("#problem-search", "1. Two Sum");
     await page
       .locator('[name="problem-search-mode"][value="leetcode"]')
       .check();
@@ -2143,7 +2160,7 @@ lobbyTest(
         "#problem-filter-summary",
       ).textContent;
       return (
-        status.includes("matching LeetCode title") ||
+        status.includes("matching LeetCode number or title") ||
         status.includes("could not be loaded")
       );
     });
@@ -3589,7 +3606,7 @@ lobbyTest(
       await page
         .locator(`[data-problem="${pageOf("two-sum")}"] .problem-source`)
         .textContent(),
-      /LeetCode: Two Sum/,
+      /LeetCode: 1\. Two Sum/,
     );
     // The recommendation still names the scenario only.
     assert.doesNotMatch(
@@ -4066,7 +4083,7 @@ lobbyTest(
       "the map was fetched without a reason",
     );
     const index = await page.content();
-    assert.doesNotMatch(index, /data-problem="two-sum"|LeetCode: Two Sum/);
+    assert.doesNotMatch(index, /data-problem="two-sum"|LeetCode: 1\. Two Sum/);
   },
 );
 
@@ -4087,7 +4104,10 @@ lobbyTest(
       "",
     );
     await history.getByRole("button", { name: "Open report" }).click();
-    const link = history.getByRole("link", { name: "Two Sum" });
+    const link = history.getByRole("link", {
+      name: "1. Two Sum",
+      exact: true,
+    });
     await link.waitFor();
     assert.equal(
       await link.getAttribute("href"),
@@ -4314,9 +4334,10 @@ for (const storage of ["account", "device"]) {
         assert.ok(
           markdown.startsWith(`# Interview Report - Saved report\n_${when}_`),
         );
-        assert.match(
-          markdown,
-          /Original problem: \[Two Sum\]\(https:\/\/leetcode\.com\/problems\/two-sum\/\)/,
+        assert.ok(
+          markdown.includes(
+            String.raw`Original problem: [1\. Two Sum](https://leetcode.com/problems/two-sum/)`,
+          ),
         );
         assert.ok(markdown.includes(`Stored summary ${index}`));
         assert.ok(

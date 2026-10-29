@@ -1,7 +1,7 @@
 {
   "page": "recent-card-repeat-alert",
   "title": "Recent Card Repeat Alert",
-  "source": "Contains Duplicate II",
+  "source": "219. Contains Duplicate II",
   "difficulty": "Easy",
   "brief": [
     "A payment fraud service assigns each card a numeric fingerprint and watches the transaction feed in order. It raises an alert when the same fingerprint appears twice within a short distance of each other in the feed.",

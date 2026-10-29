@@ -1,7 +1,7 @@
 {
   "page": "fraud-rule-worst-case",
   "title": "Fraud Rule Worst Case",
-  "source": "Maximum Depth of Binary Tree",
+  "source": "104. Maximum Depth of Binary Tree",
   "difficulty": "Easy",
   "brief": [
     "Our fraud screening service evaluates each transaction against a decision tree of rules stored as TreeNode objects: at each rule the transaction goes to the left or right child, and it stops at a rule with no children. To size our latency budget, we need to know the most rules a single transaction could ever pass through.",

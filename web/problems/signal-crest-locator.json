@@ -1,7 +1,7 @@
 {
   "page": "signal-crest-locator",
   "title": "Signal Crest Locator",
-  "source": "Find Peak Element",
+  "source": "162. Find Peak Element",
   "difficulty": "Medium",
   "brief": [
     "A survey vehicle logs signal strength at evenly spaced points along a road. Engineers want to find a crest, a point whose reading is higher than the readings immediately before and after it, so they can place a repeater there.",

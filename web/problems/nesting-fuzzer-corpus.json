@@ -1,7 +1,7 @@
 {
   "page": "nesting-fuzzer-corpus",
   "title": "Nesting Fuzzer Corpus",
-  "source": "Generate Parentheses",
+  "source": "22. Generate Parentheses",
   "difficulty": "Medium",
   "brief": [
     "Our template engine supports nested blocks written with an open marker and a close marker. To fuzz the parser we want a corpus of every correctly nested block sequence of a given size, using the character ( to open and ) to close.",

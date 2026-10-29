@@ -1,7 +1,7 @@
 {
   "page": "symmetric-lottery-tickets",
   "title": "Symmetric Lottery Tickets",
-  "source": "Palindrome Number",
+  "source": "9. Palindrome Number",
   "difficulty": "Easy",
   "brief": [
     "A lottery runs a promotion for ticket numbers that read the same from left to right as from right to left when written in decimal. The ticket service stores the number as a signed integer.",

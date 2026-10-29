@@ -1,7 +1,7 @@
 {
   "page": "maintenance-window-consolidation",
   "title": "Maintenance Window Consolidation",
-  "source": "Merge Intervals",
+  "source": "56. Merge Intervals",
   "difficulty": "Medium",
   "brief": [
     "Several teams file maintenance windows against the same cluster, and many of them overlap. The on-call dashboard should show the combined periods during which the cluster is under maintenance, with no overlapping entries.",

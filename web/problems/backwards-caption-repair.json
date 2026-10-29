@@ -1,7 +1,7 @@
 {
   "page": "backwards-caption-repair",
   "title": "Backwards Caption Repair",
-  "source": "Reverse Words in a String",
+  "source": "151. Reverse Words in a String",
   "difficulty": "Medium",
   "brief": [
     "A legacy captioning service stored every subtitle line with its words in backwards order, and its output is littered with extra spaces. Before re-publishing, we need to repair each line.",

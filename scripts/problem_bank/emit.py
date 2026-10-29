@@ -26,6 +26,15 @@ from .bank import (
 from .rules import page_slug, validated_guides, validated_variants
 
 
+def source_label(problem: dict):
+    """The formatted source string for an imported problem, or None."""
+    if not is_imported(problem):
+        return None
+    if "number" in problem:
+        return f"{problem['number']}. {problem['title']}"
+    return problem["title"]
+
+
 def candidate_problem(entry: dict) -> dict:
     """Everything the interview page is given, and nothing it is not.
 
@@ -33,15 +42,18 @@ def candidate_problem(entry: dict) -> dict:
     the bank later stays on the server until someone decides the candidate
     should see it.
 
-    The published title rides along as `source`, shown small beside the
-    scenario so a candidate can find the problem again afterwards. The scenario
-    is still what the page poses: no number, no statement, no published examples.
+    The published title with its prefixed number (e.g. "1. Two Sum") rides along
+    as `source`, shown small beside the scenario so a candidate can find the
+    problem again afterwards. The scenario is still what the page poses: no
+    statement, no published examples.
     """
     posed_problem, variant = entry["problem"], entry["variant"]
+    source = source_label(posed_problem)
+    source_info = {"source": source} if source is not None else {}
     return {
         "page": page_slug(variant["title"]),
         "title": variant["title"],
-        **({"source": posed_problem["title"]} if is_imported(posed_problem) else {}),
+        **source_info,
         "difficulty": posed_problem["difficulty"],
         "brief": variant["brief"],
         "examples": entry["examples"],
@@ -156,12 +168,17 @@ def rust_rubrics(problems: list[dict], variants: dict) -> str:
         # other piece of prose. `summary` stays raw because only `report_brief`
         # reads it, and that prompt is given the published problem on purpose.
         posed_problem = entry["problem"]
+        # The published title with its LeetCode questionFrontendId formatted as
+        # "number. title" for imported exercises; None for original exercises.
+        source = source_label(problem)
+        source_str = f"Some({rust_str(source)})" if source is not None else "None"
         rows.append(
             "\n".join(
                 [
                     "    Problem {",
                     f"        id: {rust_str(problem['id'])},",
                     f"        title: {rust_str(title)},",
+                    f"        source: {source_str},",
                     f"        difficulty: {rust_str(problem['difficulty'])},",
                     f"        summary: {rust_str(problem['summary'])},",
                     f"        optimal: {rust_str(posed_problem['optimal'])},",

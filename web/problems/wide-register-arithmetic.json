@@ -1,7 +1,7 @@
 {
   "page": "wide-register-arithmetic",
   "title": "Wide Register Arithmetic",
-  "source": "Add Binary",
+  "source": "67. Add Binary",
   "difficulty": "Easy",
   "brief": [
     "A hardware simulator represents very wide register values as strings of 0 and 1 characters, most significant bit first, because they can be thousands of bits long. We need to add two such register values.",

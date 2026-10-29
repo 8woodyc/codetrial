@@ -249,7 +249,21 @@ STARTER_LANGS = {
 
 
 def validated_problems(source: Path = SOURCE) -> list[dict]:
-    return validated_problem_data(read_json(source))
+    problems = validated_problem_data(read_json(source))
+    # Catalog entries have distinct source numbers; instructor task copies do not.
+    seen_numbers: set[int] = set()
+    for problem in problems:
+        if "number" not in problem:
+            if is_imported(problem):
+                raise RuntimeError(
+                    f"{problem['id']}: an imported problem needs its LeetCode number"
+                )
+            continue
+        number = problem["number"]
+        if number in seen_numbers:
+            raise RuntimeError(f"{problem['id']}: duplicate number {number}")
+        seen_numbers.add(number)
+    return problems
 
 
 def validated_problem_data(problems: object, sequels: bool = True) -> list[dict]:
@@ -263,6 +277,14 @@ def validated_problem_data(problems: object, sequels: bool = True) -> list[dict]
             raise RuntimeError(f"missing or duplicate problem id: {problem_id!r}")
         seen.add(problem_id)
         origin = origin_of(problem)
+        if "number" in problem:
+            if origin == "original":
+                raise RuntimeError(
+                    f"{problem_id}: original exercises cannot have a number"
+                )
+            num = problem["number"]
+            if type(num) is not int or num <= 0:
+                raise RuntimeError(f"{problem_id}: number must be a positive integer")
         if origin == "original" and ("title" in problem or "examples" in problem):
             raise RuntimeError(
                 f"{problem_id}: an original problem has no published title or examples"

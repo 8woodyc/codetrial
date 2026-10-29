@@ -1,7 +1,7 @@
 {
   "page": "gift-card-bundle-pair",
   "title": "Gift Card Bundle Pair",
-  "source": "Two Sum II - Input Array Is Sorted",
+  "source": "167. Two Sum II - Input Array Is Sorted",
   "difficulty": "Medium",
   "brief": [
     "An online shop wants to suggest two-item bundles that spend a gift card exactly. The catalogue service hands us the item prices already sorted from cheapest to most expensive.",

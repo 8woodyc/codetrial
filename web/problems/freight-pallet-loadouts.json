@@ -1,7 +1,7 @@
 {
   "page": "freight-pallet-loadouts",
   "title": "Freight Pallet Loadouts",
-  "source": "Combination Sum",
+  "source": "39. Combination Sum",
   "difficulty": "Medium",
   "brief": [
     "A warehouse packs outgoing pallets from standard crate sizes, and a pallet only ships when its load fills the target capacity exactly. Planners want to see every way to fill a pallet from the crate sizes on hand.",

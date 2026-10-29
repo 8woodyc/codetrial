@@ -1,7 +1,7 @@
 {
   "page": "rooftop-panel-footprint",
   "title": "Rooftop Panel Footprint",
-  "source": "Maximal Square",
+  "source": "221. Maximal Square",
   "difficulty": "Medium",
   "brief": [
     "A solar installer surveys a flat roof as a grid of cells, marking each cell as usable or blocked by vents and skylights. Panels are sold only in square layouts, and the sales tool needs the biggest square layout that fits entirely on usable cells.",

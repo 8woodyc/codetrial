@@ -1,7 +1,7 @@
 {
   "page": "command-palette-index",
   "title": "Command Palette Index",
-  "source": "Implement Trie (Prefix Tree)",
+  "source": "208. Implement Trie (Prefix Tree)",
   "difficulty": "Medium",
   "brief": [
     "Our editor's command palette registers command names at startup and then answers two questions as the user types: is this exactly a registered command, and does any registered command begin with what has been typed so far.",
