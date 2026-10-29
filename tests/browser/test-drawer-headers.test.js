@@ -29,30 +29,27 @@ after(async () => {
 async function waitForTransformTransition(marker, action) {
   await action();
 
+  // Reading the computed style flushes pending style, which starts the
+  // transition; waiting on the animations themselves keeps this independent
+  // of how often a loaded runner delivers frames.
   await marker.evaluate(async (el) => {
-    const deadline = performance.now() + 1500;
-    let previous = getComputedStyle(el).transform;
-    let stableFrames = 0;
-
-    while (performance.now() < deadline) {
-      await new Promise(requestAnimationFrame);
-
-      const current = getComputedStyle(el).transform;
-      const animating = el
-        .getAnimations()
-        .some((animation) => animation.playState === "running");
-
-      if (!animating && current === previous) {
-        stableFrames += 1;
-        if (stableFrames >= 4) return;
-      } else {
-        stableFrames = 0;
-      }
-
-      previous = current;
+    getComputedStyle(el).transform;
+    const finished = Promise.all(
+      el.getAnimations().map((animation) => animation.finished),
+    );
+    let timer = null;
+    const expired = new Promise((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error("Chevron transition did not finish")),
+        5000,
+      );
+    });
+    try {
+      await Promise.race([finished, expired]);
+    } finally {
+      clearTimeout(timer);
     }
-
-    throw new Error("Chevron transform did not settle");
+    await new Promise(requestAnimationFrame);
   });
 }
 
