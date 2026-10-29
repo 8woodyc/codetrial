@@ -95,12 +95,15 @@ and these actions go on the confirmed list instead.
   maintainer approved it once by writing it, and `hide` holds only requests in a
   wording the maintainers have used for the same thing (listed in
   `pr-sweep.sh`), with no inline comments; a hidden comment stays one click from
-  readable. Each entry names its `reason`: `conflicts`, or `stale_base` for a PR
-  that merges but fails only where a rebase is the whole answer, as #334 did
-  (the definition is `stale_base` in `ci-failure.sh`). "Ask the conflicting PRs
-  to rebase" asks for the `conflicts` entries alone, as "Approve the held runs"
-  does for approvals; report the conflicting PRs it skips (the account's own,
-  and those holding a current rebase review) so the count matches the banner.
+  readable. The same text answers a CI regression (hygiene's `ci_regression`),
+  so earlier copies of it, and the older "MUST resolve any regressions" wording,
+  are hidden the same way. Each entry names its `reason`: `conflicts`, or
+  `stale_base` for a PR that merges but fails only where a rebase is the whole
+  answer, as #334 did (the definition is `stale_base` in `ci-failure.sh`). "Ask
+  the conflicting PRs to rebase" asks for the `conflicts` entries alone, as
+  "Approve the held runs" does for approvals; report the conflicting PRs it skips
+  (the account's own, and those holding a current rebase review) so the count
+  matches the banner.
 - On a bare `/codetrial-triage` only, requesting changes on each open PR
   whose `hygiene.sh` output has items, as
   [Contributor hygiene](#contributor-hygiene) describes. Each item is a rule a

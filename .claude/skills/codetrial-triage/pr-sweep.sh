@@ -106,7 +106,9 @@ text=$(dirname "$0")/rebase.md
 # matched, like rebase.md, after trimming and dropping a final period.
 # shellcheck disable=SC2016
 known='["Rebase latest `main` and resolve conflicts",
-  "Rebase latest `main` branch"]'
+  "Rebase latest `main` branch",
+  "Rebase latest `main` branch and resolve conflicts",
+  "Before asking someone to review, you MUST resolve any regressions flagged by GitHub Actions"]'
 
 # A thread reply is a review by its writer, so author replies show up in
 # reviews. A review records the head it was left on, so a head that moved since
@@ -237,14 +239,17 @@ def owns($r): $r.head_sha == .headRefOid and $r.head_branch == .headRefName
   and $r.head_repo == .headRepository.nameWithOwner;
 def runs_of($p): $runs[] | select(. as $r | $p | owns($r));
 def opens_with_rebase: test("^\\s*(@[\\w-]+[,:]?\\s+)*rebase\\b"; "i");
+# The CI regression request this sweep and hygiene.sh used before rebase.md
+# answered it; an earlier copy counts as the same request.
+def old_ci_request: test("^\\s*Before asking someone to review, you MUST resolve any regressions");
 def requests: .author.login as $a | .headRefOid as $head | pushed as $p |
   [(.reviews.nodes[]
      | select(.state == "CHANGES_REQUESTED"
-         and (.body | test("\\brebase"; "i")))
+         and (.body | test("\\brebase"; "i") or old_ci_request))
      | {at: .submittedAt, inline: .comments.totalCount, review: true,
         current: (.commit.oid == $head)} + .),
    (.comments.nodes[]
-     | select(.body | opens_with_rebase)
+     | select(.body | opens_with_rebase or old_ci_request)
      | {at: .createdAt, inline: 0, review: false,
         current: ((.createdAt | ts) >= $p)} + .)]
   | map(select(human and staff and .author.login != $a and (.isMinimized | not))

@@ -12,6 +12,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import pathlib
 import re
 import shutil
 import subprocess
@@ -177,7 +178,11 @@ def request(node_id, days, body):
     }
 
 
-FIXED = "Rebase latest `main` branch and resolve conflicts."
+FIXED = (
+    (pathlib.Path(__file__).parent.parent / ".claude/skills/codetrial-triage/rebase.md")
+    .read_text(encoding="utf-8")
+    .strip()
+)
 
 
 GREEN = checked(("check", "SUCCESS"), ("gates (rust)", "SUCCESS"))
@@ -1109,6 +1114,18 @@ class PrSweepTests(SweepCase):
         )
         self.assertEqual([entry["pr"] for entry in swept["rebase"]], [1])
         self.assertEqual([entry["id"] for entry in swept["hide"]], ["IC_1"])
+
+    def test_earlier_copies_of_the_ci_wording_and_the_old_text_are_hidden(self):
+        old = "Rebase latest `main` branch and resolve conflicts."
+        ci = "Before asking someone to review, you MUST resolve any regressions flagged by GitHub Actions."
+        reviews = listed(
+            review("maint", "CHANGES_REQUESTED", 20, ci, oid="old") | {"id": "R_ci"}
+        )
+        comments = listed(request("IC_old", 10, old), request("IC_new", 1, FIXED))
+        swept = self.run_pulls(pull(1, reviews=reviews, comments=comments))
+        self.assertEqual(
+            sorted(entry["id"] for entry in swept["hide"]), ["IC_old", "R_ci"]
+        )
 
     def test_a_later_comment_never_hides_the_review_that_holds_the_request(self):
         reviews = listed(review("maint", "CHANGES_REQUESTED", 5, FIXED))
@@ -2504,6 +2521,11 @@ class HygieneTests(unittest.TestCase):
         self.assertEqual(keys(job(["clippy"]), head="h0"), [])
         self.assertEqual(keys(job(["clippy"]), mergeable="CONFLICTING"), [])
         self.assertEqual(keys(job(["clippy"]), mergeable="UNKNOWN"), [])
+
+    def test_a_ci_regression_is_asked_in_the_fixed_rebase_text(self):
+        ci = {"head": "h1", "stale_base": False, "failing": [failing_job(["clippy"])]}
+        out = self.hygiene([commit(GOOD_MESSAGE)], ci=ci)
+        self.assertEqual(out["body"], FIXED)
 
     def test_a_posted_review_holds_back_every_item_it_carried(self):
         # Each item's marker has to recognize its own text, or the next sweep
