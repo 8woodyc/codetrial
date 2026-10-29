@@ -392,6 +392,8 @@ test("the example drawer preserves code, journals pen strokes, and sends the cle
   await page.mouse.move(box.x + 50, box.y + 50);
   await page.mouse.down();
   assert.equal(await page.evaluate(() => window.activity.length), 1);
+  // The board reports activity at most once per 1000 ms of real time
+  // (web/example-board.js), so elapsed time is the input; load only lengthens it.
   await new Promise((resolve) => setTimeout(resolve, 1100));
   await page.mouse.move(box.x + 140, box.y + 110);
   assert.equal(await page.evaluate(() => window.activity.length), 2);

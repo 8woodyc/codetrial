@@ -8,6 +8,7 @@ import {
   launchChromium,
   startStaticServer,
 } from "./source.js";
+import { animationsFinished } from "./wait.js";
 
 let browser = null;
 let server = null;
@@ -28,29 +29,7 @@ after(async () => {
 
 async function waitForTransformTransition(marker, action) {
   await action();
-
-  // Reading the computed style flushes pending style, which starts the
-  // transition; waiting on the animations themselves keeps this independent
-  // of how often a loaded runner delivers frames.
-  await marker.evaluate(async (el) => {
-    getComputedStyle(el).transform;
-    const finished = Promise.all(
-      el.getAnimations().map((animation) => animation.finished),
-    );
-    let timer = null;
-    const expired = new Promise((_, reject) => {
-      timer = setTimeout(
-        () => reject(new Error("Chevron transition did not finish")),
-        5000,
-      );
-    });
-    try {
-      await Promise.race([finished, expired]);
-    } finally {
-      clearTimeout(timer);
-    }
-    await new Promise(requestAnimationFrame);
-  });
+  await animationsFinished(marker, "the chevron transition");
 }
 
 test("drawer headers share typography and toggle their chevrons", async (t) => {

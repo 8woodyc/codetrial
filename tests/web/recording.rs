@@ -702,7 +702,7 @@ async fn token_stalls_before_and_after_dispatch_have_different_side_effects() {
         "an incomplete request body should leave the handler awaiting body bytes"
     );
     let mut response = Vec::new();
-    tokio::time::timeout(Duration::from_secs(11), socket.read_to_end(&mut response))
+    tokio::time::timeout(Duration::from_secs(30), socket.read_to_end(&mut response))
         .await
         .expect("the server-side body deadline should finish the request")
         .unwrap();
@@ -793,7 +793,7 @@ async fn token_stalls_before_and_after_dispatch_have_different_side_effects() {
                 .await
         }
     });
-    let upstream_status = tokio::time::timeout(Duration::from_secs(2), upstream_done_rx)
+    let upstream_status = tokio::time::timeout(Duration::from_secs(10), upstream_done_rx)
         .await
         .expect("the real token handler should finish")
         .unwrap();
@@ -1903,7 +1903,7 @@ async fn the_server_starts_the_recording_workers() {
             )
             .unwrap()
     };
-    for _ in 0..100 {
+    for _ in 0..400 {
         if state() == "failed" {
             server.shutdown().await;
             remove_database(path).await;

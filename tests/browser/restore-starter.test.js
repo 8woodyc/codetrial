@@ -11,6 +11,7 @@ import {
   launchChromium,
   startStaticServer,
 } from "./source.js";
+import { animationsFinished } from "./wait.js";
 
 const PROBLEM = "chargeback-pair-match";
 const LANGUAGES = ["python", "javascript", "c", "cpp", "java"];
@@ -152,6 +153,7 @@ async function sentBy(page, action) {
 async function sentQuietly(page, action) {
   const seen = (await codePackets(page)).length;
   await action();
+  // Absence proof: nothing may be sent, so outwait the code_update debounce.
   await page.waitForTimeout(900);
   return (await codePackets(page)).length - seen;
 }
@@ -705,6 +707,7 @@ test("an announcement that stopped being true before its frame is not made", asy
       button.click();
       document.querySelector("#editor").value = "changed\n";
     });
+    // Absence proof: the announcement is due on the next frame, so outwait it.
     await page.waitForTimeout(300);
     assert.equal(
       await page.locator("#editor-restore-status").textContent(),
@@ -717,6 +720,7 @@ test("an announcement that stopped being true before its frame is not made", asy
       button.click();
       button.disabled = true;
     }, starters.python);
+    // Absence proof, as above, for the disabled control.
     await page.waitForTimeout(300);
     assert.equal(
       await page.locator("#editor-restore-status").textContent(),
@@ -1099,13 +1103,7 @@ test("the behavioral round disables the control when the agent opens it", async 
     // control has finished. Two reads agreeing is not enough: a starved
     // renderer can hold a transition at the same midpoint across both.
     const settled = () =>
-      button.evaluate((node) =>
-        Promise.all(
-          node
-            .getAnimations()
-            .map((animation) => animation.finished.catch(() => {})),
-        ),
-      );
+      animationsFinished(button, "the restore button's colour transition");
     await settled();
     const rest = await look();
     assert.equal(rest.opacity, "0.6", "dimmed while disabled");

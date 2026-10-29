@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
+import { until, withBackstop } from "./wait.js";
 const require = createRequire(import.meta.url);
 const {
   FloorCapture,
@@ -20,6 +21,12 @@ function fixture(t) {
   fs.writeFileSync(target, "", { mode: 0o600 });
   return { dir, target };
 }
+
+const persisted = (target) =>
+  until(
+    () => fs.readFileSync(target, "utf8").includes("seq=1"),
+    "the follower to persist its first line",
+  );
 
 test("split lines survive rolling-buffer overflow and exclude other output", (t) => {
   const { target } = fixture(t);
@@ -78,12 +85,7 @@ test("server follower preserves early and teardown records on interruption", asy
       code === 0 ? resolve() : reject(new Error(`capture exit ${code}`)),
     );
   });
-  const deadline = Date.now() + 5000;
-  while (!fs.readFileSync(target, "utf8").includes("seq=1")) {
-    if (Date.now() > deadline)
-      throw new Error("capture did not persist initial line");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
+  await persisted(target);
   fs.appendFileSync(source, line.replace("seq=1", "seq=2"));
   child.kill("SIGTERM");
   await exited;
@@ -141,12 +143,9 @@ test("group interruption waits for server teardown marker and final records", as
       code === 0 ? resolve() : reject(new Error(`capture exit ${code}`)),
     );
   });
-  const deadline = Date.now() + 5000;
-  while (!fs.readFileSync(target, "utf8").includes("seq=1")) {
-    if (Date.now() > deadline) throw new Error("follower not ready");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
+  await persisted(target);
   child.kill("SIGINT");
+  // Absence proof: the follower must not exit on SIGINT, so outwait its shutdown.
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.equal(child.exitCode, null, "must keep following while server exits");
   fs.appendFileSync(source, line.replace("seq=1", "seq=2"));
@@ -174,26 +173,12 @@ test("orphaned follower exits when its shell parent disappears", async (t) => {
       } catch {}
     }
   });
-  const deadline = Date.now() + 5000;
-  while (!fs.readFileSync(target, "utf8").includes("seq=1")) {
-    if (Date.now() > deadline) throw new Error("follower not ready");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
+  await persisted(target);
   const closed = new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error("orphaned follower held pipes open")),
-      5000,
-    );
-    parent.once("close", () => {
-      clearTimeout(timer);
-      resolve();
-    });
-    parent.once("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
+    parent.once("close", resolve);
+    parent.once("error", reject);
   });
   parent.kill("SIGKILL");
-  await closed;
+  await withBackstop(closed, "the orphaned follower to release its pipes");
   assert.equal(fs.readFileSync(target, "utf8"), line);
 });

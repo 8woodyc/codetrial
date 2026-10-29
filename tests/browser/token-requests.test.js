@@ -9,6 +9,7 @@ import {
   read,
   startStaticServer,
 } from "./source.js";
+import { until } from "./wait.js";
 
 let browser;
 let server;
@@ -206,25 +207,17 @@ async function pendingResponses(t) {
       // Chromium can omit requestfailed for a routed request from the old
       // document. The real response socket closing before any write is the
       // cancellation signal; neither the fixture nor the test aborts it.
-      const deadline = Date.now() + 10000;
-      while (!calls[0].aborted) {
-        assert.ok(
-          Date.now() < deadline,
-          "reload must close the held response socket",
-        );
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
+      await until(
+        () => calls[0].aborted,
+        "the reload to close the held response socket",
+      );
       firstSuperseded = true;
     },
     async waitFor(count) {
-      const deadline = Date.now() + 10000;
-      while (calls.length < count || !calls[count - 1].received) {
-        assert.ok(
-          Date.now() < deadline,
-          `token request ${count} was not observed`,
-        );
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
+      await until(
+        () => calls.length >= count && calls[count - 1].received,
+        `token request ${count} to be observed`,
+      );
       return calls[count - 1];
     },
     async handle(route, factory) {

@@ -157,6 +157,7 @@ test("hiding the examples also hides the Add a case placeholder", async (t) => {
     );
     await page.reload({ waitUntil: "domcontentloaded" });
     await (await judge).finished();
+    // Absence proof: outwait the load applying the placeholder after the judge.
     await page.evaluate(() => new Promise((done) => setTimeout(done, 200)));
     assert.equal(await placeholder(), "", "a returning candidate sees none");
     await page.uncheck("#hide-examples");

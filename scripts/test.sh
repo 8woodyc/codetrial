@@ -605,6 +605,9 @@ gate review-memory-experience-tests unittest_gate "$ROOT/tests/test_review_memor
 # Lifecycle cases patch process globals; they cannot share the runner threads.
 gate review-lifecycle-tests unittest_gate --jobs 1 "$ROOT/tests/test_review_lifecycle.py"
 gate --lane browser browser-tests browser_tests static
+gate test-timing node "$ROOT/scripts/check-test-timing.mjs"
+gate test-timing-tests unittest_gate "$ROOT/tests/test_check_test_timing.py"
+gate browser-stress-tests unittest_gate "$ROOT/tests/test_browser_stress.py"
 gate eslint eslint_gate
 gate --lane all cargo-audit cargo_audit_gate
 
