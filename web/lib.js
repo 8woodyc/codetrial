@@ -157,9 +157,13 @@ function sortedAnagramGroups(value) {
       return null;
     groups.push([...item].sort());
   }
-  return groups.sort((left, right) =>
-    left.join("\0").localeCompare(right.join("\0")),
-  );
+  // Collation ignores some characters, so two distinct groups could compare
+  // equal and keep their input order; code-unit order of the JSON cannot tie.
+  return groups.sort((left, right) => {
+    const a = JSON.stringify(left);
+    const b = JSON.stringify(right);
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
 }
 
 function treeFromLevelOrder(values) {

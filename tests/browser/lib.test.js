@@ -364,6 +364,19 @@ test("unorderedGroups checker ignores group and word order", () => {
     false,
     "duplicate count matters",
   );
+  for (const groups of [
+    [["ab", "ba"], ["abba"]],
+    [["a", "a"], ["aa"]],
+    [["\u00e9"], ["e\u0301"]],
+  ]) {
+    for (const answer of [groups, [...groups].reverse()]) {
+      assert.equal(
+        checkAnswer(unorderedGroups, { input: [], expected: groups }, answer),
+        true,
+        `groups whose words join to the same text: ${JSON.stringify(answer)}`,
+      );
+    }
+  }
 });
 
 test("balancedBst checker accepts any balanced BST with the same inorder values", () => {
