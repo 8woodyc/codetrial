@@ -2035,3 +2035,185 @@ async fn invalid_strict_difficulties_are_refused_before_dispatch() {
     server.shutdown().await;
     remove_database(db_path).await;
 }
+
+async fn release(base: &str, body: &Value) -> reqwest::StatusCode {
+    http_client()
+        .post(format!("{base}/api/token/release"))
+        .json(body)
+        .send()
+        .await
+        .unwrap()
+        .status()
+}
+
+/// A guest holds no session, so the join token is its credential, and the
+/// identity in that token is what the dispatcher was told to expect.
+#[tokio::test]
+async fn a_guest_releases_its_start_with_the_token_it_was_given() {
+    let dispatcher = std::sync::Arc::<RecordingDispatcher>::default();
+    let (base, server) =
+        spawn_web_server_with_dispatcher(web_config(), std::sync::Arc::clone(&dispatcher)).await;
+
+    let granted: Value = http_client()
+        .post(format!("{base}/api/token"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(granted["guest"], true);
+    let room = granted["roomName"].as_str().unwrap().to_string();
+    let identity = claims(granted["token"].as_str().unwrap())["sub"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        *dispatcher.candidates.lock().unwrap(),
+        [(room.clone(), identity.clone())],
+        "the start must be recorded for the identity its token joins as"
+    );
+
+    assert_eq!(
+        release(&base, &json!({"roomName": room, "token": granted["token"]})).await,
+        204
+    );
+    assert_eq!(*dispatcher.releases.lock().unwrap(), [(room, identity)]);
+    server.shutdown().await;
+}
+
+/// Only a token this server signed for the named room reaches the dispatcher.
+/// Each refusal is checked against an empty release list, so none of them is
+/// passing on a check that happens later.
+#[tokio::test]
+async fn a_release_without_a_matching_signed_token_reaches_no_dispatcher() {
+    let dispatcher = std::sync::Arc::<RecordingDispatcher>::default();
+    let (base, server) =
+        spawn_web_server_with_dispatcher(web_config(), std::sync::Arc::clone(&dispatcher)).await;
+    let mint = |room: &str, secret: &str| {
+        livekit_token(LivekitTokenInput {
+            api_key: "devkey",
+            api_secret: secret,
+            name: "Candidate",
+            identity: "candidate-abc123",
+            room,
+            metadata: "{}",
+            now_seconds: codetrial::web::current_epoch_seconds(),
+            agent: false,
+        })
+        .unwrap()
+    };
+
+    for (body, status) in [
+        (json!({}), 400),
+        (json!({"roomName": "interview-a"}), 400),
+        (json!({"roomName": "", "token": mint("", "devsecret")}), 400),
+        (
+            json!({"roomName": "interview-a", "token": "not-a-jwt"}),
+            403,
+        ),
+        (
+            json!({"roomName": "interview-a", "token": mint("interview-a", "other-secret")}),
+            403,
+        ),
+        (
+            json!({"roomName": "interview-a", "token": mint("interview-b", "devsecret")}),
+            403,
+        ),
+    ] {
+        assert_eq!(release(&base, &body).await, status, "{body}");
+    }
+    let malformed = http_client()
+        .post(format!("{base}/api/token/release"))
+        .header("content-type", "application/json")
+        .body("not json")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(malformed.status(), 400);
+    assert!(dispatcher.releases.lock().unwrap().is_empty());
+
+    assert_eq!(
+        release(
+            &base,
+            &json!({"roomName": "interview-a", "token": mint("interview-a", "devsecret")})
+        )
+        .await,
+        204
+    );
+    assert_eq!(
+        *dispatcher.releases.lock().unwrap(),
+        [("interview-a".to_string(), "candidate-abc123".to_string())]
+    );
+    server.shutdown().await;
+}
+
+/// The join token carries the start's metadata, so a start with a full
+/// grounding packet mints one longer than any `/api/token` request may be. Its
+/// release must still be read, or that start waits out the no-show limit with
+/// nothing on the page to say so. The euro sign is three bytes, which is what
+/// fills the packet's byte budget within its per-item length.
+#[tokio::test]
+async fn a_start_with_a_full_grounding_packet_can_still_be_released() {
+    let dispatcher = std::sync::Arc::<RecordingDispatcher>::default();
+    let (base, server) =
+        spawn_web_server_with_dispatcher(web_config(), std::sync::Arc::clone(&dispatcher)).await;
+    // Numbered, because a packet repeating an item is refused whole.
+    let items = |count: usize| -> Vec<String> {
+        (0..count)
+            .map(|index| format!("{index:02}{}", "\u{20ac}".repeat(91)))
+            .collect()
+    };
+    let grounding = json!({
+        "consentVersion": 1,
+        "requirements": items(8),
+        "skills": items(8),
+        "anchors": items(6),
+    });
+
+    let granted: Value = http_client()
+        .post(format!("{base}/api/token"))
+        .json(&json!({ "interviewGrounding": grounding }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let token = granted["token"].as_str().unwrap();
+    let metadata: Value =
+        serde_json::from_str(claims(token)["metadata"].as_str().unwrap()).unwrap();
+    assert_eq!(metadata["interviewGrounding"]["anchors"], json!(items(6)));
+    assert!(
+        token.len() > MAX_BODY_BYTES,
+        "the token must be longer than a request body may be, or this proves nothing: {}",
+        token.len()
+    );
+
+    let room = granted["roomName"].as_str().unwrap();
+    assert_eq!(
+        release(&base, &json!({"roomName": room, "token": token})).await,
+        204
+    );
+    assert_eq!(dispatcher.releases.lock().unwrap().len(), 1);
+    server.shutdown().await;
+}
+
+/// Releases have a bucket of their own, so a flood of them leaves the next
+/// `/api/token` from the same address alone.
+#[tokio::test]
+async fn releases_are_rate_limited_apart_from_token_requests() {
+    let (base, server) = spawn_web_server_with_guest_dispatcher(web_config()).await;
+    for _ in 0..TOKEN_RATE_LIMIT {
+        assert_eq!(release(&base, &json!({})).await, 400);
+    }
+    assert_eq!(release(&base, &json!({})).await, 429);
+
+    let token = http_client()
+        .post(format!("{base}/api/token"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(token.status(), 200);
+    server.shutdown().await;
+}

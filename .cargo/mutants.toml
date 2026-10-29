@@ -1,7 +1,7 @@
 # Functions the mutation gate cannot judge, because `cargo test` cannot reach
 # them. Matched against the mutant names that `cargo mutants --list` prints.
 #
-# EXCLUSIONS: 92
+# EXCLUSIONS: 93
 #
 # That number is checked by `scripts/test.sh`, so adding an entry means editing
 # this line too. The point is not the count, it is that the list only ever grows
@@ -47,6 +47,11 @@
 # loop below it does, so `Ok(None)`, which reads as "nobody joined", survives
 # exactly as `run_room`'s own mutants did. Excluded for the same reason and
 # covered by the same thing: scripts/browser-check.sh in its credentialed modes.
+# `candidate_metadata` is its wait for the candidate, and the half of it that
+# reads the `Room` is the same case: it asks a joined room who is already
+# there. The half that waits, and ends early when the page releases the start,
+# is `arriving_candidate`, which takes a plain event channel and is tested in
+# tests/unit/dispatch.rs, so only the room lookup goes unjudged.
 #
 # `run_gemini_check` is the same shape one layer down: it opens a Gemini Live
 # session against Google and closes it. Replacing the body with `Ok(())` cannot
@@ -354,6 +359,7 @@ exclude_re = [
     "on_generated_audio",
     "on_interruption",
     "open_session",
+    "replace candidate_metadata -> ",
     "run_gemini_check",
     "run_livekit",
     "replace web_router",

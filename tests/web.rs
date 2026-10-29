@@ -356,6 +356,10 @@ async fn spawn_web_server(config: WebServerConfig) -> (String, TestServer) {
 struct RecordingDispatcher {
     staffed: std::sync::Mutex<Vec<(String, String)>>,
     no_show_releases: std::sync::Mutex<Vec<(String, NoShowConsent)>>,
+    /// The identity each staffed start was recorded for, and every release the
+    /// route passed on, as `(room, candidate)`.
+    candidates: std::sync::Mutex<Vec<(String, String)>>,
+    releases: std::sync::Mutex<Vec<(String, String)>>,
     /// Set to refuse, standing in for a process already at capacity.
     at_capacity: std::sync::atomic::AtomicBool,
     /// Set to refuse, standing in for a fixed room still finishing a report.
@@ -396,9 +400,14 @@ impl RoomDispatcher for RecordingDispatcher {
         &self,
         room_name: &str,
         provider: &codetrial::config::Provider,
+        candidate: &str,
         no_show: Option<NoShowConsent>,
     ) -> Result<(), DispatchRefusal> {
         self.ensure_agent(room_name, provider, AgentJob::Interview)?;
+        self.candidates
+            .lock()
+            .unwrap()
+            .push((room_name.to_string(), candidate.to_string()));
         if let Some(no_show) = no_show {
             self.no_show_releases
                 .lock()
@@ -411,11 +420,25 @@ impl RoomDispatcher for RecordingDispatcher {
         &self,
         room_name: &str,
         provider: &codetrial::config::Provider,
+        candidate: &str,
     ) -> Result<(), DispatchRefusal> {
         // This test double uses the same controllable refusal behavior for both
         // caller kinds; production guest capacity is enforced by
         // LocalDispatcher.
-        self.ensure_agent(room_name, provider, AgentJob::Interview)
+        self.ensure_agent(room_name, provider, AgentJob::Interview)?;
+        self.candidates
+            .lock()
+            .unwrap()
+            .push((room_name.to_string(), candidate.to_string()));
+        Ok(())
+    }
+
+    fn release_start(&self, room_name: &str, candidate: &str) -> bool {
+        self.releases
+            .lock()
+            .unwrap()
+            .push((room_name.to_string(), candidate.to_string()));
+        true
     }
 }
 
@@ -1394,6 +1417,10 @@ fn custom_dispatcher_rejects_guest_admission_by_default() {
 
     assert!(!dispatcher.supports_guest_admission());
 
+    // Nothing reaches the rooms of a dispatcher that does not say how, so a
+    // release finds nothing to end and the wait runs out as it always has.
+    assert!(!dispatcher.release_start("guest-room", "candidate-guest"));
+
     let provider = codetrial::config::Provider {
         id: "test-provider".to_string(),
         url: "wss://example.test".to_string(),
@@ -1403,7 +1430,7 @@ fn custom_dispatcher_rejects_guest_admission_by_default() {
     };
 
     assert_eq!(
-        dispatcher.ensure_guest_agent("guest-room", &provider),
+        dispatcher.ensure_guest_agent("guest-room", &provider, "candidate-guest"),
         Err(DispatchRefusal::AtCapacity),
     );
 }

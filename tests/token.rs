@@ -7,9 +7,9 @@
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use codetrial::token::{
     LivekitTokenInput, TOKEN_TTL_SECONDS, WebhookRejection, livekit_egress_token,
-    livekit_observer_token, livekit_room_admin_token, livekit_room_create_token,
-    livekit_room_from_token, livekit_room_list_token, livekit_token, livekit_token_issuer,
-    sign_hs256, verify_hs256, verify_livekit_webhook,
+    livekit_join_from_token, livekit_observer_token, livekit_room_admin_token,
+    livekit_room_create_token, livekit_room_from_token, livekit_room_list_token, livekit_token,
+    livekit_token_issuer, sign_hs256, verify_hs256, verify_livekit_webhook,
 };
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
@@ -319,6 +319,60 @@ fn a_recorder_token_proves_its_room_and_nothing_else_does() {
         livekit_room_from_token(KEY, SECRET, &unnamed, NOW + 60),
         Err(WebhookRejection::Malformed),
         "an empty room name is not a room"
+    );
+}
+
+/// A release names its start by the identity its token joins as, so that
+/// identity has to come out of the signed claims and nowhere else, and a
+/// token that names none releases nothing.
+#[test]
+fn a_join_token_proves_its_room_and_identity() {
+    let token = livekit_token(LivekitTokenInput {
+        api_key: KEY,
+        api_secret: SECRET,
+        name: "Candidate",
+        identity: "candidate-a1b2c3",
+        room: "interview-a1b2c3d4",
+        metadata: "{}",
+        now_seconds: NOW,
+        agent: false,
+    })
+    .unwrap();
+    assert_eq!(
+        livekit_join_from_token(KEY, SECRET, &token, NOW + 60).unwrap(),
+        (
+            "interview-a1b2c3d4".to_string(),
+            "candidate-a1b2c3".to_string()
+        )
+    );
+    assert_eq!(
+        livekit_join_from_token(KEY, "other-secret", &token, NOW + 60),
+        Err(WebhookRejection::BadSignature)
+    );
+    assert_eq!(
+        livekit_join_from_token(KEY, SECRET, &token, NOW + TOKEN_TTL_SECONDS),
+        Err(WebhookRejection::Expired)
+    );
+
+    let admin = livekit_room_admin_token(KEY, SECRET, "interview-a1b2c3d4", NOW).unwrap();
+    assert_eq!(
+        livekit_join_from_token(KEY, SECRET, &admin, NOW + 60),
+        Err(WebhookRejection::Malformed),
+        "roomAdmin without roomJoin must not pass as a join"
+    );
+
+    // Signed correctly, so the refusal is the missing identity and not the
+    // signature check passing for it.
+    let mut claims = claims_of(&token);
+    claims.as_object_mut().unwrap().remove("sub");
+    let (head, _) = token.split_once('.').unwrap();
+    let body = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).unwrap());
+    let input = format!("{head}.{body}");
+    let anonymous = format!("{input}.{}", sign_hs256(SECRET, &input));
+    assert_eq!(
+        livekit_join_from_token(KEY, SECRET, &anonymous, NOW + 60),
+        Err(WebhookRejection::Malformed),
+        "a join token naming no identity cannot say whose start it is"
     );
 }
 

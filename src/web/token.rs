@@ -100,8 +100,21 @@ enum TokenBodyReadError {
     Rejected,
 }
 
-async fn read_token_body(body: Body, limit: Duration) -> Result<Bytes, TokenBodyReadError> {
-    match tokio::time::timeout(limit, to_bytes(body, MAX_BODY_BYTES)).await {
+/// A release carries the join token `/api/token` minted, and that token embeds
+/// the start's metadata, built from a request body of at most
+/// `MAX_BODY_BYTES`. Escaped once more as a string inside the claims it at
+/// most doubles, and base64 adds a third, so four times the request's cap
+/// holds the largest token with room for the release's own two fields. At the
+/// request's own cap, a start with a full grounding packet could not be
+/// released, and nothing on the page would say so.
+const RELEASE_BODY_BYTES: usize = 4 * MAX_BODY_BYTES;
+
+async fn read_token_body(
+    body: Body,
+    limit: Duration,
+    max_bytes: usize,
+) -> Result<Bytes, TokenBodyReadError> {
+    match tokio::time::timeout(limit, to_bytes(body, max_bytes)).await {
         Err(_) => Err(TokenBodyReadError::TimedOut),
         Ok(Err(_)) => Err(TokenBodyReadError::Rejected),
         Ok(Ok(body)) => Ok(body),
@@ -568,6 +581,7 @@ async fn dispatch_or_release_consent(
     interview: Option<&String>,
     room_name: &str,
     provider: &crate::config::Provider,
+    identity: &str,
 ) -> Option<Response> {
     let Some(dispatcher) = &state.dispatcher else {
         return None;
@@ -583,9 +597,9 @@ async fn dispatch_or_release_consent(
     });
 
     let dispatch_result = if owner.is_none() {
-        dispatcher.ensure_guest_agent(room_name, provider)
+        dispatcher.ensure_guest_agent(room_name, provider, identity)
     } else {
-        dispatcher.ensure_agent_with_no_show_release(room_name, provider, no_show.clone())
+        dispatcher.ensure_agent_with_no_show_release(room_name, provider, identity, no_show.clone())
     };
 
     let Err(refusal) = dispatch_result else {
@@ -628,6 +642,7 @@ async fn claim_and_dispatch(
     interview: Option<String>,
     room_name: String,
     provider: crate::config::Provider,
+    identity: String,
 ) -> Option<Response> {
     if let (Some(owner), Some(interview)) = (owner.as_ref(), interview.as_ref())
         && let Err(response) = claim_consent(
@@ -647,6 +662,7 @@ async fn claim_and_dispatch(
         interview.as_ref(),
         &room_name,
         &provider,
+        &identity,
     )
     .await
 }
@@ -693,18 +709,19 @@ pub(crate) async fn token_handler(
         Err(response) => return response,
     };
 
-    let body = match read_token_body(request.into_body(), TOKEN_BODY_READ_LIMIT).await {
-        Ok(body) => body,
-        Err(TokenBodyReadError::TimedOut) => {
-            return json_response(
-                StatusCode::REQUEST_TIMEOUT,
-                json!({ "error": "Session request body timed out." }),
-            );
-        }
-        Err(TokenBodyReadError::Rejected) => {
-            return StatusCode::PAYLOAD_TOO_LARGE.into_response();
-        }
-    };
+    let body =
+        match read_token_body(request.into_body(), TOKEN_BODY_READ_LIMIT, MAX_BODY_BYTES).await {
+            Ok(body) => body,
+            Err(TokenBodyReadError::TimedOut) => {
+                return json_response(
+                    StatusCode::REQUEST_TIMEOUT,
+                    json!({ "error": "Session request body timed out." }),
+                );
+            }
+            Err(TokenBodyReadError::Rejected) => {
+                return StatusCode::PAYLOAD_TOO_LARGE.into_response();
+            }
+        };
 
     // Before the token is minted, and therefore before any Egress call can be
     // made for this room. A recorded interview with no persisted consent is the
@@ -801,6 +818,7 @@ pub(crate) async fn token_handler(
         interview.clone(),
         room_name.clone(),
         provider.clone(),
+        identity.clone(),
     ));
     match startup.await {
         Ok(Some(refusal)) => return refusal,
@@ -835,6 +853,98 @@ pub(crate) async fn token_handler(
         body["previousAssignment"] = json!(assignment.receipt);
     }
     json_response(StatusCode::OK, body)
+}
+
+/// Ends the wait for a start the page gave up on before its candidate joined,
+/// so the interviewer slot, the guest slot and the consent claim come back now
+/// rather than when the agent's no-show wait runs out.
+///
+/// The caller proves which start it is ending with the join token
+/// `/api/token` gave it, which a guest holds as surely as a signed-in
+/// candidate does. The room name alone is not proof: a fixed development room
+/// is handed out again and again, and a token from an earlier start in it is
+/// still valid for hours. The dispatcher compares the token's identity with
+/// the one its start recorded.
+///
+/// A verified token gets 204 whether or not anything was released. A release
+/// that comes too late, twice, or for another start has nothing to undo, and
+/// the page does nothing different either way.
+pub(crate) async fn release_start_handler(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    request: Request<Body>,
+) -> Response {
+    // Its own bucket: nothing names the caller before the body is read, and a
+    // flood here must not spend the allowance a candidate's next `/api/token`
+    // needs.
+    let client = client_ip(request.headers(), peer, state.config.trusted_proxy_hops);
+    if !state.release_limit.allow(client, Instant::now()) {
+        return rate_limited_response("Too many release requests. Wait a minute and try again.");
+    }
+
+    let body = match read_token_body(
+        request.into_body(),
+        TOKEN_BODY_READ_LIMIT,
+        RELEASE_BODY_BYTES,
+    )
+    .await
+    {
+        Ok(body) => body,
+        Err(TokenBodyReadError::TimedOut) => {
+            return json_response(
+                StatusCode::REQUEST_TIMEOUT,
+                json!({ "error": "Release request body timed out." }),
+            );
+        }
+        Err(TokenBodyReadError::Rejected) => {
+            return StatusCode::PAYLOAD_TOO_LARGE.into_response();
+        }
+    };
+    let request = serde_json::from_slice::<Value>(&body).ok();
+    let field = |name: &str| {
+        request
+            .as_ref()
+            .and_then(|request| request.get(name)?.as_str())
+            .filter(|value| !value.is_empty())
+    };
+    let (Some(room_name), Some(token)) = (field("roomName"), field("token")) else {
+        return json_response(
+            StatusCode::BAD_REQUEST,
+            json!({ "error": "Release requests need a room name and a token." }),
+        );
+    };
+
+    let forbidden = || {
+        json_response(
+            StatusCode::FORBIDDEN,
+            json!({ "error": "This token cannot release that room." }),
+        )
+    };
+    let Some(provider) = state
+        .config
+        .pool
+        .for_room(room_name, &state.config.room_prefix)
+    else {
+        return forbidden();
+    };
+    let Ok((granted_room, identity)) = crate::token::livekit_join_from_token(
+        &provider.api_key,
+        &provider.api_secret,
+        token,
+        current_epoch_seconds(),
+    ) else {
+        return forbidden();
+    };
+    if granted_room != room_name {
+        return forbidden();
+    }
+
+    if let Some(dispatcher) = &state.dispatcher
+        && dispatcher.release_start(room_name, &identity)
+    {
+        eprintln!("codetrial start_released room={room_name}");
+    }
+    StatusCode::NO_CONTENT.into_response()
 }
 
 pub(crate) async fn observer_token_handler(

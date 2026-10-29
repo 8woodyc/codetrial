@@ -213,6 +213,9 @@ pub(crate) struct AppState {
     token_limit: TokenRateLimit,
     /// Anonymous traffic must not spend a signed-in candidate's allowance.
     guest_token_limit: TokenRateLimit,
+    /// Releases of abandoned starts. Reachable by guests and signed-in callers
+    /// alike, so neither of the buckets above may pay for it.
+    release_limit: TokenRateLimit,
 
     /// Every timer this server started, held only so they stop when it does.
     /// Never read. Why that matters is on `BackgroundTasks`.
@@ -453,6 +456,7 @@ pub(crate) fn web_router(
     let router = Router::new()
         .route("/healthz", get(|| async { "ok\n" }))
         .route("/api/token", post(token_handler))
+        .route("/api/token/release", post(release_start_handler))
         .route(
             "/api/task-sets/{set_id}/unlock",
             post(tasks::task_unlock_handler),
@@ -552,6 +556,7 @@ pub(crate) fn web_router(
             recorder,
             token_limit: TokenRateLimit::with_limit(token::TOKEN_RATE_LIMIT),
             guest_token_limit: TokenRateLimit::with_limit(token::TOKEN_RATE_LIMIT),
+            release_limit: TokenRateLimit::with_limit(token::TOKEN_RATE_LIMIT),
             login_limit: TokenRateLimit::with_limit(token::TOKEN_RATE_LIMIT),
             replay_limit: TokenRateLimit::with_limit(interviews::REPLAY_RATE_LIMIT),
             read_limit: TokenRateLimit::with_limit(recordings::READ_RATE_LIMIT),
@@ -683,14 +688,27 @@ pub trait RoomDispatcher: Send + Sync + 'static {
     /// Starts an interviewer and releases recorded consent if no candidate
     /// reaches the dispatched room. Dispatchers that cannot observe a no-show
     /// keep their existing behavior.
+    ///
+    /// `candidate` is the identity the start's token joins as, the one
+    /// [`RoomDispatcher::release_start`] has to be shown to end the wait.
     fn ensure_agent_with_no_show_release(
         &self,
         room_name: &str,
         provider: &crate::config::Provider,
+        candidate: &str,
         no_show: Option<NoShowConsent>,
     ) -> Result<(), DispatchRefusal> {
-        let _ = no_show;
+        let _ = (candidate, no_show);
         self.ensure_agent(room_name, provider, AgentJob::Interview)
+    }
+
+    /// Ends the wait for `candidate` in `room_name` if that start is still
+    /// waiting for them, and says whether it did.
+    ///
+    /// `false` from a dispatcher that cannot reach its rooms, so the wait runs
+    /// out on its own as it always has.
+    fn release_start(&self, _room_name: &str, _candidate: &str) -> bool {
+        false
     }
 
     /// Whether this dispatcher enforces guest-specific admission limits.
@@ -715,6 +733,7 @@ pub trait RoomDispatcher: Send + Sync + 'static {
         &self,
         _room_name: &str,
         _provider: &crate::config::Provider,
+        _candidate: &str,
     ) -> Result<(), DispatchRefusal> {
         // Never route a guest through an unrestricted signed-in path.
         Err(DispatchRefusal::AtCapacity)

@@ -305,6 +305,54 @@ fn the_interview_clock_starts_when_the_candidate_joined() {
     );
 }
 
+/// The room task hears a release only through the slot it was dispatched
+/// with. The dispatcher's tests drive the wait and the claim directly, so
+/// they keep passing if `open_session` stops handing either the slot; this is
+/// what notices, read as source for the reason the clock test above is.
+#[test]
+fn the_candidate_wait_listens_for_its_start_being_released() {
+    let source = include_str!("../../src/livekit.rs");
+    let opener = source
+        .split("async fn open_session")
+        .nth(1)
+        .expect("open_session is still defined here");
+    let body = opener
+        .split(
+            "
+}
+",
+        )
+        .next()
+        .unwrap_or_default();
+    let wait = body
+        .lines()
+        .find(|line| line.contains("candidate_metadata("))
+        .expect("open_session still waits for a candidate");
+    assert!(
+        wait.contains(", slot)"),
+        "the wait must be handed the slot a release reaches: {wait}"
+    );
+    let skipped = body
+        .find("Slot::is_released")
+        .expect("open_session must skip the join of a start already released");
+    assert!(
+        body.find("join_room(").is_some_and(|join| skipped < join),
+        "the released check must come before the room is joined"
+    );
+    assert!(
+        body.contains("Slot::claim_join"),
+        "an arrival must be claimed against a release that raced it"
+    );
+    assert!(
+        source
+            .split("pub(crate) async fn run_room_with_slot")
+            .nth(1)
+            .is_some_and(|run| run
+                .contains("open_session(config, &keys, room_name, now_seconds, session_id, slot)")),
+        "run_room_with_slot must pass its slot on"
+    );
+}
+
 #[test]
 fn only_the_interview_candidate_can_drive_the_runtime() {
     assert!(is_interview_participant(
