@@ -1719,6 +1719,7 @@ FAKE_GH_FEEDBACK = support.stub("skill-scripts/gh-feedback.sh")
 FAKE_GH_CACHED = support.stub("skill-scripts/gh-cached.sh")
 FAKE_GH_LIVE = support.stub("skill-scripts/gh-live.sh")
 FAKE_INLINE_LOG = support.stub("skill-scripts/inline-log.sh")
+FAKE_GH_REFINE = support.stub("skill-scripts/gh-refine.sh")
 FAKE_CI_COUNT = support.stub("skill-scripts/ci-count.sh")
 
 
@@ -2922,11 +2923,11 @@ class ReviewQueueTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return [json.loads(line) for line in result.stdout.splitlines()]
 
-    def finish(self, draft, live, inline_rc=0, **env):
+    def finish(self, draft, live, inline_rc=0, gh=None, **env):
         path = self.repo / "draft.json"
         path.write_text(json.dumps(draft))
         with tempfile.TemporaryDirectory() as scratch:
-            support.write_executable(Path(scratch) / "gh", FAKE_GH_LIVE)
+            support.write_executable(Path(scratch) / "gh", gh or FAKE_GH_LIVE)
             # The stand-in for post-inline.sh logs that it was asked to post.
             support.write_executable(Path(scratch) / "inline.sh", FAKE_INLINE_LOG)
             return subprocess.run(
@@ -2975,6 +2976,69 @@ class ReviewQueueTests(unittest.TestCase):
                 text=True,
             )
             self.assertIn("Outcome/reason/coverage: unavailable.", result.stdout, text)
+
+    @staticmethod
+    def status_entry(pr, grade="low", head="h", author="a", human=0, bot=0):
+        return {
+            "pr": pr,
+            "grade": grade,
+            "head": head,
+            "author": author,
+            "title": "t",
+            "why": [],
+            "threads": {"human": human, "bot": bot, "by": []},
+        }
+
+    def one_pr_sweep(self, human):
+        return {
+            "viewer": "maint",
+            "outdated": [],
+            "collide": [],
+            "status": [self.status_entry(1, human=human)],
+        }
+
+    def test_pick_includes_a_draft_with_an_open_thread(self):
+        entry = self.status_entry
+        sweep = {
+            "viewer": "maint",
+            "outdated": [],
+            "collide": [],
+            "status": [
+                entry(1, "draft", human=2),
+                entry(2, "draft"),
+                entry(3, "medium"),
+                entry(4, "medium", bot=1),
+                entry(5, "draft", author="maint", human=1),
+            ],
+        }
+        self.assertEqual([p["pr"] for p in self.pick(sweep)], [1, 4])
+
+    def test_pick_rereads_a_head_only_when_open_threads_grew(self):
+        self.ledger.parent.mkdir(parents=True, exist_ok=True)
+        self.ledger.write_text("1 h 2\n")
+        self.assertEqual(self.pick(self.one_pr_sweep(2)), [])
+        self.assertEqual(self.pick(self.one_pr_sweep(1)), [])
+        self.assertEqual(len(self.pick(self.one_pr_sweep(3))), 1)
+        self.ledger.write_text("1 h\n")
+        self.assertEqual(self.pick(self.one_pr_sweep(3)), [])
+        # Only the newest line for the head counts, so 2 -> 1 -> 2 is growth.
+        self.ledger.write_text("1 h 2\n1 h 1\n")
+        self.assertEqual(len(self.pick(self.one_pr_sweep(2))), 1)
+
+    def test_finish_records_the_open_thread_count_from_the_sweep(self):
+        scratch = self.repo / "scratch"
+        scratch.mkdir()
+        entry = self.status_entry
+        sweep = {
+            "status": [
+                entry(7, head="old", human=9),
+                entry(7, head="abc", human=3, bot=1),
+            ]
+        }
+        (scratch / "sweep.json").write_text(json.dumps(sweep))
+        draft = {"pr": 7, "sha": "abc", "comments": [], "similar": [], "resolve": []}
+        self.assertEqual(self.finish(draft, "abc", SCRATCH=str(scratch)).returncode, 0)
+        self.assertEqual(self.ledger.read_text(), "7 abc 4\n")
 
     def test_pick_hands_the_newest_reviewed_head_to_the_bundle(self):
         sweep = {
@@ -3070,6 +3134,70 @@ class ReviewQueueTests(unittest.TestCase):
         draft = {"pr": 7, "sha": "abc", "comments": [], "similar": [], "resolve": []}
         self.assertEqual(self.finish(draft, "abc").returncode, 0)
         self.assertEqual(self.ledger.read_text(), "7 abc\n")
+
+    def refine_draft(self, refine):
+        return {
+            "pr": 7,
+            "sha": "abc",
+            "comments": [],
+            "similar": [],
+            "resolve": [],
+            "refine": refine,
+        }
+
+    def finish_refine(self, refine, **env):
+        env = {"FAKE_HISTORY": "", "FAKE_LOG": f"{self.repo}/gh.log"} | env
+        return self.finish(self.refine_draft(refine), "abc", gh=FAKE_GH_REFINE, **env)
+
+    def test_finish_posts_the_refine_comment_once_per_head(self):
+        threads = [{"url": "https://github.com/o/r/pull/7#c1", "path": "a.js"}]
+        self.assertEqual(self.finish_refine(threads).returncode, 0)
+        log = (self.repo / "gh.log").read_text()
+        self.assertIn("refine the change", log)
+        self.assertIn("pull/7#c1", log)
+        self.assertIn("Checked at abc.", log)
+        self.assertEqual(self.ledger.read_text(), "7 abc\n")
+
+        (self.repo / "gh.log").unlink()
+        again = self.finish_refine(
+            threads, FAKE_HISTORY="see https://github.com/o/r/pull/7#c1"
+        )
+        self.assertEqual(again.returncode, 0)
+        self.assertFalse((self.repo / "gh.log").exists())
+
+    def test_finish_asks_the_author_to_resolve_an_addressed_thread(self):
+        threads = [
+            {"url": "https://github.com/o/r/pull/7#c1", "path": "a.js"},
+            {
+                "url": "https://github.com/o/r/pull/7#c2",
+                "path": "b.js",
+                "kind": "resolve",
+            },
+        ]
+        self.assertEqual(self.finish_refine(threads).returncode, 0)
+        log = (self.repo / "gh.log").read_text()
+        self.assertIn("resolve", log.split("Not addressed")[0])
+        self.assertLess(log.index("#c1"), log.index("reply with what changed"))
+        self.assertLess(log.index("reply with what changed"), log.index("#c2"))
+
+    def test_finish_keeps_the_head_out_when_the_refine_comment_fails(self):
+        threads = [{"url": "https://github.com/o/r/pull/7#c1", "path": "a.js"}]
+        for fail in ("FAKE_COMMENT_FAIL", "FAKE_API_FAIL"):
+            result = self.finish_refine(threads, **{fail: "1"})
+            self.assertEqual(result.returncode, 4, fail)
+            self.assertFalse(self.ledger.exists() and self.ledger.read_text(), fail)
+
+    def test_finish_refuses_a_malformed_refine_before_posting(self):
+        for refine in (
+            "x",
+            [{}],
+            [{"url": "u"}],
+            [{"url": 1, "path": "p"}],
+            [{"url": "u", "path": "p", "kind": "other"}],
+        ):
+            result = self.finish_refine(refine)
+            self.assertEqual(result.returncode, 2, refine)
+            self.assertFalse((self.repo / "gh.log").exists())
 
     def test_finish_refuses_a_moved_head_and_posts_nothing(self):
         draft = {

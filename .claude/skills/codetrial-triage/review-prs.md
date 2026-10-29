@@ -1,10 +1,12 @@
-# Review the low and blocked pull requests
+# Review the pull requests waiting on their authors
 
-A bare sweep reviews every open PR the merge grade puts at `low` or `blocked`
-and posts what survives as inline comments, without a confirmation. Those are
+A bare sweep reviews every open PR the merge grade puts at `low` or `blocked`,
+and any other PR (a draft included) with an open review thread, and posts what
+survives as inline comments, without a confirmation. Those are
 the PRs waiting on their authors, and a finding posted while the author is
 still working costs them one push instead of one round trip. A PR at `medium`
-or `high` waits on a maintainer's own review, which this does not replace.
+or `high` with no open thread waits on a maintainer's own review, which this
+does not replace.
 
 The review itself is [codetrial-review](../codetrial-review/SKILL.md): its
 bundle, lenses, rules and verification. What this file adds is what an
@@ -18,9 +20,9 @@ its review is in rather than after the slowest one.
 ## Pick the PRs
 
 `review-pick.sh` reads the sweep and prints one JSON object per PR to review:
-the PRs graded `low` or `blocked`, not the viewer's own, minus those whose
-current head is already in the ledger. Each object carries what the brief
-below asks for, so nothing is typed by hand: `since` (the head the ledger last
+the PRs graded `low` or `blocked`, or with an open thread, not the viewer's
+own, minus those whose current head is already in the ledger with the same
+number of open threads. Each object carries what the brief below asks for, so nothing is typed by hand: `since` (the head the ledger last
 recorded for the PR, or null), `outdated` (the thread ids and paths to
 recheck), `collide` (the other PR, the file and the function) and `why`.
 
@@ -152,6 +154,19 @@ each of this PR's entries in outdated, or none>.
      two PRs that link each other. A pair linked one way still gets its
      missing notice, which is also how a failed mirror post is retried.
 
+   Check every open review thread on the PR, not only the outdated ones; the
+   threads are in `$dir/threads.tsv`. For each, read its comments, the author's
+   replies and the code at the head, and sort it: addressed (the head does what
+   it asked, or the author's reply answers it), or not addressed. An addressed
+   outdated thread goes to `resolve` and the sweep resolves it. An addressed
+   thread that is still current goes to `refine` with `"kind": "resolve"`, so
+   the author is asked to reply and resolve it themselves. A thread not
+   addressed, outdated or not, goes to `refine` as
+   `{"url": "<thread comment url>", "path": "<path>"}`; a thread whose only
+   unanswered part is the maintainer's own decision, or that holds only the
+   maintainer's comments with nothing the author can act on, stays out of both.
+   `threads.tsv` is laid out as codetrial-review's SKILL.md describes.
+
    Read each outdated thread the brief lists, its comments and the code at the
    head where it pointed, and decide whether the head does what it asked.
    Outdated only means the lines moved; a thread whose concern the head does
@@ -188,7 +203,7 @@ each of this PR's entries in outdated, or none>.
    quote, line, start_line?, body, evidence}], "summary": null, "similar": [{"kind":
    "pr" or "issue", "number": M, "notice": "<text>", "other_notice": "<text>"
    or null, "other_sha": "<the other PR's head its diff was read at>" for a PR}], "resolve": [{"thread": "<id>", "path": "<path>", "why": "<what
-   at the head addresses it>"}]}` and return which reviewers and lenses ran or
+   at the head addresses it>"}], "refine": [{"url": "<url>", "path": "<path>", "kind": "unaddressed" or "resolve"}]}` and return which reviewers and lenses ran or
    were skipped and why, then each finding as `path:line`, the defect in a
    sentence, and how it was verified, then the questions, each similar match
    and each thread to resolve, and why. Empty lists are a result.
@@ -290,16 +305,31 @@ already present). A pair skipped because a head
 moved is not done either. If any read or post fails,
 or the session stops before completion, leave the head out of the ledger so
 the next sweep retries it, checking each thread for posts that already landed.
-After all required posts succeed, when `review-finish.sh` exited 4 and you finished the rest by hand:
+After all required posts succeed, when `review-finish.sh` exited 4 and you finished the rest by hand
+(`$open` is the `open` of this PR's `review-pick.sh` object):
 
 ```sh
-echo "$pr $sha" >> "$(git rev-parse --git-common-dir)/codetrial-triage/reviewed"
+echo "$pr $sha $open" >> "$(git rev-parse --git-common-dir)/codetrial-triage/reviewed"
 ```
 
 What authorizes these posts is in [pulls.md](pulls.md#what-a-sweep-may-apply-without-asking):
 the comment rules are the approved form, and verifying each finding at the
 head stands in for the confirmation. An inspection request ("what needs
 attention") posts nothing and shows the drafts instead.
+
+## Check every open thread
+
+`refine` in the draft is posted by `review-finish.sh` as one plain comment: the
+fixed text in [refine.md](refine.md), which tells the author to refine per the
+review comments, reply on each thread and resolve it themselves, then a link to
+each thread under "Not addressed" or "Addressed ... reply and resolve", and the
+head it was checked at. A thread an earlier refine comment already linked is
+not listed again, so a rerun never repeats itself. The PR stays graded `low`
+while threads are open, and the `stale` nudge in [pulls.md](pulls.md) reminds an
+author who goes quiet. A thread opened without a push brings the PR back,
+because the ledger line records the open-thread count the sweep saw and a
+larger count is read again. Outdated threads the head addresses are resolved as
+above; anything else stays open until its author or reviewer resolves it.
 
 ## Report
 

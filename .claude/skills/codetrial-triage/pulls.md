@@ -83,9 +83,11 @@ and these actions go on the confirmed list instead.
   concern was met, and an open thread is what holds a grade down, so resolving
   one unchecked raises a grade nobody earned: #430 went from low to
   medium-high on threads resolved before anyone read the new head. On a bare
-  `/codetrial-triage` the review of each low or blocked PR checks the outdated
-  threads on it ([review-prs.md](review-prs.md)); every other outdated thread
-  is reported by PR and path as one to recheck, and stays open. Report each
+  `/codetrial-triage` the review of each PR with an open thread checks every
+  thread on it, and asks the author in one comment to refine the ones the head
+  leaves unaddressed and to reply on and resolve the ones it addresses ([review-prs.md](review-prs.md#check-every-open-thread));
+  on a sweep alone, outdated threads are reported by PR and path as ones to
+  recheck, and stay open. Report each
   resolved thread with what at the head addresses it; a reviewer who disagrees
   clicks unresolve.
 - Requesting a rebase on each PR in `rebase`, then hiding every entry in
