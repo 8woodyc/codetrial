@@ -3,7 +3,8 @@
 # request needs at its current head. Each is a rule a script can decide, and
 # each carries the wording the maintainers already used for it, so a sweep posts
 # the result as a Request changes review without drafting anything (pulls.md,
-# "Contributor hygiene"). A conflict is not here: rebase.md owns it.
+# "Contributor hygiene"). A conflict is not here: rebase.md owns it, and the CI
+# regression item asks for the same thing in the same words.
 #
 # Usage: hygiene.sh <pr> [repo]
 #        Prints {pr, head, skip, items: [{key, text}], body}. skip says why
@@ -115,7 +116,7 @@ jq -n -L "$(dirname "$0")" --slurpfile p "$work/pr.json" --slurpfile c "$work/co
     --slurpfile ci "$work/ci.json" --slurpfile inline "$work/inline.json" \
     --argjson bad "$bad_messages" --argjson ai "$ai_messages" \
     --argjson pushers "$pushers" --arg pushed "$pushed" \
-    --arg again "$again" '
+    --arg again "$again" --rawfile fix "$(dirname "$0")/rebase.md" '
   $p[0] as $pr | ($c | add) as $commits
   | (if $ci[0].head == $pr.headRefOid then $ci[0] else {} end) as $ci
   | def staff: .author.login | IN($pushers[]);
@@ -157,7 +158,7 @@ jq -n -L "$(dirname "$0")" --slurpfile p "$work/pr.json" --slurpfile c "$work/co
         $pr.mergeable == "MERGEABLE" and ($ci.stale_base != true)
         and any($failing[]; .on_main == false and .gates != ["indent"]);
         "regression|rebase";
-        "Before asking someone to review, you MUST resolve any regressions flagged by GitHub Actions."),
+        $fix | rtrimstr("\n")),
       item("screenshot";
         any($pr.files[]; .path | test("^web/.*\\.(html|css)$"))
         and ($pr.body // "" | test("<img|!\\[|user-attachments/|\\.(png|jpe?g|gif|webp|mp4|mov)\\b"; "i") | not);

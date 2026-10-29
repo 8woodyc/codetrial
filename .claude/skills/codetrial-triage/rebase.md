@@ -1,1 +1,1 @@
-Rebase latest `main` branch and resolve conflicts.
+Rebase the current branch onto the upstream default branch and resolve any conflicts. Run `/codetrial-review` in AI agents (use `$codetrial-review` in Codex) and resolve all identified issues. Rework the series into minimal, logically coherent commits, squash closely related commits, and ensure all commit messages follow the project’s rules.
