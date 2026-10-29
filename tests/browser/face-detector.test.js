@@ -199,6 +199,7 @@ async function watchFrames() {
       // which takes tens of seconds on a cold cache, and everything after it is
       // fast; a fixed wait is either flaky or slow.
       const pump = async (canvas, wanted, budgetMs) => {
+        // timing-ok: a budget for the cold model load, bounding a loop that feeds frames
         const deadline = Date.now() + budgetMs;
         while (Date.now() < deadline) {
           await send(canvas);
@@ -209,6 +210,7 @@ async function watchFrames() {
             )
           )
             return false;
+          // Pacing between frames, not a wait for an outcome.
           await new Promise((done) => setTimeout(done, 250));
         }
         return false;
