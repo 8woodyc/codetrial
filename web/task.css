@@ -30,6 +30,7 @@
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.35);
   --backdrop: rgba(0, 0, 0, 0.65);
+  --paper: #ffffff;
   /* The editor's colours, the interview editor's. */
   --code-bg: #1e1e1e;
   --code-text: #d4d4d4;
@@ -575,14 +576,14 @@ nav {
   gap: 0.35rem;
   padding: 0.2rem 0.35rem;
   border-radius: 999px;
-  background: #ffffff;
+  background: var(--paper);
 }
 .board-color {
   width: 1.5rem;
   height: 1.5rem;
   min-height: 0;
   padding: 0;
-  border: 2px solid #ffffff;
+  border: 2px solid var(--paper);
   border-radius: 50%;
   cursor: pointer;
 }
@@ -592,7 +593,7 @@ nav {
 .example-surface {
   height: 16rem;
   overflow: auto;
-  background: #ffffff;
+  background: var(--paper);
 }
 .example-surface canvas {
   display: block;
@@ -747,6 +748,7 @@ nav {
   font-size: 0.875rem;
 }
 #calculator {
+  --field-min: 8rem;
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
@@ -757,10 +759,10 @@ nav {
 #calculator label {
   margin: 0;
   flex: 1;
-  min-width: min(100%, 160px);
+  min-width: min(100%, var(--field-min));
 }
 #calculator label.calculator-angle {
-  flex: 0 1 9rem;
+  flex: 0 1 var(--field-min);
 }
 #calculator output {
   font: 0.9375rem/1.5 var(--font-mono);

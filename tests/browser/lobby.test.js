@@ -1579,6 +1579,43 @@ lobbyTest(
   { viewport: { width: 1280, height: 800 } },
 );
 
+// Closed, the setup cards end together; opening one leaves the others their
+// own height.
+lobbyTest(
+  "the setup cards end together, and keep their height when one opens",
+  async (page) => {
+    await lobby(page);
+    const cards = () =>
+      page.evaluate(() =>
+        [...document.querySelectorAll(".setup-panel")].map((card) => {
+          const { bottom, height } = card.getBoundingClientRect();
+          return { bottom: Math.round(bottom), height: Math.round(height) };
+        }),
+      );
+    const closed = await cards();
+    assert.equal(closed.length, 3, "the lobby has three setup cards");
+    assert.equal(
+      new Set(closed.map((card) => card.bottom)).size,
+      1,
+      `closed cards end on one line: ${JSON.stringify(closed)}`,
+    );
+
+    await page.click("details.interview-context summary");
+    const open = await cards();
+    assert.ok(
+      open[2].height > open[0].height + 100,
+      `the context form is the tall card: ${JSON.stringify(open)}`,
+    );
+    for (const index of [0, 1]) {
+      assert.ok(
+        open[index].height <= closed[index].height,
+        `card ${index + 1} stretched to the open one: ${JSON.stringify({ closed, open })}`,
+      );
+    }
+  },
+  { viewport: { width: 1280, height: 800 } },
+);
+
 // The row the test above budgets for, at both ends of it. A fixed column beside
 // the button shrank below one word of a title on a phone and pushed the page
 // wider than the window; this title overflowed even at 375px.

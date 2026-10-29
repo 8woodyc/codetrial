@@ -24,6 +24,9 @@
   --accent-fill: #744ce6;
   --accent-deep: #6437d2;
   --accent-ink: var(--accent);
+  /* Text on a solid --accent-fill or --danger: white in every scheme, at least
+     4.9:1 on either fill. */
+  --on-accent: #ffffff;
   --good: #24b47e;
   --critical: #ff6b6b;
   /* A destructive control: its border and fill, and its text on the surface
@@ -54,6 +57,8 @@
   /* The same banner when the news is not a fault: the avatar was turned off. */
   --notice-tint: rgba(255, 200, 87, 0.14);
   --notice-ink: #ffd27a;
+  /* The whiteboard and the example drawings are paper in every scheme. */
+  --paper: #ffffff;
 
   /* Editor-only colors, independent of the page's fixed dark scheme. Their
      defaults keep the editor rendering exactly as before; the light values
@@ -560,7 +565,7 @@ p {
 .duration-button.selected,
 .start-button {
   background: var(--accent-fill);
-  color: #ffffff;
+  color: var(--on-accent);
 }
 
 .start-row {
@@ -1276,7 +1281,7 @@ p {
   width: 44px;
   height: 44px;
   border-radius: 999px;
-  background: #33332c;
+  background: var(--selected-surface);
   color: var(--sub);
   font-weight: 700;
 }
@@ -1401,7 +1406,7 @@ p {
 
 .meet-mode-reminder {
   margin: 0 0 0.5rem;
-  color: #f4dc9a;
+  color: var(--notice-ink);
   line-height: 1.5;
 }
 
@@ -1431,7 +1436,7 @@ p {
   max-width: 100%;
   padding: 0.35rem 0.5rem;
   border: 1px solid var(--control-border);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--sub);
   font: inherit;
@@ -1899,7 +1904,7 @@ p {
   position: relative;
   height: 16rem;
   overflow: auto;
-  background: #ffffff;
+  background: var(--paper);
 }
 
 .example-surface canvas {
@@ -2357,10 +2362,12 @@ table.phase-scores {
   background-image: linear-gradient(var(--accent), var(--accent));
 }
 
-/* Forced colors drop a gradient, which would leave a focused divider with
-   nothing to show where it is, so there it takes the ring it gave up. */
+/* Forced colors drop a gradient or a fill, which would leave a focused divider
+   or drawer handle with nothing to show where it is, so there it takes the
+   ring it gave up. */
 @media (forced-colors: active) {
-  .splitter:focus-visible {
+  .splitter:focus-visible,
+  .drawer-resizer:focus-visible {
     outline: 2px solid Highlight;
     outline-offset: -2px;
   }
@@ -2420,14 +2427,14 @@ table.phase-scores {
   gap: 0.35rem;
   padding: 0.2rem 0.35rem;
   border-radius: 999px;
-  background: #ffffff;
+  background: var(--paper);
 }
 
 .board-color {
   width: 1.5rem;
   height: 1.5rem;
   padding: 0;
-  border: 2px solid #ffffff;
+  border: 2px solid var(--paper);
   border-radius: 50%;
   cursor: pointer;
 }
@@ -2506,15 +2513,19 @@ table.phase-scores {
   aspect-ratio: 1600 / 1000;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-sm);
-  background: #ffffff;
+  background: var(--paper);
   cursor: crosshair;
   touch-action: none;
 }
 
 .board-text-draft {
+  /* The toolbar's edge and ink and the grip on a text box, paper's own. */
+  --paper-edge: #d6d9df;
+  --paper-ink: #252a32;
+  --paper-grip: #686868;
   position: absolute;
   z-index: 3;
-  outline: 1px dotted #686868;
+  outline: 1px dotted var(--paper-grip);
   background: transparent;
 }
 .board-text-draft[hidden] {
@@ -2591,9 +2602,9 @@ table.phase-scores {
   width: 12px;
   height: 12px;
   box-sizing: border-box;
-  border: 2px solid #686868;
+  border: 2px solid var(--paper-grip);
   border-radius: 50%;
-  background: #ffffff;
+  background: var(--paper);
   transform: translate(-50%, -50%);
 }
 .board-text-resize::after {
@@ -2659,29 +2670,29 @@ table.phase-scores {
   flex-wrap: wrap;
   gap: 0.375rem;
   padding: 0.5rem;
-  border: 1px solid #d6d9df;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #252a32;
+  border: 1px solid var(--paper-edge);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--paper-ink);
   box-shadow: 0 3px 12px #00000018;
 }
 .board-text-controls .board-pens {
   margin-right: auto;
 }
 .board-text-controls > button {
-  height: 30px;
+  min-height: 30px;
   padding: 0 8px;
-  border: 1px solid #d6d9df;
+  border: 1px solid var(--paper-edge);
   border-radius: 4px;
-  background: #ffffff;
-  color: #252a32;
-  font-size: 12px;
+  background: var(--paper);
+  color: var(--paper-ink);
+  font-size: 0.75rem;
   font-weight: 500;
 }
 .board-text-controls .board-text-confirm {
   background: var(--accent-fill);
   border-color: var(--accent-fill);
-  color: #ffffff;
+  color: var(--on-accent);
 }
 .board-text-controls .board-text-cancel {
   border-color: transparent;
@@ -2988,7 +2999,7 @@ body:not([data-recording]) .replay-detail > :not(header) {
   width: 100%;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-sm);
-  background: #ffffff;
+  background: var(--paper);
 }
 
 /* A whiteboard report's steps, two to a row where the card is wide enough:
@@ -3047,7 +3058,7 @@ body:not([data-recording]) .replay-detail > :not(header) {
   aspect-ratio: 1600 / 1000;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-sm);
-  background: #ffffff;
+  background: var(--paper);
 }
 
 /* One framework's steps, top left under the problem heading. Small on purpose:
@@ -3348,7 +3359,7 @@ body:not([data-recording]) .replay-detail > :not(header) {
 .session-dock .pill-button.danger:not(:disabled):hover,
 #ending-overlay .pill-button.danger:not(:disabled):hover {
   background: var(--danger);
-  color: #ffffff;
+  color: var(--on-accent);
 }
 
 .session-dock .meet-mode {
@@ -3779,6 +3790,12 @@ body:not([data-recording]) .replay-detail > :not(header) {
   align-items: start;
 }
 
+/* Stretch only while every card is closed; an open picker or form would make
+   one card far taller than the rest. */
+.setup-grid:not(:has(details[open])) {
+  align-items: stretch;
+}
+
 .setup-panel,
 .lobby .recent-performance,
 .lobby .history {
@@ -3798,7 +3815,7 @@ body:not([data-recording]) .replay-detail > :not(header) {
 
 .setup-heading .step-number {
   background: var(--accent-fill);
-  color: #ffffff;
+  color: var(--on-accent);
 }
 
 .setup-heading h2 {
@@ -3873,7 +3890,9 @@ body:not([data-recording]) .replay-detail > :not(header) {
 .lobby .editor-options-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, max-content));
-  gap: 0.25rem 1rem;
+  /* 0.75rem keeps both columns on one line in this card at 1280px beside a
+     scrollbar. */
+  gap: 0.25rem 0.75rem;
 }
 
 .lobby .editor-options-row legend {
@@ -3908,6 +3927,7 @@ body:not([data-recording]) .replay-detail > :not(header) {
 .session-panel .format-choices {
   display: grid;
   gap: 0.5rem;
+  --group-step: 0.5rem;
 }
 
 /* The grid gap above already spaces these from the mode buttons and from each
@@ -3915,6 +3935,11 @@ body:not([data-recording]) .replay-detail > :not(header) {
    alone, would double it. */
 .session-panel .format-choices > .duration-note {
   margin-top: 0;
+}
+
+/* Settings, not choices: a step apart from the buttons. */
+.session-panel .format-choices > .session-choice-group + .duration-note {
+  margin-top: var(--group-step);
 }
 
 .session-choice-group {
@@ -4294,6 +4319,7 @@ body:not([data-recording]) .replay-detail > :not(header) {
      margins above. */
   .session-panel .format-choices {
     gap: 0.25rem;
+    --group-step: 0;
   }
 
   /* On a short screen the narrow Start column makes the billing notice wrap
