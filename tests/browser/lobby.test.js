@@ -2299,8 +2299,10 @@ lobbyTest(
     await page.click("#practice-list-pick");
     assert.equal((await snapshot(page)).card, easyCard);
 
-    // Open problem picker so the card grid is visible in DOM
-    await page.click("details.problem-picker summary");
+    // Opening the picker starts the topic load, which reapplies every filter
+    // when it lands. Wait for it, so the keypress below cannot arrive in the
+    // middle of that pass.
+    await openTopicFilter(page);
     const cardButton = page.locator(`[data-problem="${easyCard}"]`);
     assert.equal(
       await cardButton.isVisible(),
@@ -2310,7 +2312,19 @@ lobbyTest(
 
     // Activate the card button via keyboard while it holds focus
     await cardButton.focus();
+    assert.equal(
+      await page.evaluate(() => document.activeElement?.dataset.problem),
+      easyCard,
+      "the card button must hold focus before Enter",
+    );
     await page.keyboard.press("Enter");
+    await reaches(
+      page,
+      (id) =>
+        document.querySelector(".problem-card.selected")?.dataset.problem !==
+        id,
+      easyCard,
+    );
 
     const after = await snapshot(page);
     assert.notEqual(after.card, easyCard);
