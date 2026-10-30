@@ -27,7 +27,7 @@ async fn token_body_read_has_a_deadline() {
     let body = Body::from_stream(stalled);
 
     assert_eq!(
-        read_token_body(body, Duration::from_millis(10)).await,
+        read_token_body(body, Duration::from_millis(10), MAX_BODY_BYTES).await,
         Err(TokenBodyReadError::TimedOut),
     );
 }

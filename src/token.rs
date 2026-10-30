@@ -365,9 +365,36 @@ pub fn livekit_room_from_token(
     now_seconds: u64,
 ) -> Result<String, WebhookRejection> {
     let claims = verified_claims(api_key, api_secret, token, now_seconds)?;
+    joined_room(&claims)
+}
 
+/// The room a LiveKit join token was minted for and the identity it joins as,
+/// once the signature says the token is real.
+///
+/// This is how a page proves which start it is giving up. The room alone
+/// does not say that: a fixed development room is handed out again and again,
+/// and every one of those tokens names it. The identity is minted fresh for
+/// each start, so it is what tells this start's token from an earlier one.
+pub fn livekit_join_from_token(
+    api_key: &str,
+    api_secret: &str,
+    token: &str,
+    now_seconds: u64,
+) -> Result<(String, String), WebhookRejection> {
+    let claims = verified_claims(api_key, api_secret, token, now_seconds)?;
+    let room = joined_room(&claims)?;
+    let identity = claims
+        .get("sub")
+        .and_then(Value::as_str)
+        .filter(|identity| !identity.is_empty())
+        .ok_or(WebhookRejection::Malformed)?;
+    Ok((room, identity.to_string()))
+}
+
+fn joined_room(claims: &Value) -> Result<String, WebhookRejection> {
     // `roomJoin` as well as the name. A token good for something other than
-    // joining is not a recorder's, whatever room it names.
+    // joining is neither a recorder's nor a candidate's, whatever room it
+    // names.
     let grant = claims.get("video").ok_or(WebhookRejection::Malformed)?;
     if grant.get("roomJoin").and_then(Value::as_bool) != Some(true) {
         return Err(WebhookRejection::Malformed);

@@ -285,6 +285,7 @@ fn router_routes_match_a_fixed_allowlist() {
         "/healthz",
         "/runtime-config.js",
         "/api/token",
+        "/api/token/release",
         "/api/task-reviews/{room}",
         "/api/task-sets/{set_id}/tasks/{task_id}",
         "/api/task-sets/{set_id}/tasks/{task_id}/attempts",

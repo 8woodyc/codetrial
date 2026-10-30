@@ -217,6 +217,11 @@ let frameworkRound = "coding";
 let exampleBoard = null;
 let drawingTurn = null;
 let editorInitialized = false;
+/// The room and token of a start the server is holding an interviewer for,
+/// until the candidate has joined it. A start the page gives up on before then
+/// hands that interviewer back instead of leaving it to wait out its no-show
+/// limit.
+let grantedStart = null;
 const mac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 const editorHistory = createEditorHistory();
 let pendingEditorEdit = null;
@@ -2145,6 +2150,9 @@ async function connect(preflight, presenting = false) {
       );
     }
     const connection = await response.json();
+    // First, before anything below can throw: from here the server holds an
+    // interviewer for this start, and only this token can let it go early.
+    grantedStart = { roomName: connection.roomName, token: connection.token };
     state.isGuest = connection.guest === true;
     // The language this interview started in, which the next one preselects.
     if (!whiteboard) writeStored(LANGUAGE_KEY, state.language);
@@ -2181,6 +2189,8 @@ async function connect(preflight, presenting = false) {
       abandonStart(preflight);
       return false;
     }
+    // The candidate is in the room, so the interviewer is no longer waiting.
+    grantedStart = null;
     // Handed to a report, or ended once the room was claimed: the report and
     // leave paths own the room and the tracks, so the start only stops here.
     if (joined === "reporting" || state.phase !== "live") return false;
@@ -2624,7 +2634,24 @@ function abandonStart(preflight) {
   state.connected = false;
   state.room = null;
   if (joined) void joined.disconnect?.()?.catch?.(() => {});
+  releaseStart();
   stopPreflight(preflight);
+}
+
+/// Tells the server this start will not join. Fire and forget: the server
+/// ignores a release that comes after the candidate joined, and a failed one
+/// costs only the wait it was meant to save. `keepalive` lets it outlive a
+/// navigation away from the page.
+function releaseStart() {
+  const start = grantedStart;
+  grantedStart = null;
+  if (!start) return;
+  void fetch("/api/token/release", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    keepalive: true,
+    body: JSON.stringify(start),
+  }).catch(() => {});
 }
 
 function stopPreflight(preflight) {

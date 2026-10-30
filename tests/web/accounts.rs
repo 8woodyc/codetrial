@@ -1630,6 +1630,9 @@ async fn every_owner_scoped_route_refuses_an_anonymous_request() {
     let anonymous = [
         "/healthz",
         "/api/token",
+        // Guests release their own starts, so the join token is the credential
+        // here and not a session.
+        "/api/token/release",
         "/api/login",
         "/api/callback",
         // A device sign-in creates the session these routes would ask for.

@@ -23,6 +23,7 @@ async fn a_panicking_interview_gives_its_capacity_back() {
         state: Arc::clone(&state),
         guest: false,
         room_name: "interview-boom".to_string(),
+        released: Arc::default(),
     };
 
     let task = tokio::spawn(async move {
@@ -113,7 +114,12 @@ async fn no_show_dispatch_enforces_the_configured_cap() {
     };
 
     assert_eq!(
-        dispatcher.ensure_agent_with_no_show_release("interview-second", &provider, None),
+        dispatcher.ensure_agent_with_no_show_release(
+            "interview-second",
+            &provider,
+            "candidate-second",
+            None
+        ),
         Err(DispatchRefusal::AtCapacity)
     );
 }
@@ -142,12 +148,16 @@ impl Drop for Scratch {
     }
 }
 
-/// The task's shared cleanup helper is the production edge between a no-show
-/// outcome and the database release. Exercising it directly makes removing the
-/// call observable without waiting through a LiveKit room deadline.
-#[tokio::test]
-async fn release_no_show_gives_the_claimed_room_back() {
-    let path = Scratch::new("dispatch-release");
+/// An account database with one interview whose consent has claimed
+/// `room_name`, as `/api/token` leaves it before dispatch. The scratch file is
+/// returned first so it outlives the connection that holds it open.
+fn claimed_interview(
+    label: &str,
+    github_id: i64,
+    interview_id: &str,
+    room_name: &str,
+) -> (Scratch, Arc<crate::accounts::Accounts>, i64) {
+    let path = Scratch::new(label);
     crate::accounts::initialize_account_database(&path.0).unwrap();
     let accounts = Arc::new(
         crate::accounts::Accounts::open(crate::accounts::GitHubLoginConfig {
@@ -162,8 +172,8 @@ async fn release_no_show_gives_the_claimed_room_back() {
     let session = crate::accounts::create_session(
         &accounts,
         &crate::accounts::GitHubProfile {
-            github_id: -1,
-            login: "release-no-show".into(),
+            github_id,
+            login: label.into(),
             avatar_url: None,
             verified_email: None,
         },
@@ -173,8 +183,6 @@ async fn release_no_show_gives_the_claimed_room_back() {
         .unwrap()
         .unwrap()
         .id;
-    let interview_id = "interview-release-no-show";
-    let room_name = "interview-release-room";
     crate::accounts::create_interview(&accounts, interview_id, account_id, "v1", 1)
         .unwrap()
         .unwrap();
@@ -182,6 +190,18 @@ async fn release_no_show_gives_the_claimed_room_back() {
         crate::accounts::claim_interview_room(&accounts, interview_id, account_id, room_name)
             .unwrap()
     );
+    (path, accounts, account_id)
+}
+
+/// The task's shared cleanup helper is the production edge between a no-show
+/// outcome and the database release. Exercising it directly makes removing the
+/// call observable without waiting through a LiveKit room deadline.
+#[tokio::test]
+async fn release_no_show_gives_the_claimed_room_back() {
+    let interview_id = "interview-release-no-show";
+    let room_name = "interview-release-room";
+    let (_path, accounts, account_id) =
+        claimed_interview("dispatch-release", -1, interview_id, room_name);
 
     assert!(
         release_no_show(
@@ -600,7 +620,12 @@ async fn local_dispatcher_enforces_guest_admission_capacity() {
     };
 
     assert_eq!(
-        RoomDispatcher::ensure_guest_agent(&dispatcher, "guest-capacity-three", &provider,),
+        RoomDispatcher::ensure_guest_agent(
+            &dispatcher,
+            "guest-capacity-three",
+            &provider,
+            "candidate-three"
+        ),
         Err(DispatchRefusal::AtCapacity),
     );
 }
@@ -625,4 +650,269 @@ async fn candidate_video_reports_the_local_agent_setting() {
         };
         assert_eq!(dispatcher.candidate_video(), Some(expected), "{value}");
     }
+}
+
+fn release_dispatcher(max_concurrent: usize) -> LocalDispatcher {
+    LocalDispatcher {
+        config: crate::config::load_from_pairs([
+            ("LIVEKIT_URL", "wss://primary.example"),
+            ("LIVEKIT_API_KEY", "primary-key"),
+            ("LIVEKIT_API_SECRET", "primary-secret"),
+            ("GOOGLE_API_KEY", "primary-google"),
+        ])
+        .unwrap(),
+        runtime: tokio::runtime::Handle::current(),
+        state: Arc::default(),
+        max_concurrent,
+    }
+}
+
+fn started(dispatcher: &LocalDispatcher, room: &str, guest: bool, candidate: &str) -> Slot {
+    match dispatcher.reserve_for(room, guest, Some(candidate.to_string())) {
+        Reservation::New(slot) => slot,
+        _ => panic!("{room} should be free to start"),
+    }
+}
+
+/// The room task's wait for a candidate, driven with no LiveKit room. Nothing
+/// is ever sent on the channel, so the wait ends only by release or by the
+/// five-minute limit, and `bound` is far inside that limit. `None` is a wait
+/// still going when the bound ran out.
+async fn wait_within(slot: &Slot, bound: std::time::Duration) -> Option<Option<(String, String)>> {
+    let (_sender, mut events) =
+        tokio::sync::mpsc::unbounded_channel::<::livekit::prelude::RoomEvent>();
+    let mut deferred = Vec::new();
+    tokio::time::timeout(
+        bound,
+        crate::livekit::arriving_candidate(&slot.room_name, &mut events, &mut deferred, Some(slot)),
+    )
+    .await
+    .ok()
+    .map(Result::unwrap)
+}
+
+async fn waited_out(slot: &Slot) -> Option<(String, String)> {
+    wait_within(slot, std::time::Duration::from_secs(5))
+        .await
+        .expect("a released start must stop waiting at once")
+}
+
+/// A second release, and one from a start that is not this one, both find
+/// nothing to undo.
+#[tokio::test]
+async fn a_start_is_released_once_and_only_by_its_own_identity() {
+    let dispatcher = release_dispatcher(2);
+    let _slot = started(&dispatcher, "interview-once", false, "candidate-a");
+
+    assert!(!dispatcher.release_start("interview-once", "candidate-b"));
+    assert!(!dispatcher.release_start("interview-other", "candidate-a"));
+    assert!(dispatcher.release_start("interview-once", "candidate-a"));
+    assert!(
+        !dispatcher.release_start("interview-once", "candidate-a"),
+        "a repeated release must do nothing"
+    );
+}
+
+/// Between a release and the slot dropping, the agent is leaving the room and
+/// giving consent back. A token for the room then must not be handed the start
+/// as `Existing`, since nobody will staff it, so it waits as a room finishing
+/// its report does, until the slot is gone.
+#[tokio::test]
+async fn a_released_room_is_refused_until_its_slot_drops() {
+    let dispatcher = release_dispatcher(2);
+    let slot = started(&dispatcher, "interview-leaving", false, "candidate-a");
+    assert!(dispatcher.release_start("interview-leaving", "candidate-a"));
+
+    assert!(matches!(
+        dispatcher.reserve_for("interview-leaving", false, Some("candidate-b".into())),
+        Reservation::Finalizing
+    ));
+    drop(slot);
+    assert!(matches!(
+        dispatcher.reserve_for("interview-leaving", false, Some("candidate-b".into())),
+        Reservation::New(_)
+    ));
+}
+
+/// The page can give up while the room task is still joining, before it has
+/// reached its wait. The release must still be there when it does.
+#[tokio::test]
+async fn a_release_before_the_room_task_waits_is_not_lost() {
+    let dispatcher = release_dispatcher(1);
+    let slot = started(&dispatcher, "interview-early", false, "candidate-a");
+    assert!(!slot.is_released());
+
+    assert!(dispatcher.release_start("interview-early", "candidate-a"));
+
+    // Asked before the join and again by the wait after it, so the first asking
+    // must not use up what the second needs.
+    assert!(slot.is_released());
+    assert_eq!(waited_out(&slot).await, None);
+    assert!(
+        !slot.claim_join(),
+        "a candidate arriving after the release must not reopen the start"
+    );
+}
+
+/// Without a release the wait goes on, so the test above is not passing on a
+/// wait that ends by itself.
+#[tokio::test]
+async fn an_unreleased_start_keeps_waiting() {
+    let dispatcher = release_dispatcher(1);
+    let slot = started(&dispatcher, "interview-waiting", false, "candidate-a");
+    assert!(
+        wait_within(&slot, std::time::Duration::from_millis(100))
+            .await
+            .is_none()
+    );
+}
+
+/// A join and a release that race agree on one winner, every time. Both run on
+/// threads of their own released together, since a serial caller cannot tell
+/// a check and a set under one lock from the two under two.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_join_racing_a_release_has_exactly_one_winner() {
+    let dispatcher = Arc::new(release_dispatcher(1));
+    for round in 0..200 {
+        let slot = Arc::new(started(&dispatcher, "interview-race", false, "candidate-a"));
+        let gate = Arc::new(std::sync::Barrier::new(2));
+        let join = {
+            let (slot, gate) = (Arc::clone(&slot), Arc::clone(&gate));
+            std::thread::spawn(move || {
+                gate.wait();
+                slot.claim_join()
+            })
+        };
+        let release = {
+            let (dispatcher, gate) = (Arc::clone(&dispatcher), Arc::clone(&gate));
+            std::thread::spawn(move || {
+                gate.wait();
+                dispatcher.release_start("interview-race", "candidate-a")
+            })
+        };
+        let (joined, released) = (join.join().unwrap(), release.join().unwrap());
+        assert!(
+            joined != released,
+            "round {round}: joined={joined} released={released}"
+        );
+        drop(Arc::into_inner(slot).expect("both threads are done with the slot"));
+    }
+}
+
+/// A candidate who drops and reconnects mid-interview is still the one who
+/// joined, so the start never goes back to a state a release could end.
+#[tokio::test]
+async fn a_reconnect_does_not_reopen_a_joined_start() {
+    let dispatcher = release_dispatcher(1);
+    let slot = started(&dispatcher, "interview-joined", false, "candidate-a");
+
+    assert!(slot.claim_join());
+    assert!(!dispatcher.release_start("interview-joined", "candidate-a"));
+    assert!(slot.claim_join(), "a second arrival is still a join");
+    assert!(!dispatcher.release_start("interview-joined", "candidate-a"));
+}
+
+/// A fixed development room is handed out again and again, and a token from
+/// the start before is valid for hours. It must not end the start after it.
+#[tokio::test]
+async fn a_token_from_an_earlier_start_in_a_reused_room_releases_nothing() {
+    let dispatcher = release_dispatcher(1);
+    drop(started(
+        &dispatcher,
+        "interview-pinned",
+        false,
+        "candidate-a",
+    ));
+    let _second = started(&dispatcher, "interview-pinned", false, "candidate-b");
+
+    assert!(!dispatcher.release_start("interview-pinned", "candidate-a"));
+    assert!(dispatcher.release_start("interview-pinned", "candidate-b"));
+}
+
+/// A reload is handed the room already running, with a token of its own. That
+/// token is not the start's, so it cannot end it.
+#[tokio::test]
+async fn a_second_token_for_a_running_room_cannot_release_it() {
+    let dispatcher = release_dispatcher(2);
+    let _slot = started(&dispatcher, "interview-shared", false, "candidate-a");
+    assert!(matches!(
+        dispatcher.reserve_for("interview-shared", false, Some("candidate-c".into())),
+        Reservation::Existing
+    ));
+
+    assert!(!dispatcher.release_start("interview-shared", "candidate-c"));
+    assert!(dispatcher.release_start("interview-shared", "candidate-a"));
+}
+
+/// A released guest start gives its place under the cap of two back now, not
+/// when the five-minute wait would have run out.
+#[tokio::test]
+async fn a_released_guest_start_gives_its_guest_slot_back() {
+    let dispatcher = release_dispatcher(8);
+    let first = started(&dispatcher, "guest-released", true, "candidate-a");
+    let _second = started(&dispatcher, "guest-kept", true, "candidate-b");
+    assert!(matches!(
+        dispatcher.reserve_with_kind("guest-third", true),
+        Reservation::Full {
+            guest_cap: true,
+            ..
+        }
+    ));
+
+    assert!(dispatcher.release_start("guest-released", "candidate-a"));
+    assert_eq!(waited_out(&first).await, None);
+    settle_interview(Ok(crate::livekit::RoomRunOutcome::NoCandidate), None, first).await;
+
+    assert!(
+        !dispatcher
+            .state
+            .lock()
+            .unwrap()
+            .guest_live
+            .contains("guest-released")
+    );
+    assert!(matches!(
+        dispatcher.reserve_with_kind("guest-third", true),
+        Reservation::New(_)
+    ));
+}
+
+/// A released signed-in start hands its consent claim back through the same
+/// no-show path a candidate who never came takes, and its slot with it.
+#[tokio::test]
+async fn a_released_start_gives_its_consent_and_slot_back() {
+    let (interview_id, room_name) = ("interview-released-start", "interview-released-room");
+    let (_path, accounts, account_id) =
+        claimed_interview("dispatch-released-start", -2, interview_id, room_name);
+
+    let dispatcher = release_dispatcher(1);
+    let slot = started(&dispatcher, room_name, false, "candidate-a");
+    assert!(dispatcher.release_start(room_name, "candidate-a"));
+    assert_eq!(waited_out(&slot).await, None);
+    let no_show = NoShowConsent::new(
+        Arc::clone(&accounts),
+        interview_id.into(),
+        account_id,
+        room_name.into(),
+    );
+    settle_interview(
+        Ok(crate::livekit::RoomRunOutcome::NoCandidate),
+        Some(no_show),
+        slot,
+    )
+    .await;
+
+    let room: Option<String> = accounts
+        .with(|connection| {
+            connection.query_row(
+                "SELECT room_name FROM interviews WHERE id = ?1",
+                [interview_id],
+                |row| row.get(0),
+            )
+        })
+        .unwrap();
+    assert_eq!(room, None, "the consent claim must be released");
+    assert!(dispatcher.state.lock().unwrap().live.is_empty());
+    assert!(dispatcher.state.lock().unwrap().starts.is_empty());
+    drop(accounts);
 }

@@ -1720,7 +1720,14 @@ async fn open_session<'a>(
     room_name: &'a str,
     now_seconds: u64,
     session_id: u64,
+    slot: Option<&crate::dispatch::Slot>,
 ) -> Result<OpenSessionOutcome<'a>, Box<dyn std::error::Error + Send + Sync>> {
+    // A page can give its start up before this task gets to the room, and
+    // joining a room nobody will come to spends a connection for nothing.
+    if slot.is_some_and(crate::dispatch::Slot::is_released) {
+        eprintln!("start released before the agent joined room={room_name}");
+        return Ok(OpenSessionOutcome::NoCandidate);
+    }
     let agent_identity = agent_identity(room_name);
     let (room, mut events) = match join_room(config, room_name, &agent_identity, now_seconds).await
     {
@@ -1739,12 +1746,20 @@ async fn open_session<'a>(
     // until someone joins.
     let mut deferred_events = Vec::new();
     let candidate =
-        match candidate_metadata(room.connected(), &mut events, &mut deferred_events).await {
+        match candidate_metadata(room.connected(), &mut events, &mut deferred_events, slot).await {
             Ok(candidate) => candidate,
             Err(error) => return Ok(OpenSessionOutcome::FailedBeforeCandidate(error)),
         };
+
+    // Claimed here, under the dispatch lock, so a release racing this arrival
+    // either ends the start before it is claimed or finds it already joined.
+    let candidate = candidate.filter(|_| slot.is_none_or(crate::dispatch::Slot::claim_join));
     let Some((candidate_identity, candidate_metadata)) = candidate else {
         eprintln!("no candidate joined room={room_name}; leaving it");
+
+        // Dropping the room does not disconnect it, and the slot drops right
+        // after this, so a fixed room's next start would staff it twice.
+        leave_room(&room).await;
         return Ok(OpenSessionOutcome::NoCandidate);
     };
     let events = tokio::sync::Mutex::new(events);
@@ -2774,7 +2789,7 @@ pub(crate) async fn run_room_with_slot(
             u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
         });
     let keys = Arc::new(GeminiKeys::from_config(config));
-    let session = open_session(config, &keys, room_name, now_seconds, session_id)
+    let session = open_session(config, &keys, room_name, now_seconds, session_id, slot)
         .await
         .inspect_err(|error| {
             eprintln!(
@@ -3324,10 +3339,11 @@ fn candidate_pair(participant: &RemoteParticipant) -> (String, String) {
     (participant.identity().to_string(), participant.metadata())
 }
 
-/// `Ok(None)` when nobody arrived within [`CANDIDATE_JOIN_LIMIT`]. A no-show is
-/// not a failure, so it does not spend a restart attempt; the agent simply
-/// leaves the room rather than holding it open for a candidate who closed the
-/// tab between requesting a token and connecting.
+/// `Ok(None)` when nobody arrived within [`CANDIDATE_JOIN_LIMIT`], or when the
+/// page that began the start released it first. A no-show is not a failure,
+/// so it does not spend a restart attempt; the agent simply leaves the room
+/// rather than holding it open for a candidate who closed the tab between
+/// requesting a token and connecting.
 /// Events seen while waiting are handed back in `deferred` rather than dropped.
 /// A `TrackSubscribed` consumed here used to be gone for good, and the only
 /// thing that attaches the candidate's microphone is that event, so losing it
@@ -3336,6 +3352,7 @@ async fn candidate_metadata(
     room: &Room,
     events: &mut tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
     deferred: &mut Vec<RoomEvent>,
+    slot: Option<&crate::dispatch::Slot>,
 ) -> Result<Option<(String, String)>, Box<dyn std::error::Error + Send + Sync>> {
     if let Some(participant) = room
         .remote_participants()
@@ -3345,9 +3362,34 @@ async fn candidate_metadata(
         return Ok(Some(candidate_pair(participant)));
     }
     eprintln!("waiting for candidate in room={}", room.name());
+    arriving_candidate(&room.name(), events, deferred, slot).await
+}
+
+/// The wait half of [`candidate_metadata`], apart from the `Room` so the
+/// dispatcher's tests can drive it with a channel they fill themselves.
+pub(crate) async fn arriving_candidate(
+    room_name: &str,
+    events: &mut tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
+    deferred: &mut Vec<RoomEvent>,
+    slot: Option<&crate::dispatch::Slot>,
+) -> Result<Option<(String, String)>, Box<dyn std::error::Error + Send + Sync>> {
     let deadline = tokio::time::Instant::now() + CANDIDATE_JOIN_LIMIT;
+    let released = async {
+        match slot {
+            Some(slot) => slot.released().await,
+            None => std::future::pending().await,
+        }
+    };
+    let mut released = std::pin::pin!(released);
     loop {
-        match tokio::time::timeout_at(deadline, events.recv()).await {
+        let event = tokio::select! {
+            event = tokio::time::timeout_at(deadline, events.recv()) => event,
+            () = &mut released => {
+                eprintln!("start released before a candidate joined room={room_name}");
+                return Ok(None);
+            }
+        };
+        match event {
             Err(_) => return Ok(None),
             Ok(Some(RoomEvent::ParticipantConnected(participant)))
                 if is_candidate(&participant) =>
@@ -3364,8 +3406,7 @@ async fn candidate_metadata(
                 // identical, and they need three different fixes.
                 if let RoomEvent::Disconnected { reason } = &other {
                     eprintln!(
-                        "disconnected from room={} while waiting for a candidate: {reason:?}",
-                        room.name()
+                        "disconnected from room={room_name} while waiting for a candidate: {reason:?}"
                     );
                 }
                 deferred.push(other);

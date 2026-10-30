@@ -385,6 +385,12 @@ for (const stage of ["token", "join"]) {
           window.releaseJoin = resolve;
         });
       });
+    // The server holds an interviewer for the granted start until someone
+    // joins, so a start given up after its token hands that interviewer back.
+    await page.route("**/api/token/release", (route) =>
+      route.fulfill({ status: 204 }),
+    );
+    const released = page.waitForRequest("**/api/token/release");
     const requested = page.waitForRequest("**/api/token");
     await preflight(page, { pause: true });
     await requested;
@@ -410,6 +416,10 @@ for (const stage of ["token", "join"]) {
       })),
       stage === "token" ? { joins: 0, leaves: 0 } : { joins: 1, leaves: 1 },
     );
+    assert.deepEqual((await released).postDataJSON(), {
+      roomName: `ended-at-${stage}`,
+      token: `ended-at-${stage}`,
+    });
   });
 }
 

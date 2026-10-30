@@ -18,6 +18,27 @@ const MAX_CONCURRENT_GUEST_INTERVIEWS: usize = 2;
 pub struct DispatchState {
     live: HashMap<String, bool>,
     guest_live: HashSet<String>,
+    /// Whose each reserved room is and whether they have arrived, so a page
+    /// that gives up its start can end the wait it began and nobody else's.
+    starts: HashMap<String, Start>,
+}
+
+struct Start {
+    /// The identity in the token this start handed out. `None` for a start
+    /// made without one, such as a task attempt, which no release can match.
+    candidate: Option<String>,
+    phase: StartPhase,
+    released: Arc<tokio::sync::Notify>,
+}
+
+/// Moves only forward, and only under the dispatch lock, so a release and a
+/// join that race each other agree on which of them won.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StartPhase {
+    Waiting,
+    /// A candidate was accepted. A reconnect never takes it back to waiting.
+    Joined,
+    Released,
 }
 
 /// Runs the interviewer for rooms this process just named, in this process.
@@ -55,37 +76,62 @@ impl RoomDispatcher for LocalDispatcher {
         provider: &Provider,
         job: AgentJob,
     ) -> Result<(), DispatchRefusal> {
-        self.ensure_agent_with_kind(room_name, provider, false, None, job)
+        self.ensure_agent_with_kind(room_name, provider, None, None, job)
     }
 
     fn ensure_agent_with_no_show_release(
         &self,
         room_name: &str,
         provider: &Provider,
+        candidate: &str,
         no_show: Option<NoShowConsent>,
     ) -> Result<(), DispatchRefusal> {
-        self.ensure_agent_with_kind(room_name, provider, false, no_show, AgentJob::Interview)
+        let start = Some((candidate, false));
+        self.ensure_agent_with_kind(room_name, provider, start, no_show, AgentJob::Interview)
     }
 
     fn ensure_guest_agent(
         &self,
         room_name: &str,
         provider: &Provider,
+        candidate: &str,
     ) -> Result<(), DispatchRefusal> {
-        self.ensure_agent_with_kind(room_name, provider, true, None, AgentJob::Interview)
+        let start = Some((candidate, true));
+        self.ensure_agent_with_kind(room_name, provider, start, None, AgentJob::Interview)
+    }
+
+    fn release_start(&self, room_name: &str, candidate: &str) -> bool {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        let Some(start) = state.starts.get_mut(room_name) else {
+            return false;
+        };
+        if start.phase != StartPhase::Waiting || start.candidate.as_deref() != Some(candidate) {
+            return false;
+        }
+        start.phase = StartPhase::Released;
+
+        // `notify_one` keeps a permit when nobody is waiting yet, so a release
+        // that lands before the room task reaches its wait is not lost.
+        start.released.notify_one();
+        true
     }
 }
 
 impl LocalDispatcher {
+    /// `start` is the candidate identity a token was minted for, and whether
+    /// that caller is a guest. `None` is a signed-in start no page can release.
     fn ensure_agent_with_kind(
         &self,
         room_name: &str,
         provider: &Provider,
-        guest: bool,
+        start: Option<(&str, bool)>,
         no_show: Option<NoShowConsent>,
         job: AgentJob,
     ) -> Result<(), DispatchRefusal> {
-        let slot = match self.reserve_with_kind(room_name, guest) {
+        let (candidate, guest) = start.map_or((None, false), |(candidate, guest)| {
+            (Some(candidate.to_string()), guest)
+        });
+        let slot = match self.reserve_for(room_name, guest, candidate) {
             Reservation::Existing => return Ok(()),
             Reservation::Full { limit, guest_cap } => {
                 eprintln!(
@@ -122,19 +168,7 @@ impl LocalDispatcher {
                         Some(&slot),
                     )
                     .await;
-                    if outcome.as_ref().is_ok_and(no_show_release_required) {
-                        release_no_show(no_show, &slot.room_name).await;
-                    }
-                    match outcome {
-                        Ok(crate::livekit::RoomRunOutcome::NoCandidate) => {}
-                        Ok(crate::livekit::RoomRunOutcome::FailedBeforeCandidate(error)) => {
-                            eprintln!("codetrial agent_failed room={}: {error}", slot.room_name);
-                        }
-                        Ok(crate::livekit::RoomRunOutcome::Completed) => {}
-                        Err(error) => {
-                            eprintln!("codetrial agent_failed room={}: {error}", slot.room_name);
-                        }
-                    }
+                    settle_interview(outcome, no_show, slot).await;
                 }
                 AgentJob::Task { candidate, task } => {
                     if let Err(error) = crate::livekit::tasks::run(
@@ -152,6 +186,32 @@ impl LocalDispatcher {
             }
         });
         Ok(())
+    }
+}
+
+/// What a room's task does once its interview has ended, however it ended.
+///
+/// Takes the slot so the order is the signature's and not a reader's to
+/// infer: consent goes back first, and the capacity and guest slot only when
+/// the slot drops at the end. A released start arrives here as `NoCandidate`,
+/// the same way a no-show does.
+async fn settle_interview(
+    outcome: Result<crate::livekit::RoomRunOutcome, Box<dyn std::error::Error + Send + Sync>>,
+    no_show: Option<NoShowConsent>,
+    slot: Slot,
+) {
+    if outcome.as_ref().is_ok_and(no_show_release_required) {
+        release_no_show(no_show, &slot.room_name).await;
+    }
+    match outcome {
+        Ok(crate::livekit::RoomRunOutcome::NoCandidate) => {}
+        Ok(crate::livekit::RoomRunOutcome::FailedBeforeCandidate(error)) => {
+            eprintln!("codetrial agent_failed room={}: {error}", slot.room_name);
+        }
+        Ok(crate::livekit::RoomRunOutcome::Completed) => {}
+        Err(error) => {
+            eprintln!("codetrial agent_failed room={}: {error}", slot.room_name);
+        }
     }
 }
 
@@ -194,11 +254,30 @@ enum Reservation {
 }
 
 impl LocalDispatcher {
+    #[cfg(test)]
     fn reserve_with_kind(&self, room_name: &str, guest: bool) -> Reservation {
+        self.reserve_for(room_name, guest, None)
+    }
+
+    /// `Existing` records nothing about `candidate`: the start already running
+    /// in that room belongs to whoever began it, and a second token for the
+    /// same room must not be able to end it.
+    fn reserve_for(&self, room_name: &str, guest: bool, candidate: Option<String>) -> Reservation {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
 
         // A room already in use cannot be reused for another interview.
         if let Some(assessing) = state.live.get(room_name) {
+            // Released, the start still holds the room until its agent has left
+            // and its consent is back. Handing a new token for it the room as
+            // `Existing` would put that candidate in a room nobody staffs, so
+            // it waits like a room finishing its report.
+            if state
+                .starts
+                .get(room_name)
+                .is_some_and(|start| start.phase == StartPhase::Released)
+            {
+                return Reservation::Finalizing;
+            }
             if guest || state.guest_live.contains(room_name) {
                 return Reservation::GuestRoomInUse;
             }
@@ -228,11 +307,21 @@ impl LocalDispatcher {
         if guest {
             state.guest_live.insert(room_name.to_string());
         }
+        let released = Arc::new(tokio::sync::Notify::new());
+        state.starts.insert(
+            room_name.to_string(),
+            Start {
+                candidate,
+                phase: StartPhase::Waiting,
+                released: Arc::clone(&released),
+            },
+        );
 
         Reservation::New(Slot {
             state: Arc::clone(&self.state),
             guest,
             room_name: room_name.to_string(),
+            released,
         })
     }
 }
@@ -243,9 +332,43 @@ pub struct Slot {
     state: Arc<Mutex<DispatchState>>,
     pub guest: bool,
     pub room_name: String,
+    released: Arc<tokio::sync::Notify>,
 }
 
 impl Slot {
+    /// Resolves once the page that began this start has given it up.
+    pub(crate) async fn released(&self) {
+        self.released.notified().await;
+    }
+
+    /// Whether the start has already been given up, read without taking the
+    /// release [`Slot::released`] waits on.
+    pub(crate) fn is_released(&self) -> bool {
+        let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state
+            .starts
+            .get(&self.room_name)
+            .is_some_and(|start| start.phase == StartPhase::Released)
+    }
+
+    /// Records that a candidate was accepted, unless the start was released
+    /// first. `false` means the room is to be left as a no-show.
+    pub(crate) fn claim_join(&self) -> bool {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+
+        // Every slot is made beside its start, and only its own drop removes
+        // it, so a slot still being asked always finds one.
+        let start = state
+            .starts
+            .get_mut(&self.room_name)
+            .expect("a live slot keeps its start");
+        if start.phase == StartPhase::Released {
+            return false;
+        }
+        start.phase = StartPhase::Joined;
+        true
+    }
+
     pub(crate) fn assessment_finished(&self) {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
 
@@ -260,6 +383,7 @@ impl Drop for Slot {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
 
         state.live.remove(&self.room_name);
+        state.starts.remove(&self.room_name);
         if self.guest {
             state.guest_live.remove(&self.room_name);
         }
