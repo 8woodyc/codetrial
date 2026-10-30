@@ -1,7 +1,7 @@
 {
   "page": "canary-host-selection",
   "title": "Canary Host Selection",
-  "source": "Combinations",
+  "source": "77. Combinations",
   "difficulty": "Medium",
   "brief": [
     "Our deployment tool rolls a new build out to a small canary group before the whole fleet. For a failover drill we want to try every possible canary group of a given size, drawn from hosts numbered 1 through n.",

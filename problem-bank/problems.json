@@ -3,6 +3,7 @@
     "id": "valid-parentheses",
     "title": "Valid Parentheses",
     "difficulty": "Easy",
+    "number": 20,
     "topics": [
       "String",
       "Stack"
@@ -49,6 +50,7 @@
     "id": "two-sum",
     "title": "Two Sum",
     "difficulty": "Easy",
+    "number": 1,
     "topics": [
       "Array",
       "Hash Table"
@@ -95,6 +97,7 @@
     "id": "merge-sorted-array",
     "title": "Merge Sorted Array",
     "difficulty": "Easy",
+    "number": 88,
     "topics": [
       "Array",
       "Two Pointers",
@@ -140,6 +143,7 @@
     "id": "remove-element",
     "title": "Remove Element",
     "difficulty": "Easy",
+    "number": 27,
     "topics": [
       "Array",
       "Two Pointers"
@@ -178,6 +182,7 @@
     "id": "remove-duplicates-from-sorted-array",
     "title": "Remove Duplicates from Sorted Array",
     "difficulty": "Easy",
+    "number": 26,
     "topics": [
       "Array",
       "Two Pointers"
@@ -217,6 +222,7 @@
     "id": "remove-duplicates-from-sorted-array-ii",
     "title": "Remove Duplicates from Sorted Array II",
     "difficulty": "Medium",
+    "number": 80,
     "topics": [
       "Array",
       "Two Pointers"
@@ -255,6 +261,7 @@
     "id": "majority-element",
     "title": "Majority Element",
     "difficulty": "Easy",
+    "number": 169,
     "topics": [
       "Array",
       "Hash Table",
@@ -295,6 +302,7 @@
     "id": "rotate-array",
     "title": "Rotate Array",
     "difficulty": "Medium",
+    "number": 189,
     "topics": [
       "Array",
       "Math",
@@ -334,6 +342,7 @@
     "id": "best-time-to-buy-and-sell-stock",
     "title": "Best Time to Buy and Sell Stock",
     "difficulty": "Easy",
+    "number": 121,
     "topics": [
       "Array",
       "Dynamic Programming"
@@ -372,6 +381,7 @@
     "id": "best-time-to-buy-and-sell-stock-ii",
     "title": "Best Time to Buy and Sell Stock II",
     "difficulty": "Medium",
+    "number": 122,
     "topics": [
       "Array",
       "Dynamic Programming",
@@ -415,6 +425,7 @@
     "id": "jump-game",
     "title": "Jump Game",
     "difficulty": "Medium",
+    "number": 55,
     "topics": [
       "Array",
       "Dynamic Programming",
@@ -453,6 +464,7 @@
     "id": "jump-game-ii",
     "title": "Jump Game II",
     "difficulty": "Medium",
+    "number": 45,
     "topics": [
       "Array",
       "Dynamic Programming",
@@ -492,6 +504,7 @@
     "id": "h-index",
     "title": "H-Index",
     "difficulty": "Medium",
+    "number": 274,
     "topics": [
       "Array",
       "Sorting",
@@ -530,6 +543,7 @@
     "id": "insert-delete-getrandom-o1",
     "title": "Insert Delete GetRandom O(1)",
     "difficulty": "Medium",
+    "number": 380,
     "topics": [
       "Array",
       "Hash Table",
@@ -567,6 +581,7 @@
     "id": "product-of-array-except-self",
     "title": "Product of Array Except Self",
     "difficulty": "Medium",
+    "number": 238,
     "topics": [
       "Array",
       "Prefix Sum"
@@ -605,6 +620,7 @@
     "id": "gas-station",
     "title": "Gas Station",
     "difficulty": "Medium",
+    "number": 134,
     "topics": [
       "Array",
       "Greedy"
@@ -643,6 +659,7 @@
     "id": "candy",
     "title": "Candy",
     "difficulty": "Hard",
+    "number": 135,
     "topics": [
       "Array",
       "Greedy"
@@ -680,6 +697,7 @@
     "id": "trapping-rain-water",
     "title": "Trapping Rain Water",
     "difficulty": "Hard",
+    "number": 42,
     "topics": [
       "Array",
       "Two Pointers",
@@ -720,6 +738,7 @@
     "id": "roman-to-integer",
     "title": "Roman to Integer",
     "difficulty": "Easy",
+    "number": 13,
     "topics": [
       "Hash Table",
       "Math",
@@ -763,6 +782,7 @@
     "id": "integer-to-roman",
     "title": "Integer to Roman",
     "difficulty": "Medium",
+    "number": 12,
     "topics": [
       "Hash Table",
       "Math",
@@ -804,6 +824,7 @@
     "id": "length-of-last-word",
     "title": "Length of Last Word",
     "difficulty": "Easy",
+    "number": 58,
     "topics": [
       "String"
     ],
@@ -845,6 +866,7 @@
     "id": "longest-common-prefix",
     "title": "Longest Common Prefix",
     "difficulty": "Easy",
+    "number": 14,
     "topics": [
       "String",
       "Trie"
@@ -883,6 +905,7 @@
     "id": "reverse-words-in-a-string",
     "title": "Reverse Words in a String",
     "difficulty": "Medium",
+    "number": 151,
     "topics": [
       "String",
       "Two Pointers"
@@ -925,6 +948,7 @@
     "id": "zigzag-conversion",
     "title": "Zigzag Conversion",
     "difficulty": "Medium",
+    "number": 6,
     "topics": [
       "String"
     ],
@@ -966,6 +990,7 @@
     "id": "find-the-index-of-the-first-occurrence-in-a-string",
     "title": "Find the Index of the First Occurrence in a String",
     "difficulty": "Easy",
+    "number": 28,
     "topics": [
       "Two Pointers",
       "String",
@@ -1004,6 +1029,7 @@
     "id": "text-justification",
     "title": "Text Justification",
     "difficulty": "Hard",
+    "number": 68,
     "topics": [
       "Array",
       "String",
@@ -1045,6 +1071,7 @@
     "id": "valid-palindrome",
     "title": "Valid Palindrome",
     "difficulty": "Easy",
+    "number": 125,
     "topics": [
       "Two Pointers",
       "String"
@@ -1086,6 +1113,7 @@
     "id": "is-subsequence",
     "title": "Is Subsequence",
     "difficulty": "Easy",
+    "number": 392,
     "topics": [
       "Two Pointers",
       "String",
@@ -1125,6 +1153,7 @@
     "id": "container-with-most-water",
     "title": "Container With Most Water",
     "difficulty": "Medium",
+    "number": 11,
     "topics": [
       "Array",
       "Two Pointers",
@@ -1164,6 +1193,7 @@
     "id": "two-sum-ii-input-array-is-sorted",
     "title": "Two Sum II - Input Array Is Sorted",
     "difficulty": "Medium",
+    "number": 167,
     "topics": [
       "Array",
       "Two Pointers",
@@ -1209,6 +1239,7 @@
     "id": "3sum",
     "title": "3Sum",
     "difficulty": "Medium",
+    "number": 15,
     "topics": [
       "Array",
       "Two Pointers",
@@ -1251,6 +1282,7 @@
     "id": "happy-number",
     "title": "Happy Number",
     "difficulty": "Easy",
+    "number": 202,
     "topics": [
       "Hash Table",
       "Math",
@@ -1288,6 +1320,7 @@
     "id": "longest-substring-without-repeating-characters",
     "title": "Longest Substring Without Repeating Characters",
     "difficulty": "Medium",
+    "number": 3,
     "topics": [
       "Hash Table",
       "String",
@@ -1331,6 +1364,7 @@
     "id": "minimum-window-substring",
     "title": "Minimum Window Substring",
     "difficulty": "Hard",
+    "number": 76,
     "topics": [
       "Hash Table",
       "String",
@@ -1374,6 +1408,7 @@
     "id": "substring-with-concatenation-of-all-words",
     "title": "Substring with Concatenation of All Words",
     "difficulty": "Hard",
+    "number": 30,
     "topics": [
       "Hash Table",
       "String",
@@ -1418,6 +1453,7 @@
     "id": "minimum-size-subarray-sum",
     "title": "Minimum Size Subarray Sum",
     "difficulty": "Medium",
+    "number": 209,
     "topics": [
       "Array",
       "Binary Search",
@@ -1462,6 +1498,7 @@
     "id": "valid-sudoku",
     "title": "Valid Sudoku",
     "difficulty": "Medium",
+    "number": 36,
     "topics": [
       "Array",
       "Hash Table",
@@ -1501,6 +1538,7 @@
     "id": "spiral-matrix",
     "title": "Spiral Matrix",
     "difficulty": "Medium",
+    "number": 54,
     "topics": [
       "Array",
       "Matrix",
@@ -1541,6 +1579,7 @@
     "id": "rotate-image",
     "title": "Rotate Image",
     "difficulty": "Medium",
+    "number": 48,
     "topics": [
       "Array",
       "Math",
@@ -1580,6 +1619,7 @@
     "id": "set-matrix-zeroes",
     "title": "Set Matrix Zeroes",
     "difficulty": "Medium",
+    "number": 73,
     "topics": [
       "Array",
       "Hash Table",
@@ -1620,6 +1660,7 @@
     "id": "game-of-life",
     "title": "Game of Life",
     "difficulty": "Medium",
+    "number": 289,
     "topics": [
       "Array",
       "Matrix",
@@ -1660,6 +1701,7 @@
     "id": "ransom-note",
     "title": "Ransom Note",
     "difficulty": "Easy",
+    "number": 383,
     "topics": [
       "Hash Table",
       "String",
@@ -1702,6 +1744,7 @@
     "id": "isomorphic-strings",
     "title": "Isomorphic Strings",
     "difficulty": "Easy",
+    "number": 205,
     "topics": [
       "Hash Table",
       "String"
@@ -1744,6 +1787,7 @@
     "id": "word-pattern",
     "title": "Word Pattern",
     "difficulty": "Easy",
+    "number": 290,
     "topics": [
       "Hash Table",
       "String"
@@ -1787,6 +1831,7 @@
     "id": "valid-anagram",
     "title": "Valid Anagram",
     "difficulty": "Easy",
+    "number": 242,
     "topics": [
       "Hash Table",
       "String",
@@ -1825,6 +1870,7 @@
     "id": "group-anagrams",
     "title": "Group Anagrams",
     "difficulty": "Medium",
+    "number": 49,
     "topics": [
       "Array",
       "Hash Table",
@@ -1869,6 +1915,7 @@
     "id": "contains-duplicate-ii",
     "title": "Contains Duplicate II",
     "difficulty": "Easy",
+    "number": 219,
     "topics": [
       "Array",
       "Hash Table",
@@ -1912,6 +1959,7 @@
     "id": "longest-consecutive-sequence",
     "title": "Longest Consecutive Sequence",
     "difficulty": "Medium",
+    "number": 128,
     "topics": [
       "Array",
       "Hash Table",
@@ -1954,6 +2002,7 @@
     "id": "summary-ranges",
     "title": "Summary Ranges",
     "difficulty": "Easy",
+    "number": 228,
     "topics": [
       "Array"
     ],
@@ -1991,6 +2040,7 @@
     "id": "insert-interval",
     "title": "Insert Interval",
     "difficulty": "Medium",
+    "number": 57,
     "topics": [
       "Array"
     ],
@@ -2030,6 +2080,7 @@
     "id": "minimum-number-of-arrows-to-burst-balloons",
     "title": "Minimum Number of Arrows to Burst Balloons",
     "difficulty": "Medium",
+    "number": 452,
     "topics": [
       "Array",
       "Greedy",
@@ -2073,6 +2124,7 @@
     "id": "simplify-path",
     "title": "Simplify Path",
     "difficulty": "Medium",
+    "number": 71,
     "topics": [
       "String",
       "Stack"
@@ -2115,6 +2167,7 @@
     "id": "min-stack",
     "title": "Min Stack",
     "difficulty": "Medium",
+    "number": 155,
     "topics": [
       "Stack",
       "Design"
@@ -2149,6 +2202,7 @@
     "id": "evaluate-reverse-polish-notation",
     "title": "Evaluate Reverse Polish Notation",
     "difficulty": "Medium",
+    "number": 150,
     "topics": [
       "Array",
       "Math",
@@ -2194,6 +2248,7 @@
     "id": "basic-calculator",
     "title": "Basic Calculator",
     "difficulty": "Hard",
+    "number": 224,
     "topics": [
       "Math",
       "String",
@@ -2239,6 +2294,7 @@
     "id": "linked-list-cycle",
     "title": "Linked List Cycle",
     "difficulty": "Easy",
+    "number": 141,
     "topics": [
       "Hash Table",
       "Linked List",
@@ -2282,6 +2338,7 @@
     "id": "add-two-numbers",
     "title": "Add Two Numbers",
     "difficulty": "Medium",
+    "number": 2,
     "topics": [
       "Linked List",
       "Math",
@@ -2325,6 +2382,7 @@
     "id": "merge-two-sorted-lists",
     "title": "Merge Two Sorted Lists",
     "difficulty": "Easy",
+    "number": 21,
     "topics": [
       "Linked List",
       "Recursion"
@@ -2367,6 +2425,7 @@
     "id": "copy-list-with-random-pointer",
     "title": "Copy List with Random Pointer",
     "difficulty": "Medium",
+    "number": 138,
     "topics": [
       "Hash Table",
       "Linked List"
@@ -2409,6 +2468,7 @@
     "id": "reverse-linked-list-ii",
     "title": "Reverse Linked List II",
     "difficulty": "Medium",
+    "number": 92,
     "topics": [
       "Linked List"
     ],
@@ -2447,6 +2507,7 @@
     "id": "reverse-nodes-in-k-group",
     "title": "Reverse Nodes in k-Group",
     "difficulty": "Hard",
+    "number": 25,
     "topics": [
       "Linked List",
       "Recursion"
@@ -2486,6 +2547,7 @@
     "id": "remove-nth-node-from-end-of-list",
     "title": "Remove Nth Node From End of List",
     "difficulty": "Medium",
+    "number": 19,
     "topics": [
       "Linked List",
       "Two Pointers"
@@ -2527,6 +2589,7 @@
     "id": "remove-duplicates-from-sorted-list-ii",
     "title": "Remove Duplicates from Sorted List II",
     "difficulty": "Medium",
+    "number": 82,
     "topics": [
       "Linked List",
       "Two Pointers"
@@ -2565,6 +2628,7 @@
     "id": "rotate-list",
     "title": "Rotate List",
     "difficulty": "Medium",
+    "number": 61,
     "topics": [
       "Linked List",
       "Two Pointers"
@@ -2602,6 +2666,7 @@
     "id": "partition-list",
     "title": "Partition List",
     "difficulty": "Medium",
+    "number": 86,
     "topics": [
       "Linked List",
       "Two Pointers"
@@ -2640,6 +2705,7 @@
     "id": "lru-cache",
     "title": "LRU Cache",
     "difficulty": "Medium",
+    "number": 146,
     "topics": [
       "Hash Table",
       "Linked List",
@@ -2678,6 +2744,7 @@
     "id": "maximum-depth-of-binary-tree",
     "title": "Maximum Depth of Binary Tree",
     "difficulty": "Easy",
+    "number": 104,
     "topics": [
       "Tree",
       "DFS",
@@ -2717,6 +2784,7 @@
     "id": "same-tree",
     "title": "Same Tree",
     "difficulty": "Easy",
+    "number": 100,
     "topics": [
       "Tree",
       "DFS",
@@ -2759,6 +2827,7 @@
     "id": "invert-binary-tree",
     "title": "Invert Binary Tree",
     "difficulty": "Easy",
+    "number": 226,
     "topics": [
       "Tree",
       "DFS",
@@ -2801,6 +2870,7 @@
     "id": "symmetric-tree",
     "title": "Symmetric Tree",
     "difficulty": "Easy",
+    "number": 101,
     "topics": [
       "Tree",
       "DFS",
@@ -2840,6 +2910,7 @@
     "id": "construct-binary-tree-from-preorder-and-inorder-traversal",
     "title": "Construct Binary Tree from Preorder and Inorder Traversal",
     "difficulty": "Medium",
+    "number": 105,
     "topics": [
       "Array",
       "Hash Table",
@@ -2882,6 +2953,7 @@
     "id": "construct-binary-tree-from-inorder-and-postorder-traversal",
     "title": "Construct Binary Tree from Inorder and Postorder Traversal",
     "difficulty": "Medium",
+    "number": 106,
     "topics": [
       "Array",
       "Hash Table",
@@ -2924,6 +2996,7 @@
     "id": "populating-next-right-pointers-in-each-node-ii",
     "title": "Populating Next Right Pointers in Each Node II",
     "difficulty": "Medium",
+    "number": 117,
     "topics": [
       "Linked List",
       "Tree",
@@ -2964,6 +3037,7 @@
     "id": "flatten-binary-tree-to-linked-list",
     "title": "Flatten Binary Tree to Linked List",
     "difficulty": "Medium",
+    "number": 114,
     "topics": [
       "Linked List",
       "Stack",
@@ -3008,6 +3082,7 @@
     "id": "path-sum",
     "title": "Path Sum",
     "difficulty": "Easy",
+    "number": 112,
     "topics": [
       "Tree",
       "DFS",
@@ -3052,6 +3127,7 @@
     "id": "sum-root-to-leaf-numbers",
     "title": "Sum Root to Leaf Numbers",
     "difficulty": "Medium",
+    "number": 129,
     "topics": [
       "Tree",
       "DFS",
@@ -3091,6 +3167,7 @@
     "id": "binary-tree-maximum-path-sum",
     "title": "Binary Tree Maximum Path Sum",
     "difficulty": "Hard",
+    "number": 124,
     "topics": [
       "Dynamic Programming",
       "Tree",
@@ -3130,6 +3207,7 @@
     "id": "binary-search-tree-iterator",
     "title": "Binary Search Tree Iterator",
     "difficulty": "Medium",
+    "number": 173,
     "topics": [
       "Stack",
       "Tree",
@@ -3169,6 +3247,7 @@
     "id": "count-complete-tree-nodes",
     "title": "Count Complete Tree Nodes",
     "difficulty": "Medium",
+    "number": 222,
     "topics": [
       "Binary Search",
       "Bit Manipulation",
@@ -3213,6 +3292,7 @@
     "id": "lowest-common-ancestor-of-a-binary-tree",
     "title": "Lowest Common Ancestor of a Binary Tree",
     "difficulty": "Medium",
+    "number": 236,
     "topics": [
       "Tree",
       "DFS",
@@ -3257,6 +3337,7 @@
     "id": "binary-tree-right-side-view",
     "title": "Binary Tree Right Side View",
     "difficulty": "Medium",
+    "number": 199,
     "topics": [
       "Tree",
       "DFS",
@@ -3304,6 +3385,7 @@
     "id": "average-of-levels-in-binary-tree",
     "title": "Average of Levels in Binary Tree",
     "difficulty": "Easy",
+    "number": 637,
     "topics": [
       "Tree",
       "DFS",
@@ -3343,6 +3425,7 @@
     "id": "binary-tree-level-order-traversal",
     "title": "Binary Tree Level Order Traversal",
     "difficulty": "Medium",
+    "number": 102,
     "topics": [
       "Tree",
       "BFS",
@@ -3385,6 +3468,7 @@
     "id": "binary-tree-zigzag-level-order-traversal",
     "title": "Binary Tree Zigzag Level Order Traversal",
     "difficulty": "Medium",
+    "number": 103,
     "topics": [
       "Tree",
       "BFS",
@@ -3427,6 +3511,7 @@
     "id": "minimum-absolute-difference-in-bst",
     "title": "Minimum Absolute Difference in BST",
     "difficulty": "Easy",
+    "number": 530,
     "topics": [
       "Tree",
       "DFS",
@@ -3467,6 +3552,7 @@
     "id": "kth-smallest-element-in-a-bst",
     "title": "Kth Smallest Element in a BST",
     "difficulty": "Medium",
+    "number": 230,
     "topics": [
       "Tree",
       "DFS",
@@ -3506,6 +3592,7 @@
     "id": "validate-binary-search-tree",
     "title": "Validate Binary Search Tree",
     "difficulty": "Medium",
+    "number": 98,
     "topics": [
       "Tree",
       "DFS",
@@ -3546,6 +3633,7 @@
     "id": "number-of-islands",
     "title": "Number of Islands",
     "difficulty": "Medium",
+    "number": 200,
     "topics": [
       "Matrix",
       "DFS",
@@ -3586,6 +3674,7 @@
     "id": "surrounded-regions",
     "title": "Surrounded Regions",
     "difficulty": "Medium",
+    "number": 130,
     "topics": [
       "Matrix",
       "DFS",
@@ -3626,6 +3715,7 @@
     "id": "clone-graph",
     "title": "Clone Graph",
     "difficulty": "Medium",
+    "number": 133,
     "topics": [
       "Hash Table",
       "DFS",
@@ -3672,6 +3762,7 @@
     "id": "evaluate-division",
     "title": "Evaluate Division",
     "difficulty": "Medium",
+    "number": 399,
     "topics": [
       "Array",
       "String",
@@ -3718,6 +3809,7 @@
     "id": "course-schedule",
     "title": "Course Schedule",
     "difficulty": "Medium",
+    "number": 207,
     "topics": [
       "DFS",
       "BFS",
@@ -3760,6 +3852,7 @@
     "id": "course-schedule-ii",
     "title": "Course Schedule II",
     "difficulty": "Medium",
+    "number": 210,
     "topics": [
       "DFS",
       "BFS",
@@ -3802,6 +3895,7 @@
     "id": "snakes-and-ladders",
     "title": "Snakes and Ladders",
     "difficulty": "Medium",
+    "number": 909,
     "topics": [
       "Array",
       "BFS",
@@ -3843,6 +3937,7 @@
     "id": "minimum-genetic-mutation",
     "title": "Minimum Genetic Mutation",
     "difficulty": "Medium",
+    "number": 433,
     "topics": [
       "Hash Table",
       "String",
@@ -3885,6 +3980,7 @@
     "id": "word-ladder",
     "title": "Word Ladder",
     "difficulty": "Hard",
+    "number": 127,
     "topics": [
       "Hash Table",
       "String",
@@ -3926,6 +4022,7 @@
     "id": "implement-trie-prefix-tree",
     "title": "Implement Trie (Prefix Tree)",
     "difficulty": "Medium",
+    "number": 208,
     "topics": [
       "Hash Table",
       "String",
@@ -3962,6 +4059,7 @@
     "id": "design-add-and-search-words-data-structure",
     "title": "Design Add and Search Words Data Structure",
     "difficulty": "Medium",
+    "number": 211,
     "topics": [
       "String",
       "DFS",
@@ -3999,6 +4097,7 @@
     "id": "word-search-ii",
     "title": "Word Search II",
     "difficulty": "Hard",
+    "number": 212,
     "topics": [
       "Array",
       "String",
@@ -4043,6 +4142,7 @@
     "id": "letter-combinations-of-a-phone-number",
     "title": "Letter Combinations of a Phone Number",
     "difficulty": "Medium",
+    "number": 17,
     "topics": [
       "Hash Table",
       "String",
@@ -4081,6 +4181,7 @@
     "id": "combinations",
     "title": "Combinations",
     "difficulty": "Medium",
+    "number": 77,
     "topics": [
       "Backtracking"
     ],
@@ -4117,6 +4218,7 @@
     "id": "permutations",
     "title": "Permutations",
     "difficulty": "Medium",
+    "number": 46,
     "topics": [
       "Array",
       "Backtracking"
@@ -4156,6 +4258,7 @@
     "id": "combination-sum",
     "title": "Combination Sum",
     "difficulty": "Medium",
+    "number": 39,
     "topics": [
       "Array",
       "Backtracking"
@@ -4195,6 +4298,7 @@
     "id": "n-queens-ii",
     "title": "N-Queens II",
     "difficulty": "Hard",
+    "number": 52,
     "topics": [
       "Backtracking"
     ],
@@ -4230,6 +4334,7 @@
     "id": "generate-parentheses",
     "title": "Generate Parentheses",
     "difficulty": "Medium",
+    "number": 22,
     "topics": [
       "String",
       "Dynamic Programming",
@@ -4267,6 +4372,7 @@
     "id": "word-search",
     "title": "Word Search",
     "difficulty": "Medium",
+    "number": 79,
     "topics": [
       "Array",
       "String",
@@ -4309,6 +4415,7 @@
     "id": "convert-sorted-array-to-binary-search-tree",
     "title": "Convert Sorted Array to Binary Search Tree",
     "difficulty": "Easy",
+    "number": 108,
     "topics": [
       "Array",
       "Divide and Conquer",
@@ -4350,6 +4457,7 @@
     "id": "merge-intervals",
     "title": "Merge Intervals",
     "difficulty": "Medium",
+    "number": 56,
     "topics": [
       "Array",
       "Sorting"
@@ -4390,6 +4498,7 @@
     "id": "longest-palindromic-substring",
     "title": "Longest Palindromic Substring",
     "difficulty": "Medium",
+    "number": 5,
     "topics": [
       "String",
       "Dynamic Programming",
@@ -4429,6 +4538,7 @@
     "id": "search-insert-position",
     "title": "Search Insert Position",
     "difficulty": "Easy",
+    "number": 35,
     "topics": [
       "Array",
       "Binary Search"
@@ -4473,6 +4583,7 @@
     "id": "plus-one",
     "title": "Plus One",
     "difficulty": "Easy",
+    "number": 66,
     "topics": [
       "Array",
       "Math"
@@ -4515,6 +4626,7 @@
     "id": "add-binary",
     "title": "Add Binary",
     "difficulty": "Easy",
+    "number": 67,
     "topics": [
       "Math",
       "String",
@@ -4555,6 +4667,7 @@
     "id": "single-number",
     "title": "Single Number",
     "difficulty": "Easy",
+    "number": 136,
     "topics": [
       "Array",
       "Bit Manipulation"
@@ -4598,6 +4711,7 @@
     "id": "palindrome-number",
     "title": "Palindrome Number",
     "difficulty": "Easy",
+    "number": 9,
     "topics": [
       "Math"
     ],
@@ -4637,6 +4751,7 @@
     "id": "climbing-stairs",
     "title": "Climbing Stairs",
     "difficulty": "Easy",
+    "number": 70,
     "topics": [
       "Math",
       "Dynamic Programming",
@@ -4675,6 +4790,7 @@
     "id": "sqrtx",
     "title": "Sqrt(x)",
     "difficulty": "Easy",
+    "number": 69,
     "topics": [
       "Math",
       "Binary Search"
@@ -4711,6 +4827,7 @@
     "id": "factorial-trailing-zeroes",
     "title": "Factorial Trailing Zeroes",
     "difficulty": "Medium",
+    "number": 172,
     "topics": [
       "Math"
     ],
@@ -4750,6 +4867,7 @@
     "id": "house-robber",
     "title": "House Robber",
     "difficulty": "Medium",
+    "number": 198,
     "topics": [
       "Array",
       "Dynamic Programming"
@@ -4787,6 +4905,7 @@
     "id": "maximum-subarray",
     "title": "Maximum Subarray",
     "difficulty": "Medium",
+    "number": 53,
     "topics": [
       "Array",
       "Divide and Conquer",
@@ -4829,6 +4948,7 @@
     "id": "coin-change",
     "title": "Coin Change",
     "difficulty": "Medium",
+    "number": 322,
     "topics": [
       "Array",
       "Dynamic Programming",
@@ -4872,6 +4992,7 @@
     "id": "longest-increasing-subsequence",
     "title": "Longest Increasing Subsequence",
     "difficulty": "Medium",
+    "number": 300,
     "topics": [
       "Array",
       "Binary Search",
@@ -4914,6 +5035,7 @@
     "id": "search-a-2d-matrix",
     "title": "Search a 2D Matrix",
     "difficulty": "Medium",
+    "number": 74,
     "topics": [
       "Array",
       "Binary Search",
@@ -4954,6 +5076,7 @@
     "id": "find-peak-element",
     "title": "Find Peak Element",
     "difficulty": "Medium",
+    "number": 162,
     "topics": [
       "Array",
       "Binary Search"
@@ -4992,6 +5115,7 @@
     "id": "find-minimum-in-rotated-sorted-array",
     "title": "Find Minimum in Rotated Sorted Array",
     "difficulty": "Medium",
+    "number": 153,
     "topics": [
       "Array",
       "Binary Search"
@@ -5035,6 +5159,7 @@
     "id": "minimum-path-sum",
     "title": "Minimum Path Sum",
     "difficulty": "Medium",
+    "number": 64,
     "topics": [
       "Array",
       "Dynamic Programming",
@@ -5073,6 +5198,7 @@
     "id": "unique-paths-ii",
     "title": "Unique Paths II",
     "difficulty": "Medium",
+    "number": 63,
     "topics": [
       "Array",
       "Dynamic Programming",
@@ -5111,6 +5237,7 @@
     "id": "word-break",
     "title": "Word Break",
     "difficulty": "Medium",
+    "number": 139,
     "topics": [
       "Array",
       "Hash Table",
@@ -5159,6 +5286,7 @@
     "id": "number-of-1-bits",
     "title": "Number of 1 Bits",
     "difficulty": "Easy",
+    "number": 191,
     "topics": [
       "Divide and Conquer",
       "Bit Manipulation"
@@ -5199,6 +5327,7 @@
     "id": "single-number-ii",
     "title": "Single Number II",
     "difficulty": "Medium",
+    "number": 137,
     "topics": [
       "Array",
       "Bit Manipulation"
@@ -5237,6 +5366,7 @@
     "id": "bitwise-and-of-numbers-range",
     "title": "Bitwise AND of Numbers Range",
     "difficulty": "Medium",
+    "number": 201,
     "topics": [
       "Bit Manipulation"
     ],
@@ -5276,6 +5406,7 @@
     "id": "triangle",
     "title": "Triangle",
     "difficulty": "Medium",
+    "number": 120,
     "topics": [
       "Array",
       "Dynamic Programming"
@@ -5314,6 +5445,7 @@
     "id": "edit-distance",
     "title": "Edit Distance",
     "difficulty": "Medium",
+    "number": 72,
     "topics": [
       "String",
       "Dynamic Programming"
@@ -5351,6 +5483,7 @@
     "id": "maximal-square",
     "title": "Maximal Square",
     "difficulty": "Medium",
+    "number": 221,
     "topics": [
       "Array",
       "Dynamic Programming",
@@ -5393,6 +5526,7 @@
     "id": "maximum-sum-circular-subarray",
     "title": "Maximum Sum Circular Subarray",
     "difficulty": "Medium",
+    "number": 918,
     "topics": [
       "Array",
       "Divide and Conquer",
@@ -5437,6 +5571,7 @@
     "id": "search-in-rotated-sorted-array",
     "title": "Search in Rotated Sorted Array",
     "difficulty": "Medium",
+    "number": 33,
     "topics": [
       "Array",
       "Binary Search"
@@ -5480,6 +5615,7 @@
     "id": "kth-largest-element-in-an-array",
     "title": "Kth Largest Element in an Array",
     "difficulty": "Medium",
+    "number": 215,
     "topics": [
       "Array",
       "Divide and Conquer",
@@ -5521,6 +5657,7 @@
     "id": "find-first-and-last-position-of-element-in-sorted-array",
     "title": "Find First and Last Position of Element in Sorted Array",
     "difficulty": "Medium",
+    "number": 34,
     "topics": [
       "Array",
       "Binary Search"
@@ -5564,6 +5701,7 @@
     "id": "powx-n",
     "title": "Pow(x, n)",
     "difficulty": "Medium",
+    "number": 50,
     "topics": [
       "Math",
       "Recursion"
@@ -5606,6 +5744,7 @@
     "id": "interleaving-string",
     "title": "Interleaving String",
     "difficulty": "Medium",
+    "number": 97,
     "topics": [
       "String",
       "Dynamic Programming"
@@ -5648,6 +5787,7 @@
     "id": "best-time-to-buy-and-sell-stock-iii",
     "title": "Best Time to Buy and Sell Stock III",
     "difficulty": "Hard",
+    "number": 123,
     "topics": [
       "Array",
       "Dynamic Programming"
@@ -5689,6 +5829,7 @@
     "id": "best-time-to-buy-and-sell-stock-iv",
     "title": "Best Time to Buy and Sell Stock IV",
     "difficulty": "Hard",
+    "number": 188,
     "topics": [
       "Array",
       "Dynamic Programming"
@@ -5727,6 +5868,7 @@
     "id": "sort-list",
     "title": "Sort List",
     "difficulty": "Medium",
+    "number": 148,
     "topics": [
       "Linked List",
       "Two Pointers",
@@ -5772,6 +5914,7 @@
     "id": "median-of-two-sorted-arrays",
     "title": "Median of Two Sorted Arrays",
     "difficulty": "Hard",
+    "number": 4,
     "topics": [
       "Array",
       "Binary Search",
@@ -5812,6 +5955,7 @@
     "id": "max-points-on-a-line",
     "title": "Max Points on a Line",
     "difficulty": "Hard",
+    "number": 149,
     "topics": [
       "Array",
       "Hash Table",
@@ -5853,6 +5997,7 @@
     "id": "reverse-bits",
     "title": "Reverse Bits",
     "difficulty": "Easy",
+    "number": 190,
     "topics": [
       "Divide and Conquer",
       "Bit Manipulation"
@@ -5890,6 +6035,7 @@
     "id": "ipo",
     "title": "IPO",
     "difficulty": "Hard",
+    "number": 502,
     "topics": [
       "Array",
       "Greedy",
@@ -5932,6 +6078,7 @@
     "id": "find-k-pairs-with-smallest-sums",
     "title": "Find K Pairs with Smallest Sums",
     "difficulty": "Medium",
+    "number": 373,
     "topics": [
       "Array",
       "Heap",
@@ -5972,6 +6119,7 @@
     "id": "merge-k-sorted-lists",
     "title": "Merge k Sorted Lists",
     "difficulty": "Hard",
+    "number": 23,
     "topics": [
       "Linked List",
       "Divide and Conquer",
@@ -6017,6 +6165,7 @@
     "id": "find-median-from-data-stream",
     "title": "Find Median from Data Stream",
     "difficulty": "Hard",
+    "number": 295,
     "topics": [
       "Two Pointers",
       "Design",
@@ -6054,6 +6203,7 @@
     "id": "construct-quad-tree",
     "title": "Construct Quad Tree",
     "difficulty": "Medium",
+    "number": 427,
     "topics": [
       "Array",
       "Divide and Conquer",

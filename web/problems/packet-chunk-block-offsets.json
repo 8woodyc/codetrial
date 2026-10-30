@@ -1,7 +1,7 @@
 {
   "page": "packet-chunk-block-offsets",
   "title": "Packet Chunk Block Offsets",
-  "source": "Substring with Concatenation of All Words",
+  "source": "30. Substring with Concatenation of All Words",
   "difficulty": "Hard",
   "brief": [
     "A packet inspection tool looks for a known message that was split into fixed-length chunk codes and may have been reassembled in any order. The payload is a single lowercase string, and we want every place where the full set of chunks appears back to back.",

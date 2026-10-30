@@ -1,7 +1,7 @@
 {
   "page": "query-parse-cache-restore",
   "title": "Query Parse Cache Restore",
-  "source": "Construct Binary Tree from Inorder and Postorder Traversal",
+  "source": "106. Construct Binary Tree from Inorder and Postorder Traversal",
   "difficulty": "Medium",
   "brief": [
     "Our query compiler caches parsed syntax trees on disk as two lists of unique node ids, since pointers cannot be saved. In the first list each node appears after everything in its left subtree and before everything in its right subtree. In the second list each node appears after everything in both of its subtrees, left subtree first.",

@@ -1,7 +1,7 @@
 {
   "page": "kiosk-token-payout",
   "title": "Kiosk Token Payout",
-  "source": "Coin Change",
+  "source": "322. Coin Change",
   "difficulty": "Medium",
   "brief": [
     "A transit kiosk hands out change using whatever token denominations were loaded that morning. Operators want each payout to use as few tokens as possible.",

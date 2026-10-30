@@ -1,7 +1,7 @@
 {
   "page": "approved-sequence-edits",
   "title": "Approved Sequence Edits",
-  "source": "Minimum Genetic Mutation",
+  "source": "433. Minimum Genetic Mutation",
   "difficulty": "Medium",
   "brief": [
     "A synthetic biology team designs short DNA constructs, each exactly eight bases long using A, C, G and T. The lab can change one base at a time, and safety review only allows a construct to exist if it is on the approved list.",

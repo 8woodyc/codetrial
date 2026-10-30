@@ -1,7 +1,7 @@
 {
   "page": "radio-frame-batching",
   "title": "Radio Frame Batching",
-  "source": "Reverse Nodes in k-Group",
+  "source": "25. Reverse Nodes in k-Group",
   "difficulty": "Hard",
   "brief": [
     "A low-power radio link transmits frames in fixed-size batches, and for hardware reasons each full batch has to be sent in the opposite order from how it was queued. The frames sit in a chain of ListNode objects, and the transmitter rearranges that chain just before sending.",

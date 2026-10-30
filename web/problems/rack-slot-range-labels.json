@@ -1,7 +1,7 @@
 {
   "page": "rack-slot-range-labels",
   "title": "Rack Slot Range Labels",
-  "source": "Summary Ranges",
+  "source": "228. Summary Ranges",
   "difficulty": "Easy",
   "brief": [
     "A datacentre dashboard lists the free slots in a rack by number. Long lists are hard to read, so the dashboard compresses each unbroken run of slot numbers into one label: a lone slot is shown as its number, such as 7, and a run of two or more is shown as its first and last number joined by ->, such as 4->5.",

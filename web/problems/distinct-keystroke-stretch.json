@@ -1,7 +1,7 @@
 {
   "page": "distinct-keystroke-stretch",
   "title": "Distinct Keystroke Stretch",
-  "source": "Longest Substring Without Repeating Characters",
+  "source": "3. Longest Substring Without Repeating Characters",
   "difficulty": "Medium",
   "brief": [
     "A password strength analyser looks at the raw keystroke string a user typed. One of its signals is how long a stretch of consecutive keystrokes goes by without any key being pressed twice.",

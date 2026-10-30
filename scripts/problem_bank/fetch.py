@@ -239,6 +239,13 @@ def scaffold_entries(slug: str, title: str, detail: dict) -> tuple[dict, dict]:
     and `exampleTestcases` carries inputs without the expected values, so the
     statement and every `expected` are written by someone who read the problem.
     """
+    try:
+        number = int(detail["questionFrontendId"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise RuntimeError(f"{slug}: missing or invalid questionFrontendId") from error
+
+    if number <= 0:
+        raise RuntimeError(f"{slug}: questionFrontendId must be positive")
     meta = json.loads(detail["metaData"])
     snippets = {item["langSlug"]: item["code"] for item in detail["codeSnippets"]}
     params = meta.get("params", [])
@@ -247,6 +254,7 @@ def scaffold_entries(slug: str, title: str, detail: dict) -> tuple[dict, dict]:
         "id": slug,
         "title": title,
         "difficulty": detail["difficulty"],
+        "number": number,
         "topics": [],
         "statement": [],
         "examples": [],

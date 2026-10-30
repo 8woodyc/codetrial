@@ -1,7 +1,7 @@
 {
   "page": "sensor-calibration-index",
   "title": "Sensor Calibration Index",
-  "source": "Convert Sorted Array to Binary Search Tree",
+  "source": "108. Convert Sorted Array to Binary Search Tree",
   "difficulty": "Easy",
   "brief": [
     "A low-power sensor stores its calibration keys as a sorted list, but lookups need to be done with a small in-memory tree whose search path never gets long. We want to turn the sorted keys into such a tree once at boot.",

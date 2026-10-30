@@ -50,6 +50,41 @@ test("difficulty and topic filters combine", () => {
   );
 });
 
+test("numeric LeetCode search matches exact numbers and digits in titles", () => {
+  const problems = [
+    ["two-sum", "1. Two Sum"],
+    ["substring", "3. Longest Substring Without Repeating Characters"],
+    ["three-sum", "15. 3Sum"],
+    ["parentheses", "20. Valid Parentheses"],
+    ["triangle", "120. Triangle"],
+    ["islands", "200. Number of Islands"],
+    ["bits", "191. Number of 1 Bits"],
+    ["randomized-set", "380. Insert Delete GetRandom O(1)"],
+  ].map(([id, leetcodeTitle]) => ({
+    id,
+    leetcodeTitle,
+    difficulty: "Medium",
+    topics: [],
+  }));
+
+  const matches = (query) =>
+    filterProblems(problems, {
+      query,
+      searchBy: "leetcode",
+    }).map((problem) => problem.id);
+
+  assert.deepEqual(matches("20"), ["parentheses"]);
+  assert.deepEqual(matches("20."), ["parentheses"]);
+  assert.deepEqual(matches("#20"), ["parentheses"]);
+  assert.deepEqual(matches("020"), ["parentheses"]);
+  assert.deepEqual(matches("3"), ["substring", "three-sum"]);
+  assert.deepEqual(matches("#3"), ["substring", "three-sum"]);
+  assert.deepEqual(matches("1"), ["two-sum", "bits", "randomized-set"]);
+  assert.deepEqual(matches(" 20 "), ["parentheses"]);
+  assert.deepEqual(matches("THREE"), []);
+  assert.deepEqual(matches("3Sum"), ["three-sum"]);
+});
+
 test("title search is case-insensitive and combines with other filters", () => {
   const named = [
     {

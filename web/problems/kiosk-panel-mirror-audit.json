@@ -1,7 +1,7 @@
 {
   "page": "kiosk-panel-mirror-audit",
   "title": "Kiosk Panel Mirror Audit",
-  "source": "Symmetric Tree",
+  "source": "101. Symmetric Tree",
   "difficulty": "Easy",
   "brief": [
     "Industrial designers lay out a kiosk's control panel as a binary tree of TreeNode objects, where each node is a control and its children are the controls split beneath it to the left and right. Brand guidelines require the panel to look identical when reflected across its vertical center line.",

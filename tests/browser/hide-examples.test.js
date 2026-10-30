@@ -119,7 +119,7 @@ test("the interview shows the published problem name when the toggle is on", asy
       .waitFor({ state: "attached" });
     assert.match(
       await page.locator("#problem-panel").textContent(),
-      /LeetCode: Two Sum/,
+      /LeetCode: 1\. Two Sum/,
     );
   } finally {
     await page.close();

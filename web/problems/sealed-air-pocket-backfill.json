@@ -1,7 +1,7 @@
 {
   "page": "sealed-air-pocket-backfill",
   "title": "Sealed Air Pocket Backfill",
-  "source": "Surrounded Regions",
+  "source": "130. Surrounded Regions",
   "difficulty": "Medium",
   "brief": [
     "In our level editor a map is a grid of rock and air. Air cells that touch along a side form a pocket. A pocket that cannot reach the edge of the map is sealed off, so players can never get there, and the editor backfills it with rock before saving.",

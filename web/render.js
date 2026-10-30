@@ -263,9 +263,9 @@ function sourceEventMarkup(event) {
 // No constraints section and no source statement: the page carries the scenario
 // the interview poses, and the limits and edge-case policies are what the
 // candidate asks Jim for, the way they would ask a person. The published title
-// is left out unless showSources is set, the lobby's "Show the LeetCode
-// problem" choice; then it is named once, small, so the problem can be found
-// again after the interview.
+// and problem number are left out unless showSources is set, the lobby's "Show
+// the LeetCode problem" choice; then they are named once, small, so the problem
+// can be found again after the interview.
 // The worked examples can be left out, so the Example step starts from cases
 // the candidate proposes instead of ones already on screen.
 export function problemMarkup(

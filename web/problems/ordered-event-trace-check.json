@@ -1,7 +1,7 @@
 {
   "page": "ordered-event-trace-check",
   "title": "Ordered Event Trace Check",
-  "source": "Is Subsequence",
+  "source": "392. Is Subsequence",
   "difficulty": "Easy",
   "brief": [
     "Our QA tooling records every UI event a test run produces as a single lowercase code letter. A test scenario lists the events that must happen in a particular order, but other events are allowed to occur in between.",

@@ -1,7 +1,7 @@
 {
   "page": "replica-event-interleave",
   "title": "Replica Event Interleave",
-  "source": "Merge Two Sorted Lists",
+  "source": "21. Merge Two Sorted Lists",
   "difficulty": "Easy",
   "brief": [
     "Two replicas of our metrics service each keep a chain of event timestamps in nondecreasing order. When we fail over, we need one chain holding every event from both replicas, still in nondecreasing order.",

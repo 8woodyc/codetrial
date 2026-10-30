@@ -1,7 +1,7 @@
 {
   "page": "interference-free-towers",
   "title": "Interference Free Towers",
-  "source": "N-Queens II",
+  "source": "52. N-Queens II",
   "difficulty": "Hard",
   "brief": [
     "A city is laid out as an n by n grid of blocks, and we must install exactly n radio towers, at most one per block. Two towers interfere if they share a row, a column, or any diagonal of the grid, no matter how far apart they are.",

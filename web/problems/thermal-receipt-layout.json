@@ -1,7 +1,7 @@
 {
   "page": "thermal-receipt-layout",
   "title": "Thermal Receipt Layout",
-  "source": "Text Justification",
+  "source": "68. Text Justification",
   "difficulty": "Hard",
   "brief": [
     "Our point-of-sale terminals print store announcements on a narrow thermal printer that has a fixed number of character columns. Marketing wants the text to look typeset: every printed line should fill the full width so both the left and right edges line up.",

@@ -1,7 +1,7 @@
 {
   "page": "arrangement-count-suffix",
   "title": "Arrangement Count Suffix",
-  "source": "Factorial Trailing Zeroes",
+  "source": "172. Factorial Trailing Zeroes",
   "difficulty": "Medium",
   "brief": [
     "A scheduling tool reports how many ways n distinct jobs can be ordered, which is the product 1 times 2 times ... times n. The number is huge, so the report shows it in a compact form and needs to know how many zero digits it ends with.",

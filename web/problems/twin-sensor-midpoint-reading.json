@@ -1,7 +1,7 @@
 {
   "page": "twin-sensor-midpoint-reading",
   "title": "Twin Sensor Midpoint Reading",
-  "source": "Median of Two Sorted Arrays",
+  "source": "4. Median of Two Sorted Arrays",
   "difficulty": "Hard",
   "brief": [
     "Two temperature sensors in a cold-storage room each upload their readings for the hour already sorted from lowest to highest. The monitoring service reports the median of all readings from both sensors combined.",

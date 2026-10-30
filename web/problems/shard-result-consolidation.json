@@ -1,7 +1,7 @@
 {
   "page": "shard-result-consolidation",
   "title": "Shard Result Consolidation",
-  "source": "Merge k Sorted Lists",
+  "source": "23. Merge k Sorted Lists",
   "difficulty": "Hard",
   "brief": [
     "Our sharded event store answers a query by sending back, from each shard, a singly linked chain of matching event scores in ascending order. Each node has a value val and a next link. The query layer needs one chain covering every shard's results.",

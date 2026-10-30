@@ -232,13 +232,14 @@ for (const card of cards) {
   card.entry.append(card.attemptSummary);
 }
 
-// The published names are off unless the candidate turns them on, and the
+// The published names and numbers are off unless the candidate turns them on, and the
 // choice is theirs to keep between visits. A convenience, so storage that
 // throws (a private window, blocked site data) just means off.
 const showSources = document.querySelector("#show-sources");
 showSources.checked = readStored(SHOW_SOURCES_KEY) === "1";
-// The published names are not in the initial page. The map arrives when the
-// candidate turns them on, or opens or downloads a completed report.
+// The published names and numbers are not in the initial page. The map
+// arrives when the candidate turns them on, or opens or downloads a
+// completed report.
 const applySources = async () => {
   if (showSources.checked) {
     const pages = await loadPageMap().catch(() => null);
@@ -539,7 +540,7 @@ for (const input of nodes.problemSearchModes) {
     if (!input.checked) return;
     nodes.problemSearch.placeholder =
       input.value === "leetcode"
-        ? "Search LeetCode titles"
+        ? "Search LeetCode numbers or titles"
         : "Search scenario titles";
     if (input.value === "leetcode" && leetcodeSearchState !== "ready")
       void loadLeetCodeSearchTitles();
@@ -1472,8 +1473,8 @@ function applyProblemFilters(difficulties = selectedDifficulties()) {
   if (titlesUnavailable) {
     nodes.problemFilterSummary.textContent =
       leetcodeSearchState === "failed"
-        ? "LeetCode titles could not be loaded. Switch modes to retry."
-        : "Loading LeetCode titles...";
+        ? "LeetCode titles and numbers could not be loaded. Switch modes to retry."
+        : "Loading LeetCode titles and numbers...";
     return;
   }
   const visible = new Set(
@@ -1491,7 +1492,7 @@ function applyProblemFilters(difficulties = selectedDifficulties()) {
     ...(topic ? [`tagged ${topic}`] : []),
     ...(query
       ? [
-          `matching ${selectedSearchMode() === "leetcode" ? "LeetCode" : "scenario"} title "${query}"`,
+          `matching ${selectedSearchMode() === "leetcode" ? "LeetCode number or title" : "scenario title"} "${query}"`,
         ]
       : []),
   ];

@@ -1,7 +1,7 @@
 {
   "page": "metric-namespace-root",
   "title": "Metric Namespace Root",
-  "source": "Longest Common Prefix",
+  "source": "14. Longest Common Prefix",
   "difficulty": "Easy",
   "brief": [
     "Our observability UI groups metric keys that a team has selected and shows the leading text they all start with as a header, so the rows below can show only the part that differs.",

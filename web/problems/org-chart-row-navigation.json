@@ -1,7 +1,7 @@
 {
   "page": "org-chart-row-navigation",
   "title": "Org Chart Row Navigation",
-  "source": "Populating Next Right Pointers in Each Node II",
+  "source": "117. Populating Next Right Pointers in Each Node II",
   "difficulty": "Medium",
   "brief": [
     "Our org chart viewer keeps the reporting hierarchy as a binary tree of Node objects, each with left and right children and an extra next field. For keyboard navigation, pressing the right arrow must jump to the next person on the same row of the chart, so each person's next field has to lead to whoever sits just after them in that row.",

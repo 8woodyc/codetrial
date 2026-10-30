@@ -274,7 +274,7 @@ and writes the task's sidecar out in full, and a new bank's set rules, so each
 field can be edited in place.
 `--id` gives the copy its own id; it keeps the reference's origin, so the checks
 that keep a catalog problem's source out of what the learner reads still apply
-while the instructor rewrites it. `--languages` sets what the learner may choose
+while the instructor rewrites it. Copies may share a LeetCode source number; task ids remain unique within the bank. `--languages` sets what the learner may choose
 from, dropping targets marked in a language no longer offered. `new` refuses a
 bank that is already invalid and an id the bank holds, validates the whole bank
 with the task in it before changing any file, and leaves files it does not

@@ -1,7 +1,7 @@
 {
   "page": "sensor-frame-quarter-turn",
   "title": "Sensor Frame Quarter Turn",
-  "source": "Rotate Image",
+  "source": "48. Rotate Image",
   "difficulty": "Medium",
   "brief": [
     "A camera module on an embedded board was mounted sideways, so every square frame it produces needs a quarter turn clockwise before it is encoded. Memory on the board is tight, so the frame buffer has to be rearranged where it sits.",

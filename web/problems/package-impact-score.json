@@ -1,7 +1,7 @@
 {
   "page": "package-impact-score",
   "title": "Package Impact Score",
-  "source": "H-Index",
+  "source": "274. H-Index",
   "difficulty": "Medium",
   "brief": [
     "Our open-source dashboard ranks maintainers by an impact score. For each maintainer we know how many other projects depend on each of their packages.",

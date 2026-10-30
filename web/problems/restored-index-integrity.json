@@ -1,7 +1,7 @@
 {
   "page": "restored-index-integrity",
   "title": "Restored Index Integrity",
-  "source": "Validate Binary Search Tree",
+  "source": "98. Validate Binary Search Tree",
   "difficulty": "Medium",
   "brief": [
     "Our storage engine restores index pages from backup as a binary tree of keys. Lookups only work if the restored tree still follows the ordering the engine relies on: keys to the left of a node are smaller than the node's key, and keys to the right are larger.",

@@ -1,7 +1,7 @@
 {
   "page": "anonymizer-substitution-audit",
   "title": "Anonymizer Substitution Audit",
-  "source": "Isomorphic Strings",
+  "source": "205. Isomorphic Strings",
   "difficulty": "Easy",
   "brief": [
     "A log anonymizer disguises identifiers by swapping each character for a replacement character, always using the same replacement for the same original and never giving two different originals the same replacement. Compliance wants a tool that checks whether a disguised string could really have come from a given original this way.",

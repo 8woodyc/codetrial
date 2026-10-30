@@ -1,7 +1,7 @@
 {
   "page": "robot-stride-plans",
   "title": "Robot Stride Plans",
-  "source": "Climbing Stairs",
+  "source": "70. Climbing Stairs",
   "difficulty": "Easy",
   "brief": [
     "A warehouse robot moves along a rail of numbered slots. Each move it advances either one slot or two slots, and the planner wants to know how many different move sequences take it from slot 0 to exactly slot n.",

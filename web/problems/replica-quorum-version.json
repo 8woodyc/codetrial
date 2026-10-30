@@ -1,7 +1,7 @@
 {
   "page": "replica-quorum-version",
   "title": "Replica Quorum Version",
-  "source": "Majority Element",
+  "source": "169. Majority Element",
   "difficulty": "Easy",
   "brief": [
     "A distributed key-value store asks every replica which schema version it is running. Rollouts are only considered settled when one version is reported by more than half of the replicas, and the coordinator needs to know which version that is.",

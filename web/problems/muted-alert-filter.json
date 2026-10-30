@@ -1,7 +1,7 @@
 {
   "page": "muted-alert-filter",
   "title": "Muted Alert Filter",
-  "source": "Remove Element",
+  "source": "27. Remove Element",
   "difficulty": "Easy",
   "brief": [
     "A monitoring agent on an embedded gateway buffers alert codes in a fixed array. When an operator mutes a code, the agent has to purge every alert with that code from the buffer without allocating a new one.",

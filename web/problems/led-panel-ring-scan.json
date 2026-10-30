@@ -1,7 +1,7 @@
 {
   "page": "led-panel-ring-scan",
   "title": "LED Panel Ring Scan",
-  "source": "Spiral Matrix",
+  "source": "54. Spiral Matrix",
   "difficulty": "Medium",
   "brief": [
     "A diagnostics routine for rectangular LED panels reads out every pixel in a ring pattern: it starts at the top-left pixel, runs right along the top edge, then down, left and up around the outside, and keeps circling inward until every pixel has been read.",

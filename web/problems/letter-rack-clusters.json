@@ -1,7 +1,7 @@
 {
   "page": "letter-rack-clusters",
   "title": "Letter Rack Clusters",
-  "source": "Group Anagrams",
+  "source": "49. Group Anagrams",
   "difficulty": "Medium",
   "brief": [
     "A word game server receives the words players submit and wants to cluster together submissions that were built from the same set of letter tiles, just arranged differently.",

@@ -1,7 +1,7 @@
 {
   "page": "required-marker-span",
   "title": "Required Marker Span",
-  "source": "Minimum Window Substring",
+  "source": "76. Minimum Window Substring",
   "difficulty": "Hard",
   "brief": [
     "A genomics pipeline scans a long read, written as a string of letters, for the tightest region that contains a set of required marker letters. Some markers must be present more than once for the region to be useful.",

@@ -1,7 +1,7 @@
 {
   "page": "serial-link-word-mirror",
   "title": "Serial Link Word Mirror",
-  "source": "Reverse Bits",
+  "source": "190. Reverse Bits",
   "difficulty": "Easy",
   "brief": [
     "A sensor sends 32-bit words over a serial link least significant bit first, but our receiver assembles each word as if it had arrived most significant bit first. Every word we store therefore has its bit order mirrored.",

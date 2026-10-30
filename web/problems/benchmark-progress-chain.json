@@ -1,7 +1,7 @@
 {
   "page": "benchmark-progress-chain",
   "title": "Benchmark Progress Chain",
-  "source": "Longest Increasing Subsequence",
+  "source": "300. Longest Increasing Subsequence",
   "difficulty": "Medium",
   "brief": [
     "Our CI system records a benchmark score for every build in the order the builds were made. For a performance retrospective we want the longest chain of builds, kept in build order but not necessarily consecutive, where each build in the chain scored higher than the one before it.",

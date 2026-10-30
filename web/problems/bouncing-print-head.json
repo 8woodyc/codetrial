@@ -1,7 +1,7 @@
 {
   "page": "bouncing-print-head",
   "title": "Bouncing Print Head",
-  "source": "Zigzag Conversion",
+  "source": "6. Zigzag Conversion",
   "difficulty": "Medium",
   "brief": [
     "A label printer's head moves diagonally: it prints each character of a message one column to the right of the last, stepping down one row at a time until it hits the bottom row, then stepping up one row at a time until it hits the top row, and bouncing like that until the message ends.",

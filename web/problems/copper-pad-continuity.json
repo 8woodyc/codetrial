@@ -1,7 +1,7 @@
 {
   "page": "copper-pad-continuity",
   "title": "Copper Pad Continuity",
-  "source": "Number of Islands",
+  "source": "200. Number of Islands",
   "difficulty": "Medium",
   "brief": [
     "An inspection camera scans a circuit board into a grid of cells. Each cell is either copper or bare board, and copper cells that touch along a side belong to the same electrical region.",

@@ -1,7 +1,7 @@
 {
   "page": "mirrored-tag-segment",
   "title": "Mirrored Tag Segment",
-  "source": "Longest Palindromic Substring",
+  "source": "5. Longest Palindromic Substring",
   "difficulty": "Medium",
   "brief": [
     "Our barcode scanner sometimes reads a tag twice, once forwards and once backwards, and the firmware team uses mirrored stretches in the raw read as a diagnostic signal. They want the longest contiguous stretch of a read that is the same forwards and backwards.",

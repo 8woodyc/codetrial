@@ -1,7 +1,7 @@
 {
   "page": "mirror-phrase-contest-filter",
   "title": "Mirror Phrase Contest Filter",
-  "source": "Valid Palindrome",
+  "source": "125. Valid Palindrome",
   "difficulty": "Easy",
   "brief": [
     "A radio station runs a contest where listeners text in phrases that read the same forwards and backwards. Entries come in with messy capitalisation, spaces and punctuation, and the moderation service needs to reject the ones that do not qualify.",

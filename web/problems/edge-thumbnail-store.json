@@ -1,7 +1,7 @@
 {
   "page": "edge-thumbnail-store",
   "title": "Edge Thumbnail Store",
-  "source": "LRU Cache",
+  "source": "146. LRU Cache",
   "difficulty": "Medium",
   "brief": [
     "Each edge server in our image CDN keeps a small in-memory store of recently served thumbnails, keyed by thumbnail id. The store has a fixed number of slots. When it is full and a new thumbnail arrives, the server drops the entry that has gone the longest without being read or written.",

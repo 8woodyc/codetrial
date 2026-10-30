@@ -1,7 +1,7 @@
 {
   "page": "letter-panel-tracing",
   "title": "Letter Panel Tracing",
-  "source": "Word Search",
+  "source": "79. Word Search",
   "difficulty": "Medium",
   "brief": [
     "A museum exhibit has a wall of lettered tiles. Visitors spell a word by touching tiles one after another, where each tile touched must sit directly next to the previous one, and the exhibit needs to know whether a given word can be spelled at all.",

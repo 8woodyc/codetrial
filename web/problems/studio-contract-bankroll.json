@@ -1,7 +1,7 @@
 {
   "page": "studio-contract-bankroll",
   "title": "Studio Contract Bankroll",
-  "source": "IPO",
+  "source": "502. IPO",
   "difficulty": "Hard",
   "brief": [
     "An indie game studio picks up outside contracts to grow its cash reserves. Each contract can only be started if the studio has at least a certain amount of cash on hand, and finishing it adds its payout to the studio's cash. The studio has time for only a limited number of contracts, done one after another.",

@@ -1,7 +1,7 @@
 {
   "page": "serpentine-tier-sweep",
   "title": "Serpentine Tier Sweep",
-  "source": "Binary Tree Zigzag Level Order Traversal",
+  "source": "103. Binary Tree Zigzag Level Order Traversal",
   "difficulty": "Medium",
   "brief": [
     "A warehouse robot picks items from storage organised as a tree of bins, where each bin branches to at most two bins on the tier below. To save travel, it sweeps each tier in the opposite direction from the previous one: it covers the top tier left to right, then turns around for the tier below, and keeps alternating.",

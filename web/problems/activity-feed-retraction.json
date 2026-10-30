@@ -1,7 +1,7 @@
 {
   "page": "activity-feed-retraction",
   "title": "Activity Feed Retraction",
-  "source": "Remove Nth Node From End of List",
+  "source": "19. Remove Nth Node From End of List",
   "difficulty": "Medium",
   "brief": [
     "A social app stores a user's activity feed as a chain of ListNode entries from oldest at the head to newest at the tail. Moderation tools identify a bad entry by how far back it is from the newest end, and we need to unlink that one entry from the feed.",

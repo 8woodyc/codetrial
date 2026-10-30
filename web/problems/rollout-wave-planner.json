@@ -1,7 +1,7 @@
 {
   "page": "rollout-wave-planner",
   "title": "Rollout Wave Planner",
-  "source": "Binary Tree Level Order Traversal",
+  "source": "102. Binary Tree Level Order Traversal",
   "difficulty": "Medium",
   "brief": [
     "Config changes spread through a tree of servers, where each server feeds at most two servers below it. The release team deploys in waves: a wave contains every server at the same distance from the origin, and within a wave servers are listed as they appear from left to right in the tree.",

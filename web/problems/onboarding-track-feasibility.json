@@ -1,7 +1,7 @@
 {
   "page": "onboarding-track-feasibility",
   "title": "Onboarding Track Feasibility",
-  "source": "Course Schedule",
+  "source": "207. Course Schedule",
   "difficulty": "Medium",
   "brief": [
     "Our engineering onboarding program is made of training modules, and some modules require others to be finished first. Program managers edit these requirements by hand, and they want a check that a new hire can actually get through every module.",

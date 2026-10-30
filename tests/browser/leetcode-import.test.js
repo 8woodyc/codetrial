@@ -118,7 +118,7 @@ test("all browser problems pose a scenario and expose only neutral interview met
     else
       assert.deepEqual(
         [entry.source, entry.title],
-        [source.title, entry.title],
+        [`${source.number}. ${source.title}`, entry.title],
       );
     const problem = JSON.parse(
       await readFile(repoFile(`web/problems/${entry.page}.json`), "utf8"),
@@ -139,7 +139,9 @@ test("all browser problems pose a scenario and expose only neutral interview met
     // The published title is shown small beside the scenario; the id is not.
     assert.equal(
       problem.source,
-      source.origin === "original" ? undefined : source.title,
+      source.origin === "original"
+        ? undefined
+        : `${source.number}. ${source.title}`,
     );
     if (!/^[a-z]+$/.test(source.id)) {
       const judge = await readFile(

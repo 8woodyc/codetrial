@@ -1,7 +1,7 @@
 {
   "page": "right-to-left-layout",
   "title": "Right To Left Layout",
-  "source": "Invert Binary Tree",
+  "source": "226. Invert Binary Tree",
   "difficulty": "Easy",
   "brief": [
     "Our UI framework describes a screen as a binary layout tree of TreeNode objects, where each container splits into a left pane and a right pane. For right to left languages we need the whole screen mirrored, so at every container the left and right panes trade places, all the way down.",

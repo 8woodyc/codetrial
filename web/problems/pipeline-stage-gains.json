@@ -1,7 +1,7 @@
 {
   "page": "pipeline-stage-gains",
   "title": "Pipeline Stage Gains",
-  "source": "Product of Array Except Self",
+  "source": "238. Product of Array Except Self",
   "difficulty": "Medium",
   "brief": [
     "A signal processing chain applies a sequence of integer gain factors, one per stage. To plan maintenance, engineers want to know, for each stage, what the combined gain of the chain would be if that one stage were bypassed.",

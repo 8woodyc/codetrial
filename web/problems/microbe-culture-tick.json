@@ -1,7 +1,7 @@
 {
   "page": "microbe-culture-tick",
   "title": "Microbe Culture Tick",
-  "source": "Game of Life",
+  "source": "289. Game of Life",
   "difficulty": "Medium",
   "brief": [
     "A lab simulation models a microbe culture on a rectangular grid where each cell is either occupied (1) or empty (0). On every tick, an occupied cell stays occupied if it has two or three occupied neighbours and dies otherwise, and an empty cell becomes occupied if it has exactly three occupied neighbours.",

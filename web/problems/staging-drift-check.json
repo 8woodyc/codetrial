@@ -1,7 +1,7 @@
 {
   "page": "staging-drift-check",
   "title": "Staging Drift Check",
-  "source": "Same Tree",
+  "source": "100. Same Tree",
   "difficulty": "Easy",
   "brief": [
     "Before promoting a release, our deploy tool compares the routing tree loaded in staging with the one loaded in production. Both are stored as binary trees of TreeNode objects, and any difference, however small, blocks the promotion.",

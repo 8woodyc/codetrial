@@ -1,7 +1,7 @@
 {
   "page": "conveyor-grid-routing",
   "title": "Conveyor Grid Routing",
-  "source": "Minimum Path Sum",
+  "source": "64. Minimum Path Sum",
   "difficulty": "Medium",
   "brief": [
     "A sorting facility is laid out as a grid of conveyor cells, and each cell has an energy cost to pass a parcel through it. Conveyors only run right or down, so a parcel entering at the top-left cell can only move one cell right or one cell down at each step until it exits through the bottom-right cell.",

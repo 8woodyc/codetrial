@@ -1,7 +1,7 @@
 {
   "page": "ordered-index-cursor",
   "title": "Ordered Index Cursor",
-  "source": "Binary Search Tree Iterator",
+  "source": "173. Binary Search Tree Iterator",
   "difficulty": "Medium",
   "brief": [
     "Our storage engine keeps order ids in a binary search tree: every id in a node's left subtree is smaller than the node's id and every id in its right subtree is larger. Reporting clients want to page through the ids in ascending order, one at a time, without the engine copying the whole index up front.",

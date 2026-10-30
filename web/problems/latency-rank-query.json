@@ -1,7 +1,7 @@
 {
   "page": "latency-rank-query",
   "title": "Latency Rank Query",
-  "source": "Kth Smallest Element in a BST",
+  "source": "230. Kth Smallest Element in a BST",
   "difficulty": "Medium",
   "brief": [
     "A monitoring service stores response time samples in a binary search tree: every sample in a node's left subtree is faster than the node's, and every sample in its right subtree is slower. Engineers regularly ask for the response time at a particular rank, counting from the fastest.",

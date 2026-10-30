@@ -1,7 +1,7 @@
 {
   "page": "crossword-pattern-matcher",
   "title": "Crossword Pattern Matcher",
-  "source": "Design Add and Search Words Data Structure",
+  "source": "211. Design Add and Search Words Data Structure",
   "difficulty": "Medium",
   "brief": [
     "A crossword construction tool keeps a growing word list. While filling the grid, the author asks whether some stored word fits a partly filled slot, where known letters are given and each unknown square is written as a dot.",

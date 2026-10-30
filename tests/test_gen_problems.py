@@ -15,6 +15,8 @@ GEN = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader
 SPEC.loader.exec_module(GEN)
 
+from problem_bank.bank import validated_problem_data  # noqa: E402
+
 CARDS_SPEC = importlib.util.spec_from_file_location(
     "gen_problem_cards", ROOT / "scripts/gen-problem-cards.py"
 )
@@ -85,6 +87,54 @@ class ProblemMetadataGeneratorTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     GEN.validated_problems(path)
 
+    def test_catalog_rejects_duplicate_problem_numbers(self):
+        problems = json.loads(GEN.SOURCE.read_text())[:2]
+        for problem in problems:
+            problem.pop("sequel", None)
+        problems[1]["number"] = problems[0]["number"]
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "problems.json"
+            path.write_text(json.dumps(problems))
+            with self.assertRaisesRegex(RuntimeError, "duplicate number"):
+                GEN.validated_problems(path)
+
+    def test_imported_catalog_problem_requires_a_number(self):
+        problem = dict(
+            next(
+                row
+                for row in json.loads(GEN.SOURCE.read_text())
+                if GEN.is_imported(row)
+            )
+        )
+        problem.pop("number")
+        problem.pop("sequel", None)
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "problems.json"
+            path.write_text(json.dumps([problem]))
+            with self.assertRaisesRegex(
+                RuntimeError, "an imported problem needs its LeetCode number"
+            ):
+                GEN.validated_problems(path)
+
+    def test_original_problem_rejects_a_number(self):
+        problem = {
+            "id": "original-number",
+            "origin": "original",
+            "number": 20,
+            "difficulty": "Easy",
+            "topics": ["Array"],
+            "summary": "Practice a custom exercise.",
+            "optimal": "Scan the input.",
+            "pitfalls": "Handle empty input.",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "problems.json"
+            path.write_text(json.dumps([problem]))
+            with self.assertRaisesRegex(
+                RuntimeError, "original exercises cannot have a number"
+            ):
+                GEN.validated_problems(path)
+
     def test_a_sequel_names_a_problem_exactly_one_level_harder(self):
         def problem(problem_id, difficulty, **extra):
             return {
@@ -120,6 +170,23 @@ class ProblemMetadataGeneratorTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "one level harder"):
                     GEN.validated_problems(path)
 
+    def test_legacy_imported_task_keeps_its_bare_source_title(self):
+        fixture = json.loads(
+            (ROOT / "tests/fixtures/task-mode/uncustomized.json").read_text()
+        )
+        problem = fixture["problem"]
+        problem.pop("number")
+        problems = validated_problem_data([problem], sequels=False)
+        self.assertEqual(problems, [problem])
+        public = GEN.candidate_problem(
+            {
+                "problem": problems[0],
+                "variant": fixture["variant"],
+                "examples": [],
+            }
+        )
+        self.assertEqual(public["source"], problem["title"])
+
     def test_a_card_names_its_sequel_by_page_and_not_by_id(self):
         problems = [
             {"id": "two-sum", "difficulty": "Easy", "sequel": "two-sum-ii"},
@@ -136,6 +203,29 @@ class ProblemMetadataGeneratorTests(unittest.TestCase):
         )
         self.assertIn('data-problem="bundle-pair" data-difficulty="Medium">', block)
         self.assertNotIn("two-sum", block)
+
+    def test_rejects_invalid_numbers(self):
+        truly_valid = {
+            "id": "one",
+            "title": "One Title",
+            "examples": [],
+            "summary": "sum",
+            "optimal": "opt",
+            "pitfalls": "pit",
+            "difficulty": "Easy",
+            "topics": ["Array"],
+        }
+        for bad_problem in (
+            {**truly_valid, "number": -1},
+            {**truly_valid, "number": 0},
+            {**truly_valid, "number": True},
+            {**truly_valid, "number": "20"},
+        ):
+            with tempfile.TemporaryDirectory() as temporary:
+                path = Path(temporary) / "problems.json"
+                path.write_text(json.dumps([bad_problem]))
+                with self.assertRaisesRegex(RuntimeError, "positive integer"):
+                    GEN.validated_problems(path)
 
     def test_public_projection_has_a_closed_schema_and_ordered_stages(self):
         problem = {
@@ -196,6 +286,48 @@ class ProblemMetadataGeneratorTests(unittest.TestCase):
             )
             self.assertIn("web/problem-categories.json", stderr.getvalue())
 
+    def test_scaffold_preserves_problem_number(self):
+        detail = {
+            "questionFrontendId": "20",
+            "metaData": json.dumps(
+                {"name": "solve", "params": [], "return": {"type": "integer"}}
+            ),
+            "codeSnippets": [],
+            "difficulty": "Easy",
+            "exampleTestcases": "",
+        }
+        problem, _ = GEN.scaffold_entries(
+            "valid-parentheses", "Valid Parentheses", detail
+        )
+        self.assertEqual(problem["number"], 20)
+        self.assertIs(type(problem["number"]), int)
+
+    def test_scaffold_rejects_missing_or_invalid_problem_number(self):
+        detail = {
+            "metaData": json.dumps(
+                {"name": "solve", "params": [], "return": {"type": "integer"}}
+            ),
+            "codeSnippets": [],
+            "difficulty": "Easy",
+            "exampleTestcases": "",
+        }
+        for extra in (
+            {},
+            {"questionFrontendId": None},
+            {"questionFrontendId": "invalid"},
+            {"questionFrontendId": "0"},
+            {"questionFrontendId": "-1"},
+        ):
+            with self.subTest(extra=extra):
+                with self.assertRaisesRegex(
+                    RuntimeError, "valid-parentheses:.*questionFrontendId"
+                ):
+                    GEN.scaffold_entries(
+                        "valid-parentheses",
+                        "Valid Parentheses",
+                        {**detail, **extra},
+                    )
+
 
 class VariantValidationTests(unittest.TestCase):
     """What stands between the published problem and the candidate's page."""
@@ -203,6 +335,7 @@ class VariantValidationTests(unittest.TestCase):
     problem = {
         "id": "coin-change",
         "title": "Coin Change",
+        "number": 322,
         "difficulty": "Medium",
         "topics": ["Dynamic Programming"],
         "statement": ["Given coins and an amount, return the fewest coins."],
@@ -749,7 +882,7 @@ class VariantValidationTests(unittest.TestCase):
             },
         )
         # Named once, in the field the page shows small, and nowhere else.
-        self.assertEqual(page.pop("source"), "Coin Change")
+        self.assertEqual(page.pop("source"), "322. Coin Change")
         self.assertNotIn("Coin Change", json.dumps(page))
 
     def test_rust_literals_survive_quotes_backslashes_and_non_ascii(self):

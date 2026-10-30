@@ -1,7 +1,7 @@
 {
   "page": "spot-capacity-round-trips",
   "title": "Spot Capacity Round Trips",
-  "source": "Best Time to Buy and Sell Stock III",
+  "source": "123. Best Time to Buy and Sell Stock III",
   "difficulty": "Hard",
   "brief": [
     "A cloud reseller buys blocks of spot compute capacity and resells them later. Given a forecast of the daily price of a block, finance wants to know the most the reseller can earn if compliance allows at most two round trips of buying and later reselling.",

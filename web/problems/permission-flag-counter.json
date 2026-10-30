@@ -1,7 +1,7 @@
 {
   "page": "permission-flag-counter",
   "title": "Permission Flag Counter",
-  "source": "Number of 1 Bits",
+  "source": "191. Number of 1 Bits",
   "difficulty": "Easy",
   "brief": [
     "Our access-control service stores each account's permissions as a single integer mask, where every bit that is set grants one permission. The audit dashboard needs to show how many permissions each account holds.",

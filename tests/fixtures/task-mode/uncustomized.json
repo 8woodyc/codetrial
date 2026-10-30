@@ -3,6 +3,7 @@
     "id": "two-sum",
     "title": "Two Sum",
     "difficulty": "Easy",
+    "number": 1,
     "topics": [
       "Array",
       "Hash Table"
