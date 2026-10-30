@@ -1756,6 +1756,10 @@ async fn open_session<'a>(
     let candidate = candidate.filter(|_| slot.is_none_or(crate::dispatch::Slot::claim_join));
     let Some((candidate_identity, candidate_metadata)) = candidate else {
         eprintln!("no candidate joined room={room_name}; leaving it");
+
+        // Dropping the room does not disconnect it, and the slot drops right
+        // after this, so a fixed room's next start would staff it twice.
+        leave_room(&room).await;
         return Ok(OpenSessionOutcome::NoCandidate);
     };
     let events = tokio::sync::Mutex::new(events);

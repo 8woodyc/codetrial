@@ -353,6 +353,35 @@ fn the_candidate_wait_listens_for_its_start_being_released() {
     );
 }
 
+/// The agent joined before nobody came, and a `Room` that is dropped stays
+/// connected, so the empty-room exit has to leave the room itself. A release
+/// sends every abandoned start through it within seconds.
+#[test]
+fn an_agent_nobody_came_to_leaves_the_room() {
+    let source = include_str!("../../src/livekit.rs");
+    let exit = source
+        .split("async fn open_session")
+        .nth(1)
+        .and_then(|body| {
+            body.split("let Some((candidate_identity, candidate_metadata)) = candidate else {")
+                .nth(1)
+        })
+        .and_then(|branch| {
+            branch
+                .split(
+                    "
+    };",
+                )
+                .next()
+        })
+        .expect("open_session still has an exit for nobody joining");
+    assert!(
+        exit.find("leave_room(&room)")
+            .is_some_and(|leave| exit.find("NoCandidate").is_some_and(|end| leave < end)),
+        "the agent must leave before giving up on the room: {exit}"
+    );
+}
+
 #[test]
 fn only_the_interview_candidate_can_drive_the_runtime() {
     assert!(is_interview_participant(
